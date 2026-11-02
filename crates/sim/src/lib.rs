@@ -262,6 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn calm_and_rough_seas_scale_the_swell() {
+        let height = |kind| {
+            let s = OVAL.surface(kind, 4);
+            s.waves().iter().map(|w| w.amplitude).sum::<f32>()
+        };
+        let (calm, normal, rough) = (
+            height(SurfaceKind::Calm),
+            height(SurfaceKind::Swells),
+            height(SurfaceKind::Rough),
+        );
+        assert!(
+            calm < normal * 0.7 && rough > normal * 1.15,
+            "{calm} {normal} {rough}"
+        );
+        assert_eq!(height(SurfaceKind::Flat), 0.0);
+    }
+
+    #[test]
     fn crests_launch_you_and_pulling_back_pops_you_higher() {
         let (mut longest, mut longest_pop, mut highest) = (0u32, 0u32, 0.0f32);
         let heading = OVAL.centerline(0.0).yaw;
