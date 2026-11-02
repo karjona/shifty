@@ -36,7 +36,7 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 14] = [
+pub const RACE_FIELDS: [&str; 15] = [
     "phase",
     "phaseTicks",
     "phaseLength",
@@ -51,6 +51,7 @@ pub const RACE_FIELDS: [&str; 14] = [
     "racers",
     "misses",
     "tickHz",
+    "wrongWay",
 ];
 
 #[wasm_bindgen]
@@ -229,6 +230,13 @@ impl WasmClient {
             .and_then(|s| standings.iter().find(|st| usize::from(st.slot) == s))
             .map_or(0, |st| st.place);
         let p = me.map(|r| r.race).unwrap_or_default();
+        // Moving against the course (not just pointing: spins don't count).
+        let wrong_way = me.is_some_and(|r| {
+            let course = world.course();
+            let s = course.project(r.pos.x, r.pos.z).0;
+            let heading = sim::math::atan2(r.vel.x, r.vel.z);
+            r.speed() > 4.0 && sim::math::angle_diff(course.centerline(s).yaw, heading).abs() > 2.0
+        });
         let v = [
             f64::from(race.phase as u8),
             f64::from(race.elapsed(world.tick)),
@@ -244,6 +252,7 @@ impl WasmClient {
             standings.len() as f64,
             f64::from(p.misses),
             f64::from(sim::TICK_HZ),
+            f64::from(u8::from(wrong_way)),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()

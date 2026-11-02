@@ -6,6 +6,7 @@ import { connect, WebTransportUnavailable, parseJoinTicket, type JoinTicket, typ
 import { World, type RiderView } from "./render/world.ts";
 import { createDebugPanel, type DebugSettings } from "./ui/debug.ts";
 import { Hud, type RaceView } from "./ui/hud.ts";
+import { Minimap } from "./ui/minimap.ts";
 import { parseCourse, parseEvents, parseStandings } from "./wasm-json.ts";
 
 const params = new URLSearchParams(location.search);
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
   let names = new Map<number, string>();
   let rosterVersion = -1;
   let courseSet = false;
+  let minimap: Minimap | null = null;
   let last = performance.now();
   let fpsFrames = 0;
   let fpsSince = last;
@@ -176,6 +178,7 @@ async function main(): Promise<void> {
       racers: f("racers"),
       misses: f("misses"),
       tickHz: f("tickHz") || 60,
+      wrongWay: f("wrongWay") === 1,
     };
   };
   const readStandings = () => parseStandings(client.standingsJson());
@@ -196,7 +199,9 @@ async function main(): Promise<void> {
 
     if (phase === 1 && !courseSet) {
       world.setWaves(client.waveParams());
-      world.setCourse(parseCourse(client.courseJson()));
+      const course = parseCourse(client.courseJson());
+      world.setCourse(course);
+      minimap = new Minimap(document.querySelector<HTMLDivElement>("#ui")!, course);
       courseSet = true;
     }
     if (client.rosterVersion() !== rosterVersion) {
@@ -213,6 +218,7 @@ async function main(): Promise<void> {
     if (phase === 1) {
       hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
       hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, readStandings, names);
+      minimap?.update(riders, nextBuoy);
     }
 
     fpsFrames++;
