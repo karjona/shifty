@@ -1,0 +1,37 @@
+# cargo-deny: licenses, advisories, banned crates and allowed sources.
+# Run with `cargo deny check`. Reference: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Platforms we build for: the race server (Linux), dev machines (macOS) and the browser (WASM).
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-apple-darwin",
+  "wasm32-unknown-unknown",
+]
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# Permissive licenses compatible with shipping Apache-2.0 binaries.
+allow = [
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace crates depend on each other by path only; none of them are published.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

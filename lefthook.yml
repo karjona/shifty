@@ -1,0 +1,5 @@
+# Git hooks, installed by `pnpm install`. Bypass once with LEFTHOOK=0.
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}

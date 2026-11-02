@@ -13,8 +13,8 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-client-core = { version = "0.1.0", path = "../client-core" }
-protocol = { version = "0.1.0", path = "../protocol" }
+client-core = { path = "../client-core" }
+protocol = { path = "../protocol" }
 serde_json = "1.0.154"
-sim = { version = "0.1.0", path = "../sim" }
+sim = { path = "../sim" }
 wasm-bindgen = "0.2.130"

@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
 import { defineConfig, type Plugin } from "vite";
-import { devJoinTicket } from "../../scripts/dev-lobby.ts";
+import { devJoinTicket, repoRoot } from "../../scripts/dev-lobby.ts";
 
 // Where the race server listens in dev. Clients reach it directly; this is
 // also the audience their join tokens are signed for.
@@ -48,8 +49,42 @@ const devLobby = (): Plugin => ({
   },
 });
 
+/**
+ * Emits `licenses/rust.md`: the license notices of the Rust crates compiled
+ * into the WASM sim. Needs `cargo-about` (version pinned in CI).
+ */
+const rustNotices = (): Plugin => ({
+  name: "shifty-rust-notices",
+  apply: "build",
+  generateBundle() {
+    let source: string;
+    try {
+      source = execFileSync(
+        "cargo",
+        [
+          "about",
+          "generate",
+          "--locked",
+          "--fail",
+          "--manifest-path",
+          "crates/sim-wasm/Cargo.toml",
+          "--target",
+          "wasm32-unknown-unknown",
+          "about.hbs",
+        ],
+        { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+      );
+    } catch (e) {
+      this.error(
+        `cargo-about failed (install it with \`cargo install cargo-about --locked --features cli\`): ${String(e)}`,
+      );
+    }
+    this.emitFile({ type: "asset", fileName: "licenses/rust.md", source });
+  },
+});
+
 export default defineConfig({
-  plugins: [devLobby()],
+  plugins: [devLobby(), rustNotices()],
   server: { port: 5173, strictPort: true },
-  build: { target: "es2024" },
+  build: { target: "es2024", license: { fileName: "licenses/npm.md" } },
 });
