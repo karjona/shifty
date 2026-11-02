@@ -1,0 +1,49 @@
+name: Race server image
+
+# The CI workflow already builds and tests all Rust code on every PR. This one
+# checks the packaging (Dockerfile, release build, distroless runtime, license
+# notices), so on PRs it runs only when something that affects the image changes.
+on:
+  pull_request:
+    paths:
+      - crates/race-server/Dockerfile
+      - .dockerignore
+      - Cargo.toml
+      - Cargo.lock
+      - crates/*/Cargo.toml
+      - rust-toolchain.toml
+      - about.toml
+      - about.hbs
+      - .github/workflows/image.yml
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  race-server-image:
+    name: Race server image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -f crates/race-server/Dockerfile -t shifty-race-server .
+      - name: Image boots and reports healthy
+        run: |
+          docker run -d --name rs -p 4433:4433/udp -p 4433:4433/tcp \
+            -e BIND='[::]:4433' -e PUBLIC_ADDR=localhost:4433 \
+            -e LOBBY_PUBLIC_KEY=C8eRicBps7bsA6cb8Py-d84vXBFooZvoNBWeD0odyMo \
+            shifty-race-server
+          for i in $(seq 1 20); do curl -fs localhost:4433/healthz && break; sleep 1; done
+          curl -fs localhost:4433/healthz
+          docker image ls shifty-race-server --format '{{.Size}}'
+          docker logs rs
+      - name: Image ships license notices
+        run: |
+          docker cp rs:/usr/share/doc/shifty/. notices/
+          ls notices/LICENSE notices/NOTICE
+          grep -q '^- quinn ' notices/THIRD-PARTY-NOTICES.md

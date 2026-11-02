@@ -8,7 +8,7 @@ An online racing game about one place and four seasons: jetski in summer, skateb
 
 ## Play locally
 
-Needs Rust (the toolchain is pinned in `rust-toolchain.toml`), Node 24+ and pnpm, plus the `wasm-bindgen` CLI:
+Needs Rust (the toolchain is pinned in `rust-toolchain.toml`), Node 24+ and pnpm, plus the `wasm-bindgen` CLI at the version in `Cargo.lock` (if it's missing, `pnpm dev` prints the exact install command):
 
 ```sh
 cargo install wasm-bindgen-cli --version 0.2.130 --locked
@@ -17,6 +17,8 @@ pnpm dev
 ```
 
 Open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad (left stick, RT/LT, A) or keyboard (WASD/arrows, Space). F1 opens the netcode debug panel, which has fake lag and packet-loss sliders.
+
+Production builds (`pnpm build`) also need `cargo install cargo-about --locked --features cli`, which writes the third-party license notices.
 
 ## How it works
 
