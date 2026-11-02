@@ -68,6 +68,9 @@ struct Peer {
 }
 
 struct Harness {
+    frame_ms: u64,
+    /// Client frame hitch: (every_ms, length_ms) with no updates at all.
+    stall: Option<(u64, u64)>,
     room: Room,
     peers: Vec<Peer>,
     now: f64,
@@ -91,6 +94,8 @@ impl Harness {
     fn new(bots: u8, surface: SurfaceKind) -> Self {
         let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface)));
         Self {
+            frame_ms: 8,
+            stall: None,
             room,
             peers: Vec::new(),
             now: 1000.0,
@@ -151,7 +156,10 @@ impl Harness {
                 for bytes in p.down.deliver(now) {
                     p.client.handle_packet(&bytes, now);
                 }
-                if (now as u64 + i as u64 * 3).is_multiple_of(8) {
+                let stalled = self
+                    .stall
+                    .is_some_and(|(every, len)| (now as u64) % every < len);
+                if !stalled && (now as u64 + i as u64 * 3).is_multiple_of(self.frame_ms) {
                     p.client.update(now, input_for(i, now));
                     for bytes in p.client.take_outgoing() {
                         p.up.send(now, bytes);
@@ -430,3 +438,45 @@ fn reconnect_with_same_player_id_keeps_the_seat() {
     assert_eq!(h.peers[0].client.slot(), Some(slot));
     assert_eq!(h.room.human_count(), 1);
 }
+
+#[test]
+fn slow_clients_still_predict_swells_exactly() {
+    for frame_ms in [16, 33, 50] {
+        let mut h = Harness::new(0, SurfaceKind::Swells);
+        h.frame_ms = frame_ms;
+        h.add_peer("a", PERFECT);
+        h.run(1000.0, |_, _| Input::default());
+        let before = h.peers[0].client.stats().mispredictions;
+        h.run(5000.0, driving);
+        let s = h.peers[0].client.stats();
+        assert_eq!(s.mispredictions - before, 0, "frame {frame_ms} ms: {s:?}");
+    }
+}
+
+#[test]
+fn input_buffer_grows_to_absorb_frame_hitches() {
+    // A client that freezes for 120 ms every second (GC, slow GPU, busy tab).
+    let mut h = Harness::new(0, SurfaceKind::Swells);
+    h.stall = Some((1000, 120));
+    h.add_peer("a", PERFECT);
+    h.run(1000.0, |_, _| Input::default());
+    h.run(6000.0, driving); // let the buffer adapt
+    let before = h.peers[0].client.stats();
+    let missed_before = h.room.stats.missed_inputs;
+    h.run(10_000.0, driving);
+    let s = h.peers[0].client.stats();
+    let missed = h.room.stats.missed_inputs - missed_before;
+    assert!(
+        s.target_lead > TARGET_LEAD_MIN + 2.0,
+        "buffer should have grown: {s:?}"
+    );
+    // Without the adaptive buffer, every hitch makes the server miss inputs.
+    assert!(
+        missed < 25,
+        "server missed {missed} of 600 inputs after adapting; {s:?}"
+    );
+    let misses = s.mispredictions - before.mispredictions;
+    assert!(misses < 8, "{misses} mispredictions after adapting; {s:?}");
+}
+
+const TARGET_LEAD_MIN: f64 = client_core::TARGET_LEAD;

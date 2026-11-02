@@ -29,10 +29,19 @@ use sim::{Input, Inputs, MAX_RIDERS, Rider, Surface, TICK_HZ, World};
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
 /// How far in the past remote riders are drawn in interpolated mode.
 pub const INTERP_DELAY_TICKS: f64 = 6.0;
-/// How many ticks early we want our inputs to reach the server.
+/// How many ticks early we want our inputs to reach the server (minimum).
+/// The actual target adapts upwards when inputs arrive late (jitter, frame
+/// hitches) and decays back slowly once things are stable.
 pub const TARGET_LEAD: f64 = 2.0;
+const MAX_TARGET_LEAD: f64 = 14.0;
+/// The server reports the worst lead over this many ticks.
+const LEAD_WINDOW_TICKS: u32 = 30;
 const HISTORY: usize = 256;
 const HELLO_RESEND_MS: f64 = 300.0;
+/// Most ticks predicted in one `update`. Prediction is cheap (microseconds
+/// per tick), so a slow frame (software rendering, GC pause) catches up fully;
+/// only real stalls (hidden tab) fall back to a clock resync.
+const MAX_CATCH_UP_TICKS: u32 = 30;
 const SNAP_BUFFER: usize = 64;
 /// Corrections bigger than this snap instead of smoothing (teleports).
 const SNAP_DISTANCE: f32 = 3.0;
@@ -66,6 +75,8 @@ pub struct Stats {
     pub snapshots: u32,
     pub stale_snapshots: u32,
     pub resyncs: u32,
+    /// Current adaptive input-lead target, ticks.
+    pub target_lead: f64,
     pub bytes_in: u64,
     pub bytes_out: u64,
     pub packets_in: u64,
@@ -113,6 +124,8 @@ pub struct Client {
     time_scale: f64,
     rtt_ms: Option<f64>,
     resync_cooldown_until: u32,
+    target_lead: f64,
+    lead_review_at: u32,
     last_snapshot_tick: Option<u32>,
     next_event_id: u16,
     pending_events: Vec<Event>,
@@ -144,6 +157,8 @@ impl Client {
             time_scale: 1.0,
             rtt_ms: None,
             resync_cooldown_until: 0,
+            target_lead: TARGET_LEAD,
+            lead_review_at: 0,
             last_snapshot_tick: None,
             next_event_id: 0,
             pending_events: Vec::new(),
@@ -156,6 +171,7 @@ impl Client {
             outbox: Vec::new(),
             stats: Stats {
                 time_scale: 1.0,
+                target_lead: TARGET_LEAD,
                 ..Stats::default()
             },
         }
@@ -236,6 +252,7 @@ impl Client {
                     self.last_hello_ms = now_ms;
                     let hello = ClientMsg::Hello {
                         version: PROTOCOL_VERSION,
+                        sim_version: sim::SIM_VERSION,
                         token: self.token.clone(),
                         client_time: Self::time16(now_ms),
                     };
@@ -256,7 +273,7 @@ impl Client {
             self.accum_ms -= TICK_MS;
             self.predict_tick(input);
             steps += 1;
-            if steps >= 8 {
+            if steps >= MAX_CATCH_UP_TICKS {
                 // Way behind (tab was hidden?). Clock sync will resync us.
                 self.accum_ms = self.accum_ms.min(TICK_MS - 0.001);
                 break;
@@ -346,7 +363,8 @@ impl Client {
                 self.surface = Surface::new(w.surface_kind, w.surface_seed);
                 self.world = World::new(self.surface.clone());
                 // Run ahead of the server by the trip time plus a small lead.
-                self.world.tick = w.server_tick + (rtt_ticks + TARGET_LEAD + 1.0).ceil() as u32;
+                self.world.tick =
+                    w.server_tick + (rtt_ticks + self.target_lead + 1.0).ceil() as u32;
                 self.input_ack = self.world.tick;
                 self.last_update_ms = Some(now_ms);
                 self.accum_ms = 0.0;
@@ -408,8 +426,23 @@ impl Client {
         // Clock sync from the server's report of how early our inputs arrive.
         let mut target_tick = self.world.tick.max(s.tick);
         self.stats.input_lead = s.input_lead;
+        // Adaptive buffer: inputs arriving late (lead < 1) means the server
+        // had to guess; ask for more lead. Once per report window, and give a
+        // raise time to show up in the reports before raising again.
+        if s.tick >= self.lead_review_at {
+            if s.input_lead < 1 {
+                self.target_lead = (self.target_lead + 2.0).min(MAX_TARGET_LEAD);
+                self.lead_review_at = s.tick + LEAD_WINDOW_TICKS * 3;
+            } else {
+                if f64::from(s.input_lead) >= self.target_lead - 0.5 {
+                    self.target_lead = (self.target_lead - 0.05).max(TARGET_LEAD);
+                }
+                self.lead_review_at = s.tick + LEAD_WINDOW_TICKS;
+            }
+        }
+        self.stats.target_lead = self.target_lead;
         if s.tick >= self.resync_cooldown_until {
-            let error = f64::from(s.input_lead) - TARGET_LEAD;
+            let error = f64::from(s.input_lead) - self.target_lead;
             if !(-6.0..=24.0).contains(&error) {
                 // Far off: jump the clock instead of drifting for seconds.
                 let shift = (-error).round() as i64;

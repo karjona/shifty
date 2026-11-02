@@ -326,25 +326,34 @@ impl Room {
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
 
+        // Lead = how many ticks early each *newly received* input arrived;
+        // the worst one in the window is reported. Late inputs count as
+        // negative lead, which makes the client grow its input buffer.
+        let prev_highest = p.highest_input_tick;
+        let mut worst: Option<i64> = None;
         for (i, input) in packet.inputs.iter().enumerate() {
             let tick = packet.first_tick.wrapping_add(i as u32);
-            if tick <= server_tick {
-                // Already simulated: a resend, or genuinely late.
-                if tick > p.highest_input_tick {
-                    self.stats.late_inputs += 1;
-                }
-                continue;
-            }
             if tick > server_tick + MAX_INPUT_LEAD_TICKS {
                 self.stats.future_inputs += 1;
                 continue;
             }
+            let fresh = tick > prev_highest;
+            if fresh {
+                let margin = i64::from(tick) - i64::from(server_tick);
+                worst = Some(worst.map_or(margin, |w| w.min(margin)));
+                p.highest_input_tick = p.highest_input_tick.max(tick);
+            }
+            if tick <= server_tick {
+                // Already simulated: a resend, or genuinely late.
+                if fresh {
+                    self.stats.late_inputs += 1;
+                }
+                continue;
+            }
             p.inputs[tick as usize % INPUT_RING] = Some((tick, input.sanitized()));
-            p.highest_input_tick = p.highest_input_tick.max(tick);
         }
-        if let Some(last) = packet.last_tick() {
-            let lead = last as i64 - server_tick as i64;
-            p.lead_min_window = p.lead_min_window.min(lead.clamp(-127, 127) as i32);
+        if let Some(w) = worst {
+            p.lead_min_window = p.lead_min_window.min(w.clamp(-127, 127) as i32);
         }
     }
 

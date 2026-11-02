@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::*;
 /// `[slot, x, y, z, yaw, pitch, roll, speed, grounded, is_me, is_bot, _]`.
 pub const RENDER_STRIDE: usize = 12;
 /// Layout of the stats buffer (f64).
-pub const STATS_FIELDS: [&str; 16] = [
+pub const STATS_FIELDS: [&str; 17] = [
     "rttMs",
     "inputLead",
     "timeScale",
@@ -29,6 +29,7 @@ pub const STATS_FIELDS: [&str; 16] = [
     "packetsOut",
     "lastSnapshotBytes",
     "lastInputCount",
+    "targetLead",
 ];
 
 #[wasm_bindgen]
@@ -136,6 +137,7 @@ impl WasmClient {
             s.packets_out as f64,
             f64::from(s.last_snapshot_bytes),
             f64::from(s.last_input_count),
+            s.target_lead,
         ];
         self.stats_buf.copy_from_slice(&v);
         self.stats_buf.as_ptr()

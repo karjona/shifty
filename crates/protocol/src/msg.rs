@@ -17,7 +17,7 @@ use sim::{MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -46,6 +46,8 @@ pub enum ClientMsg {
     /// Resent until a `Welcome` or `Reject` arrives.
     Hello {
         version: u16,
+        /// `sim::SIM_VERSION`: both sides must run the exact same sim.
+        sim_version: u32,
         token: String,
         client_time: u16,
     },
@@ -79,11 +81,13 @@ impl ClientMsg {
         match self {
             Self::Hello {
                 version,
+                sim_version,
                 token,
                 client_time,
             } => {
                 w.u8(kind::HELLO);
                 w.u16(*version);
+                w.u32(*sim_version);
                 w.u16(*client_time);
                 let t = token.as_bytes();
                 w.u16(t.len() as u16);
@@ -112,6 +116,7 @@ impl ClientMsg {
         match r.u8()? {
             kind::HELLO => {
                 let version = r.u16()?;
+                let sim_version = r.u32()?;
                 let client_time = r.u16()?;
                 let len = r.u16()? as usize;
                 if len > TOKEN_MAX_BYTES {
@@ -121,6 +126,7 @@ impl ClientMsg {
                     .map_err(|_| DecodeError::Invalid("token not utf-8"))?;
                 Ok(Self::Hello {
                     version,
+                    sim_version,
                     token: token.to_owned(),
                     client_time,
                 })

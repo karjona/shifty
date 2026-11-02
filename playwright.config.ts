@@ -11,6 +11,8 @@ export default defineConfig({
     channel: "chromium",
     baseURL: "http://localhost:5173",
     viewport: { width: 1280, height: 720 },
+    // E2E_SOFTWARE_GL=1 mimics CI runners (no GPU, software rendering).
+    launchOptions: { args: process.env.E2E_SOFTWARE_GL ? ["--disable-gpu"] : [] },
   },
   webServer: {
     command: "node scripts/dev.ts",

@@ -13,6 +13,8 @@ import { World, type RiderView } from "./render/world.ts";
 import { createDebugPanel, type DebugSettings } from "./ui/debug.ts";
 
 const params = new URLSearchParams(location.search);
+/** `?render=0` runs the full netcode without drawing (used by netcode e2e tests). */
+const renderEnabled = params.get("render") !== "0";
 const status = document.querySelector<HTMLDivElement>("#status")!;
 const hud = document.querySelector<HTMLDivElement>("#hud")!;
 const setStatus = (text: string) => {
@@ -21,7 +23,7 @@ const setStatus = (text: string) => {
 };
 
 const REJECT_REASONS: Record<number, string> = {
-  3: "wrong game version",
+  3: "the game was updated, please reload the page",
   4: "invalid join ticket",
   5: "room is full (4 players max)",
   6: "server is shutting down",
@@ -124,10 +126,36 @@ async function main(): Promise<void> {
     return dt;
   };
 
-  // Keep the connection alive when the tab is hidden (no animation frames).
+  // The netcode clock must not depend on render speed: if no frame has run
+  // the netcode recently (slow GPU, hidden tab), a timer does it.
   setInterval(() => {
-    if (document.hidden) step(performance.now());
-  }, 50);
+    const now = performance.now();
+    if (now - last > 20) step(now);
+  }, 10);
+
+  // One bulk read of every rider's render state from WASM memory.
+  const readRiders = (now: number, remote = settings.remote): RiderView[] => {
+    const n = client.render(now, remote === "predicted");
+    const buf = new Float32Array(wasm.memory.buffer, client.renderPtr(), client.renderLen());
+    const out: RiderView[] = [];
+    for (let k = 0; k < n; k++) {
+      const o = k * stride;
+      out.push({
+        slot: buf[o]!,
+        x: buf[o + 1]!,
+        y: buf[o + 2]!,
+        z: buf[o + 3]!,
+        yaw: buf[o + 4]!,
+        pitch: buf[o + 5]!,
+        roll: buf[o + 6]!,
+        speed: buf[o + 7]!,
+        grounded: buf[o + 8] === 1,
+        isMe: buf[o + 9] === 1,
+        isBot: buf[o + 10] === 1,
+      });
+    }
+    return out;
+  };
 
   const readStats = () => {
     const ptr = client.updateStats();
@@ -152,26 +180,8 @@ async function main(): Promise<void> {
       names = parseRoster(client.rosterJson());
     }
 
-    const n = client.render(now, settings.remote === "predicted");
-    const buf = new Float32Array(wasm.memory.buffer, client.renderPtr(), client.renderLen());
-    riders = [];
-    for (let k = 0; k < n; k++) {
-      const o = k * stride;
-      riders.push({
-        slot: buf[o]!,
-        x: buf[o + 1]!,
-        y: buf[o + 2]!,
-        z: buf[o + 3]!,
-        yaw: buf[o + 4]!,
-        pitch: buf[o + 5]!,
-        roll: buf[o + 6]!,
-        speed: buf[o + 7]!,
-        grounded: buf[o + 8] === 1,
-        isMe: buf[o + 9] === 1,
-        isBot: buf[o + 10] === 1,
-      });
-    }
-    world.render(riders, names, client.renderTick(), dt);
+    riders = readRiders(now);
+    if (renderEnabled) world.render(riders, names, client.renderTick(), dt);
 
     const me = riders.find((r) => r.isMe);
     hud.textContent = me ? `${Math.round(me.speed * 3.6)} km/h${me.grounded ? "" : "  ✈"}` : "";
@@ -209,7 +219,8 @@ async function main(): Promise<void> {
       transport: transport.kind,
       renderer: world.backend,
       stats: () => (readStats(), stats),
-      riders: () => riders,
+      // Fresh, not the last rendered frame (frames can be slow without a GPU).
+      riders: (remote?: "interpolated" | "predicted") => readRiders(performance.now(), remote),
       names: () => Object.fromEntries(names),
       setInput: (v: { steer: number; throttle: number; buttons: number } | null) => {
         input.forced = v;

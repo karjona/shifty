@@ -55,10 +55,16 @@ pub async fn serve(
             match ClientMsg::decode(&bytes) {
                 Ok(ClientMsg::Hello {
                     version,
+                    sim_version,
                     token,
                     client_time,
                 }) => {
-                    if version != PROTOCOL_VERSION {
+                    // Same wire format AND the exact same sim, or prediction would drift.
+                    if version != PROTOCOL_VERSION || sim_version != sim::SIM_VERSION {
+                        info!(
+                            conn,
+                            transport, version, sim_version, "rejected client from another build"
+                        );
                         reject(RejectReason::BadVersion);
                         return None;
                     }

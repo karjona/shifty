@@ -17,6 +17,21 @@ pub use math::Vec3;
 pub use surface::{Surface, SurfaceKind};
 pub use world::{Inputs, Rider, World};
 
+/// Hash of the sim's source code (see `build.rs`). Client and server must
+/// agree on it, or prediction would silently drift.
+pub const SIM_VERSION: u32 = parse_u32(env!("SIM_SOURCE_HASH"));
+
+const fn parse_u32(s: &str) -> u32 {
+    let b = s.as_bytes();
+    let mut i = 0;
+    let mut v: u32 = 0;
+    while i < b.len() {
+        v = v * 10 + (b[i] - b'0') as u32;
+        i += 1;
+    }
+    v
+}
+
 /// Simulation rate. Inputs and snapshots are numbered in these ticks.
 pub const TICK_HZ: u32 = 60;
 pub const DT: f32 = 1.0 / TICK_HZ as f32;
@@ -201,7 +216,7 @@ mod tests {
             let mut inputs: Inputs = [None; MAX_RIDERS];
             for t in 0..60 * 20 {
                 for (slot, i) in inputs.iter_mut().enumerate() {
-                    let steer = if (t / 90 + slot as u32) % 2 == 0 {
+                    let steer = if (t / 90 + slot as u32).is_multiple_of(2) {
                         0.4
                     } else {
                         -0.4
