@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 description = "Dev-only tools: mint join tokens with the dev lobby key, headless bot clients, determinism checks. Never shipped."
 
 [lints]

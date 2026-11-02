@@ -46,3 +46,7 @@ See [AGENTS.md](AGENTS.md) for the full design, decisions and workflow.
 | `crates/devkit`      | Dev tools: tokens, headless bots, determinism hash     |
 | `apps/client`        | Vite + Three.js client                                 |
 | `e2e`                | Playwright tests with real browsers                    |
+
+## License
+
+[Apache-2.0](LICENSE). If you redistribute this project, modified or not, keep the attribution in [NOTICE](NOTICE). The license grants no rights to the "23.4° Shifty" name.

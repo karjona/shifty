@@ -1,6 +1,7 @@
 {
   "name": "shifty",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.ts",

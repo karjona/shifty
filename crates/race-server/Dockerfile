@@ -17,6 +17,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /race-server /race-server
+# Apache-2.0 §4: redistributions carry the license and our NOTICE.
+COPY --from=build /src/LICENSE /src/NOTICE /usr/share/doc/shifty/
 ENV BIND=[::]:443 \
     RUST_LOG=info
 EXPOSE 443/udp 443/tcp
