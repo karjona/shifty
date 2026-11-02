@@ -12,8 +12,10 @@
 
 use crate::DT;
 use crate::course::{self, Course, RampSurface};
-use crate::input::Input;
-use crate::math::{Vec3, angle_diff, atan2, clamp, cos, sin, sqrt, wrap_angle, wrap_pi};
+use crate::input::{Input, buttons};
+use crate::math::{
+    TAU, Vec3, angle_diff, atan2, clamp, cos, round, sin, sqrt, wrap_angle, wrap_pi,
+};
 use crate::surface::Surface;
 use crate::world::Rider;
 
@@ -82,14 +84,42 @@ pub mod tuning {
     pub const RAMP_CATCH: f32 = 0.05;
     pub const RAMP_DRAG: f32 = 0.3;
 
-    pub const AIR_STEER_RATE: f32 = 0.8;
-    pub const AIR_TURN_RESPONSE: f32 = 4.0;
+    pub const AIR_STEER_RATE: f32 = 0.6;
+    pub const AIR_TURN_RESPONSE: f32 = 6.0;
+    /// With no trick button held, the hull turns back toward its flight
+    /// path (heading error to yaw rate, per second): a released spin
+    /// finishes itself.
+    pub const AIR_ALIGN: f32 = 3.5;
     /// In the air the nose eases toward the flight path (plus lean).
     pub const AIR_PITCH_STIFFNESS: f32 = 14.0;
     pub const AIR_PITCH_DAMP: f32 = 6.0;
     pub const AIR_LEAN_PITCH: f32 = 0.45;
+    pub const AIR_PITCH_LIMIT: f32 = 0.7;
     pub const AIR_ROLL_STIFFNESS: f32 = 12.0;
     pub const AIR_ROLL_DAMP: f32 = 6.0;
+
+    /// Trick rotation speeds at full stick, rad/s.
+    pub const SPIN_RATE: f32 = 9.0;
+    pub const FLIP_RATE: f32 = 7.5;
+    pub const ROLL_RATE: f32 = 9.0;
+    pub const TRICK_RESPONSE: f32 = 10.0;
+
+    /// Landing more crooked than this is a bail.
+    pub const LAND_PITCH: f32 = 0.9;
+    pub const LAND_ROLL: f32 = 0.8;
+    pub const LAND_HEADING: f32 = 1.2;
+    /// Hops shorter than this are never judged.
+    pub const MIN_JUDGED_AIR_TICKS: u16 = 6;
+    pub const BAIL_TICKS: u8 = 90;
+    /// Speed kept on impact when bailing.
+    pub const BAIL_IMPACT: f32 = 0.5;
+    /// Drag while the rider is in the water next to the ski.
+    pub const BAIL_DRAG: f32 = 1.6;
+    /// How hard the empty ski rights itself.
+    pub const BAIL_RIGHTING: f32 = 18.0;
+    /// Speed added on a clean trick landing, per full rotation (up to
+    /// three): stomp it and go. Can exceed top speed; drag eats it back.
+    pub const LANDING_BOOST: f32 = 1.5;
 }
 
 use tuning::*;
@@ -162,24 +192,90 @@ fn water_forces(r: &Rider, surface: &Surface, tick: u32) -> Wet {
     wet
 }
 
-/// Advance one rider one tick on the water (or above it).
-pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, course: &Course, tick: u32) {
+/// How a jump ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// Upright and pointing where you're going, with this many full turns:
+    /// spins (+ = clockwise), flips (+ = backflip), rolls (+ = to the right).
+    Clean { spin: i8, flip: i8, roll: i8 },
+    /// Too crooked: the rider falls off.
+    Bail,
+}
+
+fn turns(angle: f32) -> i8 {
+    clamp(round(angle / TAU), -9.0, 9.0) as i8
+}
+
+/// Judges a touchdown and settles the attitude back into normal ranges.
+/// Returns `None` for plain jumps and tiny hops.
+fn land(r: &mut Rider) -> Option<Landing> {
+    let spin = -turns(r.air_spin);
+    let flip = turns(r.pitch);
+    let roll = turns(r.roll);
+    let pitch = wrap_pi(r.pitch);
+    let roll_err = wrap_pi(r.roll);
+    r.pitch = pitch;
+    r.roll = roll_err;
+    r.air_spin = 0.0;
+    if r.state_ticks < MIN_JUDGED_AIR_TICKS || r.bailing() {
+        return None;
+    }
+    let heading = if r.speed() > 4.0 {
+        angle_diff(r.yaw, atan2(r.vel.x, r.vel.z))
+    } else {
+        0.0
+    };
+    if pitch.abs() > LAND_PITCH || roll_err.abs() > LAND_ROLL || heading.abs() > LAND_HEADING {
+        r.bail_ticks = BAIL_TICKS;
+        r.vel = r.vel * BAIL_IMPACT;
+        r.yaw_rate = 0.0;
+        r.pitch_rate = 0.0;
+        r.roll_rate = 0.0;
+        return Some(Landing::Bail);
+    }
+    let rotations = spin.unsigned_abs() + flip.unsigned_abs() + roll.unsigned_abs();
+    if rotations == 0 {
+        return None;
+    }
+    let boost = LANDING_BOOST * f32::from(rotations.min(3));
+    let along = r.forward();
+    r.vel += along * boost;
+    Some(Landing::Clean { spin, flip, roll })
+}
+
+/// Advance one rider one tick on the water (or above it). Returns how a
+/// jump ended, on the tick it touches down.
+pub fn integrate(
+    r: &mut Rider,
+    input: Input,
+    surface: &Surface,
+    course: &Course,
+    tick: u32,
+) -> Option<Landing> {
     let steer = input.steer_f();
     let throttle = input.throttle_f();
     let lean = input.lean_f();
     let was_grounded = r.grounded;
     let top_speed = MAX_SPEED * r.race.speed_bonus();
+    r.bail_ticks = r.bail_ticks.saturating_sub(1);
+    let bailing = r.bailing();
 
     if let Some(deck) = course.ramp_under(r.pos.x, r.pos.z, surface, tick)
         && r.pos.y <= deck.top + RAMP_CATCH
         && r.pos.y >= deck.top - course::tuning::RAMP_STEP
     {
+        let landing = if was_grounded { None } else { land(r) };
         ride_ramp(r, input, &deck);
-        return;
+        return landing;
     }
 
     let wet = water_forces(r, surface, tick);
     let grounded = wet.points > 0;
+    let landing = if grounded && !was_grounded {
+        land(r)
+    } else {
+        None
+    };
     // Two or more points in the water = full control.
     let bite = clamp(wet.points as f32 * 0.5, 0.0, 1.0);
     let forward = r.forward();
@@ -190,7 +286,15 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, course: &Course
     let mut pitch_acc = wet.pitch / PITCH_INERTIA;
     let mut roll_acc = wet.roll / ROLL_INERTIA;
 
-    if grounded {
+    if grounded && (bailing || r.bailing()) {
+        // Rider in the water: no control, the ski drifts to a stop and
+        // rights itself.
+        r.yaw_rate *= 1.0 - clamp(4.0 * DT, 0.0, 1.0);
+        accel.x -= r.vel.x * BAIL_DRAG;
+        accel.z -= r.vel.z * BAIL_DRAG;
+        pitch_acc -= BAIL_RIGHTING * r.pitch + 6.0 * r.pitch_rate;
+        roll_acc -= BAIL_RIGHTING * r.roll + 6.0 * r.roll_rate;
+    } else if grounded {
         // Steering: stronger with speed, reversed when going backwards.
         let speed_factor = clamp(speed_fwd.abs() / 6.0, 0.2, 1.0);
         let dir = if speed_fwd < -0.5 { -1.0 } else { 1.0 };
@@ -237,19 +341,46 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, course: &Course
         r.pitch_rate *= damp;
         r.roll_rate *= damp;
     } else {
-        // In the air: a little steering, and the nose follows the flight path.
-        let target_rate = -steer * AIR_STEER_RATE;
-        r.yaw_rate += (target_rate - r.yaw_rate) * clamp(AIR_TURN_RESPONSE * DT, 0.0, 1.0);
-        let speed_h = r.speed().max(0.1);
-        let flight = clamp(atan2(r.vel.y, speed_h) * 0.5, -0.5, 0.5);
-        let pitch_target = clamp(flight - lean * AIR_LEAN_PITCH, -0.8, 0.8);
-        pitch_acc = AIR_PITCH_STIFFNESS * (pitch_target - r.pitch) - AIR_PITCH_DAMP * r.pitch_rate;
-        roll_acc = -AIR_ROLL_STIFFNESS * r.roll - AIR_ROLL_DAMP * r.roll_rate;
+        let spin_btn = input.pressed(buttons::TRICK);
+        let roll_btn = input.pressed(buttons::ROLL);
+        if (spin_btn || roll_btn) && !r.bailing() {
+            // Tricks: hold a button and push the stick. Pull back = backflip.
+            let spin = if roll_btn { 0.0 } else { -steer * SPIN_RATE };
+            let barrel = if roll_btn { steer * ROLL_RATE } else { 0.0 };
+            let flip = -lean * FLIP_RATE;
+            let k = clamp(TRICK_RESPONSE * DT, 0.0, 1.0);
+            r.yaw_rate += (spin - r.yaw_rate) * k;
+            pitch_acc = (flip - r.pitch_rate) * TRICK_RESPONSE;
+            roll_acc = (barrel - r.roll_rate) * TRICK_RESPONSE;
+        } else {
+            // No tricks: a little steering, the hull turns back to its flight
+            // path and the nose follows it. A released rotation finishes
+            // toward the nearest upright attitude.
+            let speed_h = r.speed().max(0.1);
+            let align = if speed_h > 4.0 {
+                angle_diff(r.yaw, atan2(r.vel.x, r.vel.z)) * AIR_ALIGN
+            } else {
+                0.0
+            };
+            let target_rate = align - steer * AIR_STEER_RATE;
+            r.yaw_rate += (target_rate - r.yaw_rate) * clamp(AIR_TURN_RESPONSE * DT, 0.0, 1.0);
+            let flight = clamp(atan2(r.vel.y, speed_h) * 0.5, -0.5, 0.5);
+            let pitch_target = clamp(
+                flight - lean * AIR_LEAN_PITCH,
+                -AIR_PITCH_LIMIT,
+                AIR_PITCH_LIMIT,
+            ) + TAU * round(r.pitch / TAU);
+            pitch_acc =
+                AIR_PITCH_STIFFNESS * (pitch_target - r.pitch) - AIR_PITCH_DAMP * r.pitch_rate;
+            let roll_target = TAU * round(r.roll / TAU);
+            roll_acc = AIR_ROLL_STIFFNESS * (roll_target - r.roll) - AIR_ROLL_DAMP * r.roll_rate;
+        }
         accel.x -= r.vel.x * AIR_DRAG;
         accel.z -= r.vel.z * AIR_DRAG;
 
         // Leaving the water while pulling back: pop off the crest.
         if was_grounded
+            && !r.bailing()
             && r.state_ticks >= POP_MIN_WET_TICKS
             && lean < -0.3
             && r.vel.y > POP_MIN_RISE
@@ -263,11 +394,19 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, course: &Course
     r.roll_rate += roll_acc * DT;
 
     r.yaw = wrap_angle(r.yaw + r.yaw_rate * DT);
-    r.pitch = wrap_pi(r.pitch + r.pitch_rate * DT);
-    r.roll = wrap_pi(r.roll + r.roll_rate * DT);
+    r.pitch += r.pitch_rate * DT;
+    r.roll += r.roll_rate * DT;
+    if grounded {
+        r.pitch = wrap_pi(r.pitch);
+        r.roll = wrap_pi(r.roll);
+        r.air_spin = 0.0;
+    } else {
+        r.air_spin += r.yaw_rate * DT;
+    }
     r.pos += r.vel * DT;
 
     finish_tick(r, grounded, input);
+    landing
 }
 
 fn finish_tick(r: &mut Rider, grounded: bool, input: Input) {

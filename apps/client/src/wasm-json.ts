@@ -16,6 +16,7 @@ export function parseStandings(json: string): StandingView[] {
     lap: num(o, "lap"),
     finishTicks: num(o, "finishTicks"),
     misses: num(o, "misses"),
+    tricks: num(o, "tricks"),
   }));
 }
 
@@ -23,7 +24,7 @@ export function parseEvents(json: string): RaceEvent[] {
   const out: RaceEvent[] = [];
   for (const o of list(JSON.parse(json))) {
     const kind = o.kind;
-    if (kind !== "buoy" && kind !== "lap" && kind !== "finish") continue;
+    if (kind !== "buoy" && kind !== "lap" && kind !== "finish" && kind !== "trick" && kind !== "bail") continue;
     out.push({
       tick: num(o, "tick"),
       slot: num(o, "slot"),
@@ -33,6 +34,9 @@ export function parseEvents(json: string): RaceEvent[] {
       meter: num(o, "meter"),
       lap: num(o, "lap"),
       ticks: num(o, "ticks"),
+      spin: num(o, "spin"),
+      flip: num(o, "flip"),
+      roll: num(o, "roll"),
     });
   }
   return out;

@@ -151,6 +151,7 @@ async function main(): Promise<void> {
         vx: buf[o + 11]!,
         vy: buf[o + 12]!,
         vz: buf[o + 13]!,
+        bailing: buf[o + 14] === 1,
       });
     }
     return out;

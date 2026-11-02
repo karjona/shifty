@@ -89,6 +89,7 @@ pub struct RenderRider {
     pub speed: f32,
     pub vel: Vec3,
     pub grounded: bool,
+    pub bailing: bool,
     pub is_me: bool,
     pub is_bot: bool,
 }
@@ -108,7 +109,9 @@ impl HudEvent {
         let same_kind = match (self.kind, o.kind) {
             (EventKind::Buoy { buoy: a, .. }, EventKind::Buoy { buoy: b, .. }) => a == b,
             (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
-            (EventKind::Finish { .. }, EventKind::Finish { .. }) => true,
+            (EventKind::Finish { .. }, EventKind::Finish { .. })
+            | (EventKind::Trick { .. }, EventKind::Trick { .. })
+            | (EventKind::Bail, EventKind::Bail) => true,
             _ => false,
         };
         same_kind && self.slot == o.slot && self.tick.abs_diff(o.tick) <= EVENT_DEDUPE_TICKS
@@ -605,6 +608,7 @@ impl Client {
                     speed: r.speed(),
                     vel: r.vel,
                     grounded: r.grounded,
+                    bailing: r.bailing(),
                     is_me,
                     is_bot,
                 });

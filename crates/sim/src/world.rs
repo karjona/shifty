@@ -34,6 +34,11 @@ pub struct Rider {
     pub grounded: bool,
     /// Ticks spent in the current state (grounded or airborne), saturating.
     pub state_ticks: u16,
+    /// Heading change since leaving the water (spins), radians. Pitch and
+    /// roll are not wrapped in the air either, so flips and rolls add up.
+    pub air_spin: f32,
+    /// Ticks left in the water after a bail (0 = riding).
+    pub bail_ticks: u8,
     /// The input applied on the last tick. Part of the state: it drives
     /// button edge detection and lets clients extrapolate other riders.
     pub last_input: Input,
@@ -54,6 +59,8 @@ impl Rider {
             roll_rate: 0.0,
             grounded: true,
             state_ticks: 0,
+            air_spin: 0.0,
+            bail_ticks: 0,
             last_input: Input::default(),
             race: Progress::default(),
         };
@@ -86,6 +93,11 @@ impl Rider {
         self.yaw_rate = quant::rate_roundtrip(self.yaw_rate);
         self.pitch_rate = quant::rate_roundtrip(self.pitch_rate);
         self.roll_rate = quant::rate_roundtrip(self.roll_rate);
+        self.air_spin = quant::angle_roundtrip(self.air_spin);
+    }
+
+    pub fn bailing(&self) -> bool {
+        self.bail_ticks > 0
     }
 }
 
@@ -166,7 +178,9 @@ impl World {
             if let Some(r) = rider {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
-                jetski::integrate(r, input, &self.surface, course, tick);
+                if let Some(landing) = jetski::integrate(r, input, &self.surface, course, tick) {
+                    race::landed(&mut r.race, slot, landing, &mut events);
+                }
             }
         }
         self.resolve_collisions();
@@ -372,10 +386,13 @@ impl World {
                 r.yaw_rate,
                 r.pitch_rate,
                 r.roll_rate,
+                r.air_spin,
             ] {
                 eat(v.to_bits());
             }
-            eat(u32::from(r.grounded) | (u32::from(r.state_ticks) << 8));
+            eat(u32::from(r.grounded)
+                | (u32::from(r.state_ticks) << 8)
+                | (u32::from(r.bail_ticks) << 24));
             eat(u32::from_le_bytes([
                 r.last_input.steer as u8,
                 r.last_input.throttle as u8,
@@ -389,7 +406,7 @@ impl World {
                 p.lap,
                 p.meter,
             ]));
-            eat(u32::from(p.misses));
+            eat(u32::from(p.misses) | (u32::from(p.tricks) << 8));
             eat(p.finish_ticks);
         }
         h

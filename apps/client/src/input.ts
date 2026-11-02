@@ -1,6 +1,11 @@
 // Gamepad first (analog sticks and triggers), keyboard as the fallback.
 // Output is analog in [-1, 1]; the sim quantizes it before predicting.
 
+/** Hold in the air: the stick spins and flips. */
+export const BUTTON_TRICK = 1;
+/** Hold in the air: the stick barrel-rolls and flips. */
+export const BUTTON_ROLL = 2;
+
 export interface FrameInput {
   steer: number;
   throttle: number;
@@ -32,7 +37,8 @@ export class InputReader {
 
   constructor() {
     addEventListener("keydown", (e) => {
-      if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
+      if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
+        e.preventDefault();
       this.keys.add(e.code);
     });
     addEventListener("keyup", (e) => this.keys.delete(e.code));
@@ -57,7 +63,7 @@ export class InputReader {
       steer: this.keySteer,
       throttle: (k("KeyW") ? 1 : 0) - (k("KeyS") ? 1 : 0),
       lean: this.keyLean,
-      buttons: 0,
+      buttons: (k("Space") ? BUTTON_TRICK : 0) | (k("ShiftLeft", "ShiftRight") ? BUTTON_ROLL : 0),
     };
   }
 
@@ -69,9 +75,10 @@ export class InputReader {
       const lean = -deadzone(pad.axes[1] ?? 0);
       const rt = pad.buttons[7]?.value ?? 0;
       const lt = pad.buttons[6]?.value ?? 0;
-      const active = steer !== 0 || lean !== 0 || rt > 0.05 || lt > 0.05;
+      const buttons = (pad.buttons[0]?.pressed ? BUTTON_TRICK : 0) | (pad.buttons[1]?.pressed ? BUTTON_ROLL : 0);
+      const active = steer !== 0 || lean !== 0 || rt > 0.05 || lt > 0.05 || buttons !== 0;
       if (!active && this.lastDevice === "keyboard") return null;
-      return { steer, throttle: rt - lt, lean, buttons: 0 };
+      return { steer, throttle: rt - lt, lean, buttons };
     }
     return null;
   }
