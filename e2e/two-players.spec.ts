@@ -16,7 +16,7 @@ declare global {
       };
       riders(): { slot: number; x: number; y: number; z: number; speed: number; isMe: boolean }[];
       names(): Record<string, string>;
-      setInput(v: { steer: number; throttle: number; buttons: number } | null): void;
+      setInput(v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null): void;
       net: { lagMs: number; jitterMs: number; lossPct: number };
     };
   }
@@ -58,8 +58,8 @@ test("two players race in one room", async ({ browser }) => {
   expect(aSelf.speed).toBeGreaterThan(12);
   expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
 
-  // Riders stay on the water.
-  expect(Math.abs(aSelf.y)).toBeLessThan(2);
+  // Riders stay on (or just above) the water, even on big swells.
+  expect(Math.abs(aSelf.y)).toBeLessThan(8);
 
   // Prediction holds: almost no corrections on a clean network.
   const stats = await a.evaluate(() => window.__shifty.stats());

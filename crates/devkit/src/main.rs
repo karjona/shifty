@@ -241,8 +241,8 @@ async fn run_bot(
                     client.handle_packet(&bytes, now);
                 }
                 let steer = ((now / 900.0 + i as f64).sin() * 0.7) as f32;
-                let jump = u8::from((now as u64 / 100) % 40 == i as u64);
-                client.update(now, Input::from_analog(steer, 1.0, jump));
+                let lean = ((now / 1300.0 + i as f64).cos() * 0.8) as f32;
+                client.update(now, Input::from_analog(steer, 1.0, lean, 0));
                 for p in client.take_outgoing() {
                     if f64::from(rng.next_f32()) >= loss {
                         up.push_back((now + lag_ms / 2.0, p));

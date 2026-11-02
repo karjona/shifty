@@ -9,12 +9,12 @@
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
+import { MAX_WAVES, WaveUniforms } from "./waves.ts";
 import {
   Fn,
   abs,
   cameraPosition,
   clamp,
-  cos,
   dot,
   float,
   max,
@@ -34,8 +34,6 @@ import {
   vec4,
 } from "three/tsl";
 
-export const MAX_WAVES = 8;
-const WAVE_FIELDS = 6;
 const CHOP_WAVES = 14;
 const MAX_WAKE_RIDERS = 8;
 /** Wake texture covers this many metres, centred on the arena. */
@@ -48,9 +46,6 @@ export interface WakeSource {
   speed: number;
   grounded: boolean;
 }
-
-const vec4Uniform = () => uniform(new THREE.Vector4());
-const vec2Uniform = () => uniform(new THREE.Vector2());
 
 /** Seeded visual chop: short waves spread around the swell direction. */
 function chopWaves(
@@ -179,41 +174,20 @@ export class LabWater {
   readonly mesh: THREE.Mesh;
   private wake = new WakeField();
   private time = uniform(0);
-  private waveA = Array.from({ length: MAX_WAVES }, vec4Uniform);
-  private waveB = Array.from({ length: MAX_WAVES }, vec2Uniform);
-  private chopA = Array.from({ length: CHOP_WAVES }, vec4Uniform);
-  private chopB = Array.from({ length: CHOP_WAVES }, vec2Uniform);
+  private swells = new WaveUniforms(MAX_WAVES);
+  private chop = new WaveUniforms(CHOP_WAVES);
 
   constructor(size: number, segments: number, sky: THREE.Color) {
     const t = this.time;
-    const { waveA, waveB, chopA, chopB } = this;
+    const { swells, chop } = this;
     const wakeTex = this.wake.output;
-
-    const sumWaves = (p: THREE.Node<"vec3">, a: typeof waveA, b: typeof waveB) => {
-      let h: THREE.Node<"float"> = float(0);
-      let dx: THREE.Node<"float"> = float(0);
-      let dz: THREE.Node<"float"> = float(0);
-      for (let i = 0; i < a.length; i++) {
-        const A = a[i]!;
-        const B = b[i]!;
-        const arg = A.z
-          .mul(A.x.mul(p.x).add(A.y.mul(p.z)))
-          .sub(B.x.mul(t))
-          .add(B.y);
-        h = h.add(A.w.mul(sin(arg)));
-        const c = A.w.mul(A.z).mul(cos(arg));
-        dx = dx.add(c.mul(A.x));
-        dz = dz.add(c.mul(A.y));
-      }
-      return { h, dx, dz };
-    };
 
     const displaced = Fn(() => {
       const p = positionLocal;
-      const swell = sumWaves(p, waveA, waveB);
-      const chop = sumWaves(p, chopA, chopB);
-      normalLocal.assign(vec3(swell.dx.add(chop.dx).negate(), 1, swell.dz.add(chop.dz).negate()).normalize());
-      return p.add(vec3(0, swell.h.add(chop.h), 0));
+      const swell = swells.sum(p, t);
+      const ripple = chop.sum(p, t);
+      normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
+      return p.add(vec3(0, swell.h.add(ripple.h), 0));
     });
 
     const wakeAt = Fn(() => {
@@ -259,17 +233,9 @@ export class LabWater {
   }
 
   setWaves(params: Float32Array, seed: number): void {
-    for (let i = 0; i < MAX_WAVES; i++) {
-      const o = i * WAVE_FIELDS;
-      const p = (j: number) => params[o + j] ?? 0;
-      this.waveA[i]!.value.set(p(0), p(1), p(2), p(3));
-      this.waveB[i]!.value.set(p(4), p(5));
-    }
+    this.swells.setFromSim(params);
     const mainDir = Math.atan2(params[1] ?? 0, params[0] ?? 1);
-    chopWaves(seed, mainDir).forEach((w, i) => {
-      this.chopA[i]!.value.set(w.dx, w.dz, w.k, w.a);
-      this.chopB[i]!.value.set(w.w, w.p);
-    });
+    chopWaves(seed, mainDir).forEach((w, i) => this.chop.setSine(i, w.dx, w.dz, w.k, w.a, w.w, w.p));
   }
 
   update(renderer: THREE.WebGPURenderer, t: number, riders: Map<number, WakeSource>, dt: number): void {

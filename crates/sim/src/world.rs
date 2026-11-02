@@ -1,31 +1,12 @@
-use crate::input::{Input, buttons};
-use crate::math::{Vec3, atan2, clamp, cos, sin, wrap_angle};
+use crate::MAX_RIDERS;
+use crate::input::Input;
+use crate::jetski;
+use crate::math::{Vec3, cos, sin};
 use crate::quant;
 use crate::surface::Surface;
-use crate::{DT, MAX_RIDERS};
 
-/// Physics tuning for the generic arcade rider: it carves, jumps and rides
-/// swells.
+/// World-level tuning shared by every sport.
 pub mod tuning {
-    pub const GRAVITY: f32 = 14.0;
-    pub const MAX_SPEED: f32 = 22.0;
-    pub const MAX_REVERSE: f32 = 5.0;
-    pub const ACCEL: f32 = 14.0;
-    pub const BRAKE: f32 = 20.0;
-    pub const REVERSE_ACCEL: f32 = 6.0;
-    pub const DRAG: f32 = 0.12;
-    pub const GRIP: f32 = 6.0;
-    pub const TURN_RATE: f32 = 2.4;
-    pub const TURN_RESPONSE: f32 = 10.0;
-    pub const AIR_SPIN_RATE: f32 = 5.0;
-    pub const AIR_SPIN_RESPONSE: f32 = 6.0;
-    pub const JUMP_SPEED: f32 = 6.0;
-    /// How much the surface slope pushes you downhill.
-    pub const SLOPE_PUSH: f32 = 1.0;
-    /// Vertical speed margin before the surface "drops away" and you launch.
-    pub const LAUNCH_MARGIN: f32 = 0.3;
-    /// Cap on surface-following vertical speed (sanity bound).
-    pub const MAX_FOLLOW_SPEED: f32 = 8.0;
     pub const ARENA_HALF: f32 = 120.0;
     pub const WALL_BOUNCE: f32 = 0.4;
     pub const RIDER_RADIUS: f32 = 0.9;
@@ -37,12 +18,22 @@ use tuning::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rider {
+    /// Bottom of the hull, centred.
     pub pos: Vec3,
     pub vel: Vec3,
     /// Heading in radians, `[0, TAU)`. Yaw 0 faces +Z.
     pub yaw: f32,
+    /// Nose up positive.
+    pub pitch: f32,
+    /// Left side up positive (banked right).
+    pub roll: f32,
     pub yaw_rate: f32,
+    pub pitch_rate: f32,
+    pub roll_rate: f32,
+    /// Touching the water (or ground) this tick.
     pub grounded: bool,
+    /// Ticks spent in the current state (grounded or airborne), saturating.
+    pub state_ticks: u16,
     /// The input applied on the last tick. Part of the state: it drives
     /// button edge detection and lets clients extrapolate other riders.
     pub last_input: Input,
@@ -56,8 +47,13 @@ impl Rider {
             pos: Vec3::new((col - 1.5) * 4.0, 0.0, row * -6.0),
             vel: Vec3::ZERO,
             yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
             yaw_rate: 0.0,
+            pitch_rate: 0.0,
+            roll_rate: 0.0,
             grounded: true,
+            state_ticks: 0,
             last_input: Input::default(),
         };
         r.quantize();
@@ -84,108 +80,11 @@ impl Rider {
         self.pos = quant::pos_roundtrip(self.pos);
         self.vel = quant::vel_roundtrip(self.vel);
         self.yaw = quant::yaw_from_wire(quant::yaw_to_wire(self.yaw));
-        self.yaw_rate = quant::yaw_rate_from_wire(quant::yaw_rate_to_wire(self.yaw_rate));
-    }
-
-    /// Pitch and roll for rendering only (not part of physics).
-    pub fn visual_tilt(&self, surface: &Surface, tick: u32) -> (f32, f32) {
-        if self.grounded {
-            let n = surface.normal(self.pos.x, self.pos.z, tick);
-            let pitch = -atan2(n.dot(self.forward()), n.y);
-            let roll = atan2(n.dot(self.right()), n.y);
-            (pitch, roll)
-        } else {
-            let horizontal = self.speed().max(0.1);
-            (clamp(-atan2(self.vel.y, horizontal) * 0.6, -0.6, 0.6), 0.0)
-        }
-    }
-
-    fn integrate(&mut self, input: Input, surface: &Surface, tick: u32) {
-        let steer = input.steer_f();
-        let throttle = input.throttle_f();
-        let jump_pressed = input.pressed(buttons::JUMP) && !self.last_input.pressed(buttons::JUMP);
-        let next_tick = tick.wrapping_add(1);
-
-        if self.grounded {
-            let forward = self.forward();
-            let right = self.right();
-            let speed_fwd = self.vel.horizontal().dot(forward);
-
-            // Steering: stronger with speed, reversed when going backwards.
-            let speed_factor = clamp(speed_fwd.abs() / 6.0, 0.2, 1.0);
-            let dir = if speed_fwd < -0.5 { -1.0 } else { 1.0 };
-            let target_rate = -steer * TURN_RATE * speed_factor * dir;
-            self.yaw_rate += (target_rate - self.yaw_rate) * clamp(TURN_RESPONSE * DT, 0.0, 1.0);
-
-            // Throttle, brake, reverse.
-            let accel = if throttle >= 0.0 {
-                throttle * ACCEL * (1.0 - clamp(speed_fwd / MAX_SPEED, 0.0, 1.0))
-            } else if speed_fwd > 0.5 {
-                throttle * BRAKE
-            } else {
-                throttle * REVERSE_ACCEL * (1.0 - clamp(-speed_fwd / MAX_REVERSE, 0.0, 1.0))
-            };
-            self.vel += forward * (accel * DT);
-
-            // Grip: bleed sideways velocity so the rider carves instead of drifting forever.
-            let lateral = self.vel.dot(right);
-            self.vel -= right * (lateral * clamp(GRIP * DT, 0.0, 1.0));
-
-            // Slopes push you downhill.
-            let n = surface.normal(self.pos.x, self.pos.z, tick);
-            self.vel.x += n.x * GRAVITY * SLOPE_PUSH * DT;
-            self.vel.z += n.z * GRAVITY * SLOPE_PUSH * DT;
-
-            // Drag.
-            self.vel.x -= self.vel.x * DRAG * DT;
-            self.vel.z -= self.vel.z * DRAG * DT;
-
-            self.yaw = wrap_angle(self.yaw + self.yaw_rate * DT);
-            let h_here = surface.height(self.pos.x, self.pos.z, tick);
-            self.pos.x += self.vel.x * DT;
-            self.pos.z += self.vel.z * DT;
-
-            // Follow the surface, unless it drops away faster than gravity
-            // pulls us down: then we launch (riding a swell crest at speed).
-            // The follow speed is how fast the *surface* moves under us,
-            // never the gap between us and it (snapping must not launch).
-            let h_next = surface.height(self.pos.x, self.pos.z, next_tick);
-            let vy_follow = clamp((h_next - h_here) / DT, -MAX_FOLLOW_SPEED, MAX_FOLLOW_SPEED);
-            let vy_ballistic = self.vel.y - GRAVITY * DT;
-            if jump_pressed {
-                self.vel.y = vy_follow.max(0.0) + JUMP_SPEED;
-                self.pos.y += self.vel.y * DT;
-                self.grounded = false;
-            } else if vy_follow < vy_ballistic - LAUNCH_MARGIN {
-                self.vel.y = vy_ballistic;
-                self.pos.y += self.vel.y * DT;
-                self.grounded = false;
-            } else {
-                self.vel.y = vy_follow;
-                self.pos.y = h_next;
-            }
-        } else {
-            // In the air: the stick spins you (this is where shifties live).
-            let target_rate = -steer * AIR_SPIN_RATE;
-            self.yaw_rate +=
-                (target_rate - self.yaw_rate) * clamp(AIR_SPIN_RESPONSE * DT, 0.0, 1.0);
-            self.yaw = wrap_angle(self.yaw + self.yaw_rate * DT);
-            self.vel.y -= GRAVITY * DT;
-            self.pos += self.vel * DT;
-
-            let h = surface.height(self.pos.x, self.pos.z, next_tick);
-            if self.pos.y <= h {
-                self.pos.y = h;
-                let n = surface.normal(self.pos.x, self.pos.z, next_tick);
-                let vn = self.vel.dot(n);
-                if vn < 0.0 {
-                    self.vel -= n * vn;
-                }
-                self.grounded = true;
-            }
-        }
-
-        self.last_input = input;
+        self.pitch = quant::angle_roundtrip(self.pitch);
+        self.roll = quant::angle_roundtrip(self.roll);
+        self.yaw_rate = quant::rate_roundtrip(self.yaw_rate);
+        self.pitch_rate = quant::rate_roundtrip(self.pitch_rate);
+        self.roll_rate = quant::rate_roundtrip(self.roll_rate);
     }
 
     fn keep_in_arena(&mut self) {
@@ -232,7 +131,7 @@ impl World {
     /// Places a rider at its grid spot, standing on the surface.
     pub fn spawn(&mut self, slot: usize) {
         let mut r = Rider::spawn(slot);
-        r.pos.y = self.surface.height(r.pos.x, r.pos.z, self.tick);
+        r.pos.y = jetski::rest_height(self.surface.height(r.pos.x, r.pos.z, self.tick));
         r.quantize();
         self.riders[slot] = Some(r);
     }
@@ -247,7 +146,7 @@ impl World {
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             if let Some(r) = rider {
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
-                r.integrate(input, &self.surface, tick);
+                jetski::integrate(r, input, &self.surface, tick);
             }
         }
         self.resolve_collisions();
@@ -313,16 +212,27 @@ impl World {
             let Some(r) = r else { continue };
             eat(slot as u32);
             for v in [
-                r.pos.x, r.pos.y, r.pos.z, r.vel.x, r.vel.y, r.vel.z, r.yaw, r.yaw_rate,
+                r.pos.x,
+                r.pos.y,
+                r.pos.z,
+                r.vel.x,
+                r.vel.y,
+                r.vel.z,
+                r.yaw,
+                r.pitch,
+                r.roll,
+                r.yaw_rate,
+                r.pitch_rate,
+                r.roll_rate,
             ] {
                 eat(v.to_bits());
             }
-            eat(u32::from(r.grounded));
+            eat(u32::from(r.grounded) | (u32::from(r.state_ticks) << 8));
             eat(u32::from_le_bytes([
                 r.last_input.steer as u8,
                 r.last_input.throttle as u8,
+                r.last_input.lean as u8,
                 r.last_input.buttons,
-                0,
             ]));
         }
         h

@@ -82,6 +82,7 @@ pub struct RenderRider {
     pub pitch: f32,
     pub roll: f32,
     pub speed: f32,
+    pub vel: Vec3,
     pub grounded: bool,
     pub is_me: bool,
     pub is_bot: bool,
@@ -121,7 +122,8 @@ pub struct Client {
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
-    yaw_offset: [f32; MAX_RIDERS],
+    /// Smoothed correction of `(yaw, pitch, roll)`.
+    angle_offset: [Vec3; MAX_RIDERS],
     outbox: Vec<Vec<u8>>,
     stats: Stats,
 }
@@ -152,7 +154,7 @@ impl Client {
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
-            yaw_offset: [0.0; MAX_RIDERS],
+            angle_offset: [Vec3::ZERO; MAX_RIDERS],
             outbox: Vec::new(),
             stats: Stats {
                 time_scale: 1.0,
@@ -271,7 +273,7 @@ impl Client {
         let decay = 0.5f64.powf(dt / SMOOTH_HALF_LIFE_MS) as f32;
         for slot in 0..MAX_RIDERS {
             self.render_offset[slot] = self.render_offset[slot] * decay;
-            self.yaw_offset[slot] *= decay;
+            self.angle_offset[slot] = self.angle_offset[slot] * decay;
         }
     }
 
@@ -480,15 +482,19 @@ impl Client {
                     }
                     if d.length() > SNAP_DISTANCE {
                         self.render_offset[slot] = Vec3::ZERO;
-                        self.yaw_offset[slot] = 0.0;
+                        self.angle_offset[slot] = Vec3::ZERO;
                     } else {
                         self.render_offset[slot] += d;
-                        self.yaw_offset[slot] += angle_diff(new.yaw, old.yaw);
+                        self.angle_offset[slot] += Vec3::new(
+                            angle_diff(new.yaw, old.yaw),
+                            angle_diff(new.pitch, old.pitch),
+                            angle_diff(new.roll, old.roll),
+                        );
                     }
                 }
                 _ => {
                     self.render_offset[slot] = Vec3::ZERO;
-                    self.yaw_offset[slot] = 0.0;
+                    self.angle_offset[slot] = Vec3::ZERO;
                 }
             }
         }
@@ -514,13 +520,14 @@ impl Client {
             let drawn = self.world.riders[slot].map(|cur| {
                 let prev = self.prev_riders[slot].unwrap_or(cur);
                 let pos = lerp(prev.pos, cur.pos, alpha) + self.render_offset[slot];
-                let yaw = wrap_angle(
-                    prev.yaw + angle_diff(prev.yaw, cur.yaw) * alpha + self.yaw_offset[slot],
-                );
-                (cur, pos, yaw)
+                let off = self.angle_offset[slot];
+                let blend = |a: f32, b: f32, o: f32| a + angle_diff(a, b) * alpha + o;
+                let yaw = wrap_angle(blend(prev.yaw, cur.yaw, off.x));
+                let pitch = blend(prev.pitch, cur.pitch, off.y);
+                let roll = blend(prev.roll, cur.roll, off.z);
+                (cur, pos, yaw, pitch, roll)
             });
-            if let Some((r, pos, yaw)) = drawn {
-                let (pitch, roll) = r.visual_tilt(&self.surface, self.world.tick);
+            if let Some((r, pos, yaw, pitch, roll)) = drawn {
                 out.push(RenderRider {
                     slot: slot as u8,
                     pos,
@@ -528,6 +535,7 @@ impl Client {
                     pitch,
                     roll,
                     speed: r.speed(),
+                    vel: r.vel,
                     grounded: r.grounded,
                     is_me,
                     is_bot,

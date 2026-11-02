@@ -2,30 +2,24 @@
 // with TSL node materials. Riders are drawn as boxes.
 import * as THREE from "three/webgpu";
 import { LabWater, type WakeSource } from "./water.ts";
+import { MAX_WAVES, WAVE_FIELDS, WaveUniforms, waveHeight } from "./waves.ts";
 import {
   Fn,
-  cos,
-  float,
   fract,
   max,
   mix,
   normalLocal,
   positionLocal,
   positionWorld,
-  sin,
   smoothstep,
   step,
   uniform,
   vec3,
 } from "three/tsl";
 
-export const MAX_WAVES = 8;
-const WAVE_FIELDS = 6; // dir_x, dir_z, k, amplitude, omega, phase
 const ARENA_HALF = 120;
 const DT = 1 / 60;
-
-const vec4Uniform = () => uniform(new THREE.Vector4());
-const vec2Uniform = () => uniform(new THREE.Vector2());
+const BASE_FOV = 62;
 
 const SLOT_COLORS = [0xff5a36, 0x2bb3ff, 0xffd23f, 0x7ae582, 0xc77dff, 0xff8fab, 0xf4a261, 0xe9edf2];
 
@@ -41,24 +35,9 @@ export interface RiderView {
   grounded: boolean;
   isMe: boolean;
   isBot: boolean;
-}
-
-/** The same swell formula as `crates/sim/src/surface.rs`, for render-only use. */
-export function waveHeight(params: Float32Array, x: number, z: number, t: number): number {
-  let h = 0;
-  for (let i = 0; i < MAX_WAVES; i++) {
-    const o = i * WAVE_FIELDS;
-    const amp = params[o + 3] ?? 0;
-    if (amp === 0) continue;
-    h +=
-      amp *
-      Math.sin(
-        (params[o + 2] ?? 0) * ((params[o] ?? 0) * x + (params[o + 1] ?? 0) * z) -
-          (params[o + 4] ?? 0) * t +
-          (params[o + 5] ?? 0),
-      );
-  }
-  return h;
+  vx: number;
+  vy: number;
+  vz: number;
 }
 
 export class World {
@@ -70,13 +49,16 @@ export class World {
 
   private sun: THREE.DirectionalLight;
   private time = uniform(0);
-  private waveA: ReturnType<typeof vec4Uniform>[] = [];
-  private waveB: ReturnType<typeof vec2Uniform>[] = [];
+  private swells = new WaveUniforms(MAX_WAVES);
   private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
   private riders = new Map<number, { mesh: THREE.Group; label: HTMLDivElement }>();
   private buoys: THREE.Mesh[] = [];
   private camPos = new THREE.Vector3(0, 8, -14);
   private camLook = new THREE.Vector3();
+  /** Smoothed chase state: heading followed, rider height, airborne blend. */
+  private camHeading = 0;
+  private camHeight = 0;
+  private camAir = 0;
   private labels: HTMLElement;
 
   /** "lab" = swells + GPU chop + wake foam (see water.ts); "basic" = swells only. */
@@ -137,47 +119,23 @@ export class World {
     // Chop seed only needs to be stable per room: derive it from the swells.
     this.lab?.setWaves(params, Math.round(Math.abs(params[5] ?? 1) * 1e6));
     this.waveParams.set(params.subarray(0, MAX_WAVES * WAVE_FIELDS));
-    for (let i = 0; i < MAX_WAVES; i++) {
-      const o = i * WAVE_FIELDS;
-      const p = (j: number) => this.waveParams[o + j] ?? 0;
-      this.waveA[i]?.value.set(p(0), p(1), p(2), p(3));
-      this.waveB[i]?.value.set(p(4), p(5));
-    }
+    this.swells.setFromSim(this.waveParams);
   }
 
   private buildWater(): void {
-    for (let i = 0; i < MAX_WAVES; i++) {
-      this.waveA.push(vec4Uniform());
-      this.waveB.push(vec2Uniform());
-    }
     const t = this.time;
-    const waveA = this.waveA;
-    const waveB = this.waveB;
+    const swells = this.swells;
     // Displace vertices with the sim's swell formula; analytic normals.
     const displaced = Fn(() => {
       const p = positionLocal;
-      let h: THREE.Node<"float"> = float(0);
-      let dx: THREE.Node<"float"> = float(0);
-      let dz: THREE.Node<"float"> = float(0);
-      for (let i = 0; i < MAX_WAVES; i++) {
-        const a = waveA[i]!;
-        const b = waveB[i]!;
-        const arg = a.z
-          .mul(a.x.mul(p.x).add(a.y.mul(p.z)))
-          .sub(b.x.mul(t))
-          .add(b.y);
-        h = h.add(a.w.mul(sin(arg)));
-        const c = a.w.mul(a.z).mul(cos(arg));
-        dx = dx.add(c.mul(a.x));
-        dz = dz.add(c.mul(a.y));
-      }
-      normalLocal.assign(vec3(dx.negate(), 1, dz.negate()).normalize());
-      return p.add(vec3(0, h, 0));
+      const w = swells.sum(p, t);
+      normalLocal.assign(vec3(w.dx.negate(), 1, w.dz.negate()).normalize());
+      return p.add(vec3(0, w.h, 0));
     });
     const colour = Fn(() => {
       const deep = vec3(0.04, 0.32, 0.45);
       const crest = vec3(0.18, 0.66, 0.72);
-      const base = mix(deep, crest, smoothstep(-0.45, 0.55, positionWorld.y));
+      const base = mix(deep, crest, smoothstep(-0.8, 1.2, positionWorld.y));
       // Faint 4 m grid so speed reads even on calm water.
       const gx = step(0.965, fract(positionWorld.x.div(4)));
       const gz = step(0.965, fract(positionWorld.z.div(4)));
@@ -217,19 +175,26 @@ export class World {
     let r = this.riders.get(slot);
     if (r) return r;
     const mesh = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.8, 2.2),
-      new THREE.MeshStandardNodeMaterial({ color: SLOT_COLORS[slot % SLOT_COLORS.length], roughness: 0.5 }),
-    );
-    body.position.y = 0.4;
-    body.castShadow = true;
-    const nose = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.3, 0.4),
-      new THREE.MeshStandardNodeMaterial({ color: 0xffffff }),
-    );
-    nose.position.set(0, 0.85, 0.85);
-    nose.castShadow = true;
-    mesh.add(body, nose);
+    const colour = SLOT_COLORS[slot % SLOT_COLORS.length];
+    const paint = new THREE.MeshStandardNodeMaterial({ color: colour, roughness: 0.45 });
+    const white = new THREE.MeshStandardNodeMaterial({ color: 0xf4f4f0, roughness: 0.6 });
+    const dark = new THREE.MeshStandardNodeMaterial({ color: 0x23262b, roughness: 0.7 });
+    const part = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      mesh.add(m);
+      return m;
+    };
+    // Hull (the rider position is the bottom of the hull), nose, seat.
+    part(new THREE.BoxGeometry(1.1, 0.5, 2.5), paint, 0, 0.25, -0.1);
+    const nose = part(new THREE.BoxGeometry(0.9, 0.42, 0.7), white, 0, 0.3, 1.25);
+    nose.rotation.x = 0.35;
+    part(new THREE.BoxGeometry(0.5, 0.2, 1.0), dark, 0, 0.6, -0.3);
+    // Rider: legs, torso, head, standing slightly back.
+    part(new THREE.BoxGeometry(0.42, 0.55, 0.3), dark, 0, 0.95, -0.35);
+    part(new THREE.BoxGeometry(0.5, 0.6, 0.32), paint, 0, 1.5, -0.25);
+    part(new THREE.SphereGeometry(0.2, 10, 8), white, 0, 1.95, -0.22);
     mesh.rotation.order = "YXZ";
     this.scene.add(mesh);
     const label = document.createElement("div");
@@ -283,16 +248,37 @@ export class World {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /**
+   * Chase camera. On the water it follows the hull's heading; in the air it
+   * follows the flight path instead (so spins don't spin the camera) and
+   * pulls back to show the jump. Height is smoothed so swells roll under
+   * the camera instead of shaking it, and the view widens with speed.
+   */
   private followCamera(me: RiderView, dt: number): void {
-    const fx = Math.sin(me.yaw);
-    const fz = Math.cos(me.yaw);
-    const back = 9 + me.speed * 0.12;
-    const target = new THREE.Vector3(me.x - fx * back, me.y + 3.6 + me.speed * 0.03, me.z - fz * back);
-    const k = 1 - Math.exp(-dt * 5);
-    this.camPos.lerp(target, k);
-    this.camLook.lerp(new THREE.Vector3(me.x + fx * 4, me.y + 1, me.z + fz * 4), 1 - Math.exp(-dt * 10));
+    const air = me.grounded ? 0 : 1;
+    this.camAir += (air - this.camAir) * (1 - Math.exp(-dt * (air ? 3 : 1.5)));
+    const flying = Math.hypot(me.vx, me.vz) > 3;
+    const heading = !me.grounded && flying ? Math.atan2(me.vx, me.vz) : me.yaw;
+    let d = heading - this.camHeading;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    this.camHeading += d * (1 - Math.exp(-dt * 4));
+    this.camHeight += (me.y - this.camHeight) * (1 - Math.exp(-dt * (me.grounded ? 3 : 6)));
+
+    const fx = Math.sin(this.camHeading);
+    const fz = Math.cos(this.camHeading);
+    const back = 8.5 + me.speed * 0.13 + this.camAir * 3;
+    const up = 3.2 + me.speed * 0.03 + this.camAir * 1.6;
+    const target = new THREE.Vector3(me.x - fx * back, this.camHeight + up, me.z - fz * back);
+    this.camPos.lerp(target, 1 - Math.exp(-dt * 6));
+    const look = new THREE.Vector3(me.x + fx * 5, (this.camHeight + me.y) / 2 + 1, me.z + fz * 5);
+    this.camLook.lerp(look, 1 - Math.exp(-dt * 10));
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
+    const fov = BASE_FOV + Math.min(1, me.speed / 23) * 10 + this.camAir * 4;
+    if (Math.abs(fov - this.camera.fov) > 0.05) {
+      this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-dt * 3));
+      this.camera.updateProjectionMatrix();
+    }
     this.sun.position.set(me.x + 30, me.y + 60, me.z + 15);
     this.sun.target.position.set(me.x, me.y, me.z);
   }

@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     const i = input.read(dt);
-    client.update(now, i.steer, i.throttle, i.buttons);
+    client.update(now, i.steer, i.throttle, i.lean, i.buttons);
     sendOutgoing();
     return dt;
   };
@@ -145,6 +145,9 @@ async function main(): Promise<void> {
         grounded: buf[o + 8] === 1,
         isMe: buf[o + 9] === 1,
         isBot: buf[o + 10] === 1,
+        vx: buf[o + 11]!,
+        vy: buf[o + 12]!,
+        vz: buf[o + 13]!,
       });
     }
     return out;
@@ -215,7 +218,7 @@ async function main(): Promise<void> {
       // Fresh, not the last rendered frame (frames can be slow without a GPU).
       riders: () => readRiders(),
       names: () => Object.fromEntries(names),
-      setInput: (v: { steer: number; throttle: number; buttons: number } | null) => {
+      setInput: (v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null) => {
         input.forced = v;
       },
       net,

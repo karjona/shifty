@@ -7,24 +7,27 @@ pub struct Input {
     pub steer: i8,
     /// -127 = full brake/reverse, 127 = full throttle.
     pub throttle: i8,
+    /// Rider weight, front to back: -127 = lean back (nose up),
+    /// 127 = lean forward (nose down).
+    pub lean: i8,
     /// Bitfield of [`buttons`].
     pub buttons: u8,
 }
 
 pub mod buttons {
-    pub const JUMP: u8 = 1 << 0;
     /// All bits the sim understands. Anything else is stripped by validation.
-    pub const ALL: u8 = JUMP;
+    pub const ALL: u8 = 0;
 }
 
 impl Input {
-    pub const WIRE_SIZE: usize = 3;
+    pub const WIRE_SIZE: usize = 4;
 
     /// Builds an input from analog values in `[-1, 1]`.
-    pub fn from_analog(steer: f32, throttle: f32, buttons: u8) -> Self {
+    pub fn from_analog(steer: f32, throttle: f32, lean: f32, buttons: u8) -> Self {
         Self {
             steer: quantize_axis(steer),
             throttle: quantize_axis(throttle),
+            lean: quantize_axis(lean),
             buttons: buttons & buttons::ALL,
         }
     }
@@ -35,6 +38,7 @@ impl Input {
         Self {
             steer: self.steer.max(-127),
             throttle: self.throttle.max(-127),
+            lean: self.lean.max(-127),
             buttons: self.buttons & buttons::ALL,
         }
     }
@@ -45,6 +49,10 @@ impl Input {
 
     pub fn throttle_f(self) -> f32 {
         f32::from(self.throttle.max(-127)) / 127.0
+    }
+
+    pub fn lean_f(self) -> f32 {
+        f32::from(self.lean.max(-127)) / 127.0
     }
 
     pub fn pressed(self, button: u8) -> bool {
