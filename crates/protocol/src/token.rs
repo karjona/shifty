@@ -9,7 +9,8 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use ed25519_dalek::{Signature, VerifyingKey};
+use ed25519_dalek::Signature;
+pub use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
 pub const SIGNING_DOMAIN: &[u8] = b"shifty-join-v1.";

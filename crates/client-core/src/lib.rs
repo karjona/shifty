@@ -117,6 +117,7 @@ pub struct Client {
     next_event_id: u16,
     pending_events: Vec<Event>,
     roster: [Option<RosterEntry>; MAX_RIDERS],
+    roster_version: u32,
     snaps: VecDeque<(u32, Riders)>,
     interp_offset: Option<f64>,
     render_offset: [Vec3; MAX_RIDERS],
@@ -147,6 +148,7 @@ impl Client {
             next_event_id: 0,
             pending_events: Vec::new(),
             roster: Default::default(),
+            roster_version: 0,
             snaps: VecDeque::with_capacity(SNAP_BUFFER),
             interp_offset: None,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -177,6 +179,11 @@ impl Client {
 
     pub fn roster(&self) -> &[Option<RosterEntry>; MAX_RIDERS] {
         &self.roster
+    }
+
+    /// Bumps every time the roster changes, so UIs can refresh cheaply.
+    pub fn roster_version(&self) -> u32 {
+        self.roster_version
     }
 
     pub fn predicted_world(&self) -> &World {
@@ -385,6 +392,7 @@ impl Client {
                 EventBody::RiderLeft { slot } => self.roster[slot as usize] = None,
             }
             self.next_event_id = self.next_event_id.wrapping_add(1);
+            self.roster_version = self.roster_version.wrapping_add(1);
         }
     }
 
