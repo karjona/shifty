@@ -3,8 +3,9 @@
 //!
 //! `cargo run -p sim --example jetski_lab --release [seed]`
 
+use sim::course::OVAL;
 use sim::math::{angle_diff, clamp};
-use sim::{Input, Inputs, MAX_RIDERS, Surface, SurfaceKind, World};
+use sim::{CourseId, Input, Inputs, MAX_RIDERS, Surface, SurfaceKind, World};
 
 struct Run {
     air_frac: f32,
@@ -23,10 +24,13 @@ fn run(
     secs: u32,
     steer_wiggle: bool,
 ) -> Run {
-    let mut w = World::new(surface);
+    let mut w = World::new(CourseId::Oval, surface);
     w.spawn(0);
     let mut r = w.riders[0].unwrap();
     r.yaw = heading;
+    let start = OVAL.centerline(150.0).at_offset(-20.0);
+    r.pos.x = start.0;
+    r.pos.z = start.1;
     w.riders[0] = Some(r);
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let (mut air, mut total) = (0u32, 0u32);
@@ -50,12 +54,18 @@ fn run(
         inputs[0] = Some(Input::from_analog(steer, 1.0, lean, 0));
         w.step(&inputs);
         let mut r = w.riders[0].unwrap();
-        // Stay clear of the arena walls: jump back (the sea is endless anyway).
-        if r.pos.x.abs() > 90.0 {
-            r.pos.x -= 160.0 * r.pos.x.signum();
+        // Stay in the open water of the first straight, clear of the walls:
+        // jump back (the sea is endless anyway). And never start a race.
+        if r.pos.x.abs() > 130.0 {
+            r.pos.x -= 260.0 * r.pos.x.signum();
         }
-        if r.pos.z.abs() > 90.0 {
-            r.pos.z -= 160.0 * r.pos.z.signum();
+        if r.pos.z > -18.0 {
+            r.pos.z -= 58.0;
+        } else if r.pos.z < -80.0 {
+            r.pos.z += 58.0;
+        }
+        if w.race.phase != sim::Phase::Warmup {
+            w.restart_warmup();
         }
         if r.grounded {
             r.pos.y = r
@@ -110,7 +120,7 @@ fn main() {
         .unwrap_or(1);
 
     // Flat water: draft and settling.
-    let mut w = World::new(Surface::flat());
+    let mut w = World::new(CourseId::Oval, Surface::flat());
     w.spawn(0);
     let mut inputs: Inputs = [None; MAX_RIDERS];
     inputs[0] = Some(Input::default());
@@ -142,7 +152,7 @@ fn main() {
         f.max_roll
     );
 
-    let s = Surface::new(SurfaceKind::Swells, seed);
+    let s = OVAL.surface(SurfaceKind::Swells, seed);
     let main_dir = libm::atan2f(s.waves()[0].dir_x, s.waves()[0].dir_z);
     for w in s.waves() {
         println!(

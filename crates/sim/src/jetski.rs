@@ -11,8 +11,9 @@
 //! accelerations times the inertia constants below.
 
 use crate::DT;
+use crate::course::{self, Course, RampSurface};
 use crate::input::Input;
-use crate::math::{Vec3, atan2, clamp, cos, sin, wrap_angle, wrap_pi};
+use crate::math::{Vec3, angle_diff, atan2, clamp, cos, sin, wrap_angle, wrap_pi};
 use crate::surface::Surface;
 use crate::world::Rider;
 
@@ -76,6 +77,10 @@ pub mod tuning {
     pub const POP_MIN_RISE: f32 = 1.0;
     /// Ticks on the water before another pop is possible.
     pub const POP_MIN_WET_TICKS: u16 = 8;
+
+    /// A hull this close above a ramp deck lands on it.
+    pub const RAMP_CATCH: f32 = 0.05;
+    pub const RAMP_DRAG: f32 = 0.3;
 
     pub const AIR_STEER_RATE: f32 = 0.8;
     pub const AIR_TURN_RESPONSE: f32 = 4.0;
@@ -158,11 +163,20 @@ fn water_forces(r: &Rider, surface: &Surface, tick: u32) -> Wet {
 }
 
 /// Advance one rider one tick on the water (or above it).
-pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, tick: u32) {
+pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, course: &Course, tick: u32) {
     let steer = input.steer_f();
     let throttle = input.throttle_f();
     let lean = input.lean_f();
     let was_grounded = r.grounded;
+    let top_speed = MAX_SPEED * r.race.speed_bonus();
+
+    if let Some(deck) = course.ramp_under(r.pos.x, r.pos.z, surface, tick)
+        && r.pos.y <= deck.top + RAMP_CATCH
+        && r.pos.y >= deck.top - course::tuning::RAMP_STEP
+    {
+        ride_ramp(r, input, &deck);
+        return;
+    }
 
     let wet = water_forces(r, surface, tick);
     let grounded = wet.points > 0;
@@ -185,7 +199,7 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, tick: u32) {
 
         if wet.stern_wet {
             let thrust = if throttle >= 0.0 {
-                let v = clamp(speed_fwd / MAX_SPEED, 0.0, 1.0);
+                let v = clamp(speed_fwd / top_speed, 0.0, 1.0);
                 throttle * ACCEL * (1.0 - v * v)
             } else if speed_fwd > 0.5 {
                 throttle * BRAKE
@@ -211,7 +225,7 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, tick: u32) {
             accel.z -= r.vel.z / speed * stop;
         }
 
-        let planing = clamp(speed_fwd / MAX_SPEED, 0.0, 1.0);
+        let planing = clamp(speed_fwd / top_speed, 0.0, 1.0);
         accel.y += PLANING_LIFT * GRAVITY * planing * planing * bite;
 
         // The rider banks into turns and shifts weight front to back.
@@ -253,13 +267,39 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, tick: u32) {
     r.roll = wrap_pi(r.roll + r.roll_rate * DT);
     r.pos += r.vel * DT;
 
-    r.state_ticks = if grounded == was_grounded {
+    finish_tick(r, grounded, input);
+}
+
+fn finish_tick(r: &mut Rider, grounded: bool, input: Input) {
+    r.state_ticks = if grounded == r.grounded {
         r.state_ticks.saturating_add(1)
     } else {
         0
     };
     r.grounded = grounded;
     r.last_input = input;
+}
+
+/// On a ramp the deck holds the hull: it slides up at the deck's slope and
+/// leaves the lip with that rise as upward speed. The jet is out of the
+/// water, so there is no thrust and no steering, only momentum.
+fn ride_ramp(r: &mut Rider, input: Input, deck: &RampSurface) {
+    let (fx, fz) = (sin(deck.yaw), cos(deck.yaw));
+    let along = r.vel.x * fx + r.vel.z * fz;
+    r.pos.y = deck.top;
+    r.vel.y = along.max(0.0) * deck.slope;
+    r.vel.x -= r.vel.x * RAMP_DRAG * DT;
+    r.vel.z -= r.vel.z * RAMP_DRAG * DT;
+    let deck_pitch = atan2(deck.slope, 1.0) * cos(angle_diff(r.yaw, deck.yaw));
+    r.pitch += (deck_pitch - r.pitch) * 0.5;
+    r.pitch_rate = 0.0;
+    r.roll *= 0.8;
+    r.roll_rate = 0.0;
+    r.yaw_rate *= 0.8;
+    r.yaw = wrap_angle(r.yaw + r.yaw_rate * DT);
+    r.pos.x += r.vel.x * DT;
+    r.pos.z += r.vel.z * DT;
+    finish_tick(r, true, input);
 }
 
 /// Height a resting hull sits at, on a surface of height `h`.

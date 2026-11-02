@@ -15,6 +15,7 @@ declare global {
         inputLead: number;
       };
       riders(): { slot: number; x: number; y: number; z: number; speed: number; isMe: boolean }[];
+      race(): { phase: number; laps: number; racers: number };
       names(): Record<string, string>;
       setInput(v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null): void;
       net: { lagMs: number; jitterMs: number; lossPct: number };
@@ -45,10 +46,14 @@ test("two players race in one room", async ({ browser }) => {
     .poll(() => a.evaluate(() => Object.values(window.__shifty.names()).toSorted()))
     .toEqual(["Ana", "Bea", "🤖 Bot 7", "🤖 Bot 8"]);
   await expect.poll(() => b.evaluate(() => window.__shifty.riders().length)).toBe(4);
+  // The first player in starts a warm-up before the race on the oval.
+  const race = await a.evaluate(() => window.__shifty.race());
+  expect(race.phase).toBe(0);
+  expect(race.laps).toBe(3);
 
-  // Ana drives with a steady input; Bea draws her in the present
+  // Ana drives down the first straight; Bea draws her in the present
   // (predicted), so both screens agree on where Ana is right now.
-  await a.evaluate(() => window.__shifty.setInput({ steer: 0.2, throttle: 1, buttons: 0 }));
+  await a.evaluate(() => window.__shifty.setInput({ steer: 0.02, throttle: 1, buttons: 0 }));
   await a.waitForTimeout(3000);
   const aSlot = await a.evaluate(() => window.__shifty.slot());
   const [aSelf, bSeesA] = await Promise.all([
@@ -69,7 +74,7 @@ test("two players race in one room", async ({ browser }) => {
 
   // Now with a bad network on Ana's side: 150 ms extra RTT, 20 ms jitter, 3% loss.
   await a.evaluate(() => Object.assign(window.__shifty.net, { lagMs: 150, jitterMs: 20, lossPct: 3 }));
-  await a.evaluate(() => window.__shifty.setInput({ steer: -0.3, throttle: 1, buttons: 0 }));
+  await a.evaluate(() => window.__shifty.setInput({ steer: -0.1, throttle: 1, buttons: 0 }));
   await a.waitForTimeout(4000);
   const bad = await a.evaluate(() => window.__shifty.stats());
   expect(bad.rttMs).toBeGreaterThan(120);

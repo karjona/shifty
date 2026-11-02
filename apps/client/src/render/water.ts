@@ -36,9 +36,9 @@ import {
 
 const CHOP_WAVES = 14;
 const MAX_WAKE_RIDERS = 8;
-/** Wake texture covers this many metres, centred on the arena. */
-const WAKE_SPAN = 256;
-const WAKE_RES = 512;
+/** Wake texture covers this many metres, centred on the course. */
+const WAKE_SPAN = 512;
+const WAKE_RES = 1024;
 
 export interface WakeSource {
   x: number;
@@ -199,10 +199,10 @@ export class LabWater {
       const deep = vec3(0.02, 0.24, 0.36);
       const shallow = vec3(0.1, 0.56, 0.62);
       const h = positionWorld.y;
-      let c: THREE.Node<"vec3"> = mix(deep, shallow, smoothstep(-0.5, 0.6, h));
+      let c: THREE.Node<"vec3"> = mix(deep, shallow, smoothstep(-0.9, 1.3, h));
       // Crest foam where swell + chop pile up, and wake foam behind riders,
       // broken into streaks so it reads as churned water, not paint.
-      const crest = smoothstep(0.42, 0.62, h).mul(0.45);
+      const crest = smoothstep(1.15, 1.6, h).mul(0.4);
       const p = positionWorld.xz;
       const streaks = sin(p.x.mul(2.3).add(p.y.mul(0.7)).add(t.mul(1.3)))
         .mul(sin(p.y.mul(2.9).sub(p.x.mul(0.6)).sub(t.mul(0.9))))

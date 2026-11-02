@@ -305,7 +305,8 @@ fn two_players_see_each_other_and_bots_are_predicted_exactly() {
         .iter()
         .find(|r| r.slot == a_slot)
         .expect("sees player a");
-    let spawn = sim::Rider::spawn(a_slot as usize).pos;
+    let grid = sim::course::OVAL.grid_spot(a_slot as usize);
+    let spawn = sim::Vec3::new(grid.x, a.pos.y, grid.z);
     let server = h.room.world().riders[a_slot as usize].unwrap().pos;
     assert!(
         (a.pos - spawn).length() > 3.0,

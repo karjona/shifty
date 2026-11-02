@@ -8,6 +8,7 @@
 use core::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 
 pub const TAU: f32 = core::f32::consts::TAU;
+pub const PI: f32 = core::f32::consts::PI;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec3 {

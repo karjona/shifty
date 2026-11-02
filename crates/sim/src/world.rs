@@ -1,15 +1,15 @@
 use crate::MAX_RIDERS;
+use crate::course::{Course, CourseId, Frame};
 use crate::input::Input;
 use crate::jetski;
 use crate::math::{Vec3, cos, sin};
 use crate::quant;
-use crate::surface::Surface;
+use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
+use crate::surface::{Surface, SurfaceKind};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
-    pub const ARENA_HALF: f32 = 120.0;
-    pub const WALL_BOUNCE: f32 = 0.4;
-    pub const RIDER_RADIUS: f32 = 0.9;
+    pub const RIDER_RADIUS: f32 = crate::course::tuning::RIDER_RADIUS;
     pub const RIDER_HALF_HEIGHT: f32 = 0.8;
     pub const BUMP_RESTITUTION: f32 = 0.35;
 }
@@ -37,16 +37,16 @@ pub struct Rider {
     /// The input applied on the last tick. Part of the state: it drives
     /// button edge detection and lets clients extrapolate other riders.
     pub last_input: Input,
+    pub race: Progress,
 }
 
 impl Rider {
-    pub fn spawn(slot: usize) -> Self {
-        let col = (slot % 4) as f32;
-        let row = (slot / 4) as f32;
+    /// A rider at rest at `spot`, with `y` the hull bottom.
+    pub fn at(spot: Frame, y: f32) -> Self {
         let mut r = Self {
-            pos: Vec3::new((col - 1.5) * 4.0, 0.0, row * -6.0),
+            pos: Vec3::new(spot.x, y, spot.z),
             vel: Vec3::ZERO,
-            yaw: 0.0,
+            yaw: spot.yaw,
             pitch: 0.0,
             roll: 0.0,
             yaw_rate: 0.0,
@@ -55,6 +55,7 @@ impl Rider {
             grounded: true,
             state_ticks: 0,
             last_input: Input::default(),
+            race: Progress::default(),
         };
         r.quantize();
         r
@@ -86,23 +87,6 @@ impl Rider {
         self.pitch_rate = quant::rate_roundtrip(self.pitch_rate);
         self.roll_rate = quant::rate_roundtrip(self.roll_rate);
     }
-
-    fn keep_in_arena(&mut self) {
-        if self.pos.x.abs() > ARENA_HALF {
-            let side = if self.pos.x > 0.0 { 1.0 } else { -1.0 };
-            self.pos.x = side * ARENA_HALF;
-            if self.vel.x * side > 0.0 {
-                self.vel.x = -self.vel.x * WALL_BOUNCE;
-            }
-        }
-        if self.pos.z.abs() > ARENA_HALF {
-            let side = if self.pos.z > 0.0 { 1.0 } else { -1.0 };
-            self.pos.z = side * ARENA_HALF;
-            if self.vel.z * side > 0.0 {
-                self.vel.z = -self.vel.z * WALL_BOUNCE;
-            }
-        }
-    }
 }
 
 /// The whole simulated world. Pure data + pure functions: no clocks, no I/O,
@@ -113,26 +97,44 @@ pub struct World {
     /// Number of ticks simulated so far. The state stored here is the state
     /// *after* tick `tick` (tick 0 = initial state).
     pub tick: u32,
+    pub course: CourseId,
     pub surface: Surface,
+    pub race: Race,
     pub riders: [Option<Rider>; MAX_RIDERS],
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
 
 impl World {
-    pub fn new(surface: Surface) -> Self {
+    pub fn new(course: CourseId, surface: Surface) -> Self {
         Self {
             tick: 0,
+            course,
             surface,
+            race: Race::new(0),
             riders: [None; MAX_RIDERS],
         }
     }
 
-    /// Places a rider at its grid spot, standing on the surface.
+    /// A world on a course, with the course's sea.
+    pub fn on_course(course: CourseId, kind: SurfaceKind, seed: u32) -> Self {
+        Self::new(course, course.course().surface(kind, seed))
+    }
+
+    pub fn course(&self) -> &'static Course {
+        self.course.course()
+    }
+
+    /// Places a rider at its grid spot, floating. Riders who arrive during
+    /// the countdown join the race; at any other time they ride free until
+    /// the next one.
     pub fn spawn(&mut self, slot: usize) {
-        let mut r = Rider::spawn(slot);
-        r.pos.y = jetski::rest_height(self.surface.height(r.pos.x, r.pos.z, self.tick));
-        r.quantize();
+        let spot = self.course().grid_spot(slot);
+        let y = jetski::rest_height(self.surface.height(spot.x, spot.z, self.tick));
+        let mut r = Rider::at(spot, y);
+        if self.race.phase == Phase::Countdown {
+            r.race = Progress::lined_up();
+        }
         self.riders[slot] = Some(r);
     }
 
@@ -140,21 +142,158 @@ impl World {
         self.riders[slot] = None;
     }
 
+    /// Starts a fresh warm-up (the server calls this when the first player
+    /// arrives, so nobody lands in the middle of a bots-only race).
+    pub fn restart_warmup(&mut self) {
+        self.race = Race::new(self.tick);
+        for r in self.riders.iter_mut().flatten() {
+            r.race = Progress {
+                meter: r.race.meter,
+                ..Progress::default()
+            };
+        }
+    }
+
     /// Advance one fixed tick. Riders without an input repeat their last one.
-    pub fn step(&mut self, inputs: &Inputs) {
+    /// Returns what happened worth telling players about (buoys, laps...).
+    pub fn step(&mut self, inputs: &Inputs) -> Vec<SimEvent> {
         let tick = self.tick;
+        let next = tick.wrapping_add(1);
+        let course = self.course();
+        let mut events = Vec::new();
+        let mut s_prev = [0.0f32; MAX_RIDERS];
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             if let Some(r) = rider {
+                s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
-                jetski::integrate(r, input, &self.surface, tick);
+                jetski::integrate(r, input, &self.surface, course, tick);
             }
         }
         self.resolve_collisions();
-        for r in self.riders.iter_mut().flatten() {
-            r.keep_in_arena();
+        let holding = self.race.phase == Phase::Countdown;
+        for (slot, rider) in self.riders.iter_mut().enumerate() {
+            let Some(r) = rider else { continue };
+            course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            if holding && r.race.racing {
+                // On the grid: engines rev, the hull bobs, nobody moves.
+                let spot = course.grid_spot(slot);
+                r.pos.x = spot.x;
+                r.pos.z = spot.z;
+                r.yaw = spot.yaw;
+                r.yaw_rate = 0.0;
+                r.vel.x = 0.0;
+                r.vel.z = 0.0;
+            }
+            // Gates are judged on the final (grid) position, which is where
+            // the next tick starts from, so crossings can't fall in a gap.
             r.quantize();
+            let (s, offset) = course.project(r.pos.x, r.pos.z);
+            race::pass_gates(
+                course,
+                &mut r.race,
+                slot,
+                s_prev[slot],
+                s,
+                offset,
+                &self.race,
+                next,
+                &mut events,
+            );
         }
-        self.tick = tick.wrapping_add(1);
+        self.tick = next;
+        self.advance_phase();
+        events
+    }
+
+    fn advance_phase(&mut self) {
+        let elapsed = self.race.elapsed(self.tick);
+        let done = match self.race.phase {
+            Phase::Racing => {
+                let racers = self.riders.iter().flatten().filter(|r| r.race.racing);
+                let mut any = false;
+                let mut all_done = true;
+                let mut first = u32::MAX;
+                for r in racers {
+                    any = true;
+                    if r.race.finished() {
+                        first = first.min(r.race.finish_ticks);
+                    } else {
+                        all_done = false;
+                    }
+                }
+                !any || all_done
+                    || (first != u32::MAX && elapsed >= first + race::tuning::FINISH_GRACE_TICKS)
+                    || elapsed >= race::tuning::MAX_RACE_TICKS
+            }
+            phase => phase.duration().is_some_and(|d| elapsed >= d),
+        };
+        if !done {
+            return;
+        }
+        let next = match self.race.phase {
+            Phase::Warmup => Phase::Countdown,
+            Phase::Countdown => Phase::Racing,
+            Phase::Racing => Phase::Results,
+            Phase::Results => Phase::Warmup,
+        };
+        self.race = Race {
+            phase: next,
+            phase_tick: self.tick,
+        };
+        match next {
+            Phase::Countdown => self.line_up(),
+            Phase::Warmup => {
+                for r in self.riders.iter_mut().flatten() {
+                    r.race.racing = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Everyone to the grid for a new race.
+    fn line_up(&mut self) {
+        let course = self.course();
+        for (slot, rider) in self.riders.iter_mut().enumerate() {
+            if let Some(r) = rider {
+                let spot = course.grid_spot(slot);
+                let y = jetski::rest_height(self.surface.height(spot.x, spot.z, self.tick));
+                *r = Rider::at(spot, y);
+                r.race = Progress::lined_up();
+            }
+        }
+    }
+
+    /// Racing riders in race order: finishers by time, then by distance
+    /// covered. Riding free (joined mid-race) are left out.
+    pub fn standings(&self) -> Vec<Standing> {
+        let course = self.course();
+        let mut list: Vec<(u8, Progress, f32)> = self
+            .riders
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, r)| {
+                let r = r.as_ref()?;
+                r.race.racing.then(|| {
+                    let s = course.project(r.pos.x, r.pos.z).0;
+                    (slot as u8, r.race, race::distance(course, &r.race, s))
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| match (a.1.finished(), b.1.finished()) {
+            (true, true) => a.1.finish_ticks.cmp(&b.1.finish_ticks).then(a.0.cmp(&b.0)),
+            (true, false) => core::cmp::Ordering::Less,
+            (false, true) => core::cmp::Ordering::Greater,
+            (false, false) => b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)),
+        });
+        list.iter()
+            .enumerate()
+            .map(|(i, (slot, progress, _))| Standing {
+                slot: *slot,
+                place: (i + 1) as u8,
+                progress: *progress,
+            })
+            .collect()
     }
 
     /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
@@ -208,6 +347,8 @@ impl World {
             }
         };
         eat(self.tick);
+        eat(self.race.phase as u32);
+        eat(self.race.phase_tick);
         for (slot, r) in self.riders.iter().enumerate() {
             let Some(r) = r else { continue };
             eat(slot as u32);
@@ -234,6 +375,15 @@ impl World {
                 r.last_input.lean as u8,
                 r.last_input.buttons,
             ]));
+            let p = r.race;
+            eat(u32::from_le_bytes([
+                u8::from(p.racing),
+                p.next_gate,
+                p.lap,
+                p.meter,
+            ]));
+            eat(u32::from(p.misses));
+            eat(p.finish_ticks);
         }
         h
     }

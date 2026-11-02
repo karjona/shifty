@@ -22,7 +22,8 @@ use protocol::{
 };
 use sim::bot::bot_input;
 use sim::math::{Vec3, angle_diff, wrap_angle};
-use sim::{Input, Inputs, MAX_RIDERS, Rider, Surface, TICK_HZ, World};
+use sim::race::{EventKind, Race, Standing};
+use sim::{CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Surface, TICK_HZ, World};
 
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
 /// How many ticks early we want our inputs to reach the server (minimum).
@@ -42,6 +43,10 @@ const MAX_CATCH_UP_TICKS: u32 = 30;
 const SNAP_DISTANCE: f32 = 3.0;
 /// Half-life of visual error smoothing.
 const SMOOTH_HALF_LIFE_MS: f64 = 60.0;
+/// The same event seen again within this many ticks (a re-simulation after
+/// a correction) is not announced twice.
+const EVENT_DEDUPE_TICKS: u32 = 45;
+const MAX_PENDING_HUD_EVENTS: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -88,6 +93,28 @@ pub struct RenderRider {
     pub is_bot: bool,
 }
 
+/// A race event to show (buoy, lap, finish), from the predicted world.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HudEvent {
+    pub tick: u32,
+    pub slot: u8,
+    pub kind: EventKind,
+}
+
+impl HudEvent {
+    /// Two sightings of the same event (possibly at slightly different
+    /// ticks after a correction).
+    fn same_as(&self, o: &HudEvent) -> bool {
+        let same_kind = match (self.kind, o.kind) {
+            (EventKind::Buoy { buoy: a, .. }, EventKind::Buoy { buoy: b, .. }) => a == b,
+            (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
+            (EventKind::Finish { .. }, EventKind::Finish { .. }) => true,
+            _ => false,
+        };
+        same_kind && self.slot == o.slot && self.tick.abs_diff(o.tick) <= EVENT_DEDUPE_TICKS
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RosterEntry {
     pub kind: RiderKind,
@@ -124,6 +151,8 @@ pub struct Client {
     render_offset: [Vec3; MAX_RIDERS],
     /// Smoothed correction of `(yaw, pitch, roll)`.
     angle_offset: [Vec3; MAX_RIDERS],
+    announced: Vec<HudEvent>,
+    hud_events: Vec<HudEvent>,
     outbox: Vec<Vec<u8>>,
     stats: Stats,
 }
@@ -136,7 +165,7 @@ impl Client {
             last_hello_ms: f64::NEG_INFINITY,
             slot: 0,
             surface: Surface::flat(),
-            world: World::new(Surface::flat()),
+            world: World::new(CourseId::Oval, Surface::flat()),
             prev_riders: [None; MAX_RIDERS],
             history: [None; HISTORY],
             input_ack: 0,
@@ -155,6 +184,8 @@ impl Client {
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
             angle_offset: [Vec3::ZERO; MAX_RIDERS],
+            announced: Vec::new(),
+            hud_events: Vec::new(),
             outbox: Vec::new(),
             stats: Stats {
                 time_scale: 1.0,
@@ -191,6 +222,39 @@ impl Client {
 
     pub fn predicted_world(&self) -> &World {
         &self.world
+    }
+
+    pub fn race(&self) -> Race {
+        self.world.race
+    }
+
+    /// Race order in the predicted present.
+    pub fn standings(&self) -> Vec<Standing> {
+        self.world.standings()
+    }
+
+    /// Race events since the last call, oldest first.
+    pub fn take_events(&mut self) -> Vec<HudEvent> {
+        std::mem::take(&mut self.hud_events)
+    }
+
+    fn note_events(&mut self, tick: u32, events: Vec<SimEvent>) {
+        for e in events {
+            let ev = HudEvent {
+                tick,
+                slot: e.slot,
+                kind: e.kind,
+            };
+            if self.announced.iter().any(|a| a.same_as(&ev)) {
+                continue;
+            }
+            self.announced.push(ev);
+            if self.hud_events.len() < MAX_PENDING_HUD_EVENTS {
+                self.hud_events.push(ev);
+            }
+        }
+        self.announced
+            .retain(|a| tick.wrapping_sub(a.tick) <= EVENT_DEDUPE_TICKS * 2);
     }
 
     /// Fractional predicted tick, for animating time-based things (water).
@@ -307,7 +371,8 @@ impl Client {
         self.history[tick as usize % HISTORY] = Some((tick, input));
         self.prev_riders = self.world.riders;
         let inputs = self.inputs_for(&self.world, tick);
-        self.world.step(&inputs);
+        let events = self.world.step(&inputs);
+        self.note_events(tick, events);
         self.stats.predicted_tick = self.world.tick;
     }
 
@@ -347,8 +412,8 @@ impl Client {
                 let rtt_ticks = self.rtt_ms.unwrap_or(100.0) / TICK_MS;
                 self.phase = Phase::Joined;
                 self.slot = w.slot as usize;
-                self.surface = Surface::new(w.surface_kind, w.surface_seed);
-                self.world = World::new(self.surface.clone());
+                self.world = World::on_course(w.course, w.surface_kind, w.surface_seed);
+                self.surface = self.world.surface.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
                     w.server_tick + (rtt_ticks + self.target_lead + 1.0).ceil() as u32;
@@ -452,7 +517,9 @@ impl Client {
         let before = self.world.riders;
         let mut world = World {
             tick: s.tick,
+            course: self.world.course,
             surface: self.surface.clone(),
+            race: s.race,
             riders,
         };
         let mut prev = world.riders;
@@ -463,7 +530,8 @@ impl Client {
             let tick = world.tick + 1;
             prev = world.riders;
             let inputs = self.inputs_for(&world, tick);
-            world.step(&inputs);
+            let events = world.step(&inputs);
+            self.note_events(tick, events);
         }
         self.world = world;
         self.prev_riders = prev;
