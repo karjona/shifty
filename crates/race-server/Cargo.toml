@@ -1,0 +1,16 @@
+[package]
+name = "race-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+protocol = { version = "0.1.0", path = "../protocol" }
+sim = { version = "0.1.0", path = "../sim" }
+
+[dev-dependencies]
+client-core = { path = "../client-core" }
