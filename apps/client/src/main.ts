@@ -2,13 +2,7 @@ import "./style.css";
 import init, { WasmClient, renderStride, statsFields } from "./wasm/sim.js";
 import { InputReader } from "./input.ts";
 import { conditioned, type NetConditions } from "./net/conditioner.ts";
-import {
-  connect,
-  parseJoinTicket,
-  parseTransportPreference,
-  type JoinTicket,
-  type Transport,
-} from "./net/transport.ts";
+import { connect, WebTransportUnavailable, parseJoinTicket, type JoinTicket, type Transport } from "./net/transport.ts";
 import { World, type RiderView } from "./render/world.ts";
 import { createDebugPanel, type DebugSettings } from "./ui/debug.ts";
 
@@ -76,9 +70,8 @@ async function main(): Promise<void> {
   setStatus("Getting a join ticket…");
   const ticket = await getTicket();
   setStatus("Connecting…");
-  const prefer = parseTransportPreference(params.get("transport"));
   const net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
-  const raw: Transport = await connect(ticket, prefer);
+  const raw: Transport = await connect(ticket);
   const transport = conditioned(raw, net);
 
   const client = new WasmClient(ticket.token);
@@ -233,5 +226,6 @@ async function main(): Promise<void> {
 
 main().catch((e: unknown) => {
   console.error(e);
-  setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+  if (e instanceof WebTransportUnavailable) setStatus(e.message);
+  else setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
 });

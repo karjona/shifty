@@ -78,8 +78,10 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
  └─ WebTransport ───────► Race server: native Rust (Docker)
       datagrams: inputs + snapshots (unreliable)
       stream:    start/finish/tricks/chat (reliable)
-      fallback:  WebSocket when UDP is blocked
+      no TCP fallback (see below)
 ```
+
+- **Race traffic is WebTransport (UDP) only, no WebSocket fallback** (decided Nov 2026). We use the browser so players don't have to download anything, not to reach office/school networks that block UDP. Like console games: if your network blocks UDP, you can't race online. Don't add a TCP fallback back without asking Kilian. The lobby (menus, matchmaking) still uses HTTPS/WebSocket, which is fine since it isn't real-time racing.
 
 ### Netcode
 
@@ -91,7 +93,7 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 - **Ghosts and replays are playback, not netcode:** the server's authoritative snapshot stream of a run (or a whole race) is the recording; the client plays it back by race time. Independent from the live prediction above.
 - **Server-side scoring and timing.** Ghosts and leaderboards only come from server-recorded runs, never from client uploads.
 - Inputs are validated (clamped, rate-limited, max lag).
-- **Protocol designed as if it were UDP**, even over WebSocket: self-contained or delta snapshots against an acknowledged baseline, redundant inputs, important events with IDs that are resent until acknowledged. Transport sits behind an interface (`send` / `onMessage`).
+- **Protocol designed for UDP**: self-contained or delta snapshots against an acknowledged baseline, redundant inputs, important events with IDs that are resent until acknowledged. Transport sits behind an interface (`send` / `onMessage`).
 - Snapshots must fit one datagram (about 1,200 bytes; Chrome reports 1,211 for WebTransport). Use compact binary encoding.
 - **Numbers (decided Nov 2026):** sim at 60 Hz, snapshots at 30 Hz. **4 humans max per room**, 8 rider slots so bots can fill the field.
 - **Determinism:** native (server) and WASM (browser) sims must be bit-identical. No SIMD math crates, no platform libm (use `sim::math`, backed by `libm`), no `mul_add`, no hash-map iteration in the sim. Authoritative state is snapped onto the network grid every tick, so snapshots are lossless and re-simulation does not drift. CI checks native vs WASM hashes (`pnpm check:determinism`).
@@ -104,10 +106,10 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 
 - One Rust binary, many rooms (one Tokio task per room). Docker image based on distroless, about 10-20 MB.
 - WebTransport with **`web-transport-quinn` + `quinn`** (the stack behind Cloudflare's production MoQ relay).
-- Ports: 443/UDP (WebTransport), 443/TCP (WebSocket fallback). Docker needs `-p 443:443/udp` explicitly, or `--network host`.
+- Ports: 443/UDP (WebTransport, all game traffic). 443/TCP serves only ops HTTP (`/healthz`, `/metrics`, `/cert-hash`). Docker needs `-p 443:443/udp` explicitly, or `--network host`.
 - Config through env vars: `LOBBY_URL`, `REGION`, `PUBLIC_ADDR`, `LOBBY_PUBLIC_KEY`, plus `BIND` (default `[::]:443`), `TLS_CERT`/`TLS_KEY` (domain mode), `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
 - Join tokens: `base64url(claims JSON) "." base64url(Ed25519 sig over "shifty-join-v1." + payload)`. Claims carry `aud` = the race server's `PUBLIC_ADDR`, so a token only works on the server it was issued for. Format lives in `crates/protocol/src/token.rs`; the dev stand-in signer is `scripts/dev-lobby.ts`.
-- Paths: WebTransport `/race`, WebSocket `/ws`, plus `/healthz`, `/metrics`, `/cert-hash`.
+- Paths: WebTransport `/race`; ops HTTP `/healthz`, `/metrics`, `/cert-hash`.
 - On boot it registers with the lobby and sends heartbeats (region, load).
 - Verifies join tokens with the lobby's **public key only**. A race server can check tokens but never create them.
 - Reports results to the lobby. **Race servers never touch Postgres.**
@@ -179,7 +181,7 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 
 ## Workflow
 
-- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `transport` (`webtransport`/`websocket`), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
+- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm test:e2e`. CI runs all of them.
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.

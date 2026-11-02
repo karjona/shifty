@@ -4,6 +4,8 @@
 #   container build -f crates/race-server/Dockerfile -t shifty-race-server .   # Apple container
 # Run (hash mode, no domain needed):
 #   docker run -p 443:443/udp -p 443:443/tcp -e LOBBY_PUBLIC_KEY=... -e PUBLIC_ADDR=host:443 shifty-race-server
+# UDP 443 carries all game traffic (WebTransport); TCP 443 is ops HTTP only
+# (/healthz, /metrics, /cert-hash).
 
 FROM rust:1.99-slim-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake && rm -rf /var/lib/apt/lists/*

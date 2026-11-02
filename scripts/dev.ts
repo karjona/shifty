@@ -1,7 +1,7 @@
 // `pnpm dev`: everything needed to play locally, in one command.
 //  1. creates the dev lobby key (.dev/lobby-key.json) if missing
 //  2. builds the WASM sim for the browser
-//  3. builds and runs the race server (WebTransport + WebSocket on :4433)
+//  3. builds and runs the race server (WebTransport on UDP :4433)
 //  4. runs the Vite dev server (http://localhost:5173), which also stands in
 //     for the lobby by handing out signed join tickets
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
@@ -54,6 +54,6 @@ run("vite", 35, "pnpm", ["--filter", "client", "exec", "vite"], { RACE_SERVER: `
 console.log(`
   ▸ open http://localhost:5173/?name=YourName in two browser windows
     URL options: name, room, bots (0-7), surface (0 flat, 1 swells),
-                 transport (webtransport|websocket), scale (0.25-1),
+                 scale (0.25-1),
                  water=lab (GPU chop + wake foam)
 `);

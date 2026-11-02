@@ -24,7 +24,7 @@ Open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad
 Browser (Three.js WebGPU + Rust sim in WASM)
    │  inputs (60 Hz, redundant)        ▲ snapshots (30 Hz, ~150 B)
    ▼                                   │
-Race server (Rust, WebTransport/UDP, WebSocket fallback)
+Race server (Rust, WebTransport over UDP)
    └─ one authoritative room per race, same Rust sim, bit-identical to the WASM build
 ```
 
@@ -41,7 +41,7 @@ See [AGENTS.md](AGENTS.md) for the full design, decisions and workflow.
 | `crates/sim`         | Game logic and physics (pure, deterministic)           |
 | `crates/protocol`    | Binary wire format, join tokens                        |
 | `crates/client-core` | Client netcode: prediction, reconciliation, clock sync |
-| `crates/race-server` | The authoritative server (WebTransport + WebSocket)    |
+| `crates/race-server` | The authoritative server (WebTransport over UDP)       |
 | `crates/sim-wasm`    | Browser bindings                                       |
 | `crates/devkit`      | Dev tools: tokens, headless bots, determinism hash     |
 | `apps/client`        | Vite + Three.js client                                 |

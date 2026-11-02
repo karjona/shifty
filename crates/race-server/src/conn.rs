@@ -1,6 +1,7 @@
-//! Transport-independent connection handling. WebTransport and WebSocket
-//! adapters both turn their connection into a pair of channels (datagrams
-//! in, datagrams out) and hand them to [`serve`].
+//! Transport-independent connection handling. The transport adapter turns a
+//! session into a pair of channels (datagrams in, datagrams out) and hands
+//! them to [`serve`]; game logic never touches the transport (handy for
+//! tests, and for swapping transports later if ever needed).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

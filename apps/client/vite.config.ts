@@ -36,7 +36,6 @@ const devLobby = (): Plugin => ({
               token,
               room: claims.room,
               webTransportUrl: `https://${RACE_SERVER}/race`,
-              webSocketUrl: `ws://${RACE_SERVER}/ws`,
               certHash: hash,
             }),
           );

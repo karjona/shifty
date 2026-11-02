@@ -1,5 +1,5 @@
-//! Race server: one native binary, many rooms. WebTransport over UDP, with a
-//! WebSocket fallback over TCP on the same port number.
+//! Race server: one native binary, many rooms. Game traffic is WebTransport
+//! over UDP only; plain HTTP on TCP (same port number) serves ops endpoints.
 //!
 //! Env: `LOBBY_PUBLIC_KEY` (required), `PUBLIC_ADDR`, `BIND`, `REGION`,
 //! `LOBBY_URL`, `TLS_CERT` + `TLS_KEY` (domain mode; otherwise hash mode),
@@ -52,13 +52,8 @@ async fn main() -> Result<()> {
         region = %config.region,
         tls = if matches!(config.tls, TlsMode::Hash) { "hash" } else { "domain" },
         cert_sha256 = material.info.sha256_b64.as_deref().unwrap_or("-"),
-        "race server listening (WebTransport on UDP /race, WebSocket on TCP /ws)"
+        "race server listening (WebTransport on UDP /race; ops HTTP on TCP: /healthz /metrics /cert-hash)"
     );
-    if matches!(config.tls, TlsMode::Domain { .. }) {
-        // TODO(m2): terminate TLS for the WebSocket fallback too. Until then,
-        // put a TLS-terminating proxy in front of the TCP port in domain mode.
-        warn!("WebSocket fallback is plain TCP; terminate TLS in front of it for production");
-    }
     match &config.lobby_url {
         // TODO(lobby): register + heartbeat (region, load, cert hash) once the lobby exists.
         Some(url) => warn!(%url, "lobby registration is not implemented yet; running standalone"),

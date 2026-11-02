@@ -3,7 +3,7 @@
 //! ```text
 //! devkit determinism [ticks]            native determinism hash
 //! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--surface 1] [--pid p]
-//! devkit bots --url ws://localhost:4433/ws [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0]
+//! devkit bots [--server localhost:4433] [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0]
 //! ```
 //!
 //! Tokens are signed with the dev lobby key in `.dev/lobby-key.json` (created
@@ -17,12 +17,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use client_core::{Client, Phase};
 use ed25519_dalek::{Signer, SigningKey};
-use futures_util::{SinkExt, StreamExt};
 use protocol::token::{JoinClaims, b64, encode_claims, signing_input};
 use serde::Deserialize;
 use sim::Input;
 use sim::math::Pcg32;
-use tokio_tungstenite::tungstenite::Message;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,13 +139,20 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Headless players: real `client_core::Client`s over a real WebSocket, with
-/// optional artificial lag and loss. Prints their netcode stats.
+/// Headless players: real `client_core::Client`s over real WebTransport,
+/// with optional artificial lag and loss. Prints their netcode stats.
 async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
-    let url = m
-        .get("url")
+    let server = m
+        .get("server")
         .cloned()
-        .unwrap_or_else(|| "ws://localhost:4433/ws".into());
+        .unwrap_or_else(|| "localhost:4433".into());
+    // Hash mode: trust the race server's self-signed cert by its hash,
+    // exactly like browsers do with `serverCertificateHashes`.
+    let cert_hash = fetch_cert_hash(&server).await?;
+    let wt = web_transport_quinn::ClientBuilder::new()
+        .with_server_certificate_hashes(vec![cert_hash])
+        .context("building WebTransport client")?;
+    let url: url::Url = format!("https://{server}/race").parse()?;
     let count: usize = m.get("count").map_or(Ok(3), |c| c.parse())?;
     let seconds: u64 = m.get("seconds").map_or(Ok(20), |c| c.parse())?;
     let lag_ms: f64 = m.get("lag-ms").map_or(Ok(0.0), |c| c.parse())?;
@@ -157,9 +162,12 @@ async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
     for i in 0..count {
         let claims = claims_from(m, &format!("headless-{i}"), &format!("Headless {}", i + 1))?;
         let token = mint(&key, &claims);
-        let url = url.clone();
+        let session = wt
+            .connect(url.clone())
+            .await
+            .with_context(|| format!("connecting to {url}"))?;
         tasks.push(tokio::spawn(async move {
-            run_bot(i, url, token, seconds, lag_ms, loss).await
+            run_bot(i, session, token, seconds, lag_ms, loss).await
         }));
     }
     let mut failed = false;
@@ -175,18 +183,45 @@ async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
     Ok(())
 }
 
+/// GETs `/cert-hash` from the race server's ops HTTP port (dev only).
+async fn fetch_cert_hash(server: &str) -> Result<Vec<u8>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut tcp = tokio::net::TcpStream::connect(server)
+        .await
+        .with_context(|| format!("race server not reachable at {server}"))?;
+    let host = server.rsplit_once(':').map_or(server, |(h, _)| h);
+    tcp.write_all(format!("GET /cert-hash HTTP/1.0\r\nHost: {host}\r\n\r\n").as_bytes())
+        .await?;
+    let mut raw = String::new();
+    tcp.read_to_string(&mut raw).await?;
+    let body = raw.split_once("\r\n\r\n").map_or("", |(_, b)| b);
+    let json: serde_json::Value = serde_json::from_str(body).context("parsing /cert-hash")?;
+    let hash = json["hash"]
+        .as_str()
+        .context("race server has no certificate hash (domain mode?)")?;
+    base64_decode(hash)
+}
+
 async fn run_bot(
     i: usize,
-    url: String,
+    session: web_transport_quinn::Session,
     token: String,
     seconds: u64,
     lag_ms: f64,
     loss: f64,
 ) -> Result<()> {
-    let (ws, _) = tokio_tungstenite::connect_async(url.as_str())
-        .await
-        .with_context(|| format!("connecting to {url}"))?;
-    let (mut tx, mut rx) = ws.split();
+    // Datagrams in, on their own task; this loop owns the client.
+    let (in_tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
+    let reader = {
+        let session = session.clone();
+        tokio::spawn(async move {
+            while let Ok(d) = session.read_datagram().await {
+                if in_tx.send(d).await.is_err() {
+                    break;
+                }
+            }
+        })
+    };
     let mut client = Client::new(token);
     let start = Instant::now();
     let now_ms = || start.elapsed().as_secs_f64() * 1000.0;
@@ -215,22 +250,16 @@ async fn run_bot(
                 }
                 while up.front().is_some_and(|(at, _)| *at <= now) {
                     let (_, bytes) = up.pop_front().expect("front");
-                    tx.send(Message::Binary(bytes.into())).await?;
+                    session.send_datagram(bytes.into())?;
                 }
                 if let Phase::Rejected(r) = client.phase() {
                     bail!("bot {i} rejected: {r:?}");
                 }
             }
-            msg = rx.next() => {
-                match msg {
-                    Some(Ok(Message::Binary(b))) => {
-                        if f64::from(rng.next_f32()) >= loss {
-                            down.push_back((now_ms() + lag_ms / 2.0, b.to_vec()));
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => bail!("bot {i}: server closed the connection"),
-                    Some(Ok(_)) => {}
-                    Some(Err(e)) => return Err(e.into()),
+            msg = rx.recv() => {
+                let Some(b) = msg else { bail!("bot {i}: server closed the session") };
+                if f64::from(rng.next_f32()) >= loss {
+                    down.push_back((now_ms() + lag_ms / 2.0, b.to_vec()));
                 }
             }
             _ = report.tick() => {
@@ -243,9 +272,9 @@ async fn run_bot(
             }
         }
     }
-    let _ = tx
-        .send(Message::Binary(protocol::ClientMsg::Bye.encode().into()))
-        .await;
+    let _ = session.send_datagram(protocol::ClientMsg::Bye.encode().into());
+    reader.abort();
+    session.close(0, b"bye");
     if client.phase() != Phase::Joined {
         bail!("bot {i} never joined");
     }

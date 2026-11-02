@@ -10,10 +10,9 @@ workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
-axum = { version = "0.8.9", features = ["ws"] }
+axum = "0.8.9"
 base64 = "0.23.1"
 bytes = "1.12.1"
-futures-util = "0.3.34"
 protocol = { version = "0.1.0", path = "../protocol" }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }

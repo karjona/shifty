@@ -16,7 +16,7 @@ pub enum TlsMode {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Address to listen on, UDP (WebTransport) and TCP (WebSocket + HTTP).
+    /// Address to listen on: UDP for WebTransport, TCP for ops HTTP.
     pub bind: SocketAddr,
     /// Public `host:port` clients use. Join tokens must name it as audience.
     pub public_addr: String,

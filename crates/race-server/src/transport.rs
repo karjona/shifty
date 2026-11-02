@@ -1,25 +1,24 @@
-//! Transport adapters. Each turns a connection into "datagrams in / datagrams
-//! out" channels and hands them to `conn::serve`, so the game never knows
-//! which transport it is on.
+//! Network edges of the race server.
 //!
-//! - **WebTransport** (UDP/QUIC datagrams): the real thing. Path `/race`.
-//! - **WebSocket** (TCP): fallback when UDP is blocked. Path `/ws`. Messages
-//!   are treated exactly like datagrams (the protocol tolerates loss, so
-//!   reliable delivery is just a bonus).
+//! - **Game traffic: WebTransport only** (QUIC datagrams over UDP), path
+//!   `/race`. Each session becomes "datagrams in / datagrams out" channels
+//!   handed to `conn::serve`, so the game logic stays transport-agnostic.
+//!   No TCP fallback by design: the browser is for "no download", not for
+//!   reaching networks that block UDP (see AGENTS.md).
+//! - **Ops over HTTP (TCP):** `/healthz`, `/metrics`, `/cert-hash`. Never
+//!   game traffic.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Request, State};
+use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{RwLock, mpsc};
-use tracing::{debug, info, warn};
+use tracing::debug;
 use web_transport_quinn::quinn;
 
 use crate::config::Config;
@@ -106,11 +105,10 @@ pub async fn serve_webtransport(endpoint: quinn::Endpoint, state: AppState) {
 }
 
 // ---------------------------------------------------------------------------
-// HTTP: WebSocket fallback, health, metrics, dev cert hash
+// HTTP (ops only): health, metrics, certificate hash
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/ws", get(ws_upgrade))
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
         .route("/cert-hash", get(cert_hash))
@@ -168,49 +166,4 @@ async fn cert_hash(State(s): State<AppState>) -> Response {
         "publicAddr": s.config.public_addr,
     });
     ([(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(body)).into_response()
-}
-
-async fn ws_upgrade(State(s): State<AppState>, ws: WebSocketUpgrade, _req: Request) -> Response {
-    ws.max_message_size(MAX_MESSAGE)
-        .max_frame_size(MAX_MESSAGE)
-        .on_upgrade(move |socket| ws_session(socket, s))
-}
-
-async fn ws_session(socket: WebSocket, state: AppState) {
-    let conn = conn::next_conn_id();
-    debug!(conn, "websocket session");
-    let (mut sink, mut stream) = socket.split();
-    let (in_tx, in_rx) = mpsc::channel::<Bytes>(64);
-    let (out_tx, mut out_rx) = mpsc::channel::<Bytes>(OUT_QUEUE);
-    let reader = tokio::spawn(async move {
-        while let Some(Ok(msg)) = stream.next().await {
-            match msg {
-                Message::Binary(b) => {
-                    if in_tx.try_send(b).is_err() && in_tx.is_closed() {
-                        break;
-                    }
-                }
-                Message::Close(_) => break,
-                _ => {}
-            }
-        }
-    });
-    let writer = tokio::spawn(async move {
-        while let Some(bytes) = out_rx.recv().await {
-            if sink.send(Message::Binary(bytes)).await.is_err() {
-                break;
-            }
-        }
-        let _ = sink.close().await;
-    });
-    conn::serve(conn, "websocket", in_rx, out_tx, state.config, state.rooms).await;
-    reader.abort();
-    // The writer ends once every sender is gone (after flushing a final Reject).
-    if tokio::time::timeout(std::time::Duration::from_millis(200), writer)
-        .await
-        .is_err()
-    {
-        warn!(conn, "websocket writer did not finish");
-    }
-    info!(conn, "websocket closed");
 }

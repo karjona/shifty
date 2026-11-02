@@ -1,9 +1,10 @@
-// Transports behind one tiny interface. The game protocol treats every
-// message as an unreliable datagram, so WebSocket (reliable, ordered) is a
-// drop-in fallback for WebTransport datagrams.
+// The race connection: WebTransport datagrams (UDP) only, by design. The
+// browser is our "no download" platform, not a way to reach networks that
+// block UDP (see AGENTS.md). Kept behind a tiny interface so the game code
+// and the fake-bad-network wrapper don't care what is underneath.
 
 export interface Transport {
-  readonly kind: "webtransport" | "websocket";
+  readonly kind: "webtransport";
   send(bytes: Uint8Array<ArrayBuffer>): void;
   onMessage(cb: (bytes: Uint8Array) => void): void;
   onClose(cb: (reason: string) => void): void;
@@ -14,7 +15,6 @@ export interface JoinTicket {
   token: string;
   room: string;
   webTransportUrl: string;
-  webSocketUrl: string;
   /** Base64 SHA-256 of the server certificate (hash mode), or null (domain mode). */
   certHash: string | null;
 }
@@ -33,15 +33,8 @@ export function parseJoinTicket(v: unknown): JoinTicket {
     token: str("token"),
     room: str("room"),
     webTransportUrl: str("webTransportUrl"),
-    webSocketUrl: str("webSocketUrl"),
     certHash: certHash ?? null,
   };
-}
-
-export type TransportPreference = "auto" | "webtransport" | "websocket";
-
-export function parseTransportPreference(v: string | null): TransportPreference {
-  return v === "webtransport" || v === "websocket" ? v : "auto";
 }
 
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
@@ -62,7 +55,15 @@ class Listeners {
   }
 }
 
-export async function connectWebTransport(ticket: JoinTicket, timeoutMs = 3000): Promise<Transport> {
+/** Thrown when this browser or network can't do WebTransport. */
+export class WebTransportUnavailable extends Error {}
+
+export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Transport> {
+  if (typeof WebTransport === "undefined") {
+    throw new WebTransportUnavailable(
+      "This browser doesn't support WebTransport. Please use a recent Chrome, Edge, Firefox or Safari.",
+    );
+  }
   const options: WebTransportOptions = {};
   if (ticket.certHash) {
     options.serverCertificateHashes = [{ algorithm: "sha-256", value: base64ToBytes(ticket.certHash) }];
@@ -71,7 +72,12 @@ export async function connectWebTransport(ticket: JoinTicket, timeoutMs = 3000):
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error("WebTransport timed out")), timeoutMs),
   );
-  await Promise.race([wt.ready, timeout]);
+  try {
+    await Promise.race([wt.ready, timeout]);
+  } catch {
+    wt.close();
+    throw new WebTransportUnavailable("Couldn't reach the race server. Your network may be blocking UDP.");
+  }
 
   const listeners = new Listeners();
   const writer = wt.datagrams.writable.getWriter();
@@ -111,60 +117,4 @@ export async function connectWebTransport(ticket: JoinTicket, timeoutMs = 3000):
       wt.close();
     },
   };
-}
-
-export async function connectWebSocket(ticket: JoinTicket, timeoutMs = 3000): Promise<Transport> {
-  const ws = new WebSocket(ticket.webSocketUrl);
-  ws.binaryType = "arraybuffer";
-  await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("WebSocket timed out")), timeoutMs);
-    ws.addEventListener(
-      "open",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true },
-    );
-    ws.addEventListener(
-      "error",
-      () => {
-        clearTimeout(t);
-        reject(new Error("WebSocket failed"));
-      },
-      { once: true },
-    );
-  });
-  const listeners = new Listeners();
-  ws.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => listeners.message?.(new Uint8Array(e.data)));
-  ws.addEventListener("close", (e) => listeners.fireClose(`websocket closed (${e.code})`));
-  return {
-    kind: "websocket",
-    send(bytes) {
-      // Like a datagram: if the socket is backed up, drop instead of queueing.
-      if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 16_384) ws.send(bytes);
-    },
-    onMessage(cb) {
-      listeners.message = cb;
-    },
-    onClose(cb) {
-      listeners.close = cb;
-    },
-    close() {
-      ws.close();
-    },
-  };
-}
-
-/** WebTransport first; WebSocket when UDP is blocked or unsupported. */
-export async function connect(ticket: JoinTicket, prefer: TransportPreference): Promise<Transport> {
-  if (prefer !== "websocket" && typeof WebTransport !== "undefined") {
-    try {
-      return await connectWebTransport(ticket);
-    } catch (e) {
-      if (prefer === "webtransport") throw e;
-      console.warn("WebTransport unavailable, falling back to WebSocket:", e);
-    }
-  }
-  return connectWebSocket(ticket);
 }
