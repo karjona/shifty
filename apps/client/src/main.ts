@@ -69,6 +69,7 @@ async function main(): Promise<void> {
   const world = new World(
     document.querySelector<HTMLElement>("#app")!,
     document.querySelector<HTMLElement>("#labels")!,
+    params.get("water") === "lab" ? "lab" : "basic",
   );
   await world.init();
 

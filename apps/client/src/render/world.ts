@@ -1,6 +1,7 @@
 // Rendering: Three.js WebGPURenderer (falls back to WebGL2 automatically)
 // with TSL node materials. Placeholder art: boxes on water.
 import * as THREE from "three/webgpu";
+import { LabWater, type WakeSource } from "./water.ts";
 import {
   Fn,
   cos,
@@ -78,7 +79,11 @@ export class World {
   private camLook = new THREE.Vector3();
   private labels: HTMLElement;
 
-  constructor(container: HTMLElement, labels: HTMLElement) {
+  /** "lab" = swells + GPU chop + wake foam (see water.ts); "basic" = swells only. */
+  private lab: LabWater | null = null;
+  private wakeSources = new Map<number, WakeSource>();
+
+  constructor(container: HTMLElement, labels: HTMLElement, water: "basic" | "lab" = "basic") {
     this.labels = labels;
     this.renderer = new THREE.WebGPURenderer({ antialias: true });
     this.renderer.shadowMap.enabled = true;
@@ -95,7 +100,12 @@ export class World {
     Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
     this.scene.add(this.sun, this.sun.target);
 
-    this.buildWater();
+    if (water === "lab") {
+      this.lab = new LabWater(ARENA_HALF * 2 + 400, 400, sky);
+      this.scene.add(this.lab.mesh);
+    } else {
+      this.buildWater();
+    }
     this.buildBuoys();
     addEventListener("resize", () => this.resize());
     this.resize();
@@ -124,6 +134,8 @@ export class World {
   }
 
   setWaves(params: Float32Array): void {
+    // Chop seed only needs to be stable per room: derive it from the swells.
+    this.lab?.setWaves(params, Math.round(Math.abs(params[5] ?? 1) * 1e6));
     this.waveParams.set(params.subarray(0, MAX_WAVES * WAVE_FIELDS));
     for (let i = 0; i < MAX_WAVES; i++) {
       const o = i * WAVE_FIELDS;
@@ -263,6 +275,11 @@ export class World {
     }
 
     if (me) this.followCamera(me, dt);
+    if (this.lab) {
+      this.wakeSources.clear();
+      for (const r of riders) this.wakeSources.set(r.slot, { x: r.x, z: r.z, speed: r.speed, grounded: r.grounded });
+      this.lab.update(this.renderer, t, this.wakeSources, dt);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 

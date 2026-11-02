@@ -178,7 +178,7 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 
 ## Workflow
 
-- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `transport` (`webtransport`/`websocket`), `remote` (`interpolated`/`predicted`), `scale` (render scale). F1 toggles the debug panel (stats, fake lag/jitter/loss).
+- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `transport` (`webtransport`/`websocket`), `remote` (`interpolated`/`predicted`), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm test:e2e`. CI runs all of them.
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.

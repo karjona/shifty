@@ -54,5 +54,6 @@ run("vite", 35, "pnpm", ["--filter", "client", "exec", "vite"], { RACE_SERVER: `
 console.log(`
   ▸ open http://localhost:5173/?name=YourName in two browser windows
     URL options: name, room, bots (0-7), surface (0 flat, 1 swells),
-                 transport (webtransport|websocket), remote (interpolated|predicted), scale (0.25-1)
+                 transport (webtransport|websocket), remote (interpolated|predicted), scale (0.25-1),
+                 water=lab (GPU chop + wake foam)
 `);
