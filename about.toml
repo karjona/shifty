@@ -1,0 +1,14 @@
+# cargo-about: third-party license notices for what we ship (race server image, WASM sim).
+# Generate with `cargo about generate -m <crate>/Cargo.toml --target <triple> about.hbs`.
+accepted = [
+  "Apache-2.0",
+  "MIT",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  "CDLA-Permissive-2.0",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+private = { ignore = true }
