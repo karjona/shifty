@@ -2,7 +2,7 @@
 // for render-only CPU use (placing buoys). Must match the sim: the water you
 // see is the water the physics rides.
 import * as THREE from "three/webgpu";
-import { cos, float, max, pow, sin, uniform } from "three/tsl";
+import { cos, float, sin, step, uniform } from "three/tsl";
 
 export const MAX_WAVES = 8;
 /** Floats per wave from WASM: dir_x, dir_z, k, amplitude, omega, phase, sharpness, 0. */
@@ -84,15 +84,42 @@ export class WaveUniforms {
         .sub(B.x.mul(t))
         .add(B.y);
       const u = sin(arg).add(1).mul(0.5);
-      h = h.add(A.w.mul(2).mul(pow(u, B.z).sub(B.w)));
+      // Sharpness is 1, 2 or 3: weights select u, u² or u³ (cheaper than pow).
+      const w3 = step(2.5, B.z);
+      const w2 = step(1.5, B.z).sub(w3);
+      const w1 = float(1).sub(w2).sub(w3);
+      const u2 = u.mul(u);
+      const up = u.mul(w1).add(u2.mul(w2)).add(u2.mul(u).mul(w3));
+      h = h.add(A.w.mul(2).mul(up.sub(B.w)));
       // d/d(arg) = A p u^(p-1) cos(arg)
-      const c = A.w
-        .mul(B.z)
-        .mul(pow(max(u, 1e-4), B.z.sub(1)))
-        .mul(cos(arg));
+      const dp = w1.add(u.mul(w2).mul(2)).add(u2.mul(w3).mul(3));
+      const c = A.w.mul(dp).mul(cos(arg));
       dx = dx.add(c.mul(A.z).mul(A.x));
       dz = dz.add(c.mul(A.z).mul(A.y));
     }
     return { h, dx, dz };
   }
 }
+
+/**
+ * A square water grid of `size` metres, dense in the middle and coarse at
+ * the edges (`segments` per side). Meant to follow the camera, so the water
+ * close to you is detailed and the far bay still has water.
+ */
+export function waterGrid(size: number, segments: number): THREE.PlaneGeometry {
+  const geo = new THREE.PlaneGeometry(2, 2, segments, segments);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position!;
+  // u in [-1, 1] -> spacing grows with distance: about 4x finer at the
+  // centre than a uniform grid, coarser toward the edge.
+  const warp = (u: number) => Math.sign(u) * (0.25 * Math.abs(u) + 0.75 * Math.abs(u) ** 3) * (size / 2);
+  for (let i = 0; i < pos.count; i++) {
+    pos.setX(i, warp(pos.getX(i)));
+    pos.setZ(i, warp(pos.getZ(i)));
+  }
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/** Grid step the water mesh snaps to as it follows the camera (metres). */
+export const WATER_SNAP = 8;

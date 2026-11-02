@@ -9,7 +9,7 @@
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
-import { MAX_WAVES, WaveUniforms } from "./waves.ts";
+import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
   abs,
@@ -176,18 +176,19 @@ export class LabWater {
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
   private chop = new WaveUniforms(CHOP_WAVES);
+  private origin = uniform(new THREE.Vector2());
 
   constructor(size: number, segments: number, sky: THREE.Color) {
     const t = this.time;
-    const { swells, chop } = this;
+    const { swells, chop, origin } = this;
     const wakeTex = this.wake.output;
 
     const displaced = Fn(() => {
-      const p = positionLocal;
+      const p = positionLocal.add(vec3(origin.x, 0, origin.y));
       const swell = swells.sum(p, t);
       const ripple = chop.sum(p, t);
       normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
-      return p.add(vec3(0, swell.h.add(ripple.h), 0));
+      return positionLocal.add(vec3(0, swell.h.add(ripple.h), 0));
     });
 
     const wakeAt = Fn(() => {
@@ -222,14 +223,20 @@ export class LabWater {
       return skyColour.mul(fres);
     });
 
-    const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-    geo.rotateX(-Math.PI / 2);
+    const geo = waterGrid(size, segments);
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0 });
     mat.positionNode = displaced();
     mat.colorNode = colour();
     mat.emissiveNode = reflection();
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false;
+  }
+
+  /** Move the grid's centre to world `(x, z)`. */
+  follow(x: number, z: number): void {
+    this.origin.value.set(x, z);
+    this.mesh.position.set(x, 0, z);
   }
 
   setWaves(params: Float32Array, seed: number): void {
