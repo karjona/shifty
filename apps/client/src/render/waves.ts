@@ -8,6 +8,12 @@ export const MAX_WAVES = 8;
 /** Floats per wave from WASM: dir_x, dir_z, k, amplitude, omega, phase, sharpness, 0. */
 export const WAVE_FIELDS = 8;
 
+/** Sharpness from the sim: 2 or 3, anything else is a plain sine (1). */
+function sharpness(v: number): number {
+  const p = Math.round(v);
+  return p === 2 || p === 3 ? p : 1;
+}
+
 /** Mean of `((1 + sin a) / 2)^p` for integer `p`: C(2p, p) / 4^p. */
 function shapeMean(p: number): number {
   if (p >= 3) return 0.3125;
@@ -26,7 +32,7 @@ export function waveHeight(params: Float32Array, x: number, z: number, t: number
       (params[o + 2] ?? 0) * ((params[o] ?? 0) * x + (params[o + 1] ?? 0) * z) -
       (params[o + 4] ?? 0) * t +
       (params[o + 5] ?? 0);
-    const p = Math.max(1, Math.round(params[o + 6] ?? 1));
+    const p = sharpness(params[o + 6] ?? 1);
     const u = (1 + Math.sin(a)) / 2;
     h += 2 * amp * (u ** p - shapeMean(p));
   }
@@ -53,7 +59,7 @@ export class WaveUniforms {
     for (let i = 0; i < this.count; i++) {
       const o = i * WAVE_FIELDS;
       const p = (j: number) => params[o + j] ?? 0;
-      const sharp = Math.max(1, Math.round(p(6)));
+      const sharp = sharpness(p(6));
       this.a[i]!.value.set(p(0), p(1), p(2), p(3));
       this.b[i]!.value.set(p(4), p(5), sharp, shapeMean(sharp));
     }

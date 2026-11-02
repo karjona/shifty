@@ -83,7 +83,8 @@ pub struct Wave {
     /// Angular frequency (rad/s), from deep-water dispersion `ω = √(g·k)`.
     pub omega: f32,
     pub phase: f32,
-    /// Integer power the wave shape is raised to (1 = sine).
+    /// Integer power the wave shape is raised to: 1 (sine), 2 or 3. Any
+    /// other value is treated as 1.
     pub sharpness: u8,
 }
 

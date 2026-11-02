@@ -160,6 +160,16 @@ mod tests {
     }
 
     #[test]
+    fn a_coasting_jetski_comes_to_rest() {
+        let mut w = World::new(Surface::flat());
+        w.spawn(0);
+        run(&mut w, Input::from_analog(0.0, 1.0, 0.0, 0), 60 * 2);
+        run(&mut w, Input::default(), 60 * 40);
+        let r = w.riders[0].unwrap();
+        assert_eq!(r.speed(), 0.0, "{r:?}");
+    }
+
+    #[test]
     fn steering_right_turns_right_and_banks_into_the_turn() {
         let mut w = World::new(Surface::flat());
         w.spawn(0);

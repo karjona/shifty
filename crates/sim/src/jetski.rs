@@ -25,6 +25,8 @@ pub mod tuning {
     pub const REVERSE_ACCEL: f32 = 5.0;
     /// Water drag on horizontal speed, per second.
     pub const DRAG: f32 = 0.1;
+    /// Constant water drag (m/s²), so a coasting hull comes to rest.
+    pub const STOP_DECEL: f32 = 0.6;
     pub const AIR_DRAG: f32 = 0.02;
     /// Sideways velocity bleed per second (the keel biting).
     pub const GRIP: f32 = 5.5;
@@ -200,6 +202,14 @@ pub fn integrate(r: &mut Rider, input: Input, surface: &Surface, tick: u32) {
         let drag = DRAG * bite + DIG_DRAG * wet.excess_depth;
         accel.x -= r.vel.x * drag;
         accel.z -= r.vel.z * drag;
+        // Proportional drag alone fades below one velocity grid step per
+        // tick at low speed; a small constant part brings the hull to rest.
+        let speed = r.speed();
+        if speed > 1e-4 {
+            let stop = (STOP_DECEL * bite).min(speed / DT);
+            accel.x -= r.vel.x / speed * stop;
+            accel.z -= r.vel.z / speed * stop;
+        }
 
         let planing = clamp(speed_fwd / MAX_SPEED, 0.0, 1.0);
         accel.y += PLANING_LIFT * GRAVITY * planing * planing * bite;
