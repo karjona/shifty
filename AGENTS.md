@@ -47,8 +47,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 - **Gamepad-first.** skate-style flick tricks need analog sticks. The Gamepad API works in all browsers. Keyboard must work, but second-class citizen.
 - **Physics per sport.** Grounded means each sport has its own model: water and buoyancy (jetski), edge carving (snow), board flip physics (skate), suspension and traction (bike).
-- **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`, and never round it to 23.5. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2.
-
+- **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2.
 
 ### Customization
 
@@ -58,7 +57,7 @@ Character type, body, name, clothes... (Seasonal outfits fit the season concept.
 
 Time trials with ghosts, matchmaking, rooms. Rocket League-style multiplayer engine: with "rollback netcode" à la FGC where it makes sense.
 
-"Resort" with 2XKO/DBFighterZ/SF6/NBA2K style "matchmaking area", but it inside a "country club" inside of an Arcade/Town.
+"Resort" with 2XKO/DBFighterZ/SF6/NBA2K style "matchmaking area", but it inside a "country club" instead of an Arcade/Town.
 
 ### Progression
 
@@ -78,10 +77,9 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
  └─ WebTransport ───────► Race server: native Rust (Docker)
       datagrams: inputs + snapshots (unreliable)
       stream:    start/finish/tricks/chat (reliable)
-      no TCP fallback (see below)
 ```
 
-- **Race traffic is WebTransport (UDP) only, no WebSocket fallback** (decided Nov 2026). We use the browser so players don't have to download anything, not to reach office/school networks that block UDP. Like console games: if your network blocks UDP, you can't race online. Don't add a TCP fallback back without asking Kilian. The lobby (menus, matchmaking) still uses HTTPS/WebSocket, which is fine since it isn't real-time racing.
+- **Race traffic is WebTransport (UDP) only**. We use the browser so players don't have to download anything, not to reach office/school networks that block UDP. Like console games: if your network blocks UDP, you can't race online. The lobby (menus, matchmaking) still uses HTTPS/WebSocket, which is fine since it isn't real-time racing.
 
 ### Netcode
 
@@ -89,13 +87,13 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 - Clients send **inputs only**, numbered per tick. Never positions.
 - Server runs the sim at a fixed tick rate and sends snapshots.
 - **Client prediction + reconciliation** for your own rider (this is our "rollback where it makes sense").
-- **Other riders are predicted too** (decided Nov 2026, the Rocket League model): everyone is drawn in the predicted present, extrapolated with their last known input and smoothed on correction, so what you see is what you bump into. No interpolation mode for live riders.
+- **Other riders are predicted too**: everyone is drawn in the predicted present, extrapolated with their last known input and smoothed on correction, so what you see is what you bump into. No interpolation mode for live riders.
 - **Ghosts and replays are playback, not netcode:** the server's authoritative snapshot stream of a run (or a whole race) is the recording; the client plays it back by race time. Independent from the live prediction above.
 - **Server-side scoring and timing.** Ghosts and leaderboards only come from server-recorded runs, never from client uploads.
 - Inputs are validated (clamped, rate-limited, max lag).
 - **Protocol designed for UDP**: self-contained or delta snapshots against an acknowledged baseline, redundant inputs, important events with IDs that are resent until acknowledged. Transport sits behind an interface (`send` / `onMessage`).
 - Snapshots must fit one datagram (about 1,200 bytes; Chrome reports 1,211 for WebTransport). Use compact binary encoding.
-- **Numbers (decided Nov 2026):** sim at 60 Hz, snapshots at 30 Hz. **4 humans max per room**, 8 rider slots so bots can fill the field.
+- **Numbers:** sim at 60 Hz, snapshots at 30 Hz. **4 humans max per room**, 8 rider slots so bots can fill the field.
 - **Determinism:** native (server) and WASM (browser) sims must be bit-identical. No SIMD math crates, no platform libm (use `sim::math`, backed by `libm`), no `mul_add`, no hash-map iteration in the sim. Authoritative state is snapped onto the network grid every tick, so snapshots are lossless and re-simulation does not drift. CI checks native vs WASM hashes (`pnpm check:determinism`).
 - **Rider collisions: yes.** The server resolves them; clients predict them by running the whole world forward (other humans extrapolated by repeating their last input, bots predicted exactly because their AI is deterministic sim code).
 - **Bots** are server-side riders whose inputs come from `sim::bot` instead of the network, through the same sim path. Single player later builds on this.
