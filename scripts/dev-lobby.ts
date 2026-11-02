@@ -1,6 +1,5 @@
-// Dev stand-in for the lobby: owns a dev Ed25519 key pair and signs join
-// tokens in exactly the format the real lobby will use
-// (see crates/protocol/src/token.rs). Never used in production.
+// Dev lobby: owns a dev Ed25519 key pair and signs join tokens in the lobby's
+// token format (see crates/protocol/src/token.rs). Dev only.
 import { createPrivateKey, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -72,7 +71,7 @@ export interface DevJoinOptions {
   pid?: string;
 }
 
-/** Everything a client needs to join a race, like the real lobby will hand out. */
+/** A signed join token, and its claims, for the given race server. */
 export function devJoinTicket(raceServer: string, opts: DevJoinOptions) {
   const key = ensureDevKey();
   const claims: JoinClaims = {

@@ -4,7 +4,7 @@ An online racing game about one place and four seasons: jetski in summer, skateb
 
 > 23.4° is Earth's axial tilt, the reason seasons exist. A shifty is a board trick: twist in the air, bring it back.
 
-**Status:** milestone 1, "make it work". Boxes ride gentle ocean swells with up to 4 friends and some bots. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
+**Status:** early prototype. Boxes ride gentle ocean swells with up to 4 friends and some bots. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
 
 ## Play locally
 

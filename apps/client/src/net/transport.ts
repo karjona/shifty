@@ -1,7 +1,5 @@
-// The race connection: WebTransport datagrams (UDP) only, by design. The
-// browser is our "no download" platform, not a way to reach networks that
-// block UDP (see AGENTS.md). Kept behind a tiny interface so the game code
-// and the fake-bad-network wrapper don't care what is underneath.
+// The race connection (WebTransport datagrams) behind a tiny interface, so the
+// game code and the fake-bad-network wrapper don't depend on what is underneath.
 
 export interface Transport {
   readonly kind: "webtransport";

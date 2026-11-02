@@ -7,8 +7,8 @@
 //! ```
 //!
 //! Tokens are signed with the dev lobby key in `.dev/lobby-key.json` (created
-//! by `pnpm dev`). The real lobby signs with its own key; race servers only
-//! ever hold the public half.
+//! by `pnpm dev`). In production the lobby signs with its own key; race
+//! servers only ever hold the public half.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;

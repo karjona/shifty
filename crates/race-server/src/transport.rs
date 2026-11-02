@@ -3,8 +3,6 @@
 //! - **Game traffic: WebTransport only** (QUIC datagrams over UDP), path
 //!   `/race`. Each session becomes "datagrams in / datagrams out" channels
 //!   handed to `conn::serve`, so the game logic stays transport-agnostic.
-//!   No TCP fallback by design: the browser is for "no download", not for
-//!   reaching networks that block UDP (see AGENTS.md).
 //! - **Ops over HTTP (TCP):** `/healthz`, `/metrics`, `/cert-hash`. Never
 //!   game traffic.
 

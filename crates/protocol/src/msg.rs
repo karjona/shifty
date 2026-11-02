@@ -1,11 +1,12 @@
 //! Message types and their binary encoding.
 //!
-//! Designed as if the transport were UDP, even when it is a WebSocket:
+//! Designed for unreliable datagrams:
 //! - Clients send inputs only, numbered by tick, with the recent unacked
 //!   inputs repeated in every packet (so a lost packet costs nothing).
-//! - Snapshots are self-contained (no baseline needed yet) and fit in one
-//!   datagram. They carry a `last_snapshot_tick` ack slot so we can add delta
-//!   compression against an acknowledged baseline later without a version bump.
+//! - Snapshots are self-contained and fit in one datagram. Input packets
+//!   acknowledge the latest snapshot received (`last_snapshot_tick`); the
+//!   server does not read it, it exists so snapshots can be delta-compressed
+//!   against an acknowledged baseline without changing the wire format.
 //! - Important events carry IDs and are resent in every snapshot until the
 //!   client acknowledges them.
 

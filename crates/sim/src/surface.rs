@@ -2,7 +2,7 @@
 //! tick. Nothing about the surface is ever sent over the network: server and
 //! clients build the same surface from the same seed.
 //!
-//! Today: a flat plane, or gentle ocean swells (a sum of directional sine
+//! Two kinds: a flat plane, or gentle ocean swells (a sum of directional sine
 //! waves, deep-water dispersion). The client's water shader evaluates the same
 //! wave parameters (see [`Surface::wave_params`]), so the water you see is the
 //! water the physics rides.

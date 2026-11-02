@@ -1,6 +1,6 @@
 //! Tiny, explicit f32 math.
 //!
-//! We do not use a SIMD math crate on purpose: the order of every float
+//! No SIMD math crate: the order of every float
 //! operation is written out here, so native (server) and WASM (browser)
 //! builds produce bit-identical results. Transcendental functions go through
 //! `libm`, never the platform's libm.

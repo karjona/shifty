@@ -4,9 +4,8 @@ use crate::quant;
 use crate::surface::Surface;
 use crate::{DT, MAX_RIDERS};
 
-/// Physics tuning for the prototype "box" rider. Each sport will get its own
-/// model later (buoyancy, edges, board flips, suspension); this one is a
-/// generic arcade vehicle that can carve, jump and ride swells.
+/// Physics tuning for the generic arcade rider: it carves, jumps and rides
+/// swells.
 pub mod tuning {
     pub const GRAVITY: f32 = 14.0;
     pub const MAX_SPEED: f32 = 22.0;

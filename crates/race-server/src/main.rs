@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         "race server listening (WebTransport on UDP /race; ops HTTP on TCP: /healthz /metrics /cert-hash)"
     );
     match &config.lobby_url {
-        // TODO(lobby): register + heartbeat (region, load, cert hash) once the lobby exists.
+        // TODO: register with the lobby and send heartbeats (region, load, cert hash).
         Some(url) => warn!(%url, "lobby registration is not implemented yet; running standalone"),
         None => info!("LOBBY_URL not set; running standalone"),
     }

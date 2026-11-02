@@ -1,4 +1,4 @@
-// "Water lab": the three water layers from our design, in one material.
+// Layered water, in one material:
 //
 //  1. Swells  - physics. Same parameters and formula as crates/sim (uniforms
 //               filled from WASM). The rider's height comes from these only.

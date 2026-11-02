@@ -1,5 +1,5 @@
 // Rendering: Three.js WebGPURenderer (falls back to WebGL2 automatically)
-// with TSL node materials. Placeholder art: boxes on water.
+// with TSL node materials. Riders are drawn as boxes.
 import * as THREE from "three/webgpu";
 import { LabWater, type WakeSource } from "./water.ts";
 import {
@@ -178,7 +178,7 @@ export class World {
       const deep = vec3(0.04, 0.32, 0.45);
       const crest = vec3(0.18, 0.66, 0.72);
       const base = mix(deep, crest, smoothstep(-0.45, 0.55, positionWorld.y));
-      // Faint 4 m grid so speed reads even on calm water (prototype aid).
+      // Faint 4 m grid so speed reads even on calm water.
       const gx = step(0.965, fract(positionWorld.x.div(4)));
       const gz = step(0.965, fract(positionWorld.z.div(4)));
       return mix(base, vec3(0.85, 0.95, 1.0), max(gx, gz).mul(0.12));

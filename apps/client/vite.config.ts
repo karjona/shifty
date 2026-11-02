@@ -6,9 +6,9 @@ import { devJoinTicket } from "../../scripts/dev-lobby.ts";
 const RACE_SERVER = process.env.RACE_SERVER ?? "localhost:4433";
 
 /**
- * Dev-only stand-in for the lobby: `GET /__dev/join?name=..&room=..&bots=..&surface=..`
- * returns what the real lobby will hand out: a signed join token, the race
- * server URLs and (hash mode) its certificate hash. Never part of a build.
+ * Dev-only lobby: `GET /__dev/join?name=..&room=..&bots=..&surface=..` returns
+ * a join ticket: a signed join token, the race server URL and (hash mode) its
+ * certificate hash. Not part of builds.
  */
 const devLobby = (): Plugin => ({
   name: "shifty-dev-lobby",

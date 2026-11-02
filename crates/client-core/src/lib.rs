@@ -12,9 +12,9 @@
 //!   not yet confirmed. Visual error is smoothed out over ~100 ms.
 //! - **Clock sync:** the server reports how early our inputs arrive; we
 //!   speed up or slow down our tick clock by up to 6% to keep a small lead.
-//! - **Other riders are predicted, not interpolated** (the Rocket League
-//!   model): everyone is drawn in the predicted present, so what you see is
-//!   what you bump into. Their corrections are smoothed like your own.
+//! - **Rendering:** every rider is drawn from the predicted world, so what
+//!   you see is what you bump into. Corrections to other riders are smoothed
+//!   the same way as your own.
 
 use protocol::{
     ClientMsg, Event, EventBody, InputPacket, MAX_INPUTS_PER_PACKET, PROTOCOL_VERSION,
