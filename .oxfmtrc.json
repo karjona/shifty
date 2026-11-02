@@ -8,7 +8,6 @@
     "target/**",
     "pnpm-lock.yaml",
     "AGENTS.md",
-    "CHANGELOG.md",
     ".release-please-manifest.json"
   ]
 }
