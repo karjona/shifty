@@ -56,6 +56,16 @@ class Listeners {
 /** Thrown when this browser or network can't do WebTransport. */
 export class WebTransportUnavailable extends Error {}
 
+/**
+ * The spec replaced `datagrams.writable` with `datagrams.createWritable()`.
+ * Browsers ship either or both: Chrome only has `writable`, Safari only `createWritable()`.
+ */
+function datagramWritable(wt: WebTransport): WritableStream<Uint8Array> {
+  const datagrams: WebTransportDatagramDuplexStream & { createWritable?: () => WritableStream<Uint8Array> } =
+    wt.datagrams;
+  return datagrams.createWritable ? datagrams.createWritable() : datagrams.writable;
+}
+
 export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Transport> {
   if (typeof WebTransport === "undefined") {
     throw new WebTransportUnavailable(
@@ -78,7 +88,7 @@ export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Tra
   }
 
   const listeners = new Listeners();
-  const writer = wt.datagrams.writable.getWriter();
+  const writer = datagramWritable(wt).getWriter();
   const reader = wt.datagrams.readable.getReader();
   void (async () => {
     try {
