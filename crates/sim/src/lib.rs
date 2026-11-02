@@ -190,6 +190,39 @@ mod tests {
     }
 
     #[test]
+    fn riding_swells_stays_near_the_water() {
+        for seed in 0..20 {
+            let mut w = World::new(Surface::new(SurfaceKind::Swells, seed));
+            w.tick = seed * 997; // spawn at arbitrary times, on crests and troughs
+            for slot in 0..MAX_RIDERS {
+                w.spawn(slot);
+            }
+            let mut max_air = 0.0f32;
+            let mut inputs: Inputs = [None; MAX_RIDERS];
+            for t in 0..60 * 20 {
+                for (slot, i) in inputs.iter_mut().enumerate() {
+                    let steer = if (t / 90 + slot as u32) % 2 == 0 {
+                        0.4
+                    } else {
+                        -0.4
+                    };
+                    *i = Some(Input::from_analog(steer, 1.0, 0));
+                }
+                w.step(&inputs);
+                for r in w.riders.iter().flatten() {
+                    let h = w.surface.height(r.pos.x, r.pos.z, w.tick);
+                    max_air = max_air.max(r.pos.y - h);
+                }
+            }
+            // Swell launches are small hops, never rockets.
+            assert!(
+                max_air < 1.5,
+                "seed {seed}: rider got {max_air} m above the water"
+            );
+        }
+    }
+
+    #[test]
     fn determinism_scenario_is_repeatable() {
         assert_eq!(determinism_scenario(600), determinism_scenario(600));
     }

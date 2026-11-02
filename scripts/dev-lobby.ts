@@ -30,7 +30,18 @@ const b64url = (b: Buffer): string => b.toString("base64url");
 /** Loads the dev lobby key, creating it on first use. */
 export function ensureDevKey(): DevKey {
   if (existsSync(keyPath)) {
-    return JSON.parse(readFileSync(keyPath, "utf8")) as DevKey;
+    const data: unknown = JSON.parse(readFileSync(keyPath, "utf8"));
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      "privateKey" in data &&
+      "publicKey" in data &&
+      typeof data.privateKey === "string" &&
+      typeof data.publicKey === "string"
+    ) {
+      return { privateKey: data.privateKey, publicKey: data.publicKey };
+    }
+    throw new Error(`${keyPath} is malformed; delete it to create a new dev key`);
   }
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   // PKCS#8 and SPKI DER for Ed25519 end with the raw 32-byte key.

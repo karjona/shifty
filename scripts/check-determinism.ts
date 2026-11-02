@@ -12,10 +12,14 @@ const wasm = await import(new URL("../apps/client/src/wasm/sim.js", import.meta.
 wasm.initSync({ module: readFileSync(new URL("../apps/client/src/wasm/sim_bg.wasm", import.meta.url)) });
 const wasmHash: string = wasm.determinismHash(ticks);
 
-const nativeHash = execFileSync("cargo", ["run", "-q", "--release", "-p", "devkit", "--", "determinism", String(ticks)], {
-  cwd: root,
-  encoding: "utf8",
-}).trim();
+const nativeHash = execFileSync(
+  "cargo",
+  ["run", "-q", "--release", "-p", "devkit", "--", "determinism", String(ticks)],
+  {
+    cwd: root,
+    encoding: "utf8",
+  },
+).trim();
 
 console.log(`ticks=${ticks} native=${nativeHash} wasm=${wasmHash}`);
 if (nativeHash !== wasmHash) {

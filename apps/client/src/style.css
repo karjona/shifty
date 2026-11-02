@@ -1,0 +1,59 @@
+:root {
+  font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  color: #fff;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #a8d8f0;
+}
+#app canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+#labels .label {
+  position: fixed;
+  left: 0;
+  top: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#labels .label.me {
+  background: rgb(255 120 40 / 0.8);
+}
+#hud {
+  position: fixed;
+  left: 24px;
+  bottom: 20px;
+  font-size: 34px;
+  font-weight: 800;
+  text-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+}
+#status {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  text-shadow: 0 2px 8px rgb(0 0 0 / 0.5);
+  pointer-events: none;
+}
+#status[hidden] {
+  display: none;
+}
+#help {
+  position: fixed;
+  left: 16px;
+  top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.85;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+}

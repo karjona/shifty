@@ -25,6 +25,8 @@ pub mod tuning {
     pub const SLOPE_PUSH: f32 = 1.0;
     /// Vertical speed margin before the surface "drops away" and you launch.
     pub const LAUNCH_MARGIN: f32 = 0.3;
+    /// Cap on surface-following vertical speed (sanity bound).
+    pub const MAX_FOLLOW_SPEED: f32 = 8.0;
     pub const ARENA_HALF: f32 = 120.0;
     pub const WALL_BOUNCE: f32 = 0.4;
     pub const RIDER_RADIUS: f32 = 0.9;
@@ -140,13 +142,16 @@ impl Rider {
             self.vel.z -= self.vel.z * DRAG * DT;
 
             self.yaw = wrap_angle(self.yaw + self.yaw_rate * DT);
+            let h_here = surface.height(self.pos.x, self.pos.z, tick);
             self.pos.x += self.vel.x * DT;
             self.pos.z += self.vel.z * DT;
 
             // Follow the surface, unless it drops away faster than gravity
             // pulls us down: then we launch (riding a swell crest at speed).
+            // The follow speed is how fast the *surface* moves under us,
+            // never the gap between us and it (snapping must not launch).
             let h_next = surface.height(self.pos.x, self.pos.z, next_tick);
-            let vy_follow = (h_next - self.pos.y) / DT;
+            let vy_follow = clamp((h_next - h_here) / DT, -MAX_FOLLOW_SPEED, MAX_FOLLOW_SPEED);
             let vy_ballistic = self.vel.y - GRAVITY * DT;
             if jump_pressed {
                 self.vel.y = vy_follow.max(0.0) + JUMP_SPEED;
@@ -225,8 +230,12 @@ impl World {
         }
     }
 
+    /// Places a rider at its grid spot, standing on the surface.
     pub fn spawn(&mut self, slot: usize) {
-        self.riders[slot] = Some(Rider::spawn(slot));
+        let mut r = Rider::spawn(slot);
+        r.pos.y = self.surface.height(r.pos.x, r.pos.z, self.tick);
+        r.quantize();
+        self.riders[slot] = Some(r);
     }
 
     pub fn remove(&mut self, slot: usize) {

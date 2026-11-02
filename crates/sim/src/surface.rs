@@ -65,8 +65,9 @@ impl Surface {
                 let angle = main_dir + spread;
                 let wavelength = rng.range(26.0, 48.0) / (1.0 + i as f32 * 0.45);
                 let k = TAU / wavelength;
-                // Keep steepness (amplitude * k) low: gentle, rideable swells.
-                let amplitude = rng.range(0.10, 0.16) / k;
+                // Keep steepness (amplitude * k) low so that even all waves
+                // stacked stay a rideable slope (< ~0.3): gentle swells.
+                let amplitude = rng.range(0.035, 0.06) / k;
                 *w = Wave {
                     dir_x: cos(angle),
                     dir_z: sin(angle),
