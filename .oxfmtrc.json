@@ -1,5 +1,13 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "printWidth": 120,
-  "ignorePatterns": ["**/*.toml", "about.hbs", "apps/client/src/wasm/**", "target/**", "pnpm-lock.yaml", "AGENTS.md"]
+  "ignorePatterns": [
+    "**/*.toml",
+    "about.hbs",
+    "apps/client/src/wasm/**",
+    "target/**",
+    "pnpm-lock.yaml",
+    "AGENTS.md",
+    ".release-please-manifest.json"
+  ]
 }
