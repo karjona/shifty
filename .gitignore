@@ -1,0 +1,7 @@
+/target
+/.dev
+node_modules
+/apps/client/src/wasm
+dist
+/test-results
+/playwright-report

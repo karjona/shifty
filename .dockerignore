@@ -1,0 +1,11 @@
+# Only the Rust workspace is needed to build the race server.
+target
+node_modules
+apps
+e2e
+scripts
+.dev
+.git
+test-results
+# The pinned toolchain file would make rustup download extra targets/components.
+rust-toolchain.toml

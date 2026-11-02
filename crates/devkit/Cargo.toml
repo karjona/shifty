@@ -1,0 +1,24 @@
+[package]
+name = "devkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Dev-only tools: mint join tokens with the dev lobby key, headless bot clients, determinism checks. Never shipped."
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+bytes = "1.12.1"
+client-core = { version = "0.1.0", path = "../client-core" }
+ed25519-dalek = "3.0.0"
+protocol = { version = "0.1.0", path = "../protocol" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sim = { version = "0.1.0", path = "../sim" }
+tokio = { version = "1.54.1", features = ["full"] }
+url = "2.5.8"
+web-transport-quinn = "0.13.5"

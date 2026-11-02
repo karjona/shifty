@@ -1,0 +1,29 @@
+[package]
+name = "race-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8.9"
+base64 = "0.23.1"
+bytes = "1.12.1"
+protocol = { version = "0.1.0", path = "../protocol" }
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "aws_lc_rs"] }
+serde_json = "1.0.154"
+sim = { version = "0.1.0", path = "../sim" }
+time = "0.3"
+tokio = { version = "1.54.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+web-transport-quinn = "0.13.5"
+
+[dev-dependencies]
+client-core = { path = "../client-core" }
