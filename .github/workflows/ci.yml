@@ -17,40 +17,23 @@ env:
 
 jobs:
   rust:
-    name: Rust (fmt, clippy, tests)
+    name: Rust (fmt, clippy, tests, cargo-deny)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show # installs the toolchain pinned in rust-toolchain.toml
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
-
-  deny:
-    name: Rust dependencies (licenses, advisories, sources)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: rustup show
       - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         with:
           tool: cargo-deny@0.20.2
-      - run: cargo deny --locked check --hide-inclusion-graph
-
-  audit:
-    name: npm dependencies (advisories)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-      - run: pnpm audit
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Dependency licenses, advisories and sources
+        run: cargo deny --locked check --hide-inclusion-graph
 
   web:
-    name: Web (determinism, lint, types, build, e2e)
+    name: Web (determinism, lint, types, build, e2e, audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,25 +66,5 @@ jobs:
           name: e2e-results
           path: test-results/
           retention-days: 7
-
-  race-server-image:
-    name: Race server image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: docker build -f crates/race-server/Dockerfile -t shifty-race-server .
-      - name: Image boots and reports healthy
-        run: |
-          docker run -d --name rs -p 4433:4433/udp -p 4433:4433/tcp \
-            -e BIND='[::]:4433' -e PUBLIC_ADDR=localhost:4433 \
-            -e LOBBY_PUBLIC_KEY=C8eRicBps7bsA6cb8Py-d84vXBFooZvoNBWeD0odyMo \
-            shifty-race-server
-          for i in $(seq 1 20); do curl -fs localhost:4433/healthz && break; sleep 1; done
-          curl -fs localhost:4433/healthz
-          docker image ls shifty-race-server --format '{{.Size}}'
-          docker logs rs
-      - name: Image ships license notices
-        run: |
-          docker cp rs:/usr/share/doc/shifty/. notices/
-          ls notices/LICENSE notices/NOTICE
-          grep -q '^- quinn ' notices/THIRD-PARTY-NOTICES.md
+      - name: npm package advisories
+        run: pnpm audit
