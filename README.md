@@ -29,20 +29,20 @@ Race server (Rust, WebTransport/UDP, WebSocket fallback)
 ```
 
 - The sim is written once in Rust. It runs natively on the server and as WASM in the browser, and CI checks that both give bit-identical results.
-- Clients send only inputs. The server simulates and the client predicts. Corrections are smoothed, and everything else is drawn from snapshots.
+- Clients send only inputs. The server simulates. The client predicts everyone (your rider and the others, Rocket League style) and smooths corrections.
 - Join tokens are signed by the lobby (Ed25519). Race servers can verify tokens but never create them.
 
 See [AGENTS.md](AGENTS.md) for the full design, decisions and workflow.
 
 ## Layout
 
-| Path                 | What                                                      |
-| -------------------- | --------------------------------------------------------- |
-| `crates/sim`         | Game logic and physics (pure, deterministic)              |
-| `crates/protocol`    | Binary wire format, join tokens                           |
-| `crates/client-core` | Client netcode: prediction, reconciliation, interpolation |
-| `crates/race-server` | The authoritative server (WebTransport + WebSocket)       |
-| `crates/sim-wasm`    | Browser bindings                                          |
-| `crates/devkit`      | Dev tools: tokens, headless bots, determinism hash        |
-| `apps/client`        | Vite + Three.js client                                    |
-| `e2e`                | Playwright tests with real browsers                       |
+| Path                 | What                                                   |
+| -------------------- | ------------------------------------------------------ |
+| `crates/sim`         | Game logic and physics (pure, deterministic)           |
+| `crates/protocol`    | Binary wire format, join tokens                        |
+| `crates/client-core` | Client netcode: prediction, reconciliation, clock sync |
+| `crates/race-server` | The authoritative server (WebTransport + WebSocket)    |
+| `crates/sim-wasm`    | Browser bindings                                       |
+| `crates/devkit`      | Dev tools: tokens, headless bots, determinism hash     |
+| `apps/client`        | Vite + Three.js client                                 |
+| `e2e`                | Playwright tests with real browsers                    |

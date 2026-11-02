@@ -14,9 +14,7 @@ declare global {
         rttMs: number;
         inputLead: number;
       };
-      riders(
-        remote?: "interpolated" | "predicted",
-      ): { slot: number; x: number; y: number; z: number; speed: number; isMe: boolean }[];
+      riders(): { slot: number; x: number; y: number; z: number; speed: number; isMe: boolean }[];
       names(): Record<string, string>;
       setInput(v: { steer: number; throttle: number; buttons: number } | null): void;
       net: { lagMs: number; jitterMs: number; lossPct: number };
@@ -49,21 +47,17 @@ for (const transport of ["webtransport", "websocket"]) {
       .toEqual(["Ana", "Bea", "🤖 Bot 7", "🤖 Bot 8"]);
     await expect.poll(() => b.evaluate(() => window.__shifty.riders().length)).toBe(4);
 
-    // Ana drives; Bea sees her move to where the server says she is.
+    // Ana drives with a steady input; Bea draws her in the present
+    // (predicted), so both screens agree on where Ana is right now.
     await a.evaluate(() => window.__shifty.setInput({ steer: 0.2, throttle: 1, buttons: 0 }));
     await a.waitForTimeout(3000);
     const aSlot = await a.evaluate(() => window.__shifty.slot());
-    const aSelf = await a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!);
+    const [aSelf, bSeesA] = await Promise.all([
+      a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
+      b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
+    ]);
     expect(aSelf.speed).toBeGreaterThan(12);
-    // In Bea's browser, at one instant: Ana drawn ~100 ms in the past
-    // (interpolated) vs Ana predicted to "now". They must agree closely.
-    const seen = await b.evaluate((s) => {
-      const find = (mode: "interpolated" | "predicted") => window.__shifty.riders(mode).find((r) => r.slot === s)!;
-      return { past: find("interpolated"), now: find("predicted") };
-    }, aSlot);
-    expect(Math.hypot(seen.past.x - seen.now.x, seen.past.z - seen.now.z)).toBeLessThan(6);
-    // Across browsers (read at slightly different times): same neighbourhood.
-    expect(Math.hypot(aSelf.x - seen.now.x, aSelf.z - seen.now.z)).toBeLessThan(15);
+    expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
 
     // Riders stay on the water.
     expect(Math.abs(aSelf.y)).toBeLessThan(2);

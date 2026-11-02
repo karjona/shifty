@@ -12,11 +12,9 @@
 //!   not yet confirmed. Visual error is smoothed out over ~100 ms.
 //! - **Clock sync:** the server reports how early our inputs arrive; we
 //!   speed up or slow down our tick clock by up to 6% to keep a small lead.
-//! - **Interpolation:** other riders can be drawn ~100 ms in the past between
-//!   two real snapshots (smooth and correct), or from the predicted world
-//!   (current, but can wobble). `RemoteMode` picks.
-
-use std::collections::VecDeque;
+//! - **Other riders are predicted, not interpolated** (the Rocket League
+//!   model): everyone is drawn in the predicted present, so what you see is
+//!   what you bump into. Their corrections are smoothed like your own.
 
 use protocol::{
     ClientMsg, Event, EventBody, InputPacket, MAX_INPUTS_PER_PACKET, PROTOCOL_VERSION,
@@ -27,8 +25,6 @@ use sim::math::{Vec3, angle_diff, wrap_angle};
 use sim::{Input, Inputs, MAX_RIDERS, Rider, Surface, TICK_HZ, World};
 
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
-/// How far in the past remote riders are drawn in interpolated mode.
-pub const INTERP_DELAY_TICKS: f64 = 6.0;
 /// How many ticks early we want our inputs to reach the server (minimum).
 /// The actual target adapts upwards when inputs arrive late (jitter, frame
 /// hitches) and decays back slowly once things are stable.
@@ -42,7 +38,6 @@ const HELLO_RESEND_MS: f64 = 300.0;
 /// per tick), so a slow frame (software rendering, GC pause) catches up fully;
 /// only real stalls (hidden tab) fall back to a clock resync.
 const MAX_CATCH_UP_TICKS: u32 = 30;
-const SNAP_BUFFER: usize = 64;
 /// Corrections bigger than this snap instead of smoothing (teleports).
 const SNAP_DISTANCE: f32 = 3.0;
 /// Half-life of visual error smoothing.
@@ -53,12 +48,6 @@ pub enum Phase {
     Connecting,
     Joined,
     Rejected(RejectReason),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RemoteMode {
-    Interpolated,
-    Predicted,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -131,8 +120,6 @@ pub struct Client {
     pending_events: Vec<Event>,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
-    snaps: VecDeque<(u32, Riders)>,
-    interp_offset: Option<f64>,
     render_offset: [Vec3; MAX_RIDERS],
     yaw_offset: [f32; MAX_RIDERS],
     outbox: Vec<Vec<u8>>,
@@ -164,8 +151,6 @@ impl Client {
             pending_events: Vec::new(),
             roster: Default::default(),
             roster_version: 0,
-            snaps: VecDeque::with_capacity(SNAP_BUFFER),
-            interp_offset: None,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
             yaw_offset: [0.0; MAX_RIDERS],
             outbox: Vec::new(),
@@ -461,23 +446,6 @@ impl Client {
             riders[rs.slot as usize] = Some(rs.rider);
         }
 
-        // Interpolation buffer and server-clock estimate.
-        if self.snaps.len() == SNAP_BUFFER {
-            self.snaps.pop_front();
-        }
-        self.snaps.push_back((s.tick, riders));
-        let sample = f64::from(s.tick) - now_ms / TICK_MS;
-        self.interp_offset = Some(match self.interp_offset {
-            Some(est) if (sample - est).abs() < 30.0 => {
-                if sample > est {
-                    est + (sample - est) * 0.3
-                } else {
-                    est + (sample - est) * 0.02
-                }
-            }
-            _ => sample,
-        });
-
         // Reconcile: authoritative state at s.tick, re-simulated to the present.
         let before = self.world.riders;
         let mut world = World {
@@ -526,16 +494,14 @@ impl Client {
         }
     }
 
-    /// Where to draw every rider right now.
-    pub fn render(&self, now_ms: f64, mode: RemoteMode) -> Vec<RenderRider> {
+    /// Where to draw every rider right now: the predicted world, smoothed
+    /// between ticks and with correction offsets decaying away.
+    pub fn render(&self) -> Vec<RenderRider> {
         let mut out = Vec::with_capacity(MAX_RIDERS);
         if self.phase != Phase::Joined {
             return out;
         }
         let alpha = (self.accum_ms / TICK_MS).clamp(0.0, 1.0) as f32;
-        let interp_tick = self
-            .interp_offset
-            .map(|o| now_ms / TICK_MS + o - INTERP_DELAY_TICKS);
         for slot in 0..MAX_RIDERS {
             let is_me = slot == self.slot;
             let is_bot = matches!(
@@ -545,18 +511,14 @@ impl Client {
                     ..
                 })
             );
-            let drawn = if is_me || mode == RemoteMode::Predicted {
-                self.world.riders[slot].map(|cur| {
-                    let prev = self.prev_riders[slot].unwrap_or(cur);
-                    let pos = lerp(prev.pos, cur.pos, alpha) + self.render_offset[slot];
-                    let yaw = wrap_angle(
-                        prev.yaw + angle_diff(prev.yaw, cur.yaw) * alpha + self.yaw_offset[slot],
-                    );
-                    (cur, pos, yaw)
-                })
-            } else {
-                interp_tick.and_then(|t| self.interpolate(slot, t))
-            };
+            let drawn = self.world.riders[slot].map(|cur| {
+                let prev = self.prev_riders[slot].unwrap_or(cur);
+                let pos = lerp(prev.pos, cur.pos, alpha) + self.render_offset[slot];
+                let yaw = wrap_angle(
+                    prev.yaw + angle_diff(prev.yaw, cur.yaw) * alpha + self.yaw_offset[slot],
+                );
+                (cur, pos, yaw)
+            });
             if let Some((r, pos, yaw)) = drawn {
                 let (pitch, roll) = r.visual_tilt(&self.surface, self.world.tick);
                 out.push(RenderRider {
@@ -573,26 +535,6 @@ impl Client {
             }
         }
         out
-    }
-
-    fn interpolate(&self, slot: usize, t: f64) -> Option<(Rider, Vec3, f32)> {
-        let mut older: Option<(u32, Rider)> = None;
-        for (tick, riders) in &self.snaps {
-            let Some(r) = riders[slot] else { continue };
-            if f64::from(*tick) <= t {
-                older = Some((*tick, r));
-            } else {
-                return Some(match older {
-                    Some((t0, a)) => {
-                        let f = ((t - f64::from(t0)) / f64::from(tick - t0)) as f32;
-                        let yaw = wrap_angle(a.yaw + angle_diff(a.yaw, r.yaw) * f);
-                        (r, lerp(a.pos, r.pos, f), yaw)
-                    }
-                    None => (r, r.pos, r.yaw),
-                });
-            }
-        }
-        older.map(|(_, r)| (r, r.pos, r.yaw))
     }
 }
 

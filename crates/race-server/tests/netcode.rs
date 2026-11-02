@@ -1,7 +1,7 @@
 //! End-to-end netcode tests: the real `Room` and real `Client`s talking
 //! through a simulated network with latency, jitter and packet loss.
 
-use client_core::{Client, Phase, RemoteMode};
+use client_core::{Client, Phase};
 use protocol::token::JoinClaims;
 use protocol::{ClientMsg, InputPacket, ServerMsg};
 use race_server::room::{ConnId, Room, RoomConfig};
@@ -302,30 +302,28 @@ fn two_players_see_each_other_and_bots_are_predicted_exactly() {
     // own prediction only misses when player 0 bumps into it.
     assert!(s1.mispredictions - before < 5, "{s1:?}");
 
-    // Player 1 sees player 0 moving, both in interpolated and predicted mode.
+    // Player 1 sees player 0 moving, drawn in the present (predicted).
     let a_slot = h.peers[0].client.slot().unwrap() as u8;
-    for mode in [RemoteMode::Interpolated, RemoteMode::Predicted] {
-        let seen = h.peers[1].client.render(h.now, mode);
-        let a = seen
-            .iter()
-            .find(|r| r.slot == a_slot)
-            .expect("sees player a");
-        let spawn = sim::Rider::spawn(a_slot as usize).pos;
-        let server = h.room.world().riders[a_slot as usize].unwrap().pos;
-        assert!(
-            (a.pos - spawn).length() > 3.0,
-            "player a should have moved: {:?}",
-            a.pos
-        );
-        // Interpolated is ~130 ms in the past at ~20 m/s; predicted is about current.
-        assert!(
-            (a.pos - server).length() < 6.0,
-            "{mode:?}: drawn {:?}, server {:?}",
-            a.pos,
-            server
-        );
-        assert_eq!(seen.len(), 4);
-    }
+    let seen = h.peers[1].client.render();
+    let a = seen
+        .iter()
+        .find(|r| r.slot == a_slot)
+        .expect("sees player a");
+    let spawn = sim::Rider::spawn(a_slot as usize).pos;
+    let server = h.room.world().riders[a_slot as usize].unwrap().pos;
+    assert!(
+        (a.pos - spawn).length() > 3.0,
+        "player a should have moved: {:?}",
+        a.pos
+    );
+    // Predicted ahead of the server by about one trip plus the input lead.
+    assert!(
+        (a.pos - server).length() < 4.0,
+        "drawn {:?}, server {:?}",
+        a.pos,
+        server
+    );
+    assert_eq!(seen.len(), 4);
 }
 
 #[test]

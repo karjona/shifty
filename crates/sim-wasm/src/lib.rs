@@ -4,7 +4,7 @@
 //! memory (render state, stats, wave parameters) and one packed buffer of
 //! outgoing packets per frame, never through many tiny calls.
 
-use client_core::{Client, Phase, RemoteMode};
+use client_core::{Client, Phase};
 use sim::{Input, MAX_RIDERS};
 use wasm_bindgen::prelude::*;
 
@@ -79,13 +79,8 @@ impl WasmClient {
     }
 
     /// Fills the render buffer; returns how many riders are in it.
-    pub fn render(&mut self, now_ms: f64, predicted_remotes: bool) -> usize {
-        let mode = if predicted_remotes {
-            RemoteMode::Predicted
-        } else {
-            RemoteMode::Interpolated
-        };
-        let riders = self.inner.render(now_ms, mode);
+    pub fn render(&mut self) -> usize {
+        let riders = self.inner.render();
         for (i, r) in riders.iter().enumerate() {
             let o = i * RENDER_STRIDE;
             self.render_buf[o..o + RENDER_STRIDE].copy_from_slice(&[

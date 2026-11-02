@@ -87,17 +87,18 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 - Clients send **inputs only**, numbered per tick. Never positions.
 - Server runs the sim at a fixed tick rate and sends snapshots.
 - **Client prediction + reconciliation** for your own rider (this is our "rollback where it makes sense").
-- **Interpolation** for other riders (about 100 ms in the past).
+- **Other riders are predicted too** (decided Nov 2026, the Rocket League model): everyone is drawn in the predicted present, extrapolated with their last known input and smoothed on correction, so what you see is what you bump into. No interpolation mode for live riders.
+- **Ghosts and replays are playback, not netcode:** the server's authoritative snapshot stream of a run (or a whole race) is the recording; the client plays it back by race time. Independent from the live prediction above.
 - **Server-side scoring and timing.** Ghosts and leaderboards only come from server-recorded runs, never from client uploads.
 - Inputs are validated (clamped, rate-limited, max lag).
 - **Protocol designed as if it were UDP**, even over WebSocket: self-contained or delta snapshots against an acknowledged baseline, redundant inputs, important events with IDs that are resent until acknowledged. Transport sits behind an interface (`send` / `onMessage`).
 - Snapshots must fit one datagram (about 1,200 bytes; Chrome reports 1,211 for WebTransport). Use compact binary encoding.
-- **Numbers (decided Nov 2026):** sim at 60 Hz, snapshots at 30 Hz, remote interpolation delay 100 ms (6 ticks). **4 humans max per room**, 8 rider slots so bots can fill the field.
+- **Numbers (decided Nov 2026):** sim at 60 Hz, snapshots at 30 Hz. **4 humans max per room**, 8 rider slots so bots can fill the field.
 - **Determinism:** native (server) and WASM (browser) sims must be bit-identical. No SIMD math crates, no platform libm (use `sim::math`, backed by `libm`), no `mul_add`, no hash-map iteration in the sim. Authoritative state is snapped onto the network grid every tick, so snapshots are lossless and re-simulation does not drift. CI checks native vs WASM hashes (`pnpm check:determinism`).
 - **Rider collisions: yes.** The server resolves them; clients predict them by running the whole world forward (other humans extrapolated by repeating their last input, bots predicted exactly because their AI is deterministic sim code).
 - **Bots** are server-side riders whose inputs come from `sim::bot` instead of the network, through the same sim path. Single player later builds on this.
 - **Clock sync:** the server reports how early each client's inputs arrive; clients speed up or slow down up to 6% (hard resync when far off) to keep a 2-tick lead.
-- **Netcode lives in `crates/client-core`** (pure Rust: prediction, reconciliation, clock sync, interpolation). The browser uses it through `sim-wasm`; headless bots and tests use it natively. The race server's `Room` is a pure state machine too, so `crates/race-server/tests/netcode.rs` tests the whole loop over a simulated lossy network.
+- **Netcode lives in `crates/client-core`** (pure Rust: prediction, reconciliation, clock sync, smoothing). The browser uses it through `sim-wasm`; headless bots and tests use it natively. The race server's `Room` is a pure state machine too, so `crates/race-server/tests/netcode.rs` tests the whole loop over a simulated lossy network.
 
 ### Race server
 
@@ -139,7 +140,7 @@ Self-hosting target: `docker compose up` runs workerd + race-server + postgres.
 crates/
   sim/          # pure game logic: physics, tricks, scoring (no I/O)
   protocol/     # message types + binary encoding + join token verification
-  client-core/  # client netcode: prediction, reconciliation, interpolation (pure)
+  client-core/  # client netcode: prediction, reconciliation, clock sync (pure)
   race-server/  # native binary: WebTransport, rooms, authority
   sim-wasm/     # wasm-bindgen wrapper: client-core + sim for the browser
   devkit/       # dev-only: mint tokens, headless bot clients, determinism hash
@@ -178,7 +179,7 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 
 ## Workflow
 
-- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `transport` (`webtransport`/`websocket`), `remote` (`interpolated`/`predicted`), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
+- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells), `transport` (`webtransport`/`websocket`), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm test:e2e`. CI runs all of them.
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.

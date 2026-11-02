@@ -20,7 +20,6 @@ export interface DebugState {
 }
 
 export interface DebugSettings {
-  remote: "interpolated" | "predicted";
   renderScale: number;
 }
 
@@ -72,7 +71,6 @@ export function createDebugPanel(net: NetConditions, settings: DebugSettings, on
   fake.add(net, "lossPct", 0, 30, 0.5).name("loss %");
 
   const view = gui.addFolder("View");
-  view.add(settings, "remote", ["interpolated", "predicted"]).name("other riders");
   view.add(settings, "renderScale", 0.25, 1, 0.05).name("render scale").onChange(onRenderScale);
 
   let visible = true;

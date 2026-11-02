@@ -89,7 +89,6 @@ async function main(): Promise<void> {
   });
 
   const settings: DebugSettings = {
-    remote: params.get("remote") === "predicted" ? "predicted" : "interpolated",
     renderScale: Number(params.get("scale") ?? 1),
   };
   world.setRenderScale(settings.renderScale);
@@ -135,8 +134,8 @@ async function main(): Promise<void> {
   }, 10);
 
   // One bulk read of every rider's render state from WASM memory.
-  const readRiders = (now: number, remote = settings.remote): RiderView[] => {
-    const n = client.render(now, remote === "predicted");
+  const readRiders = (): RiderView[] => {
+    const n = client.render();
     const buf = new Float32Array(wasm.memory.buffer, client.renderPtr(), client.renderLen());
     const out: RiderView[] = [];
     for (let k = 0; k < n; k++) {
@@ -181,7 +180,7 @@ async function main(): Promise<void> {
       names = parseRoster(client.rosterJson());
     }
 
-    riders = readRiders(now);
+    riders = readRiders();
     if (renderEnabled) world.render(riders, names, client.renderTick(), dt);
 
     const me = riders.find((r) => r.isMe);
@@ -221,7 +220,7 @@ async function main(): Promise<void> {
       renderer: world.backend,
       stats: () => (readStats(), stats),
       // Fresh, not the last rendered frame (frames can be slow without a GPU).
-      riders: (remote?: "interpolated" | "predicted") => readRiders(performance.now(), remote),
+      riders: () => readRiders(),
       names: () => Object.fromEntries(names),
       setInput: (v: { steer: number; throttle: number; buttons: number } | null) => {
         input.forced = v;
