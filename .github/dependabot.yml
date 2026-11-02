@@ -1,0 +1,60 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci(deps)
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      # three.js and its types move together, apart from the rest (TSL changes between releases).
+      three:
+        patterns: ["three", "@types/three"]
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+
+  - package-ecosystem: docker
+    directory: /crates/race-server
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      docker:
+        patterns: ["*"]
