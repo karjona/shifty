@@ -1,7 +1,8 @@
 //! Prints how the jetski behaves on flat water and on swells: draft, top
 //! speed, and how often and how high crests launch you. For tuning.
 //!
-//! `cargo run -p sim --example jetski_lab --release [seed]`
+//! `cargo run -p sim --example jetski_lab --release [seed] [surface]`
+//! (surface: 1 = the course's sea, 2 = calm, 3 = rough)
 
 use sim::course::OVAL;
 use sim::math::{angle_diff, clamp};
@@ -152,7 +153,12 @@ fn main() {
         f.max_roll
     );
 
-    let s = OVAL.surface(SurfaceKind::Swells, seed);
+    let kind = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .and_then(SurfaceKind::from_u8)
+        .unwrap_or(SurfaceKind::Swells);
+    let s = OVAL.surface(kind, seed);
     let main_dir = libm::atan2f(s.waves()[0].dir_x, s.waves()[0].dir_z);
     for w in s.waves() {
         println!(

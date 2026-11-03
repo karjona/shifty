@@ -2,10 +2,11 @@
 //! tick. Nothing about the surface is ever sent over the network: server and
 //! clients build the same surface from the same seed.
 //!
-//! Two kinds: a flat plane, or ocean swells. Swells are a sum of directional
-//! waves with deep-water dispersion. Each wave can be "sharpened": its sine is
-//! raised to an integer power, which gives pointed crests and long flat
-//! troughs, like real swells, and makes crests launch riders.
+//! A flat plane, or ocean swells (as designed for the course, calmer, or
+//! rougher). Swells are a sum of directional waves with deep-water
+//! dispersion. Each wave can be "sharpened": its sine is raised to an
+//! integer power, which gives pointed crests and long flat troughs, like
+//! real swells, and makes crests launch riders.
 //!
 //! The client's water shader evaluates the same wave parameters with the
 //! same formula (see [`Surface::wave_params`]), so the water you see is the
@@ -23,7 +24,12 @@ const GRAVITY_WAVES: f32 = 9.81;
 #[repr(u8)]
 pub enum SurfaceKind {
     Flat = 0,
+    /// The course's sea, as designed.
     Swells = 1,
+    /// Gentler: the same swell, less steep.
+    Calm = 2,
+    /// Steeper, taller waves.
+    Rough = 3,
 }
 
 impl SurfaceKind {
@@ -31,7 +37,19 @@ impl SurfaceKind {
         match v {
             0 => Some(Self::Flat),
             1 => Some(Self::Swells),
+            2 => Some(Self::Calm),
+            3 => Some(Self::Rough),
             _ => None,
+        }
+    }
+
+    /// Steepness and height multipliers on the sea state.
+    fn scale(self) -> Option<(f32, f32)> {
+        match self {
+            Self::Flat => None,
+            Self::Swells => Some((1.0, 1.0)),
+            Self::Calm => Some((0.6, 0.6)),
+            Self::Rough => Some((1.25, 1.35)),
         }
     }
 }
@@ -138,7 +156,7 @@ impl Surface {
     pub fn with_sea(kind: SurfaceKind, seed: u32, sea: &SeaState) -> Self {
         let mut waves = [Wave::default(); MAX_WAVES];
         let mut wave_count = 0;
-        if kind == SurfaceKind::Swells {
+        if let Some((steep, height)) = kind.scale() {
             let mut rng = Pcg32::new(u64::from(seed) ^ 0x5157_E115);
             let picked = rng.range(0.0, TAU);
             let main_dir = sea.direction.unwrap_or(picked);
@@ -148,13 +166,13 @@ impl Surface {
                 let wavelength =
                     rng.range(sea.wavelength.0, sea.wavelength.1) / (1.0 + i as f32 * 0.55);
                 let k = TAU / wavelength;
-                let amplitude = rng.range(sea.steepness.0, sea.steepness.1) / k;
+                let amplitude = steep * rng.range(sea.steepness.0, sea.steepness.1) / k;
                 *w = Wave {
                     // Yaw convention: direction (sin, cos).
                     dir_x: sin(angle),
                     dir_z: cos(angle),
                     k,
-                    amplitude: amplitude.min(sea.max_amplitude),
+                    amplitude: amplitude.min(sea.max_amplitude * height),
                     omega: sqrt(GRAVITY_WAVES * k),
                     phase: rng.range(0.0, TAU),
                     sharpness: if i < sea.sharp_waves {
