@@ -151,6 +151,10 @@ pub fn pass_gates(
     tick: u32,
     events: &mut Vec<SimEvent>,
 ) {
+    if race.phase == Phase::Results {
+        // Everyone's race is frozen until the next warm-up.
+        return;
+    }
     let moved = course.delta_s(s_prev, s_now);
     if moved <= 0.0 || moved > MAX_GATE_STEP {
         return;

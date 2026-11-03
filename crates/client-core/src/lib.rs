@@ -254,7 +254,7 @@ impl Client {
             }
         }
         self.announced
-            .retain(|a| tick.wrapping_sub(a.tick) <= EVENT_DEDUPE_TICKS * 2);
+            .retain(|a| (tick.wrapping_sub(a.tick) as i32) <= (EVENT_DEDUPE_TICKS * 2) as i32);
     }
 
     /// Fractional predicted tick, for animating time-based things (water).
@@ -616,4 +616,29 @@ impl Client {
 
 fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a + (b - a) * t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_are_announced_once_across_resimulation() {
+        let mut c = Client::new("t");
+        let lap = || {
+            vec![SimEvent {
+                slot: 0,
+                kind: EventKind::Lap { lap: 2 },
+            }]
+        };
+        c.note_events(105, lap());
+        // A snapshot rewinds to tick 102 and re-simulates through 105.
+        c.note_events(103, Vec::new());
+        c.note_events(104, Vec::new());
+        c.note_events(105, lap());
+        assert_eq!(c.take_events().len(), 1);
+        // Much later, the same kind of event is news again.
+        c.note_events(400, lap());
+        assert_eq!(c.take_events().len(), 1);
+    }
 }

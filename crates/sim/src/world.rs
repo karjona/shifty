@@ -142,8 +142,8 @@ impl World {
         self.riders[slot] = None;
     }
 
-    /// Starts a fresh warm-up (the server calls this when the first player
-    /// arrives, so nobody lands in the middle of a bots-only race).
+    /// Starts a fresh warm-up from now: nobody is lined up, laps and gates
+    /// start over (meters are kept).
     pub fn restart_warmup(&mut self) {
         self.race = Race::new(self.tick);
         for r in self.riders.iter_mut().flatten() {
@@ -275,7 +275,14 @@ impl World {
             .filter_map(|(slot, r)| {
                 let r = r.as_ref()?;
                 r.race.racing.then(|| {
-                    let s = course.project(r.pos.x, r.pos.z).0;
+                    // On the results screen, unfinished riders are ranked by
+                    // where the race left them, not where they ride now.
+                    let s = if self.race.phase == Phase::Results {
+                        let gate = usize::from(r.race.next_gate) % course.gate_count();
+                        course.gate_s(gate) - 0.01
+                    } else {
+                        course.project(r.pos.x, r.pos.z).0
+                    };
                     (slot as u8, r.race, race::distance(course, &r.race, s))
                 })
             })

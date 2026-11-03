@@ -169,8 +169,7 @@ mod tests {
 
     #[test]
     fn a_coasting_jetski_comes_to_rest() {
-        let mut w = World::new(Surface::flat());
-        w.spawn(0);
+        let mut w = straight_world(SurfaceKind::Flat, 0);
         run(&mut w, Input::from_analog(0.0, 1.0, 0.0, 0), 60 * 2);
         run(&mut w, Input::default(), 60 * 40);
         let r = w.riders[0].unwrap();
@@ -300,6 +299,31 @@ mod tests {
         }
         assert!(longest > 50, "airtime off the ramp: {longest} ticks");
         assert!(w.riders[0].unwrap().speed() > 12.0);
+    }
+
+    #[test]
+    fn a_slow_rider_slides_back_off_a_ramp() {
+        let ramp = OVAL.ramps[0];
+        for input in [
+            Input::default(),
+            Input::from_analog(0.0, -1.0, 0.0, 0), // back away
+        ] {
+            let mut w = straight_world(SurfaceKind::Flat, 0);
+            place(&mut w, 0, ramp.s + 4.0, ramp.offset, 1.0);
+            let mut r = w.riders[0].unwrap();
+            r.pos.y = OVAL
+                .ramp_under(r.pos.x, r.pos.z, &w.surface, w.tick)
+                .unwrap()
+                .top;
+            r.quantize();
+            w.riders[0] = Some(r);
+            run(&mut w, input, 60 * 4);
+            let r = w.riders[0].unwrap();
+            let on_deck = OVAL
+                .ramp_under(r.pos.x, r.pos.z, &w.surface, w.tick)
+                .is_some();
+            assert!(!on_deck, "stuck on the ramp with {input:?}: {r:?}");
+        }
     }
 
     #[test]
@@ -436,6 +460,14 @@ mod tests {
             for pair in standings.windows(2) {
                 assert!(pair[0].progress.finish_ticks <= pair[1].progress.finish_ticks);
             }
+            // The results don't change while everyone keeps riding.
+            for _ in 0..60 * 5 {
+                for (slot, i) in inputs.iter_mut().enumerate() {
+                    *i = Some(bot::bot_input(&w, slot));
+                }
+                w.step(&inputs);
+            }
+            assert_eq!(w.standings(), standings);
             // Results, then a new warm-up.
             run(&mut w, Input::default(), race::tuning::RESULTS_TICKS);
             assert_eq!(w.race.phase, Phase::Warmup);

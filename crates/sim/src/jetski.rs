@@ -13,7 +13,7 @@
 use crate::DT;
 use crate::course::{self, Course, RampSurface};
 use crate::input::Input;
-use crate::math::{Vec3, angle_diff, atan2, clamp, cos, sin, wrap_angle, wrap_pi};
+use crate::math::{Vec3, angle_diff, atan2, clamp, cos, sin, sqrt, wrap_angle, wrap_pi};
 use crate::surface::Surface;
 use crate::world::Rider;
 
@@ -282,9 +282,13 @@ fn finish_tick(r: &mut Rider, grounded: bool, input: Input) {
 
 /// On a ramp the deck holds the hull: it slides up at the deck's slope and
 /// leaves the lip with that rise as upward speed. The jet is out of the
-/// water, so there is no thrust and no steering, only momentum.
+/// water, so there is no thrust and no steering, only momentum; gravity
+/// along the deck slides a slow hull back into the water.
 fn ride_ramp(r: &mut Rider, input: Input, deck: &RampSurface) {
     let (fx, fz) = (sin(deck.yaw), cos(deck.yaw));
+    let slide = GRAVITY * deck.slope / sqrt(1.0 + deck.slope * deck.slope);
+    r.vel.x -= fx * slide * DT;
+    r.vel.z -= fz * slide * DT;
     let along = r.vel.x * fx + r.vel.z * fz;
     r.pos.y = deck.top;
     r.vel.y = along.max(0.0) * deck.slope;

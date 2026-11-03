@@ -135,9 +135,9 @@ use tuning::*;
 
 const HALF_PI: f32 = PI * 0.5;
 
-/// Summer: a 860 m oval in the bay, three laps. The swell rolls in along
-/// the course, so the first straight heads into it (crests launch you) and
-/// the back straight runs with it (floating ramps make up for it there).
+/// Summer: an 860 m oval in the bay, three laps. The swell rolls in along
+/// the course: the first straight heads into it (crests launch you), the
+/// back straight runs with it and has the floating ramps.
 pub static OVAL: Course = Course {
     straight_half: 150.0,
     radius: 42.0,
