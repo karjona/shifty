@@ -246,6 +246,23 @@ mod tests {
         );
     }
 
+    /// The lobby's signer (apps/lobby/src/tickets.ts) signs this exact token
+    /// for a Grand Prix (see apps/lobby/test/tickets.test.ts).
+    #[test]
+    fn verifies_a_token_signed_by_the_lobby() {
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJib3RzIjo3LCJzdXJmYWNlIjoxLCJjb3Vyc2UiOjAsImV2ZW50cyI6WzAsMV19.eMBZeAYgcGluX_xHlndGuqz7i133iyLf8hPvaRudW2izHmeXo8i8GCs3oagqLWlD-0CCo3RozYJEOvrg1eLeDw";
+        let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
+        let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
+        assert_eq!(claims.room, "m_test");
+        assert_eq!(claims.pid, "user_1");
+        assert_eq!(claims.name, "Lord Kylian#0042");
+        assert_eq!(claims.bots, 7);
+        assert_eq!(
+            claims.plan(),
+            vec![sim::CourseId::Oval, sim::CourseId::Mountain]
+        );
+    }
+
     #[test]
     fn public_key_parses_both_base64_flavours() {
         let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
