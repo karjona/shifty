@@ -60,7 +60,7 @@ class Flyover implements Stage {
       new THREE.Vector3(85, 3, -60),
       new THREE.Vector3(40, 8, 90),
       new THREE.Vector3(-40, 10, 140),
-      new THREE.Vector3(-120, 4, -40),
+      new THREE.Vector3(150, 8, 100),
       new THREE.Vector3(-160, 8, 120),
       new THREE.Vector3(-100, 6, 110),
     ],
