@@ -17,7 +17,7 @@ mod tests {
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }
-        let inputs = [Some(Input::from_analog(0.4, 1.0, 1)); MAX_RIDERS];
+        let inputs = [Some(Input::from_analog(0.4, 1.0, -0.7, 0xFF)); MAX_RIDERS];
         for _ in 0..120 {
             world.step(&inputs);
         }
@@ -77,7 +77,7 @@ mod tests {
             last_snapshot_tick: 100,
             client_time: 55,
             first_tick: 90,
-            inputs: vec![Input::from_analog(-1.0, 1.0, 1); MAX_INPUTS_PER_PACKET],
+            inputs: vec![Input::from_analog(-1.0, 1.0, 1.0, 0xFF); MAX_INPUTS_PER_PACKET],
         });
         let bytes = msg.encode();
         assert!(bytes.len() <= MAX_DATAGRAM);

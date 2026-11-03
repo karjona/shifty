@@ -8,9 +8,9 @@ use client_core::{Client, Phase};
 use sim::{Input, MAX_RIDERS};
 use wasm_bindgen::prelude::*;
 
-/// Floats per rider in the render buffer:
-/// `[slot, x, y, z, yaw, pitch, roll, speed, grounded, is_me, is_bot, _]`.
-pub const RENDER_STRIDE: usize = 12;
+/// Floats per rider in the render buffer: `[slot, x, y, z, yaw, pitch, roll,
+/// speed, grounded, is_me, is_bot, vx, vy, vz, _, _]`.
+pub const RENDER_STRIDE: usize = 16;
 /// Layout of the stats buffer (f64).
 pub const STATS_FIELDS: [&str; 17] = [
     "rttMs",
@@ -60,9 +60,9 @@ impl WasmClient {
     }
 
     /// Advance the clock with this frame's input (analog values in [-1, 1]).
-    pub fn update(&mut self, now_ms: f64, steer: f32, throttle: f32, buttons: u8) {
+    pub fn update(&mut self, now_ms: f64, steer: f32, throttle: f32, lean: f32, buttons: u8) {
         self.inner
-            .update(now_ms, Input::from_analog(steer, throttle, buttons));
+            .update(now_ms, Input::from_analog(steer, throttle, lean, buttons));
     }
 
     /// Packs all pending outgoing packets as `[u16 len LE][bytes]...` and
@@ -95,6 +95,10 @@ impl WasmClient {
                 f32::from(u8::from(r.grounded)),
                 f32::from(u8::from(r.is_me)),
                 f32::from(u8::from(r.is_bot)),
+                r.vel.x,
+                r.vel.y,
+                r.vel.z,
+                0.0,
                 0.0,
             ]);
         }
@@ -162,7 +166,7 @@ impl WasmClient {
     }
 
     /// Wave parameters for the water shader: `[dir_x, dir_z, k, amplitude,
-    /// omega, phase]` per wave, `sim::surface::MAX_WAVES` waves.
+    /// omega, phase, sharpness, 0]` per wave, `sim::surface::MAX_WAVES` waves.
     #[wasm_bindgen(js_name = waveParams)]
     pub fn wave_params(&mut self) -> Vec<f32> {
         self.wave_buf = self.inner.surface().wave_params().to_vec();

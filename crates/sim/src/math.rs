@@ -123,6 +123,16 @@ pub fn wrap_angle(a: f32) -> f32 {
     if r >= TAU { 0.0 } else { r }
 }
 
+/// Wraps an angle to `(-PI, PI]`.
+pub fn wrap_pi(a: f32) -> f32 {
+    let w = wrap_angle(a);
+    if w > core::f32::consts::PI {
+        w - TAU
+    } else {
+        w
+    }
+}
+
 /// Shortest signed difference `b - a`, in `(-PI, PI]`.
 pub fn angle_diff(a: f32, b: f32) -> f32 {
     let d = wrap_angle(b - a);

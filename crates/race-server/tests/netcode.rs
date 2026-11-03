@@ -183,12 +183,8 @@ impl Harness {
 fn driving(_: usize, now: f64) -> Input {
     // Wiggle the stick so prediction has something to get wrong.
     let steer = ((now / 700.0).sin() * 0.8) as f32;
-    let jump = if (now as u64 / 1000).is_multiple_of(3) && (now as u64 % 1000) < 50 {
-        1
-    } else {
-        0
-    };
-    Input::from_analog(steer, 1.0, jump)
+    let lean = ((now / 1100.0).cos() * 0.9) as f32;
+    Input::from_analog(steer, 1.0, lean, 0)
 }
 
 #[test]
@@ -257,7 +253,7 @@ fn prediction_matches_the_server_once_inputs_settle() {
     h.run(1000.0, |_, _| Input::default());
     h.run(4000.0, driving);
     // Hold a constant input; the server catches up to the predicted tick.
-    h.run(1000.0, |_, _| Input::from_analog(0.2, 1.0, 0));
+    h.run(1000.0, |_, _| Input::from_analog(0.2, 1.0, 0.0, 0));
     let err = h.own_error_vs_server(0);
     // Not exactly comparable (client is ahead), but riding straight-ish the
     // gap is just a few ticks of travel.
@@ -366,6 +362,7 @@ fn server_does_not_trust_client_inputs() {
             Input {
                 steer: 0,
                 throttle: 127,
+                lean: 0,
                 buttons: 0xFF
             };
             32
@@ -392,6 +389,7 @@ fn server_does_not_trust_client_inputs() {
         inputs: vec![Input {
             steer: -128,
             throttle: -128,
+            lean: -128,
             buttons: 0xFE,
         }],
         ..far
@@ -415,6 +413,7 @@ fn server_does_not_trust_client_inputs() {
         Input {
             steer: -127,
             throttle: -127,
+            lean: -127,
             buttons: 0
         }
     );

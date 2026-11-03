@@ -8,9 +8,13 @@ pub const POS_SCALE: f32 = 1024.0;
 /// Velocity: 1/256 m/s in an i16 (±127 m/s).
 pub const VEL_SCALE: f32 = 256.0;
 pub const VEL_MAX: f32 = 127.0;
-/// Yaw rate: 1/1024 rad/s in an i16 (±32 rad/s).
-pub const YAW_RATE_SCALE: f32 = 1024.0;
-pub const YAW_RATE_MAX: f32 = 31.9;
+/// Angular rates: 1/1024 rad/s in an i16 (±32 rad/s).
+pub const RATE_SCALE: f32 = 1024.0;
+pub const RATE_MAX: f32 = 31.9;
+/// Unwrapped angles (pitch, roll): 1/1024 rad in an i16 (±32 rad, five
+/// full turns, enough for any flip).
+pub const ANGLE_SCALE: f32 = 1024.0;
+pub const ANGLE_MAX: f32 = 31.9;
 
 pub fn pos_to_wire(v: f32) -> i32 {
     round(v * POS_SCALE) as i32
@@ -52,10 +56,26 @@ pub fn yaw_from_wire(v: u16) -> f32 {
     f32::from(v) * (TAU / 65536.0)
 }
 
-pub fn yaw_rate_to_wire(v: f32) -> i16 {
-    round(clamp(v, -YAW_RATE_MAX, YAW_RATE_MAX) * YAW_RATE_SCALE) as i16
+pub fn rate_to_wire(v: f32) -> i16 {
+    round(clamp(v, -RATE_MAX, RATE_MAX) * RATE_SCALE) as i16
 }
 
-pub fn yaw_rate_from_wire(v: i16) -> f32 {
-    f32::from(v) / YAW_RATE_SCALE
+pub fn rate_from_wire(v: i16) -> f32 {
+    f32::from(v) / RATE_SCALE
+}
+
+pub fn rate_roundtrip(v: f32) -> f32 {
+    rate_from_wire(rate_to_wire(v))
+}
+
+pub fn angle_to_wire(v: f32) -> i16 {
+    round(clamp(v, -ANGLE_MAX, ANGLE_MAX) * ANGLE_SCALE) as i16
+}
+
+pub fn angle_from_wire(v: i16) -> f32 {
+    f32::from(v) / ANGLE_SCALE
+}
+
+pub fn angle_roundtrip(v: f32) -> f32 {
+    angle_from_wire(angle_to_wire(v))
 }

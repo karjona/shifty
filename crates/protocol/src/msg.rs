@@ -18,7 +18,7 @@ use sim::{MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -102,9 +102,7 @@ impl ClientMsg {
                 w.u32(p.first_tick);
                 w.u8(p.inputs.len() as u8);
                 for i in &p.inputs {
-                    w.i8(i.steer);
-                    w.i8(i.throttle);
-                    w.u8(i.buttons);
+                    write_input(&mut w, i);
                 }
             }
             Self::Bye => w.u8(kind::BYE),
@@ -143,11 +141,7 @@ impl ClientMsg {
                 }
                 let mut inputs = Vec::with_capacity(n);
                 for _ in 0..n {
-                    inputs.push(Input {
-                        steer: r.i8()?,
-                        throttle: r.i8()?,
-                        buttons: r.u8()?,
-                    });
+                    inputs.push(read_input(&mut r)?);
                 }
                 Ok(Self::Inputs(InputPacket {
                     event_ack,
@@ -259,6 +253,22 @@ pub enum ServerMsg {
 
 const FLAG_GROUNDED: u8 = 1;
 
+fn write_input(w: &mut Writer, i: &Input) {
+    w.i8(i.steer);
+    w.i8(i.throttle);
+    w.i8(i.lean);
+    w.u8(i.buttons);
+}
+
+fn read_input(r: &mut Reader<'_>) -> Result<Input, DecodeError> {
+    Ok(Input {
+        steer: r.i8()?,
+        throttle: r.i8()?,
+        lean: r.i8()?,
+        buttons: r.u8()?,
+    })
+}
+
 fn write_rider(w: &mut Writer, s: &RiderState) {
     let r = &s.rider;
     w.u8(s.slot);
@@ -270,10 +280,13 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.i16(quant::vel_to_wire(r.vel.y));
     w.i16(quant::vel_to_wire(r.vel.z));
     w.u16(quant::yaw_to_wire(r.yaw));
-    w.i16(quant::yaw_rate_to_wire(r.yaw_rate));
-    w.i8(r.last_input.steer);
-    w.i8(r.last_input.throttle);
-    w.u8(r.last_input.buttons);
+    w.i16(quant::angle_to_wire(r.pitch));
+    w.i16(quant::angle_to_wire(r.roll));
+    w.i16(quant::rate_to_wire(r.yaw_rate));
+    w.i16(quant::rate_to_wire(r.pitch_rate));
+    w.i16(quant::rate_to_wire(r.roll_rate));
+    w.u16(r.state_ticks);
+    write_input(w, &r.last_input);
 }
 
 fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
@@ -293,20 +306,26 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
         quant::vel_from_wire(r.i16()?),
     );
     let yaw = quant::yaw_from_wire(r.u16()?);
-    let yaw_rate = quant::yaw_rate_from_wire(r.i16()?);
-    let last_input = Input {
-        steer: r.i8()?,
-        throttle: r.i8()?,
-        buttons: r.u8()?,
-    };
+    let pitch = quant::angle_from_wire(r.i16()?);
+    let roll = quant::angle_from_wire(r.i16()?);
+    let yaw_rate = quant::rate_from_wire(r.i16()?);
+    let pitch_rate = quant::rate_from_wire(r.i16()?);
+    let roll_rate = quant::rate_from_wire(r.i16()?);
+    let state_ticks = r.u16()?;
+    let last_input = read_input(r)?;
     Ok(RiderState {
         slot,
         rider: Rider {
             pos,
             vel,
             yaw,
+            pitch,
+            roll,
             yaw_rate,
+            pitch_rate,
+            roll_rate,
             grounded: flags & FLAG_GROUNDED != 0,
+            state_ticks,
             last_input,
         },
     })

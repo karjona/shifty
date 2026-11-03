@@ -3,7 +3,7 @@
 //! human's. The function is deterministic, so clients can predict bots
 //! exactly by running it too.
 
-use crate::input::{Input, buttons};
+use crate::input::Input;
 use crate::math::{angle_diff, atan2, clamp, cos, sin};
 use crate::world::World;
 
@@ -23,10 +23,5 @@ pub fn bot_input(world: &World, slot: usize) -> Input {
     // Positive steer turns right, which lowers yaw.
     let steer = clamp(-diff * 2.0, -1.0, 1.0);
     let throttle = 0.7 + (slot % 3) as f32 * 0.1;
-    let hop = world.tick.wrapping_add(slot as u32 * 37) % 240 < 2;
-    Input::from_analog(
-        if r.grounded { steer } else { 0.0 },
-        throttle,
-        if hop { buttons::JUMP } else { 0 },
-    )
+    Input::from_analog(if r.grounded { steer } else { 0.0 }, throttle, 0.0, 0)
 }
