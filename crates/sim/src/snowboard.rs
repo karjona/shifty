@@ -93,6 +93,9 @@ pub mod tuning {
     /// way to land, rad).
     pub const FINISH_RATE: f32 = 1.5;
     pub const FINISH_NEAR: f32 = 0.6;
+    /// A flip is only finished forward once it is this far round (rad): a
+    /// lip tipping the nose up is not a backflip.
+    pub const FLIP_NEAR: f32 = 1.6;
 
     /// Landing more crooked than this is a fall.
     pub const LAND_HEADING: f32 = 0.6;
@@ -427,12 +430,15 @@ fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
             AIR_ALIGN * (to - rel) - AIR_ALIGN_DAMP * (r.yaw_rate + steer * AIR_STEER_RATE);
         r.yaw_rate += yaw_acc * DT;
         let q = (r.pitch - snow_pitch) / TAU;
-        let whole = if r.pitch_rate > FINISH_RATE {
+        let near = round(q);
+        let whole = if ((q - near) * TAU).abs() < FLIP_NEAR {
+            near
+        } else if r.pitch_rate > FINISH_RATE {
             libm::ceilf(q)
         } else if r.pitch_rate < -FINISH_RATE {
             libm::floorf(q)
         } else {
-            round(q)
+            near
         };
         let pitch_target = snow_pitch + TAU * whole;
         pitch_acc = AIR_PITCH_STIFFNESS * (pitch_target - r.pitch) - AIR_PITCH_DAMP * r.pitch_rate;

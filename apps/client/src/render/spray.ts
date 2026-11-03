@@ -36,8 +36,10 @@ const SHORE_STEP = 4;
 const SPLASH_HEIGHT = 0.45;
 const SPLASH_RANGE = 140;
 
-interface PoolLook {
+export interface PoolLook {
   max: number;
+  /** Particle colour (linear RGB); spray white by default. */
+  color?: [number, number, number];
   /** Downward pull (m/s²) and air drag (per second). */
   gravity: number;
   drag: number;
@@ -52,7 +54,7 @@ interface PoolLook {
 }
 
 /** A batch of particles: CPU-simulated, drawn as camera-facing discs. */
-class ParticlePool {
+export class ParticlePool {
   readonly sprite: THREE.Sprite;
   private look: PoolLook;
   /** Per particle, drawn: position + size, and alpha. */
@@ -91,7 +93,8 @@ class ParticlePool {
     // a plume has body.
     const r = uv().sub(0.5).length();
     const shade = float(0.9).add(uv().y.mul(0.06)).add(hash(instanceIndex).mul(0.06));
-    mat.colorNode = vec3(0.9, 0.95, 0.98).mul(shade);
+    const [cr, cg, cb] = look.color ?? [0.9, 0.95, 0.98];
+    mat.colorNode = vec3(cr, cg, cb).mul(shade);
     const lens = smoothstep(look.lensFrom, look.lensTo, ps.xyz.distance(cameraPosition));
     mat.opacityNode = smoothstep(0.5, look.rim, r).mul(a).mul(lens);
     this.sprite = new THREE.Sprite(mat);
@@ -125,8 +128,8 @@ class ParticlePool {
     this.size1[i] = size1;
   }
 
-  /** Move every particle; ones that fall back into the water are gone. */
-  update(water: (x: number, z: number) => number, dt: number): void {
+  /** Move every particle; ones that fall back into the water (or snow) are gone. */
+  update(water: (x: number, z: number) => number, dt: number, wind?: { x: number; z: number }): void {
     const { ps, alpha, look } = this;
     const drag = Math.exp(-look.drag * dt);
     for (let i = 0; i < look.max; i++) {
@@ -136,13 +139,15 @@ class ParticlePool {
       const o = i * 4;
       const v = i * 3;
       let vy = this.vel[v + 1]! - look.gravity * dt;
-      this.vel[v]! *= drag;
+      const vx = this.vel[v]! * drag + (wind ? wind.x * (1 - drag) : 0);
+      const vz = this.vel[v + 2]! * drag + (wind ? wind.z * (1 - drag) : 0);
       vy *= drag;
+      this.vel[v] = vx;
       this.vel[v + 1] = vy;
-      this.vel[v + 2]! *= drag;
-      ps[o]! += this.vel[v]! * dt;
+      this.vel[v + 2] = vz;
+      ps[o]! += vx * dt;
       ps[o + 1]! += vy * dt;
-      ps[o + 2]! += this.vel[v + 2]! * dt;
+      ps[o + 2]! += vz * dt;
       const t = age / life;
       if (t >= 1 || (vy < 0 && ps[o + 1]! < water(ps[o]!, ps[o + 2]!) - 0.1)) {
         this.life[i] = 0;

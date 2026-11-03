@@ -415,18 +415,16 @@ impl WasmClient {
     }
 
     /// Mountain only: the snow along the run, as a ribbon of vertices
-    /// `[x, y, z]`: one row every `step` metres of the run (from `from` to
-    /// `to`), one column per entry of `offsets` (metres right of the centre
-    /// line). Empty on a bay course.
+    /// `[x, y, z]`: one row per arc length in `rows`, one column per entry of
+    /// `offsets` (metres right of the centre line). Empty on a bay course.
     #[wasm_bindgen(js_name = runRibbon)]
-    pub fn run_ribbon(&self, from: f32, to: f32, step: f32, offsets: &[f32]) -> Vec<f32> {
+    pub fn run_ribbon(&self, rows: &[f32], offsets: &[f32]) -> Vec<f32> {
         let Some(run) = self.inner.predicted_world().course().run() else {
             return Vec::new();
         };
-        let rows = ((to - from) / step) as usize + 1;
-        let mut out = Vec::with_capacity(rows * offsets.len() * 3);
-        for i in 0..rows {
-            let f = run.centerline(from + i as f32 * step);
+        let mut out = Vec::with_capacity(rows.len() * offsets.len() * 3);
+        for &s in rows {
+            let f = run.centerline(s);
             for &o in offsets {
                 let (x, z) = f.at_offset(o);
                 out.extend_from_slice(&[x, run.height(x, z), z]);
@@ -435,20 +433,54 @@ impl WasmClient {
         out
     }
 
-    /// Mountain only: snow heights on a regular grid, row by row (`nx` per
-    /// row, `nz` rows, `step` metres apart, from `(x0, z0)`).
+    /// Mountain only: the snow on a regular grid, row by row (`nx` per row,
+    /// `nz` rows, `step` metres apart, from `(x0, z0)`): `[height, distance
+    /// from the run's centre line]` per point (the distance is huge far from
+    /// the run).
     #[wasm_bindgen(js_name = terrainGrid)]
     pub fn terrain_grid(&self, x0: f32, z0: f32, step: f32, nx: u32, nz: u32) -> Vec<f32> {
         let Some(run) = self.inner.predicted_world().course().run() else {
             return Vec::new();
         };
-        let mut out = Vec::with_capacity((nx * nz) as usize);
+        let mut out = Vec::with_capacity((nx * nz * 2) as usize);
         for j in 0..nz {
             for i in 0..nx {
-                out.push(run.height(x0 + i as f32 * step, z0 + j as f32 * step));
+                let (x, z) = (x0 + i as f32 * step, z0 + j as f32 * step);
+                out.push(run.height(x, z));
+                out.push(run.project(x, z).1.abs());
             }
         }
         out
+    }
+
+    /// Mountain only: snow heights at points `[x0, z0, x1, z1, ...]`.
+    #[wasm_bindgen(js_name = heightsAt)]
+    pub fn heights_at(&self, points: &[f32]) -> Vec<f32> {
+        let Some(run) = self.inner.predicted_world().course().run() else {
+            return Vec::new();
+        };
+        points
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[x, z]| run.height(x, z))
+            .collect()
+    }
+
+    /// Dev: what a bot would do in my place right now, as analog
+    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`).
+    #[wasm_bindgen(js_name = autoInput)]
+    pub fn auto_input(&self) -> Vec<f32> {
+        let Some(slot) = self.inner.slot() else {
+            return vec![0.0; 4];
+        };
+        let i = sim::bot::bot_input(self.inner.predicted_world(), slot);
+        vec![
+            i.steer_f(),
+            i.throttle_f(),
+            i.lean_f(),
+            f32::from(i.buttons),
+        ]
     }
 
     /// Mountain only: where `(x, z)` is along the run: `[s, offset]`.

@@ -22,6 +22,8 @@ export interface JoinClaims {
   exp: number;
   bots: number;
   surface: number;
+  /** 0 = the summer bay (jetski), 1 = the winter mountain (snowboard). */
+  course: number;
 }
 
 const b64url = (b: Buffer): string => b.toString("base64url");
@@ -68,6 +70,7 @@ export interface DevJoinOptions {
   room?: string;
   bots?: number;
   surface?: number;
+  course?: number;
   pid?: string;
 }
 
@@ -83,6 +86,7 @@ export function devJoinTicket(raceServer: string, opts: DevJoinOptions) {
     exp: Math.floor(Date.now() / 1000) + 10 * 60,
     bots: opts.bots ?? 2,
     surface: opts.surface ?? 1,
+    course: opts.course ?? 0,
   };
   return { token: mintJoinToken(key, claims), claims };
 }

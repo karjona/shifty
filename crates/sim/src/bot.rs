@@ -135,6 +135,20 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
         }
     }
 
+    // Steer round whatever stands in the line ahead (to the side nearer
+    // the middle of the run).
+    for o in run.obstacles {
+        let ahead = o.s - s;
+        let clear = o.radius + 2.5;
+        if (0.0..50.0).contains(&ahead) && (o.offset - lane).abs() < clear {
+            lane = if o.offset > 0.0 {
+                o.offset - clear
+            } else {
+                o.offset + clear
+            };
+        }
+    }
+
     let look = 8.0 + speed * 0.5;
     let (tx, tz) = run.centerline(s + look).at_offset(lane);
     let desired = atan2(tx - r.pos.x, tz - r.pos.z);

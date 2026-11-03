@@ -1,7 +1,11 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
 import type { CourseData } from "./render/course.ts";
+import type { GateData, ObstacleData, RunData, RunPoint, TableData } from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
+
+/** A course: the summer bay (jetski) or the winter mountain run (snowboard). */
+export type CourseInfo = { sport: "jetski"; bay: CourseData } | { sport: "snow"; run: RunData };
 
 type Obj = Record<string, unknown>;
 
@@ -17,6 +21,7 @@ export function parseStandings(json: string): StandingView[] {
     finishTicks: num(o, "finishTicks"),
     misses: num(o, "misses"),
     tricks: num(o, "tricks"),
+    points: num(o, "points"),
   }));
 }
 
@@ -24,7 +29,15 @@ export function parseEvents(json: string): RaceEvent[] {
   const out: RaceEvent[] = [];
   for (const o of list(JSON.parse(json))) {
     const kind = o.kind;
-    if (kind !== "buoy" && kind !== "lap" && kind !== "finish" && kind !== "trick" && kind !== "bail") continue;
+    if (
+      kind !== "buoy" &&
+      kind !== "checkpoint" &&
+      kind !== "lap" &&
+      kind !== "finish" &&
+      kind !== "trick" &&
+      kind !== "bail"
+    )
+      continue;
     out.push({
       tick: num(o, "tick"),
       slot: num(o, "slot"),
@@ -37,14 +50,71 @@ export function parseEvents(json: string): RaceEvent[] {
       spin: num(o, "spin"),
       flip: num(o, "flip"),
       roll: num(o, "roll"),
+      grab: num(o, "grab"),
+      grabTicks: num(o, "grabTicks"),
+      points: num(o, "points"),
+      index: num(o, "index"),
     });
   }
   return out;
 }
 
-export function parseCourse(json: string): CourseData {
+export function parseCourse(json: string): CourseInfo {
   const raw: unknown = JSON.parse(json);
   const o = isObj(raw) ? raw : {};
+  if (o.sport === "snow" && isObj(o.run)) return { sport: "snow", run: parseRun(o.run) };
+  return { sport: "jetski", bay: parseBay(o) };
+}
+
+const gate = (v: unknown): GateData => {
+  const g = isObj(v) ? v : {};
+  return {
+    s: num(g, "s"),
+    x: num(g, "x"),
+    y: num(g, "y"),
+    z: num(g, "z"),
+    yaw: num(g, "yaw"),
+    half: num(g, "half"),
+    limit: num(g, "limit"),
+  };
+};
+
+function parseRun(o: Obj): RunData {
+  return {
+    length: num(o, "length"),
+    startS: num(o, "startS"),
+    finishS: num(o, "finishS"),
+    startGate: gate(o.startGate),
+    finish: gate(o.finish),
+    checkpoints: list(o.checkpoints).map(gate),
+    path: list(o.path).map((p): RunPoint => ({
+      s: num(p, "s"),
+      x: num(p, "x"),
+      y: num(p, "y"),
+      z: num(p, "z"),
+      yaw: num(p, "yaw"),
+      half: num(p, "half"),
+      wall: num(p, "wall"),
+      limit: num(p, "limit"),
+    })),
+    obstacles: list(o.obstacles).map((b): ObstacleData => ({
+      x: num(b, "x"),
+      y: num(b, "y"),
+      z: num(b, "z"),
+      radius: num(b, "radius"),
+      height: num(b, "height"),
+      kind: b.kind === "tower" ? "tower" : b.kind === "rock" ? "rock" : "pine",
+    })),
+    tables: list(o.tables).map((t): TableData => ({
+      s: num(t, "s"),
+      lip: num(t, "lip"),
+      offset: num(t, "offset"),
+      halfWidth: num(t, "halfWidth"),
+    })),
+  };
+}
+
+function parseBay(o: Obj): CourseData {
   const start = isObj(o.start) ? o.start : {};
   return {
     length: num(o, "length"),

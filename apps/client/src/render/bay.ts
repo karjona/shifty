@@ -1,0 +1,172 @@
+// Summer: the bay. Sky and sun, the sea (the sim's swells plus GPU chop,
+// ripples, wakes, foam and reflections, or the swells alone), the course
+// on it, the coast behind, and the spray the jetskis throw.
+import * as THREE from "three/webgpu";
+import {
+  Fn,
+  fract,
+  max,
+  mix,
+  normalLocal,
+  positionLocal,
+  positionWorld,
+  smoothstep,
+  step,
+  uniform,
+  vec3,
+} from "three/tsl";
+import { CourseView, type CourseData } from "./course.ts";
+import { JetskiModel } from "./rider.ts";
+import { buildScenery } from "./scenery.ts";
+import { Spray } from "./spray.ts";
+import { SeaWater, type WakeSource } from "./water.ts";
+import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
+import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
+
+/** The water grid follows the camera and reaches across the whole bay. */
+const WATER_SIZE = 1400;
+const WATER_SEGMENTS = 300;
+
+/** Chase camera on the water, in metres from the bottom of the hull. */
+const CAMERA: CameraTuning = {
+  fov: 55,
+  fovSpeed: 6,
+  fovAir: 4,
+  back: 4.3,
+  backPerSpeed: 0.02,
+  up: 2.35,
+  lookAhead: 8,
+  lookUp: 0.75,
+  lookFrom: "rider",
+  turn: 5,
+  reverseLooksAhead: true,
+  heightOnGround: 7,
+  heightRising: 6,
+  heightInAir: 6,
+  clearance: 0.9,
+  airFrom: 0.4,
+  airSpan: 2,
+  airBack: 2.5,
+  airUp: 1.2,
+  tilt: 0,
+};
+
+export interface BayOptions {
+  /** "sea" = swells + GPU chop, ripples, foam and reflections (see water.ts); "basic" = swells only, cheap. */
+  water: "basic" | "sea";
+  /** The jetski's top speed (m/s). */
+  topSpeed: number;
+  /** The sim's swells (`waveParams`). */
+  waves: Float32Array;
+  course: CourseData;
+}
+
+export class Bay implements Environment {
+  readonly group = new THREE.Group();
+  readonly camera = CAMERA;
+  readonly topSpeed: number;
+
+  private sky = new THREE.Color(0xa8d8f0);
+  private time = uniform(0);
+  private swells = new WaveUniforms(MAX_WAVES);
+  private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  private course: CourseView;
+  private water: THREE.Mesh | null = null;
+  /** World xz of the water grid's centre (it follows the camera). */
+  private waterOrigin = uniform(new THREE.Vector2());
+  /** The full water; `null` in basic mode (see `buildWater`). */
+  private sea: SeaWater | null = null;
+  private wakeSources = new Map<number, WakeSource>();
+  private spray: Spray;
+
+  constructor(opts: BayOptions) {
+    this.topSpeed = opts.topSpeed;
+    this.spray = new Spray(opts.topSpeed);
+    this.group.add(this.spray.group);
+    this.group.add(buildScenery(this.sky));
+    if (opts.water === "sea") {
+      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS);
+      this.group.add(this.sea.mesh);
+    } else {
+      this.buildWater();
+    }
+    // Chop seed only needs to be stable per room: derive it from the swells.
+    this.sea?.setWaves(opts.waves, Math.round(Math.abs(opts.waves[5] ?? 1) * 1e6));
+    this.waveParams.set(opts.waves.subarray(0, MAX_WAVES * WAVE_FIELDS));
+    this.swells.setFromSim(this.waveParams);
+    this.course = new CourseView(opts.course);
+    this.group.add(this.course.group);
+    this.sea?.setLand(opts.course.land);
+    this.spray.setShore(opts.course.land);
+  }
+
+  light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
+    scene.background = this.sky;
+    scene.fog = new THREE.Fog(this.sky, 90, 480);
+    hemi.color.set(0xfff4e0);
+    hemi.groundColor.set(0x2a6f8f);
+    hemi.intensity = 1.2;
+    sun.color.set(0xfff1d6);
+    sun.intensity = 2.6;
+  }
+
+  ground(x: number, z: number, t: number): number {
+    return waveHeight(this.waveParams, x, z, t);
+  }
+
+  makeRider(slot: number): RiderModel {
+    return new JetskiModel(slot);
+  }
+
+  private buildWater(): void {
+    const t = this.time;
+    const swells = this.swells;
+    const origin = this.waterOrigin;
+    // Displace vertices with the sim's swell formula; analytic normals.
+    const displaced = Fn(() => {
+      const p = positionLocal;
+      const w = swells.sum(p.add(vec3(origin.x, 0, origin.y)), t);
+      normalLocal.assign(vec3(w.dx.negate(), 1, w.dz.negate()).normalize());
+      return p.add(vec3(0, w.h, 0));
+    });
+    const colour = Fn(() => {
+      const deep = vec3(0.04, 0.32, 0.45);
+      const crest = vec3(0.18, 0.66, 0.72);
+      const base = mix(deep, crest, smoothstep(-0.8, 1.2, positionWorld.y));
+      // Faint 4 m grid so speed reads even on calm water.
+      const gx = step(0.965, fract(positionWorld.x.div(4)));
+      const gz = step(0.965, fract(positionWorld.z.div(4)));
+      return mix(base, vec3(0.85, 0.95, 1.0), max(gx, gz).mul(0.12));
+    });
+    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.38, metalness: 0.0 });
+    mat.positionNode = displaced();
+    mat.colorNode = colour();
+    const water = new THREE.Mesh(waterGrid(WATER_SIZE, WATER_SEGMENTS), mat);
+    water.receiveShadow = true;
+    water.frustumCulled = false;
+    this.group.add(water);
+    this.water = water;
+  }
+
+  update(f: Frame): void {
+    this.time.value = f.t;
+    this.course.update(this.waveParams, f.t, f.nextBuoy);
+    const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
+    for (const r of f.riders) {
+      const model = f.models.get(r.slot);
+      if (model) this.spray.emit(r, model.mesh, water, f.dt);
+    }
+    this.spray.update(water, f.eye, f.dt);
+    // Centre the water grid near what the camera looks at, in fixed steps.
+    const x = Math.round(f.look.x / WATER_SNAP) * WATER_SNAP;
+    const z = Math.round(f.look.z / WATER_SNAP) * WATER_SNAP;
+    this.waterOrigin.value.set(x, z);
+    this.water?.position.set(x, 0, z);
+    this.sea?.follow(x, z);
+    if (this.sea) {
+      this.wakeSources.clear();
+      for (const r of f.riders) this.wakeSources.set(r.slot, { x: r.x, z: r.z, speed: r.speed, grounded: r.grounded });
+      this.sea.update(f.renderer, f.t, this.wakeSources, f.dt);
+    }
+  }
+}

@@ -1,17 +1,38 @@
 import "./style.css";
-import init, { WasmClient, raceFields, renderStride, statsFields, topSpeed } from "./wasm/sim.js";
+import init, { WasmClient, raceFields, renderStride, statsFields } from "./wasm/sim.js";
 import { InputReader } from "./input.ts";
 import { conditioned, type NetConditions } from "./net/conditioner.ts";
 import { connect, WebTransportUnavailable, parseJoinTicket, type JoinTicket, type Transport } from "./net/transport.ts";
+import { Bay } from "./render/bay.ts";
+import { Mountain } from "./render/mountain.ts";
 import { World, type RiderView } from "./render/world.ts";
 import { createDebugPanel, type DebugSettings } from "./ui/debug.ts";
 import { Hud, type RaceView } from "./ui/hud.ts";
-import { Minimap } from "./ui/minimap.ts";
+import { Minimap, RunMap, type CourseMap } from "./ui/minimap.ts";
 import { parseCourse, parseEvents, parseStandings } from "./wasm-json.ts";
 
 const params = new URLSearchParams(location.search);
+/** `?event=snow` races the winter mountain; the summer bay otherwise. */
+const snow = params.get("event") === "snow";
+
+const HELP = {
+  jetski:
+    "<b>23.4° Shifty</b> · summer · prototype<br />" +
+    "Gamepad: left stick steer and lean (pull back on a crest to fly) · RT throttle · LT brake<br />" +
+    "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!<br />" +
+    "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks · F1 debug<br />" +
+    'Pass <b class="red">red</b> buoys with them on your right, <b class="green">green</b> on your left',
+  snow:
+    "<b>23.4° Shifty</b> · winter · prototype<br />" +
+    "Gamepad: left stick steer · stick up (or RT) tuck · down (or LT) sit back and brake<br />" +
+    "Hold A to load a jump, let go at the lip · in the air: X + stick spins and flips, B grabs<br />" +
+    "Keyboard: WASD steer, tuck, brake · Space jump · J / Shift spin · K / E grab · F1 debug<br />" +
+    "Land flat on the board, along the slope (forward or switch), and let go of the grab first!",
+};
 /** `?render=0` runs the full netcode without drawing (used by netcode e2e tests). */
 const renderEnabled = params.get("render") !== "0";
+/** `?autopilot=1` (dev): ride like a bot, to look around the course. */
+const autopilot = params.get("autopilot") === "1";
 const status = document.querySelector<HTMLDivElement>("#status")!;
 const hud = new Hud(document.querySelector<HTMLDivElement>("#ui")!);
 const setStatus = (text: string) => {
@@ -45,9 +66,10 @@ function parseRoster(json: string): Map<number, string> {
 async function getTicket(): Promise<JoinTicket> {
   const q = new URLSearchParams({
     name: params.get("name") ?? `Rider ${Math.floor(Math.random() * 900 + 100)}`,
-    room: params.get("room") ?? "dev",
+    room: params.get("room") ?? (snow ? "dev-snow" : "dev"),
     bots: params.get("bots") ?? "2",
     surface: params.get("surface") ?? "1",
+    course: snow ? "1" : "0",
   });
   const pid = params.get("pid");
   if (pid) q.set("pid", pid);
@@ -67,12 +89,10 @@ async function main(): Promise<void> {
   const world = new World(
     document.querySelector<HTMLElement>("#app")!,
     document.querySelector<HTMLElement>("#labels")!,
-    {
-      water: params.get("water") === "basic" ? "basic" : "sea",
-      topSpeed: topSpeed(),
-    },
   );
   await world.init();
+  const help = document.querySelector<HTMLDivElement>("#help");
+  if (help) help.innerHTML = snow ? HELP.snow : HELP.jetski;
 
   setStatus("Getting a join ticket…");
   const ticket = await getTicket();
@@ -100,7 +120,8 @@ async function main(): Promise<void> {
   let names = new Map<number, string>();
   let rosterVersion = -1;
   let courseSet = false;
-  let minimap: Minimap | null = null;
+  let minimap: CourseMap | null = null;
+  let sport: "jetski" | "snow" = "jetski";
   let last = performance.now();
   let fpsFrames = 0;
   let fpsSince = last;
@@ -121,7 +142,11 @@ async function main(): Promise<void> {
   const step = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    const i = input.read(dt);
+    let i = input.read(dt);
+    if (autopilot && client.phase() === 1) {
+      const [steer = 0, throttle = 0, lean = 0, buttons = 0] = client.autoInput();
+      i = { steer, throttle, lean, buttons };
+    }
     client.update(now, i.steer, i.throttle, i.lean, i.buttons);
     sendOutgoing();
     return dt;
@@ -157,6 +182,10 @@ async function main(): Promise<void> {
         vy: buf[o + 12]!,
         vz: buf[o + 13]!,
         bailing: buf[o + 14] === 1,
+        charge: buf[o + 15]!,
+        grab: buf[o + 16]!,
+        lean: buf[o + 17]!,
+        steer: buf[o + 18]!,
       });
     }
     return out;
@@ -182,6 +211,9 @@ async function main(): Promise<void> {
       misses: f("misses"),
       tickHz: f("tickHz") || 60,
       wrongWay: f("wrongWay") === 1,
+      points: f("points"),
+      gates: f("gates"),
+      looped: f("looped") === 1,
     };
   };
   const readStandings = () => parseStandings(client.standingsJson());
@@ -201,10 +233,32 @@ async function main(): Promise<void> {
     else setStatus("");
 
     if (phase === 1 && !courseSet) {
-      world.setWaves(client.waveParams());
       const course = parseCourse(client.courseJson());
-      world.setCourse(course);
-      minimap = new Minimap(document.querySelector<HTMLDivElement>("#ui")!, course);
+      const ui = document.querySelector<HTMLDivElement>("#ui")!;
+      sport = course.sport;
+      input.sport = course.sport;
+      if (help) help.innerHTML = course.sport === "snow" ? HELP.snow : HELP.jetski;
+      if (course.sport === "snow") {
+        world.setEnvironment(
+          new Mountain(course.run, {
+            ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
+            grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
+            heights: (points) => client.heightsAt(points),
+          }),
+        );
+        world.setSunOffset(-35, 70, -30);
+        minimap = new RunMap(ui, course.run);
+      } else {
+        world.setEnvironment(
+          new Bay({
+            water: params.get("water") === "basic" ? "basic" : "sea",
+            topSpeed: client.topSpeed(),
+            waves: client.waveParams(),
+            course: course.bay,
+          }),
+        );
+        minimap = new Minimap(ui, course.bay);
+      }
       courseSet = true;
     }
     if (client.rosterVersion() !== rosterVersion) {
@@ -214,7 +268,7 @@ async function main(): Promise<void> {
 
     riders = readRiders();
     const race = readRace();
-    const nextBuoy = race.nextGate >= 1 ? race.nextGate - 1 : null;
+    const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (renderEnabled) world.render(riders, names, client.renderTick(), dt, nextBuoy);
 
     const me = riders.find((r) => r.isMe);
@@ -256,6 +310,7 @@ async function main(): Promise<void> {
       slot: () => client.slot(),
       transport: transport.kind,
       renderer: world.backend,
+      sport: () => sport,
       stats: () => (readStats(), stats),
       // Fresh, not the last rendered frame (frames can be slow without a GPU).
       riders: () => readRiders(),
