@@ -2,6 +2,7 @@
 // along the top; on Home your rider stands over the seasons' colours with
 // a banner, missions and news around.
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { showMenuRider } from "../../game/backdrops.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useReducer, useState } from "react";
 import { type Locale, LOCALES, setLocale, useLocale, useT } from "../../i18n/index.ts";
@@ -19,6 +20,7 @@ export function MainMenu() {
   const t = useT();
   const navigate = useNavigate();
   const { tab = "home" } = route.useSearch();
+  useEffect(() => showMenuRider(tab === "home"), [tab]);
   const setTab = (next: MenuTab) => void navigate({ to: "/", search: { tab: next }, replace: true });
   const play = () => void navigate({ to: "/play" });
   useAction("play", play);

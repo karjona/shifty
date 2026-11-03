@@ -89,7 +89,10 @@ app.use("/api/*", async (c, next) => {
   return next();
 });
 
-const session = (c: Ctx) => c.var.auth.api.getSession({ headers: c.req.raw.headers });
+// Our endpoints read the session from the database, not the cookie cache,
+// so a deleted or banned account is out at once.
+const session = (c: Ctx) =>
+  c.var.auth.api.getSession({ headers: c.req.raw.headers, query: { disableCookieCache: true } });
 
 /** The signed-in player with a handle, or an error response. */
 async function requirePlayer(c: Ctx) {

@@ -162,6 +162,11 @@ class SeasonField implements Stage {
     this.engine = engine;
   }
 
+  /** Shows the rider (home) or just the colours (the other tabs). */
+  showRider(on: boolean): void {
+    this.avatar.mesh.visible = on;
+  }
+
   frame(now: number, dt: number): void {
     const engine = this.engine;
     if (!engine?.render) return;
@@ -261,6 +266,11 @@ export function backdrop(kind: BackdropKind): Stage {
   if (kind === "flyover") return (flyover ??= new Flyover());
   if (kind === "shader") return (field ??= new SeasonField());
   return (club ??= new Club());
+}
+
+/** Shows or hides the rider on the main menu's colours. */
+export function showMenuRider(on: boolean): void {
+  (field ??= new SeasonField()).showRider(on);
 }
 
 /** Sets how many riders stand on the club's terrace. */
