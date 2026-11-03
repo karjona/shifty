@@ -5,6 +5,9 @@
 //! outgoing packets per frame, never through many tiny calls.
 
 use client_core::{Client, Phase};
+use serde_json::json;
+use sim::course::{Keep, tuning as course_tuning};
+use sim::race::{EventKind, tuning as race_tuning};
 use sim::{Input, MAX_RIDERS};
 use wasm_bindgen::prelude::*;
 
@@ -32,10 +35,29 @@ pub const STATS_FIELDS: [&str; 17] = [
     "targetLead",
 ];
 
+/// Layout of the race buffer (f64), for the HUD.
+pub const RACE_FIELDS: [&str; 14] = [
+    "phase",
+    "phaseTicks",
+    "phaseLength",
+    "laps",
+    "racing",
+    "lap",
+    "meter",
+    "meterMax",
+    "nextGate",
+    "finishTicks",
+    "place",
+    "racers",
+    "misses",
+    "tickHz",
+];
+
 #[wasm_bindgen]
 pub struct WasmClient {
     inner: Client,
     render_buf: Vec<f32>,
+    race_buf: Vec<f64>,
     stats_buf: Vec<f64>,
     wave_buf: Vec<f32>,
     out_buf: Vec<u8>,
@@ -48,6 +70,7 @@ impl WasmClient {
         Self {
             inner: Client::new(token),
             render_buf: vec![0.0; MAX_RIDERS * RENDER_STRIDE],
+            race_buf: vec![0.0; RACE_FIELDS.len()],
             stats_buf: vec![0.0; STATS_FIELDS.len()],
             wave_buf: Vec::new(),
             out_buf: Vec::with_capacity(2048),
@@ -193,6 +216,124 @@ impl WasmClient {
         serde_json::Value::Array(entries).to_string()
     }
 
+    /// Refreshes the race buffer (see `raceFields()` for the layout).
+    #[wasm_bindgen(js_name = updateRace)]
+    pub fn update_race(&mut self) -> *const f64 {
+        let world = self.inner.predicted_world();
+        let race = world.race;
+        let me = self.inner.slot().and_then(|s| world.riders[s]);
+        let standings = world.standings();
+        let place = self
+            .inner
+            .slot()
+            .and_then(|s| standings.iter().find(|st| usize::from(st.slot) == s))
+            .map_or(0, |st| st.place);
+        let p = me.map(|r| r.race).unwrap_or_default();
+        let v = [
+            f64::from(race.phase as u8),
+            f64::from(race.elapsed(world.tick)),
+            f64::from(race.phase.duration().unwrap_or(0)),
+            f64::from(world.course().laps),
+            f64::from(u8::from(p.racing)),
+            f64::from(p.lap),
+            f64::from(p.meter),
+            f64::from(race_tuning::METER_MAX),
+            f64::from(p.next_gate),
+            f64::from(p.finish_ticks),
+            f64::from(place),
+            standings.len() as f64,
+            f64::from(p.misses),
+            f64::from(sim::TICK_HZ),
+        ];
+        self.race_buf.copy_from_slice(&v);
+        self.race_buf.as_ptr()
+    }
+
+    /// Race order as JSON: `[{slot, place, lap, finishTicks, misses}]`.
+    #[wasm_bindgen(js_name = standingsJson)]
+    pub fn standings_json(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .inner
+            .standings()
+            .iter()
+            .map(|st| {
+                json!({
+                    "slot": st.slot,
+                    "place": st.place,
+                    "lap": st.progress.lap,
+                    "finishTicks": st.progress.finish_ticks,
+                    "misses": st.progress.misses,
+                })
+            })
+            .collect();
+        serde_json::Value::Array(list).to_string()
+    }
+
+    /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
+    /// `buoy` (`buoy`, `ok`, `meter`), `lap` (`lap`) or `finish` (`ticks`).
+    #[wasm_bindgen(js_name = takeEventsJson)]
+    pub fn take_events_json(&mut self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .inner
+            .take_events()
+            .iter()
+            .map(|e| match e.kind {
+                EventKind::Buoy { buoy, ok, meter } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "buoy", "buoy": buoy, "ok": ok, "meter": meter })
+                }
+                EventKind::Lap { lap } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "lap", "lap": lap })
+                }
+                EventKind::Finish { ticks } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
+                }
+            })
+            .collect();
+        serde_json::Value::Array(list).to_string()
+    }
+
+    /// The course, for drawing it (positions in metres, angles in radians).
+    #[wasm_bindgen(js_name = courseJson)]
+    pub fn course_json(&self) -> String {
+        let c = self.inner.predicted_world().course();
+        let buoys: Vec<serde_json::Value> = (0..c.buoys.len())
+            .map(|i| {
+                let (x, z) = c.buoy_pos(i);
+                let b = &c.buoys[i];
+                json!({
+                    "x": x,
+                    "z": z,
+                    "yaw": c.centerline(b.s).yaw,
+                    "keep": if b.keep == Keep::Left { "left" } else { "right" },
+                })
+            })
+            .collect();
+        let ramps: Vec<serde_json::Value> = c
+            .ramps
+            .iter()
+            .map(|d| {
+                let f = c.centerline(d.s + d.length * 0.5);
+                let (x, z) = f.at_offset(d.offset);
+                json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
+            })
+            .collect();
+        let start = c.centerline(c.start_s);
+        json!({
+            "length": c.length(),
+            "laps": c.laps,
+            "straightHalf": c.straight_half,
+            "radius": c.radius,
+            "laneHalf": c.lane_half,
+            "breakwaterRadius": c.breakwater_radius,
+            "outerLimit": c.outer_limit,
+            "rampSink": course_tuning::RAMP_SINK,
+            "start": { "x": start.x, "z": start.z, "yaw": start.yaw },
+            "buoys": buoys,
+            "ramps": ramps,
+        })
+        .to_string()
+    }
+
     /// Surface height at a point and fractional tick (for placing things on water).
     #[wasm_bindgen(js_name = surfaceHeight)]
     pub fn surface_height(&self, x: f32, z: f32, tick: u32) -> f32 {
@@ -203,6 +344,11 @@ impl WasmClient {
 #[wasm_bindgen(js_name = statsFields)]
 pub fn stats_fields() -> Vec<String> {
     STATS_FIELDS.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[wasm_bindgen(js_name = raceFields)]
+pub fn race_fields() -> Vec<String> {
+    RACE_FIELDS.iter().map(|s| (*s).to_owned()).collect()
 }
 
 #[wasm_bindgen(js_name = renderStride)]

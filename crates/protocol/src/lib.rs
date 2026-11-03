@@ -10,10 +10,10 @@ pub use wire::DecodeError;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::{Input, MAX_RIDERS, Surface, SurfaceKind, World};
+    use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 
     fn full_snapshot() -> Snapshot {
-        let mut world = World::new(Surface::new(SurfaceKind::Swells, 9));
+        let mut world = World::on_course(CourseId::Oval, SurfaceKind::Swells, 9);
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }
@@ -27,6 +27,7 @@ mod tests {
             input_lead: 3,
             echo_client_time: 999,
             echo_hold_ms: 12,
+            race: world.race,
             events: (0..MAX_EVENTS_PER_SNAPSHOT as u16)
                 .map(|i| Event {
                     id: i,
@@ -59,8 +60,8 @@ mod tests {
             "snapshot is {} bytes",
             bytes.len()
         );
-        // Keep plenty of headroom for future fields (scores, race state).
-        assert!(bytes.len() < 500, "snapshot grew to {} bytes", bytes.len());
+        // Keep plenty of headroom for future fields.
+        assert!(bytes.len() < 700, "snapshot grew to {} bytes", bytes.len());
     }
 
     #[test]

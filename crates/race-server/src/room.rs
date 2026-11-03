@@ -11,7 +11,7 @@ use protocol::{
     RiderKind, RiderState, ServerMsg, Snapshot, Welcome, truncate_utf8,
 };
 use sim::bot::bot_input;
-use sim::{Input, Inputs, MAX_HUMANS, MAX_RIDERS, Surface, SurfaceKind, TICK_HZ, World};
+use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, SurfaceKind, TICK_HZ, World};
 
 pub type ConnId = u64;
 
@@ -31,6 +31,7 @@ const INPUT_RING: usize = 128;
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
     pub id: String,
+    pub course: CourseId,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     pub bots: u8,
@@ -44,6 +45,7 @@ impl RoomConfig {
         }
         Self {
             id: claims.room.clone(),
+            course: CourseId::Oval,
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
             bots: claims.bots.min((MAX_RIDERS - 1) as u8),
@@ -137,7 +139,7 @@ pub struct Outbox {
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
         let mut room = Self {
-            world: World::new(Surface::new(config.surface_kind, config.surface_seed)),
+            world: World::on_course(config.course, config.surface_kind, config.surface_seed),
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
             stats: RoomStats::default(),
@@ -226,6 +228,11 @@ impl Room {
                 if self.human_count() >= MAX_HUMANS {
                     return Err(RejectReason::RoomFull);
                 }
+                if self.human_count() == 0 {
+                    // First player in: a fresh warm-up, not the middle of a
+                    // bots-only race.
+                    self.world.restart_warmup();
+                }
                 let slot = match self.seats.iter().position(|s| *s == Seat::Empty) {
                     Some(s) => s,
                     None => {
@@ -291,6 +298,7 @@ impl Room {
             tick_hz: TICK_HZ as u8,
             snapshot_interval: SNAPSHOT_INTERVAL as u8,
             max_riders: MAX_RIDERS as u8,
+            course: self.config.course,
             surface_kind: self.config.surface_kind,
             surface_seed: self.config.surface_seed,
             server_tick: self.world.tick,
@@ -424,6 +432,7 @@ impl Room {
                     echo_hold_ms: now_ms
                         .saturating_sub(p.echo_received_ms)
                         .min(u64::from(u16::MAX)) as u16,
+                    race: self.world.race,
                     events: p
                         .events
                         .iter()

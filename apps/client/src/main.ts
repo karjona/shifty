@@ -1,16 +1,18 @@
 import "./style.css";
-import init, { WasmClient, renderStride, statsFields } from "./wasm/sim.js";
+import init, { WasmClient, raceFields, renderStride, statsFields } from "./wasm/sim.js";
 import { InputReader } from "./input.ts";
 import { conditioned, type NetConditions } from "./net/conditioner.ts";
 import { connect, WebTransportUnavailable, parseJoinTicket, type JoinTicket, type Transport } from "./net/transport.ts";
 import { World, type RiderView } from "./render/world.ts";
 import { createDebugPanel, type DebugSettings } from "./ui/debug.ts";
+import { Hud, type RaceView } from "./ui/hud.ts";
+import { parseCourse, parseEvents, parseStandings } from "./wasm-json.ts";
 
 const params = new URLSearchParams(location.search);
 /** `?render=0` runs the full netcode without drawing (used by netcode e2e tests). */
 const renderEnabled = params.get("render") !== "0";
 const status = document.querySelector<HTMLDivElement>("#status")!;
-const hud = document.querySelector<HTMLDivElement>("#hud")!;
+const hud = new Hud(document.querySelector<HTMLDivElement>("#ui")!);
 const setStatus = (text: string) => {
   status.textContent = text;
   status.hidden = text === "";
@@ -59,6 +61,7 @@ async function main(): Promise<void> {
   const wasm = await init();
   const stride = renderStride();
   const fields = statsFields();
+  const raceKeys = raceFields();
 
   const world = new World(
     document.querySelector<HTMLElement>("#app")!,
@@ -92,7 +95,7 @@ async function main(): Promise<void> {
   const input = new InputReader();
   let names = new Map<number, string>();
   let rosterVersion = -1;
-  let wavesSet = false;
+  let courseSet = false;
   let last = performance.now();
   let fpsFrames = 0;
   let fpsSince = last;
@@ -153,6 +156,29 @@ async function main(): Promise<void> {
     return out;
   };
 
+  const readRace = (): RaceView => {
+    const ptr = client.updateRace();
+    const view = new Float64Array(wasm.memory.buffer, ptr, raceKeys.length);
+    const f = (key: string) => view[raceKeys.indexOf(key)] ?? 0;
+    return {
+      phase: f("phase"),
+      phaseTicks: f("phaseTicks"),
+      phaseLength: f("phaseLength"),
+      laps: f("laps"),
+      racing: f("racing") === 1,
+      lap: f("lap"),
+      meter: f("meter"),
+      meterMax: f("meterMax"),
+      nextGate: f("nextGate"),
+      finishTicks: f("finishTicks"),
+      place: f("place"),
+      racers: f("racers"),
+      misses: f("misses"),
+      tickHz: f("tickHz") || 60,
+    };
+  };
+  const readStandings = () => parseStandings(client.standingsJson());
+
   const readStats = () => {
     const ptr = client.updateStats();
     const view = new Float64Array(wasm.memory.buffer, ptr, fields.length);
@@ -167,9 +193,10 @@ async function main(): Promise<void> {
     else if (closedReason) setStatus(`Connection lost: ${closedReason}`);
     else setStatus("");
 
-    if (phase === 1 && !wavesSet) {
+    if (phase === 1 && !courseSet) {
       world.setWaves(client.waveParams());
-      wavesSet = true;
+      world.setCourse(parseCourse(client.courseJson()));
+      courseSet = true;
     }
     if (client.rosterVersion() !== rosterVersion) {
       rosterVersion = client.rosterVersion();
@@ -177,10 +204,15 @@ async function main(): Promise<void> {
     }
 
     riders = readRiders();
-    if (renderEnabled) world.render(riders, names, client.renderTick(), dt);
+    const race = readRace();
+    const nextBuoy = race.nextGate >= 1 ? race.nextGate - 1 : null;
+    if (renderEnabled) world.render(riders, names, client.renderTick(), dt, nextBuoy);
 
     const me = riders.find((r) => r.isMe);
-    hud.textContent = me ? `${Math.round(me.speed * 3.6)} km/h${me.grounded ? "" : "  ✈"}` : "";
+    if (phase === 1) {
+      hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
+      hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, readStandings, names);
+    }
 
     fpsFrames++;
     if (now - fpsSince > 250) {
@@ -217,6 +249,8 @@ async function main(): Promise<void> {
       stats: () => (readStats(), stats),
       // Fresh, not the last rendered frame (frames can be slow without a GPU).
       riders: () => readRiders(),
+      race: () => readRace(),
+      standings: () => readStandings(),
       names: () => Object.fromEntries(names),
       setInput: (v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null) => {
         input.forced = v;

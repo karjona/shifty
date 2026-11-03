@@ -49,6 +49,13 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - **Physics per sport.** Grounded means each sport has its own model: water and buoyancy (jetski), edge carving (snow), board flip physics (skate), suspension and traction (bike).
 - **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2.
 
+### Jetski (summer)
+
+- **Course:** an oval in the bay around a breakwater; buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. Rooms loop warm-up → countdown → race → results.
+- **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
+- **One speed meter, passive:** clean buoy passes and landed tricks fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
+- **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail; land clean and you get a short speed boost.
+
 ### Customization
 
 Character type, body, name, clothes... (Seasonal outfits fit the season concept.)

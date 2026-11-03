@@ -3,25 +3,47 @@
 //! human's. The function is deterministic, so clients can predict bots
 //! exactly by running it too.
 
+use crate::course::Keep;
 use crate::input::Input;
-use crate::math::{angle_diff, atan2, clamp, cos, sin};
+use crate::math::{angle_diff, atan2, clamp};
 use crate::world::World;
 
-/// Bots lap a circle around the arena centre, each on its own radius.
+/// Bots follow the course, swing out to pass each buoy on its correct side,
+/// and pull back on some crests to pop.
 pub fn bot_input(world: &World, slot: usize) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
     };
-    let radius = 40.0 + (slot % 4) as f32 * 7.0;
-    // Angle around the centre, then aim a bit further along the circle.
-    let around = atan2(r.pos.x, r.pos.z);
-    let target_angle = around + 0.45;
-    let tx = sin(target_angle) * radius;
-    let tz = cos(target_angle) * radius;
-    let desired_yaw = atan2(tx - r.pos.x, tz - r.pos.z);
-    let diff = angle_diff(r.yaw, desired_yaw);
+    let course = world.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+
+    // Each bot has its own lane, pace and appetite for air.
+    let lane = ((slot % 4) as f32 - 1.5) * 2.5;
+    let pace = 0.9 + (slot % 3) as f32 * 0.05;
+    let margin = 2.5 + (slot % 3) as f32;
+
+    let mut target_offset = lane;
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    if gate >= 1 {
+        let b = &course.buoys[gate - 1];
+        if course.delta_s(s, b.s) < 70.0 {
+            target_offset = match b.keep {
+                Keep::Right => b.offset - margin,
+                Keep::Left => b.offset + margin,
+            };
+        }
+    }
+    let look = 12.0 + r.speed() * 0.6;
+    let (tx, tz) = course.centerline(s + look).at_offset(target_offset);
+    let desired = atan2(tx - r.pos.x, tz - r.pos.z);
     // Positive steer turns right, which lowers yaw.
-    let steer = clamp(-diff * 2.0, -1.0, 1.0);
-    let throttle = 0.7 + (slot % 3) as f32 * 0.1;
-    Input::from_analog(if r.grounded { steer } else { 0.0 }, throttle, 0.0, 0)
+    let steer = clamp(-angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+
+    let pops = world.tick.wrapping_add(slot as u32 * 131) % 400 < 200;
+    let lean = if pops && r.grounded && r.vel.y > 1.5 {
+        -1.0
+    } else {
+        0.0
+    };
+    Input::from_analog(if r.grounded { steer } else { 0.0 }, pace, lean, 0)
 }

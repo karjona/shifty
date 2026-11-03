@@ -9,7 +9,7 @@
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
-import { MAX_WAVES, WaveUniforms } from "./waves.ts";
+import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
   abs,
@@ -36,9 +36,9 @@ import {
 
 const CHOP_WAVES = 14;
 const MAX_WAKE_RIDERS = 8;
-/** Wake texture covers this many metres, centred on the arena. */
-const WAKE_SPAN = 256;
-const WAKE_RES = 512;
+/** Wake texture covers this many metres, centred on the course. */
+const WAKE_SPAN = 512;
+const WAKE_RES = 1024;
 
 export interface WakeSource {
   x: number;
@@ -176,18 +176,19 @@ export class LabWater {
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
   private chop = new WaveUniforms(CHOP_WAVES);
+  private origin = uniform(new THREE.Vector2());
 
   constructor(size: number, segments: number, sky: THREE.Color) {
     const t = this.time;
-    const { swells, chop } = this;
+    const { swells, chop, origin } = this;
     const wakeTex = this.wake.output;
 
     const displaced = Fn(() => {
-      const p = positionLocal;
+      const p = positionLocal.add(vec3(origin.x, 0, origin.y));
       const swell = swells.sum(p, t);
       const ripple = chop.sum(p, t);
       normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
-      return p.add(vec3(0, swell.h.add(ripple.h), 0));
+      return positionLocal.add(vec3(0, swell.h.add(ripple.h), 0));
     });
 
     const wakeAt = Fn(() => {
@@ -199,10 +200,10 @@ export class LabWater {
       const deep = vec3(0.02, 0.24, 0.36);
       const shallow = vec3(0.1, 0.56, 0.62);
       const h = positionWorld.y;
-      let c: THREE.Node<"vec3"> = mix(deep, shallow, smoothstep(-0.5, 0.6, h));
+      let c: THREE.Node<"vec3"> = mix(deep, shallow, smoothstep(-0.9, 1.3, h));
       // Crest foam where swell + chop pile up, and wake foam behind riders,
       // broken into streaks so it reads as churned water, not paint.
-      const crest = smoothstep(0.42, 0.62, h).mul(0.45);
+      const crest = smoothstep(1.15, 1.6, h).mul(0.4);
       const p = positionWorld.xz;
       const streaks = sin(p.x.mul(2.3).add(p.y.mul(0.7)).add(t.mul(1.3)))
         .mul(sin(p.y.mul(2.9).sub(p.x.mul(0.6)).sub(t.mul(0.9))))
@@ -222,14 +223,20 @@ export class LabWater {
       return skyColour.mul(fres);
     });
 
-    const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-    geo.rotateX(-Math.PI / 2);
+    const geo = waterGrid(size, segments);
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0 });
     mat.positionNode = displaced();
     mat.colorNode = colour();
     mat.emissiveNode = reflection();
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false;
+  }
+
+  /** Move the grid's centre to world `(x, z)`. */
+  follow(x: number, z: number): void {
+    this.origin.value.set(x, z);
+    this.mesh.position.set(x, 0, z);
   }
 
   setWaves(params: Float32Array, seed: number): void {

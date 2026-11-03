@@ -1,8 +1,9 @@
 // Rendering: Three.js WebGPURenderer (falls back to WebGL2 automatically)
 // with TSL node materials. Riders are drawn as boxes.
 import * as THREE from "three/webgpu";
+import { CourseView, type CourseData } from "./course.ts";
 import { LabWater, type WakeSource } from "./water.ts";
-import { MAX_WAVES, WAVE_FIELDS, WaveUniforms, waveHeight } from "./waves.ts";
+import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
   fract,
@@ -17,7 +18,9 @@ import {
   vec3,
 } from "three/tsl";
 
-const ARENA_HALF = 120;
+/** The water grid follows the camera and reaches across the whole bay. */
+const WATER_SIZE = 1400;
+const WATER_SEGMENTS = 300;
 const DT = 1 / 60;
 const BASE_FOV = 62;
 
@@ -52,7 +55,10 @@ export class World {
   private swells = new WaveUniforms(MAX_WAVES);
   private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
   private riders = new Map<number, { mesh: THREE.Group; label: HTMLDivElement }>();
-  private buoys: THREE.Mesh[] = [];
+  private course: CourseView | null = null;
+  private water: THREE.Mesh | null = null;
+  /** World xz of the water grid's centre (it follows the camera). */
+  private waterOrigin = uniform(new THREE.Vector2());
   private camPos = new THREE.Vector3(0, 8, -14);
   private camLook = new THREE.Vector3();
   /** Smoothed chase state: heading followed, rider height, airborne blend. */
@@ -74,7 +80,7 @@ export class World {
 
     const sky = new THREE.Color(0xa8d8f0);
     this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 60, 320);
+    this.scene.fog = new THREE.Fog(sky, 90, 480);
     this.scene.add(new THREE.HemisphereLight(0xfff4e0, 0x2a6f8f, 1.2));
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
     this.sun.castShadow = true;
@@ -83,12 +89,11 @@ export class World {
     this.scene.add(this.sun, this.sun.target);
 
     if (water === "lab") {
-      this.lab = new LabWater(ARENA_HALF * 2 + 400, 400, sky);
+      this.lab = new LabWater(WATER_SIZE, WATER_SEGMENTS, sky);
       this.scene.add(this.lab.mesh);
     } else {
       this.buildWater();
     }
-    this.buildBuoys();
     addEventListener("resize", () => this.resize());
     this.resize();
   }
@@ -125,10 +130,11 @@ export class World {
   private buildWater(): void {
     const t = this.time;
     const swells = this.swells;
+    const origin = this.waterOrigin;
     // Displace vertices with the sim's swell formula; analytic normals.
     const displaced = Fn(() => {
       const p = positionLocal;
-      const w = swells.sum(p, t);
+      const w = swells.sum(p.add(vec3(origin.x, 0, origin.y)), t);
       normalLocal.assign(vec3(w.dx.negate(), 1, w.dz.negate()).normalize());
       return p.add(vec3(0, w.h, 0));
     });
@@ -141,34 +147,29 @@ export class World {
       const gz = step(0.965, fract(positionWorld.z.div(4)));
       return mix(base, vec3(0.85, 0.95, 1.0), max(gx, gz).mul(0.12));
     });
-    const geo = new THREE.PlaneGeometry(ARENA_HALF * 2 + 400, ARENA_HALF * 2 + 400, 320, 320);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.22, metalness: 0.0 });
+    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.38, metalness: 0.0 });
     mat.positionNode = displaced();
     mat.colorNode = colour();
-    const water = new THREE.Mesh(geo, mat);
+    const water = new THREE.Mesh(waterGrid(WATER_SIZE, WATER_SEGMENTS), mat);
     water.receiveShadow = true;
+    water.frustumCulled = false;
     this.scene.add(water);
+    this.water = water;
   }
 
-  private buildBuoys(): void {
-    const geo = new THREE.CylinderGeometry(0.35, 0.45, 1.2, 10);
-    const edge = new THREE.MeshStandardNodeMaterial({ color: 0xff7a1a, roughness: 0.6 });
-    const inner = new THREE.MeshStandardNodeMaterial({ color: 0xf5f5f0, roughness: 0.6 });
-    const add = (x: number, z: number, mat: THREE.Material) => {
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(x, 0, z);
-      m.castShadow = true;
-      this.scene.add(m);
-      this.buoys.push(m);
-    };
-    for (let s = -ARENA_HALF; s <= ARENA_HALF; s += 12) {
-      add(s, -ARENA_HALF, edge);
-      add(s, ARENA_HALF, edge);
-      add(-ARENA_HALF, s, edge);
-      add(ARENA_HALF, s, edge);
-    }
-    for (let x = -90; x <= 90; x += 30) for (let z = -90; z <= 90; z += 30) if (x !== 0 || z !== 0) add(x, z, inner);
+  /** Centre the water grid near what the camera looks at, in fixed steps. */
+  private followWater(): void {
+    const x = Math.round(this.camLook.x / WATER_SNAP) * WATER_SNAP;
+    const z = Math.round(this.camLook.z / WATER_SNAP) * WATER_SNAP;
+    this.waterOrigin.value.set(x, z);
+    this.water?.position.set(x, 0, z);
+    this.lab?.follow(x, z);
+  }
+
+  setCourse(data: CourseData): void {
+    if (this.course) this.scene.remove(this.course.group);
+    this.course = new CourseView(data);
+    this.scene.add(this.course.group);
   }
 
   private riderMesh(slot: number): { mesh: THREE.Group; label: HTMLDivElement } {
@@ -206,12 +207,10 @@ export class World {
   }
 
   /** Draw a frame. `tick` is the fractional sim tick the water should show. */
-  render(riders: RiderView[], names: Map<number, string>, tick: number, dt: number): void {
+  render(riders: RiderView[], names: Map<number, string>, tick: number, dt: number, nextBuoy: number | null): void {
     const t = tick * DT;
     this.time.value = t;
-    for (const b of this.buoys) {
-      b.position.y = waveHeight(this.waveParams, b.position.x, b.position.z, t) + 0.15;
-    }
+    this.course?.update(this.waveParams, t, nextBuoy);
 
     const seen = new Set<number>();
     let me: RiderView | undefined;
@@ -240,6 +239,7 @@ export class World {
     }
 
     if (me) this.followCamera(me, dt);
+    this.followWater();
     if (this.lab) {
       this.wakeSources.clear();
       for (const r of riders) this.wakeSources.set(r.slot, { x: r.x, z: r.z, speed: r.speed, grounded: r.grounded });

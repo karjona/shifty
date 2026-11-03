@@ -13,12 +13,13 @@
 use sim::input::Input;
 use sim::math::Vec3;
 use sim::quant;
+use sim::race::{Phase, Progress, Race};
 use sim::world::Rider;
-use sim::{MAX_RIDERS, SurfaceKind};
+use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -190,6 +191,7 @@ pub struct Welcome {
     pub tick_hz: u8,
     pub snapshot_interval: u8,
     pub max_riders: u8,
+    pub course: CourseId,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     /// Server tick when the welcome was sent.
@@ -241,6 +243,7 @@ pub struct Snapshot {
     /// Ms between receiving the echoed packet and sending this snapshot.
     pub echo_hold_ms: u16,
     pub events: Vec<Event>,
+    pub race: Race,
     pub riders: Vec<RiderState>,
 }
 
@@ -252,6 +255,7 @@ pub enum ServerMsg {
 }
 
 const FLAG_GROUNDED: u8 = 1;
+const FLAG_RACING: u8 = 2;
 
 fn write_input(w: &mut Writer, i: &Input) {
     w.i8(i.steer);
@@ -272,7 +276,15 @@ fn read_input(r: &mut Reader<'_>) -> Result<Input, DecodeError> {
 fn write_rider(w: &mut Writer, s: &RiderState) {
     let r = &s.rider;
     w.u8(s.slot);
-    w.u8(if r.grounded { FLAG_GROUNDED } else { 0 });
+    let p = &r.race;
+    let mut flags = 0;
+    if r.grounded {
+        flags |= FLAG_GROUNDED;
+    }
+    if p.racing {
+        flags |= FLAG_RACING;
+    }
+    w.u8(flags);
     w.i32(quant::pos_to_wire(r.pos.x));
     w.i32(quant::pos_to_wire(r.pos.y));
     w.i32(quant::pos_to_wire(r.pos.z));
@@ -287,6 +299,11 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.i16(quant::rate_to_wire(r.roll_rate));
     w.u16(r.state_ticks);
     write_input(w, &r.last_input);
+    w.u8(p.next_gate);
+    w.u8(p.lap);
+    w.u8(p.meter);
+    w.u8(p.misses);
+    w.u32(p.finish_ticks);
 }
 
 fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
@@ -313,6 +330,14 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
     let roll_rate = quant::rate_from_wire(r.i16()?);
     let state_ticks = r.u16()?;
     let last_input = read_input(r)?;
+    let race = Progress {
+        racing: flags & FLAG_RACING != 0,
+        next_gate: r.u8()?,
+        lap: r.u8()?,
+        meter: r.u8()?,
+        misses: r.u8()?,
+        finish_ticks: r.u32()?,
+    };
     Ok(RiderState {
         slot,
         rider: Rider {
@@ -327,6 +352,7 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
             grounded: flags & FLAG_GROUNDED != 0,
             state_ticks,
             last_input,
+            race,
         },
     })
 }
@@ -388,6 +414,7 @@ impl ServerMsg {
                 w.u8(m.tick_hz);
                 w.u8(m.snapshot_interval);
                 w.u8(m.max_riders);
+                w.u8(m.course as u8);
                 w.u8(m.surface_kind as u8);
                 w.u32(m.surface_seed);
                 w.u32(m.server_tick);
@@ -408,6 +435,8 @@ impl ServerMsg {
                 for e in &s.events {
                     write_event(&mut w, e);
                 }
+                w.u8(s.race.phase as u8);
+                w.u32(s.race.phase_tick);
                 w.u8(s.riders.len() as u8);
                 for rs in &s.riders {
                     write_rider(&mut w, rs);
@@ -426,6 +455,7 @@ impl ServerMsg {
                 let tick_hz = r.u8()?;
                 let snapshot_interval = r.u8()?;
                 let max_riders = r.u8()?;
+                let course = CourseId::from_u8(r.u8()?).ok_or(DecodeError::Invalid("course"))?;
                 let surface_kind =
                     SurfaceKind::from_u8(r.u8()?).ok_or(DecodeError::Invalid("surface kind"))?;
                 let surface_seed = r.u32()?;
@@ -440,6 +470,7 @@ impl ServerMsg {
                     tick_hz,
                     snapshot_interval,
                     max_riders,
+                    course,
                     surface_kind,
                     surface_seed,
                     server_tick,
@@ -460,6 +491,10 @@ impl ServerMsg {
                 let events = (0..n_events)
                     .map(|_| read_event(&mut r))
                     .collect::<Result<Vec<_>, _>>()?;
+                let race = Race {
+                    phase: Phase::from_u8(r.u8()?).ok_or(DecodeError::Invalid("race phase"))?,
+                    phase_tick: r.u32()?,
+                };
                 let n_riders = r.u8()? as usize;
                 if n_riders > MAX_RIDERS {
                     return Err(DecodeError::Invalid("too many riders"));
@@ -474,6 +509,7 @@ impl ServerMsg {
                     echo_client_time,
                     echo_hold_ms,
                     events,
+                    race,
                     riders,
                 }))
             }
