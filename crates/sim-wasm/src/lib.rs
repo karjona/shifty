@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 
 /// Floats per rider in the render buffer: `[slot, x, y, z, yaw, pitch, roll,
 /// speed, grounded, is_me, is_bot, vx, vy, vz, bailing, charge, grab, lean,
-/// steer, _]`.
+/// steer, wobble]`.
 pub const RENDER_STRIDE: usize = 20;
 /// Layout of the stats buffer (f64).
 pub const STATS_FIELDS: [&str; 17] = [
@@ -38,8 +38,9 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 18] = [
+pub const RACE_FIELDS: [&str; 19] = [
     "phase",
+    "phaseStart",
     "phaseTicks",
     "phaseLength",
     "laps",
@@ -132,7 +133,7 @@ impl WasmClient {
                 f32::from(r.grab),
                 r.lean,
                 r.steer,
-                0.0,
+                r.wobble,
             ]);
         }
         riders.len()
@@ -248,6 +249,7 @@ impl WasmClient {
         });
         let v = [
             f64::from(race.phase as u8),
+            f64::from(race.phase_tick),
             f64::from(race.elapsed(world.tick)),
             f64::from(race.phase.duration().unwrap_or(0)),
             f64::from(world.course().laps),
@@ -295,7 +297,8 @@ impl WasmClient {
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
     /// `finish` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
-    /// `grab`, `grabTicks`, `points`, `meter`) or `bail`.
+    /// `grab`, `grabTicks`, `points`, `sketchy`), `sketchy` (a plain jump
+    /// landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
     pub fn take_events_json(&mut self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -315,7 +318,7 @@ impl WasmClient {
                 EventKind::Finish { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
                 }
-                EventKind::Trick { trick: t, meter } => json!({
+                EventKind::Trick { trick: t, sketchy } => json!({
                     "tick": e.tick,
                     "slot": e.slot,
                     "kind": "trick",
@@ -325,8 +328,9 @@ impl WasmClient {
                     "grab": t.grab,
                     "grabTicks": t.grab_ticks,
                     "points": t.points,
-                    "meter": meter,
+                    "sketchy": sketchy,
                 }),
+                EventKind::Sketchy => json!({ "tick": e.tick, "slot": e.slot, "kind": "sketchy" }),
                 EventKind::Bail => json!({ "tick": e.tick, "slot": e.slot, "kind": "bail" }),
             })
             .collect();

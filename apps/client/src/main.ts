@@ -143,7 +143,8 @@ async function main(): Promise<void> {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     let i = input.read(dt);
-    if (autopilot && client.phase() === 1) {
+    // Test hooks that force the input win over the autopilot.
+    if (autopilot && client.phase() === 1 && !input.forced) {
       const [steer = 0, throttle = 0, lean = 0, buttons = 0] = client.autoInput();
       i = { steer, throttle, lean, buttons };
     }
@@ -186,6 +187,7 @@ async function main(): Promise<void> {
         grab: buf[o + 16]!,
         lean: buf[o + 17]!,
         steer: buf[o + 18]!,
+        wobble: buf[o + 19]!,
       });
     }
     return out;
@@ -197,6 +199,7 @@ async function main(): Promise<void> {
     const f = (key: string) => view[raceKeys.indexOf(key)] ?? 0;
     return {
       phase: f("phase"),
+      phaseStart: f("phaseStart"),
       phaseTicks: f("phaseTicks"),
       phaseLength: f("phaseLength"),
       laps: f("laps"),
@@ -248,7 +251,7 @@ async function main(): Promise<void> {
             heights: (points) => client.heightsAt(points),
           }),
         );
-        world.setSunOffset(-35, 70, -30);
+        world.setSunOffset(-30, 35, 60);
         minimap = new RunMap(ui, course.run);
       } else {
         world.setEnvironment(

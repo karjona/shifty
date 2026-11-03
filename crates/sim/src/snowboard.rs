@@ -20,7 +20,9 @@
 //! rider finishes the rotation toward the nearest way to land. A landing is
 //! judged against the snow: the board along the direction of travel
 //! (forward or switch), flat on the slope, and not still grabbing, or the
-//! rider falls.
+//! rider falls. Between clean and a fall is sketchy: a little crooked, or
+//! slammed into the snow, and the rider loses speed and wobbles for a
+//! moment (a weaker edge, no loading a jump).
 //!
 //! Units are per unit of mass: forces are accelerations.
 
@@ -105,6 +107,17 @@ pub mod tuning {
     /// Hitting the snow faster than this (into it, m/s) is a fall. Below
     /// it, a flat landing only costs the speed that went into the snow.
     pub const HARD_LANDING: f32 = 28.0;
+    /// Landing more crooked than this (but not enough to fall), or hitting
+    /// the snow harder than this, is sketchy.
+    pub const CLEAN_HEADING: f32 = 0.25;
+    pub const CLEAN_PITCH: f32 = 0.3;
+    pub const CLEAN_ROLL: f32 = 0.8;
+    pub const SKETCHY_IMPACT: f32 = 19.0;
+    /// A sketchy landing keeps this much speed, and wobbles this long.
+    pub const SKETCHY_SPEED: f32 = 0.82;
+    pub const WOBBLE_TICKS: u8 = 36;
+    /// Wobbling, the edge holds this much of its grip.
+    pub const WOBBLE_GRIP: f32 = 0.5;
     /// Hops shorter than this are never judged.
     pub const MIN_JUDGED_AIR_TICKS: u16 = 10;
     /// A grab held this long counts as a trick.
@@ -183,6 +196,7 @@ pub fn fall(r: &mut Rider) {
     r.charge = 0;
     r.grab = 0;
     r.grab_ticks = 0;
+    r.wobble = 0;
 }
 
 /// On the start grid: standing still on the snow at `spot`.
@@ -196,6 +210,7 @@ pub fn hold(r: &mut Rider, spot: Frame, run: &Run) {
     r.pitch_rate = 0.0;
     r.roll_rate = 0.0;
     r.grounded = true;
+    r.wobble = 0;
 }
 
 /// Advance one rider one tick on the snow (or above it). Returns how a jump
@@ -224,6 +239,8 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
     let steer = input.steer_f();
     let lean = input.lean_f();
     let bailing = r.bailing();
+    let steady = if r.wobble > 0 { WOBBLE_GRIP } else { 1.0 };
+    r.wobble = r.wobble.saturating_sub(1);
     let (h, n) = run.sample(r.pos.x, r.pos.z);
     r.pos.y = h;
     let mut v = r.vel - n * r.vel.dot(n);
@@ -245,7 +262,7 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
     } else {
         -downhill.dot(right)
     };
-    let grip = CARVE_GRIP * (1.0 - TUCK_TURN_LOSS * tuck) + inward.max(0.0);
+    let grip = CARVE_GRIP * steady * (1.0 - TUCK_TURN_LOSS * tuck) + inward.max(0.0);
     let cap = (grip / speed.max(1.0)).min(MAX_TURN_RATE) * (1.0 + SKID_TURN * brake);
     let target = if bailing { 0.0 } else { -steer * cap };
     r.yaw_rate += (target - r.yaw_rate) * clamp(TURN_RESPONSE * DT, 0.0, 1.0);
@@ -279,7 +296,7 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
         let along = v.dot(f);
         let lat = v.dot(right);
         let sp = v.length();
-        let grip = clamp(GRIP * (1.0 - 0.6 * brake) * DT, 0.0, 1.0);
+        let grip = clamp(GRIP * steady * (1.0 - 0.6 * brake) * DT, 0.0, 1.0);
         let lat_after = lat * (1.0 - grip);
         let carving = if sp > 1e-3 {
             crate::math::smoothstep(0.5, 0.2, lat.abs() / sp)
@@ -297,7 +314,7 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
 
     // The jump: hold to crouch, let go to pop.
     let mut pop = 0.0;
-    if !bailing {
+    if !bailing && steady == 1.0 {
         if input.pressed(buttons::JUMP) {
             r.charge = (r.charge + 1).min(CHARGE_TICKS);
         } else if r.charge > 0 {
@@ -367,6 +384,7 @@ fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
     let steer = input.steer_f();
     let lean = input.lean_f();
     let bailing = r.bailing();
+    r.wobble = r.wobble.saturating_sub(1);
     let speed_h = r.speed();
     let travel = if speed_h > 3.0 {
         atan2(r.vel.x, r.vel.z)
@@ -478,6 +496,7 @@ fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
 }
 
 /// Judges a touchdown, scores it, and puts the board flat on the snow.
+/// Returns `None` for a plain jump landed clean.
 fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
     let spin = -(clamp(round(r.air_spin / PI), -18.0, 18.0) as i8);
     let (snow_pitch, snow_roll) = snow_attitude(r.yaw, n);
@@ -522,17 +541,25 @@ fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
     } else {
         0
     };
-    if spin == 0 && flip == 0 && grab_ticks == 0 {
-        return None;
-    }
-    Some(Landing::Clean(Trick {
+    let trick = (spin != 0 || flip != 0 || grab_ticks != 0).then(|| Trick {
         spin,
         flip,
         roll: 0,
         grab: if grab_ticks > 0 { grab } else { 0 },
         grab_ticks,
         points: points(spin, flip, grab_ticks),
-    }))
+    });
+    if heading_err > CLEAN_HEADING
+        || pitch_err.abs() > CLEAN_PITCH
+        || roll_err.abs() > CLEAN_ROLL
+        || impact > SKETCHY_IMPACT
+    {
+        r.vel = r.vel * SKETCHY_SPEED;
+        r.yaw_rate *= 0.5;
+        r.wobble = WOBBLE_TICKS;
+        return Some(Landing::Sketchy(trick));
+    }
+    trick.map(Landing::Clean)
 }
 
 fn settle(r: &mut Rider, grounded: bool) {
@@ -785,7 +812,13 @@ mod tests {
             }
         });
         let t = tricks(&ev);
-        let [EventKind::Trick { trick, meter: 0 }] = t[..] else {
+        let [
+            EventKind::Trick {
+                trick,
+                sketchy: false,
+            },
+        ] = t[..]
+        else {
             panic!("{t:?}");
         };
         assert_eq!((trick.spin.abs(), trick.flip), (2, 0));
@@ -828,6 +861,113 @@ mod tests {
         });
         assert_eq!(tricks(&ev), [EventKind::Bail]);
         assert!(r.bailing() || r.speed() < 15.0);
+    }
+
+    #[test]
+    fn a_crooked_landing_is_sketchy_and_wobbles() {
+        // A 180 that carries on a little too far: held there, not finished.
+        let (ev, r) = table_jump(|r| {
+            let steer = if r.air_spin.abs() < PI - 0.45 {
+                1.0
+            } else {
+                0.0
+            };
+            Input::from_analog(steer, 0.0, 0.0, buttons::TRICK)
+        });
+        let t = tricks(&ev);
+        let [
+            EventKind::Trick {
+                trick,
+                sketchy: true,
+            },
+        ] = t[..]
+        else {
+            panic!("{t:?}");
+        };
+        assert_eq!(trick.spin.abs(), 1);
+        assert_eq!(trick.points, points(1, 0, 0) / 2, "half points");
+        assert!(!r.bailing());
+        // The same 180, finished: clean, and faster away from the landing.
+        let (ev, clean) = table_jump(|r| {
+            if r.air_spin.abs() < 0.35 * TAU {
+                Input::from_analog(-1.0, 0.0, 0.0, buttons::TRICK)
+            } else {
+                Input::default()
+            }
+        });
+        assert!(
+            matches!(tricks(&ev)[..], [EventKind::Trick { sketchy: false, .. }]),
+            "{ev:?}"
+        );
+        assert!(
+            r.speed() < clean.speed() - 1.0,
+            "{} vs {}",
+            r.speed(),
+            clean.speed()
+        );
+    }
+
+    #[test]
+    fn landings_are_clean_sketchy_or_a_fall() {
+        let n = Vec3::new(0.0, 1.0, 0.0);
+        let judged = |yaw_off: f32, pitch: f32, impact: f32| {
+            let mut r = Rider::at(
+                Frame {
+                    x: 0.0,
+                    z: 0.0,
+                    yaw: 0.0,
+                },
+                0.0,
+            );
+            r.grounded = false;
+            r.state_ticks = 60;
+            r.vel = Vec3::new(0.0, 0.0, 20.0);
+            r.yaw = wrap_angle(yaw_off);
+            r.pitch = pitch;
+            let landing = judge(&mut r, Input::default(), n, impact);
+            (landing, r)
+        };
+        assert_eq!(judged(0.1, 0.1, 10.0).0, None);
+        let (landing, r) = judged(0.4, 0.0, 10.0);
+        assert_eq!(landing, Some(Landing::Sketchy(None)));
+        assert!(r.wobble > 0 && r.speed() < 20.0 * SKETCHY_SPEED + 0.01);
+        assert_eq!(judged(0.0, 0.5, 10.0).0, Some(Landing::Sketchy(None)));
+        assert_eq!(judged(0.0, 0.0, 22.0).0, Some(Landing::Sketchy(None)));
+        assert_eq!(
+            judged(PI + 0.3, 0.0, 10.0).0,
+            Some(Landing::Sketchy(None)),
+            "switch"
+        );
+        assert_eq!(judged(0.8, 0.0, 10.0).0, Some(Landing::Bail));
+        assert_eq!(judged(0.0, 0.0, 30.0).0, Some(Landing::Bail));
+    }
+
+    #[test]
+    fn a_wobble_weakens_the_edge_for_a_moment() {
+        let mut carved = [0.0; 2];
+        for (i, wobble) in [0, WOBBLE_TICKS].into_iter().enumerate() {
+            let mut w = world();
+            place(&mut w, 0, 140.0, 0.0, 20.0);
+            let mut r = w.riders[0].unwrap();
+            r.wobble = wobble;
+            w.riders[0] = Some(r);
+            let yaw0 = r.yaw;
+            // Loading the jump does nothing while wobbling.
+            run(&mut w, 20, |_| {
+                Input::from_analog(1.0, 0.0, 0.0, buttons::JUMP)
+            });
+            let r = w.riders[0].unwrap();
+            carved[i] = angle_diff(yaw0, r.yaw).abs();
+            assert_eq!(r.charge == 0, wobble > 0, "{r:?}");
+        }
+        assert!(carved[1] < carved[0] * 0.75, "{carved:?}");
+        let mut w = world();
+        place(&mut w, 0, 140.0, 0.0, 20.0);
+        let mut r = w.riders[0].unwrap();
+        r.wobble = WOBBLE_TICKS;
+        w.riders[0] = Some(r);
+        run(&mut w, u32::from(WOBBLE_TICKS) + 1, |_| Input::default());
+        assert_eq!(w.riders[0].unwrap().wobble, 0);
     }
 
     #[test]

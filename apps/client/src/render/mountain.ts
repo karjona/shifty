@@ -1,18 +1,25 @@
 // Winter: the mountain. The snow is drawn from the sim's own heights (a
 // ribbon of vertices along the run, fine where the riding is, and a coarse
 // grid for the mountain around it), so the slope you see is the slope you
-// ride. Around it: pines crowding the run's edges, red netting fences,
+// ride. The snow shows its shape: a low sun, shade baked into hollows, blue
+// dye lines on lips and knuckles, and old board tracks streaking down the
+// run. Around it: pines crowding the run's edges, red netting fences,
 // checkpoint flags, the start and finish arches, the chairlift, rocks, a
-// lodge by the cliff drop, peaks in the haze, falling snow, and powder
-// thrown up by the boards.
+// lodge by the cliff drop, peaks in the haze, falling snow, powder thrown up
+// by the boards, and the tracks they carve.
 import * as THREE from "three/webgpu";
 import {
   Fn,
   abs,
+  attribute,
   cameraPosition,
+  clamp,
   float,
   floor,
+  fract,
+  fwidth,
   hash,
+  max,
   mix,
   mx_noise_float,
   normalWorld,
@@ -20,8 +27,10 @@ import {
   sin,
   smoothstep,
   uv,
+  vec2,
   vec3,
 } from "three/tsl";
+import { CarveTrails } from "./trails.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
 import { ParticlePool } from "./spray.ts";
@@ -90,16 +99,20 @@ export interface Terrain {
   heights(points: Float32Array): Float32Array;
 }
 
-/** Close and low behind the rider, 1080-style: the rider fills about half the screen's height. */
+/**
+ * Close and low behind the rider, 1080-style: the rider fills about half
+ * the screen's height, and the view tips down the slope, so the snow
+ * rushing past fills the screen to about a third from the top.
+ */
 const CAMERA: CameraTuning = {
   fov: 52,
   fovSpeed: 6,
   fovAir: 4,
   back: 2.75,
   backPerSpeed: 0.006,
-  up: 1.5,
-  lookAhead: 8,
-  lookUp: 0.6,
+  up: 1.4,
+  lookAhead: 6,
+  lookUp: -0.55,
   lookFrom: "ground",
   turn: 4.5,
   reverseLooksAhead: false,
@@ -108,7 +121,8 @@ const CAMERA: CameraTuning = {
   // the way down: the rider drops in the frame.
   heightRising: 10,
   heightInAir: 5,
-  clearance: 0.7,
+  clearance: 0.8,
+  floorFollow: 6,
   airFrom: 1.2,
   airSpan: 5,
   airBack: 0.5,
@@ -125,7 +139,14 @@ const GRID_SINK = 0.3;
 /** Coarse vertices this close to the run hide under the ribbon. */
 const GRID_HIDE = RIBBON_HALF - GRID_STEP;
 const ROWS_PER_CHUNK = 96;
-const SKY = 0xc4d3e8;
+const SKY = 0xc9d4e4;
+/** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
+const DYE_BREAK = 0.16;
+/** How far back up the approach from the crest the dye reaches (m). */
+const DYE_WIDTH = 0.6;
+/** How far either side (m) the curvature and the local pitch are measured over, and the pitch around it. */
+const CURVE_SPAN = 1.5;
+const PITCH_SPAN = 9;
 
 /** Deterministic noise in [0, 1). */
 function rng(seed: number): () => number {
@@ -151,44 +172,103 @@ function ribbonOffsets(): Float32Array {
   return Float32Array.from([...side.toReversed().map((o) => -o), 0, ...side]);
 }
 
-/** Rows along the run: every metre, every half metre across the tables (sharp lips). */
+/** Rows along the run: every metre, every half metre across the tables and wherever the pitch breaks sharply (lips, the cliff). */
 function ribbonRows(run: RunData): Float32Array {
+  const breaks: number[] = [];
+  const p = run.path;
+  for (let i = 1; i < p.length - 1; i++) {
+    const before = (p[i]!.y - p[i - 1]!.y) / (p[i]!.s - p[i - 1]!.s);
+    const after = (p[i + 1]!.y - p[i]!.y) / (p[i + 1]!.s - p[i]!.s);
+    if (Math.abs(after - before) > 0.3) breaks.push(p[i]!.s);
+  }
+  const fine = (s: number) =>
+    run.tables.some((t) => s > t.s - 2 && s < t.lip + 12) || breaks.some((b) => Math.abs(s - b) < 8);
   const rows: number[] = [];
-  const fine = (s: number) => run.tables.some((t) => s > t.s - 2 && s < t.lip + 12);
   for (let s = -80; s <= run.length + 60; s += fine(s) ? 0.5 : 1) rows.push(s);
   return Float32Array.from(rows);
 }
 
-/** The snow: white, blue in the shade, with groomed corduroy on the run, glitter, and rock where it's steep. */
-function snowMaterial(groomed: boolean): THREE.MeshStandardNodeMaterial {
+/**
+ * The snow: white in the open, blue-grey in drifts, with grain close up and
+ * rock where it's steep. On the run (`ribbon`, with `uv` = arc length and
+ * offset): old board tracks streaking down it, corduroy between them, shade
+ * baked into faces that rise toward the rider and into hollows (`shade`), so
+ * rollers and kickers read even in flat light, and blue dye on lips and
+ * knuckles (`dye`).
+ * Fine detail fades out where it would be smaller than a pixel.
+ */
+function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
   mat.colorNode = Fn(() => {
     const p = positionWorld;
+    const near = smoothstep(90, 20, p.distance(cameraPosition));
     const drift = mx_noise_float(p.xz.mul(0.045)).mul(0.5).add(0.5);
-    const base = mix(vec3(0.86, 0.9, 0.97), vec3(0.97, 0.98, 1.0), drift);
-    let c = base;
-    if (groomed) {
+    const blotch = mx_noise_float(p.xz.mul(0.17)).mul(0.5).add(0.5);
+    let c = mix(vec3(0.74, 0.8, 0.92), vec3(0.9, 0.93, 0.98), drift).mul(blotch.mul(0.1).add(0.9));
+    c = c.mul(mx_noise_float(p.xz.mul(3.1)).mul(0.05).mul(near).add(1));
+    if (ribbon) {
+      const s = uv().x;
+      const o = uv().y;
+      // Metres per pixel across the run: lines thinner than that fade out.
+      const px = max(fwidth(o), 0.001);
+      // Old tracks: wandering lines down the run, in patches.
+      const layers = [
+        [2.3, 0.9, 0.11, 0.07],
+        [3.7, 1.6, 0.07, 0.1],
+        [5.3, 2.4, 0.045, 0.13],
+      ] as const;
+      const lines = layers.map(([spacing, amp, freq, width], k) => {
+        const wander = sin(s.mul(freq).add(k * 2.1))
+          .mul(amp)
+          .add(mx_noise_float(vec2(s.mul(0.02), o.mul(0.08).add(k * 7.3))).mul(amp * 1.5));
+        const u = o.add(wander).div(spacing);
+        const d = abs(fract(u).sub(0.5)).mul(spacing);
+        // Each track its own depth: some fresh, some nearly filled in.
+        const depth = hash(floor(u).add(k * 31))
+          .mul(0.7)
+          .add(0.3);
+        const line = smoothstep(px.add(width), max(float(width).sub(px), 0), d)
+          .mul(clamp(float(width).div(px), 0, 1))
+          .mul(depth);
+        const patch = smoothstep(-0.15, 0.3, mx_noise_float(vec2(s.mul(0.012), o.mul(0.04).add(k * 3.7))));
+        return line.mul(patch);
+      });
+      const tracked = max(lines[0]!, lines[1]!, lines[2]!);
+      c = mix(c, c.mul(vec3(0.74, 0.8, 0.93)), tracked.mul(0.75));
       // Corduroy: fine ridges along the run, on the groomed part only.
-      const offset = abs(uv().y);
-      const ridge = sin(uv().y.mul((Math.PI * 2) / 0.32))
+      const ridge = sin(o.mul((Math.PI * 2) / 0.32))
         .mul(0.5)
         .add(0.5);
-      const onRun = smoothstep(17, 13, offset);
-      c = c.mul(float(1).sub(ridge.mul(0.045).mul(onRun)));
+      const groomed = smoothstep(17, 13, abs(o)).mul(clamp(float(1).sub(px.div(0.12)), 0, 1));
+      c = c.mul(float(1).sub(ridge.mul(0.07).mul(groomed).mul(float(1).sub(tracked))));
+      // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
+      const shade = attribute("shade", "float");
+      c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
     }
     // Steep walls and cliffs show rock.
     const rock = smoothstep(0.62, 0.45, normalWorld.y);
     const rockColor = mix(vec3(0.33, 0.33, 0.36), vec3(0.45, 0.44, 0.45), drift);
-    return mix(c, rockColor, rock.mul(0.85));
+    c = mix(c, rockColor, rock.mul(0.85));
+    if (ribbon) {
+      // Dye lines, painted on top of everything.
+      const dye = smoothstep(0.35, 0.65, attribute("dye", "float"));
+      c = mix(c, vec3(0.03, 0.17, 0.75), dye.mul(0.85));
+    }
+    return c;
   })();
   // Glitter: a few cells of snow catch the light close up.
   mat.emissiveNode = Fn(() => {
-    const cell = floor(positionWorld.mul(9));
+    const cell = floor(positionWorld.mul(16));
     const g = hash(cell.x.add(cell.y.mul(57)).add(cell.z.mul(131)));
-    const near = smoothstep(28, 6, positionWorld.distance(cameraPosition));
-    return vec3(1, 1, 1).mul(smoothstep(0.996, 1.0, g).mul(near).mul(0.9));
+    const near = smoothstep(12, 3, positionWorld.distance(cameraPosition));
+    return vec3(1, 1, 1).mul(smoothstep(0.997, 1.0, g).mul(near).mul(0.35));
   })();
   return mat;
+}
+
+/** Second difference of heights `a`, `b`, `c`, spaced `h0` then `h1` apart: curvature (1/m), + = a hollow. */
+function bend(a: number, b: number, c: number, h0: number, h1: number): number {
+  return h0 > 0 && h1 > 0 ? (2 * ((c - b) / h1 - (b - a) / h0)) / (h0 + h1) : 0;
 }
 
 /** Colours a geometry per vertex (from its height and normal) and unindexes it. */
@@ -357,6 +437,7 @@ export class Mountain implements Environment {
     peak: 0.32,
     fadeIn: 5,
   });
+  private trails = new CarveTrails();
   private flakeCarry = 0;
   private emitters = new Map<number, Emitter>();
   private wind = { x: 0.6, z: -0.3 };
@@ -374,15 +455,15 @@ export class Mountain implements Environment {
     this.buildRocks();
     this.buildLodge();
     this.group.add(peakRange(this.sky, run.path[0]!.y, run.path.at(-1)!.y, run.path));
-    this.group.add(this.flakes.sprite, this.powder.sprite, this.mist.sprite);
+    this.group.add(this.trails.group, this.flakes.sprite, this.powder.sprite, this.mist.sprite);
   }
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     scene.background = this.sky;
-    scene.fog = new THREE.Fog(this.sky, 80, 520);
+    scene.fog = new THREE.Fog(this.sky, 45, 330);
     hemi.color.set(0xdfe9fb);
     hemi.groundColor.set(0x6f84b0);
-    hemi.intensity = 1.05;
+    hemi.intensity = 1.9;
     sun.color.set(0xfff1dd);
     sun.intensity = 3.1;
   }
@@ -440,6 +521,7 @@ export class Mountain implements Environment {
         normals.set([nrm.x, nrm.y, nrm.z], (r * cols + c) * 3);
       }
     }
+    const { shade, dye } = this.shapeOf(xyz, rows, offsets);
     const mat = snowMaterial(true);
     for (let start = 0; start < n - 1; start += ROWS_PER_CHUNK) {
       const end = Math.min(n - 1, start + ROWS_PER_CHUNK);
@@ -447,6 +529,8 @@ export class Mountain implements Environment {
       const pos = new Float32Array(count * 3);
       const nor = new Float32Array(count * 3);
       const uvs = new Float32Array(count * 2);
+      const shaded = shade.slice(start * cols, (end + 1) * cols);
+      const dyed = dye.slice(start * cols, (end + 1) * cols);
       for (let r = start; r <= end; r++) {
         for (let c = 0; c < cols; c++) {
           const src = (r * cols + c) * 3;
@@ -478,12 +562,85 @@ export class Mountain implements Environment {
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
       geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      geo.setAttribute("shade", new THREE.BufferAttribute(shaded, 1));
+      geo.setAttribute("dye", new THREE.BufferAttribute(dyed, 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
       mesh.receiveShadow = true;
       this.group.add(mesh);
     }
+  }
+
+  /**
+   * The snow's shape, per ribbon vertex: `shade` (+1 a face rising steeply
+   * toward a rider coming down, or a deep hollow; -1 a face falling away or
+   * a sharp crest), from the local pitch against the pitch around it and
+   * the curvature, and `dye` (1 on the sharpest crest of a lip, a knuckle or
+   * the cliff edge, inside the riding width).
+   */
+  private shapeOf(
+    xyz: Float32Array,
+    rows: Float32Array,
+    offsets: Float32Array,
+  ): { shade: Float32Array; dye: Float32Array } {
+    const n = rows.length;
+    const cols = offsets.length;
+    const y = (r: number, c: number) => xyz[(r * cols + c) * 3 + 1]!;
+    // Rows `span` metres either side of each row.
+    const around = (span: number) => {
+      const back = new Int32Array(n);
+      const ahead = new Int32Array(n);
+      for (let r = 0, b = 0, a = 0; r < n; r++) {
+        while (b + 1 < r && rows[b + 1]! <= rows[r]! - span) b++;
+        a = Math.max(a, r);
+        while (a < n - 1 && rows[a]! < rows[r]! + span) a++;
+        back[r] = Math.min(b, r);
+        ahead[r] = a;
+      }
+      return { back, ahead };
+    };
+    const near = around(CURVE_SPAN);
+    const wide = around(PITCH_SPAN);
+    const pitch = (r0: number, r1: number, c: number) =>
+      r1 > r0 ? (y(r1, c) - y(r0, c)) / (rows[r1]! - rows[r0]!) : 0;
+    const along = new Float32Array(n * cols);
+    const shade = new Float32Array(n * cols);
+    for (let r = 0; r < n; r++) {
+      const r0 = near.back[r]!;
+      const r1 = near.ahead[r]!;
+      for (let c = 0; c < cols; c++) {
+        const k = bend(y(r0, c), y(r, c), y(r1, c), rows[r]! - rows[r0]!, rows[r1]! - rows[r]!);
+        const c0 = Math.max(0, c - 2);
+        const c1 = Math.min(cols - 1, c + 2);
+        const across = bend(y(r, c0), y(r, c), y(r, c1), offsets[c]! - offsets[c0]!, offsets[c1]! - offsets[c]!);
+        const facing = pitch(r0, r1, c) - pitch(wide.back[r]!, wide.ahead[r]!, c);
+        along[r * cols + c] = k;
+        shade[r * cols + c] = Math.max(-1, Math.min(1, 3.5 * facing + 6 * k + 3 * across));
+      }
+    }
+    const dye = new Float32Array(n * cols);
+    for (let r = 2; r < n - 2; r++) {
+      const limit = this.limitAt(rows[r]!);
+      for (let c = 0; c < cols; c++) {
+        if (Math.abs(offsets[c]!) > limit) continue;
+        const k = along[r * cols + c]!;
+        if (k > -DYE_BREAK) continue;
+        let sharpest = true;
+        for (const d of [-2, -1, 1, 2]) if (along[(r + d) * cols + c]! < k) sharpest = false;
+        if (!sharpest) continue;
+        // The line runs from the crest back up the approach, where riders see it.
+        for (let b = r; b >= 0 && rows[r]! - rows[b]! <= DYE_WIDTH; b--) dye[b * cols + c] = 1;
+      }
+    }
+    return { shade, dye };
+  }
+
+  /** How far from the centre line riders can go, at arc length `s`. */
+  private limitAt(s: number): number {
+    const path = this.run.path;
+    const i = Math.round((s - path[0]!.s) / (path[1]!.s - path[0]!.s));
+    return path[Math.max(0, Math.min(path.length - 1, i))]!.limit;
   }
 
   /** The mountain beyond the ribbon: a coarse grid of the sim's heights, sunk a little (and well under the ribbon). */
@@ -854,6 +1011,7 @@ export class Mountain implements Environment {
       this.flakes.spawn(x, y, z, this.wind.x, -1.4 - r() * 0.8, this.wind.z, 7, 0.05 + r() * 0.05, 0.06 + r() * 0.05);
     }
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);
+    this.trails.update(f.riders, f.t);
     this.flakes.update(ground, f.dt, { x: this.wind.x, z: this.wind.z });
     this.powder.update(ground, f.dt);
     this.mist.update(() => -1e6, f.dt);

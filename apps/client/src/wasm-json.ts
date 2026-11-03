@@ -35,6 +35,7 @@ export function parseEvents(json: string): RaceEvent[] {
       kind !== "lap" &&
       kind !== "finish" &&
       kind !== "trick" &&
+      kind !== "sketchy" &&
       kind !== "bail"
     )
       continue;
@@ -53,6 +54,7 @@ export function parseEvents(json: string): RaceEvent[] {
       grab: num(o, "grab"),
       grabTicks: num(o, "grabTicks"),
       points: num(o, "points"),
+      sketchy: o.sketchy === true,
       index: num(o, "index"),
     });
   }

@@ -47,14 +47,16 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 - **Gamepad-first.** skate-style flick tricks need analog sticks. The Gamepad API works in all browsers. Keyboard must work, but second-class citizen.
 - **Physics per sport.** Grounded means each sport has its own model: water and buoyancy (jetski), edge carving (snow), board flip physics (skate), suspension and traction (bike).
+- **Tricks never make you faster**, in any sport: races are won on the line and the clock. Tricks score style points (what style earns is decided later, maybe customization), and a bail still costs you.
+- **Split times:** at every checkpoint (and the finish) the HUD shows your gap to the first rider through it, or your time if you are first.
 - **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2.
 
 ### Jetski (summer)
 
 - **Course:** an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. Rooms loop warm-up → countdown → race → results.
 - **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
-- **One speed meter, passive:** clean buoy passes and landed tricks fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
-- **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail; land clean and you get a short speed boost.
+- **One speed meter, passive:** clean buoy passes fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
+- **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail.
 
 ### Snowboard (winter)
 
@@ -62,8 +64,9 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - **The mountain is one height function in `crates/sim/src/mountain.rs`:** slope bands along Z, a valley that follows the run, noise; the run carved into it (a level bench, banked in turns, tables, rollers, a gully, berms where the slope falls away). The client draws the snow from those same heights, so what you see is what you ride.
 - **Gravity is the engine:** carve (the edge turns sideways speed into speed along the board; fast turns are wide), tuck for speed (stick up), sit back to skid and brake (stick down), skate when slow. The board flies wherever the snow falls away faster than gravity can follow (lips, knuckles, the cliff).
 - **Jump button:** hold to crouch and load, let go to pop (bigger the longer you loaded). Letting go at a lip adds to the lip's launch; a few ticks late still pops.
-- **Tricks only score points** (no speed meter, no landing boost): the trick button + stick spins (in 180s) and flips, the grab button grabs (the stick picks Indy, nose, tail, melon or method). Let go and the rider finishes toward the nearest way to land, forward or switch. Land along the direction of travel, flat on the slope and not still grabbing, or you fall. Trees, rocks and lift towers knock you down.
-- **Look:** 1080° Avalanche framing. The camera is close and low, the rider fills about half the screen's height, the horizon leans with the slope, and in the air the camera's height lags so the rider drops in the frame.
+- **Tricks only score points** (no speed meter): the trick button + stick spins (in 180s) and flips, the grab button grabs (the stick picks Indy, nose, tail, melon or method). Let go and the rider finishes toward the nearest way to land, forward or switch. Land along the direction of travel, flat on the slope and not still grabbing, or you fall. In between is **sketchy**: a little crooked, or slammed into the snow, and you lose some speed, wobble for a moment (weaker edge, no loading a jump) and the trick scores half. Trees, rocks and lift towers knock you down.
+- **Look:** 1080° Avalanche framing. The camera is close and low, the rider fills about half the screen's height, the view tips down the slope so the snow rushing past fills the screen to about a third from the top, the horizon leans with the slope, and in the air the camera's height lags so the rider drops in the frame.
+- **Snow you can read:** a low sun ahead of the riders, shade baked into faces that rise toward you and into hollows (so rollers and kickers show even in flat light), blue dye lines on lips, knuckles and the cliff edge, old tracks streaking down the run, and every board carves a fading track of its own. Fog closes in at a few hundred metres.
 
 ### Customization
 
