@@ -46,6 +46,14 @@ impl Vec3 {
     pub fn horizontal(self) -> Self {
         Self::new(self.x, 0.0, self.z)
     }
+
+    pub fn cross(self, o: Self) -> Self {
+        Self::new(
+            self.y * o.z - self.z * o.y,
+            self.z * o.x - self.x * o.z,
+            self.x * o.y - self.y * o.x,
+        )
+    }
 }
 
 impl Add for Vec3 {
@@ -108,6 +116,14 @@ pub fn round(x: f32) -> f32 {
     libm::roundf(x)
 }
 
+pub fn floor(x: f32) -> f32 {
+    libm::floorf(x)
+}
+
+pub fn atan(x: f32) -> f32 {
+    libm::atanf(x)
+}
+
 pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
     if x < lo {
         lo
@@ -116,6 +132,40 @@ pub fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
     } else {
         x
     }
+}
+
+/// Hermite ramp: 0 at `x <= e0`, 1 at `x >= e1`, smooth in between.
+/// `e0 > e1` gives the falling ramp.
+pub fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Smooth noise in `[-1, 1]` on a unit lattice (value noise with Hermite
+/// interpolation, so it is smooth to the first derivative).
+pub fn value_noise(x: f32, z: f32, seed: u32) -> f32 {
+    let fx = floor(x);
+    let fz = floor(z);
+    let (ix, iz) = (fx as i32, fz as i32);
+    let (tx, tz) = (x - fx, z - fz);
+    let (wx, wz) = (tx * tx * (3.0 - 2.0 * tx), tz * tz * (3.0 - 2.0 * tz));
+    let a = lattice(ix, iz, seed);
+    let b = lattice(ix + 1, iz, seed);
+    let c = lattice(ix, iz + 1, seed);
+    let d = lattice(ix + 1, iz + 1, seed);
+    let top = a + (b - a) * wx;
+    let bottom = c + (d - c) * wx;
+    top + (bottom - top) * wz
+}
+
+/// A pseudo-random value in `[-1, 1]` for a lattice point.
+fn lattice(ix: i32, iz: i32, seed: u32) -> f32 {
+    let mut h =
+        seed ^ (ix as u32).wrapping_mul(0x8DA6_B343) ^ (iz as u32).wrapping_mul(0xD816_3841);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5BD1_E995);
+    h ^= h >> 15;
+    (h >> 8) as f32 * (2.0 / 16_777_216.0) - 1.0
 }
 
 /// Wraps an angle to `[0, TAU)`.

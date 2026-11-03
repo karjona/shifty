@@ -88,7 +88,7 @@ impl Rooms {
         let handle = RoomHandle { tx };
         rooms.insert(claims.room.clone(), handle.clone());
         let config = RoomConfig::from_claims(claims);
-        info!(room = %config.id, bots = config.bots, surface = ?config.surface_kind, "room created");
+        info!(room = %config.id, course = ?config.course, bots = config.bots, surface = ?config.surface_kind, "room created");
         self.metrics.rooms.fetch_add(1, Ordering::Relaxed);
         let me = Arc::clone(self);
         tokio::spawn(async move {

@@ -1,6 +1,7 @@
 // Race HUD: phase banner (warm-up, countdown, results), lap / position /
-// time, the speed meter, and short popups for buoys, laps and the finish.
-// Plain DOM: the state comes from the predicted world every frame.
+// time, the speed meter (summer) or trick score (winter), and short popups
+// for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the state
+// comes from the predicted world every frame.
 
 export interface RaceView {
   phase: number;
@@ -18,20 +19,31 @@ export interface RaceView {
   misses: number;
   tickHz: number;
   wrongWay: boolean;
+  /** Trick points this race (winter). */
+  points: number;
+  /** Gates on the course (start, buoys or checkpoints, finish). */
+  gates: number;
+  /** Raced for laps (or one run down). */
+  looped: boolean;
 }
 
 export interface RaceEvent {
   tick: number;
   slot: number;
-  kind: "buoy" | "lap" | "finish" | "trick" | "bail";
+  kind: "buoy" | "checkpoint" | "lap" | "finish" | "trick" | "bail";
   buoy?: number;
   ok?: boolean;
   meter?: number;
   lap?: number;
   ticks?: number;
+  /** Half turns. */
   spin?: number;
   flip?: number;
   roll?: number;
+  grab?: number;
+  grabTicks?: number;
+  points?: number;
+  index?: number;
 }
 
 export interface StandingView {
@@ -41,6 +53,7 @@ export interface StandingView {
   finishTicks: number;
   misses: number;
   tricks: number;
+  points: number;
 }
 
 const WARMUP = 0;
@@ -57,12 +70,15 @@ export function ordinal(n: number): string {
 const TIMES = ["", "", "Double ", "Triple ", "Quad "];
 const times = (k: number) => TIMES[Math.min(Math.abs(k), 4)] ?? "";
 
-/** "Backflip 360", "Double barrel roll"... from signed rotation counts. */
-export function trickName(spin: number, flip: number, roll: number): string {
+const GRABS = ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"];
+
+/** "Backflip 360", "540 Melon", "Double barrel roll"... from signed rotation counts (spin in half turns) and a grab. */
+export function trickName(spin: number, flip: number, roll: number, grab = 0): string {
   const parts: string[] = [];
   if (flip !== 0) parts.push(`${times(flip)}${flip > 0 ? "backflip" : "frontflip"}`);
   if (roll !== 0) parts.push(`${times(roll)}barrel roll`);
-  if (spin !== 0) parts.push(String(Math.abs(spin) * 360));
+  if (spin !== 0) parts.push(String(Math.abs(spin) * 180));
+  if (grab > 0) parts.push(GRABS[grab] ?? "Grab");
   const name = parts.join(" ");
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
@@ -118,12 +134,17 @@ export class Hud {
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? "✓ MAX POWER" : "✓", "good");
         else this.popup("MISSED BUOY", "bad");
+      } else if (e.kind === "checkpoint") {
+        if (race.racing && race.phase === RACING) {
+          this.popup(`CHECKPOINT ${(e.index ?? 0) + 1}/${Math.max(0, race.gates - 2)}`, "good");
+        }
       } else if (e.kind === "lap") {
         if ((e.lap ?? 0) > 1) this.popup((e.lap ?? 0) === race.laps ? "FINAL LAP" : `LAP ${e.lap}`, "big");
       } else if (e.kind === "finish") {
         this.popup(`FINISH! ${ordinal(race.place)}`, "big");
       } else if (e.kind === "trick") {
-        this.popup(`${trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0)}!`, "big");
+        const name = trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0, e.grab ?? 0);
+        this.popup(race.looped ? `${name}!` : `${name}  +${e.points ?? 0}`, "big");
       } else if (e.kind === "bail") {
         this.popup("BAIL!", "bad");
       }
@@ -158,8 +179,11 @@ export class Hud {
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
       const lap = Math.min(Math.max(race.lap, 1), race.laps);
+      const first = race.looped
+        ? `<div><span>LAP</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>`
+        : `<div><span>SCORE</span> ${race.points}</div>`;
       this.info.innerHTML =
-        `<div><span>LAP</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>` +
+        first +
         `<div><span>POS</span> ${race.place}/${race.racers}</div>` +
         `<div><span>TIME</span> ${formatTime(time, hz)}</div>`;
     } else {
@@ -167,9 +191,13 @@ export class Hud {
     }
 
     this.speed.textContent = `${Math.round(speedKmh)} km/h${airborne ? " ✈" : ""}`;
-    let pips = "";
-    for (let i = 0; i < race.meterMax; i++) pips += `<i class="${i < race.meter ? "on" : ""}"></i>`;
-    this.meter.innerHTML = `<span>POWER</span>${pips}`;
+    if (race.looped) {
+      let pips = "";
+      for (let i = 0; i < race.meterMax; i++) pips += `<i class="${i < race.meter ? "on" : ""}"></i>`;
+      this.meter.innerHTML = `<span>POWER</span>${pips}`;
+    } else {
+      this.meter.innerHTML = "";
+    }
 
     this.results.hidden = race.phase !== RESULTS;
     if (race.phase === RESULTS) {
@@ -181,10 +209,14 @@ export class Hud {
           .map((s) => {
             const name = names.get(s.slot) ?? `#${s.slot + 1}`;
             const time = s.finishTicks > 0 ? formatTime(s.finishTicks, hz) : "DNF";
-            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td><td>${s.misses}</td><td>${s.tricks}</td></tr>`;
+            const extra = race.looped
+              ? `<td>${s.misses}</td><td>${s.tricks}</td>`
+              : `<td>${s.tricks}</td><td>${s.points}</td>`;
+            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td>${extra}</tr>`;
           })
           .join("");
-        this.results.innerHTML = `<h2>Results</h2><table><tr><th></th><th></th><th>time</th><th>missed</th><th>tricks</th></tr>${rows}</table>`;
+        const heads = race.looped ? "<th>missed</th><th>tricks</th>" : "<th>tricks</th><th>points</th>";
+        this.results.innerHTML = `<h2>Results</h2><table><tr><th></th><th></th><th>time</th>${heads}</tr>${rows}</table>`;
       }
     }
   }

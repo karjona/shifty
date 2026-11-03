@@ -45,7 +45,7 @@ impl RoomConfig {
         }
         Self {
             id: claims.room.clone(),
-            course: CourseId::Oval,
+            course: CourseId::from_u8(claims.course).unwrap_or(CourseId::Oval),
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
             bots: claims.bots.min((MAX_RIDERS - 1) as u8),

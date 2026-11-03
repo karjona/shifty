@@ -16,6 +16,7 @@ use crate::input::{Input, buttons};
 use crate::math::{
     TAU, Vec3, angle_diff, atan2, clamp, cos, round, sin, sqrt, wrap_angle, wrap_pi,
 };
+use crate::race::{Landing, Trick};
 use crate::surface::Surface;
 use crate::world::Rider;
 
@@ -194,22 +195,13 @@ fn water_forces(r: &Rider, surface: &Surface, tick: u32) -> Wet {
     wet
 }
 
-/// How a jump ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Landing {
-    /// Upright and pointing where you're going, with this many full turns:
-    /// spins (+ = clockwise), flips (+ = backflip), rolls (+ = to the right).
-    Clean { spin: i8, flip: i8, roll: i8 },
-    /// Too crooked: the rider falls off.
-    Bail,
-}
-
 fn turns(angle: f32) -> i8 {
     clamp(round(angle / TAU), -9.0, 9.0) as i8
 }
 
-/// Judges a touchdown and settles the attitude back into normal ranges.
-/// Returns `None` for plain jumps and tiny hops.
+/// Judges a touchdown and settles the attitude back into normal ranges:
+/// upright and pointing where you're going, with full turns of spin, flip
+/// or roll, is a trick. Returns `None` for plain jumps and tiny hops.
 fn land(r: &mut Rider) -> Option<Landing> {
     let spin = -turns(r.air_spin);
     let flip = turns(r.pitch);
@@ -242,7 +234,12 @@ fn land(r: &mut Rider) -> Option<Landing> {
     let boost = LANDING_BOOST * f32::from(rotations.min(3));
     let along = r.forward();
     r.vel += along * boost;
-    Some(Landing::Clean { spin, flip, roll })
+    Some(Landing::Clean(Trick {
+        spin: spin * 2,
+        flip,
+        roll,
+        ..Trick::default()
+    }))
 }
 
 /// Advance one rider one tick on the water (or above it). Returns how a

@@ -7,6 +7,7 @@ declare global {
       slot(): number;
       transport: string;
       renderer: string;
+      sport(): "jetski" | "snow";
       stats(): {
         snapshots: number;
         mispredictions: number;
@@ -80,6 +81,38 @@ test("two players race in one room", async ({ browser }) => {
   expect(bad.rttMs).toBeGreaterThan(120);
   expect(bad.inputLead).toBeGreaterThanOrEqual(1);
   expect(await a.evaluate(() => window.__shifty.phase())).toBe(1);
+});
+
+test("two players ride the winter mountain", async ({ browser }) => {
+  const room = `e2e-snow-${Date.now()}`;
+  const open = async (name: string) => {
+    const p = await (await browser.newContext()).newPage();
+    p.on("pageerror", (e) => console.log(`[${name}] page error: ${e.message}`));
+    await p.goto(`/?name=${name}&room=${room}&bots=2&event=snow&render=0`);
+    await joined(p);
+    return p;
+  };
+  const a = await open("Ana");
+  const b = await open("Bea");
+  expect(await a.evaluate(() => window.__shifty.sport())).toBe("snow");
+  const top = await a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!);
+
+  // Ana tucks down the start ramp; Bea sees her where she is.
+  await a.evaluate(() => window.__shifty.setInput({ steer: 0, lean: 1, buttons: 0 }));
+  await a.waitForTimeout(6000);
+  const aSlot = await a.evaluate(() => window.__shifty.slot());
+  const [aSelf, bSeesA] = await Promise.all([
+    a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
+    b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
+  ]);
+  expect(aSelf.z - top.z).toBeGreaterThan(30);
+  expect(top.y - aSelf.y).toBeGreaterThan(10);
+  expect(aSelf.speed).toBeGreaterThan(10);
+  expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
+
+  const stats = await a.evaluate(() => window.__shifty.stats());
+  expect(stats.mispredictions).toBeLessThan(stats.snapshots * 0.1);
+  expect(stats.lastSnapshotBytes).toBeLessThan(1200);
 });
 
 test("a fifth human is turned away (4 humans max)", async ({ browser }) => {

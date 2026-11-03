@@ -3,9 +3,9 @@
 // landings and swells, and the body lags behind the hull when it speeds up
 // or digs in.
 import * as THREE from "three/webgpu";
-import type { RiderView } from "./world.ts";
+import type { RiderModel, RiderView } from "./world.ts";
 
-const SLOT_COLORS = [0xff5a36, 0x2bb3ff, 0xffd23f, 0x7ae582, 0xc77dff, 0xff8fab, 0xf4a261, 0xe9edf2];
+export const SLOT_COLORS = [0xff5a36, 0x2bb3ff, 0xffd23f, 0x7ae582, 0xc77dff, 0xff8fab, 0xf4a261, 0xe9edf2];
 
 /** Leg length and the feet's place on the deck, in hull space. */
 const LEGS = 0.55;
@@ -27,7 +27,7 @@ const MAX_STRETCH = 0.06;
 const MAX_LEAN = 0.35;
 
 /** One axis of the rider's body: a damped spring driven by the hull's motion. */
-class Spring {
+export class Spring {
   x = 0;
   v = 0;
 
@@ -52,7 +52,7 @@ function part(
   return m;
 }
 
-export class RiderModel {
+export class JetskiModel implements RiderModel {
   readonly mesh = new THREE.Group();
   /** The whole rider, moved off the ski when bailing. */
   private body = new THREE.Group();

@@ -7,7 +7,7 @@ import { devJoinTicket, repoRoot } from "../../scripts/dev-lobby.ts";
 const RACE_SERVER = process.env.RACE_SERVER ?? "localhost:4433";
 
 /**
- * Dev-only lobby: `GET /__dev/join?name=..&room=..&bots=..&surface=..` returns
+ * Dev-only lobby: `GET /__dev/join?name=..&room=..&bots=..&surface=..&course=..` returns
  * a join ticket: a signed join token, the race server URL and (hash mode) its
  * certificate hash. Not part of builds.
  */
@@ -29,6 +29,7 @@ const devLobby = (): Plugin => ({
             room: q.get("room") || "dev",
             bots: Number(q.get("bots") ?? 2),
             surface: Number(q.get("surface") ?? 1),
+            course: Number(q.get("course") ?? 0),
             pid: q.get("pid") || undefined,
           });
           res.setHeader("content-type", "application/json");

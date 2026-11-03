@@ -72,7 +72,7 @@ run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js"], {
 
 console.log(`
   ▸ open http://localhost:5173/?name=YourName in two browser windows
-    URL options: name, room, bots (0-7), surface (0 flat, 1 swells),
-                 scale (0.25-1),
+    URL options: name, room, bots (0-7), event (jetski, snow),
+                 surface (0 flat, 1 swells), scale (0.25-1),
                  water=basic (plain swells, for slow machines)
 `);

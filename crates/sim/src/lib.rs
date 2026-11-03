@@ -10,12 +10,14 @@ pub mod course;
 pub mod input;
 pub mod jetski;
 pub mod math;
+pub mod mountain;
 pub mod quant;
 pub mod race;
+pub mod snowboard;
 pub mod surface;
 pub mod world;
 
-pub use course::{Course, CourseId};
+pub use course::{Course, CourseId, Sport};
 pub use input::{Input, buttons};
 pub use math::Vec3;
 pub use race::{Phase, SimEvent};
@@ -47,30 +49,35 @@ pub const MAX_RIDERS: usize = 8;
 pub const MAX_HUMANS: usize = 4;
 
 /// A fixed scenario used to compare native and WASM builds bit for bit:
-/// a full room of riders on swells, driven by seeded pseudo-random inputs.
+/// a full room of riders on every course (swells, then snow), driven by
+/// seeded pseudo-random inputs and bots.
 pub fn determinism_scenario(ticks: u32) -> u64 {
-    let mut world = World::on_course(CourseId::Oval, SurfaceKind::Swells, 0xC0FFEE);
-    for slot in 0..MAX_RIDERS {
-        world.spawn(slot);
-    }
-    let mut rng = math::Pcg32::new(42);
-    let mut inputs: Inputs = [None; MAX_RIDERS];
-    for _ in 0..ticks {
-        for (slot, input) in inputs.iter_mut().enumerate() {
-            *input = Some(if slot >= 6 {
-                bot::bot_input(&world, slot)
-            } else {
-                Input::from_analog(
-                    rng.range(-1.0, 1.0),
-                    rng.range(-0.3, 1.0),
-                    rng.range(-1.0, 1.0),
-                    (rng.next_u32() & 0xFF) as u8,
-                )
-            });
+    let mut hash: u64 = 0;
+    for course in [CourseId::Oval, CourseId::Mountain] {
+        let mut world = World::on_course(course, SurfaceKind::Swells, 0xC0FFEE);
+        for slot in 0..MAX_RIDERS {
+            world.spawn(slot);
         }
-        world.step(&inputs);
+        let mut rng = math::Pcg32::new(42);
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        for _ in 0..ticks {
+            for (slot, input) in inputs.iter_mut().enumerate() {
+                *input = Some(if slot >= 6 {
+                    bot::bot_input(&world, slot)
+                } else {
+                    Input::from_analog(
+                        rng.range(-1.0, 1.0),
+                        rng.range(-0.3, 1.0),
+                        rng.range(-1.0, 1.0),
+                        (rng.next_u32() & 0xFF) as u8,
+                    )
+                });
+            }
+            world.step(&inputs);
+        }
+        hash = hash.rotate_left(17) ^ world.state_hash();
     }
-    world.state_hash()
+    hash
 }
 
 #[cfg(test)]
@@ -223,7 +230,7 @@ mod tests {
             min_dist = min_dist.min(d);
         }
         assert!(
-            min_dist > world::tuning::RIDER_RADIUS * 2.0 - 0.3,
+            min_dist > course::tuning::RIDER_RADIUS * 2.0 - 0.3,
             "overlapped: {min_dist}"
         );
         assert!(
@@ -367,9 +374,10 @@ mod tests {
         assert_eq!(
             tricks(&ev),
             [EventKind::Trick {
-                spin: 1,
-                flip: 0,
-                roll: 0,
+                trick: race::Trick {
+                    spin: 2,
+                    ..race::Trick::default()
+                },
                 meter: 2
             }]
         );
@@ -389,9 +397,12 @@ mod tests {
             matches!(
                 tricks(&ev)[..],
                 [EventKind::Trick {
-                    flip: 1,
-                    spin: 0,
-                    roll: 0,
+                    trick: race::Trick {
+                        flip: 1,
+                        spin: 0,
+                        roll: 0,
+                        ..
+                    },
                     ..
                 }]
             ),
@@ -408,9 +419,12 @@ mod tests {
             matches!(
                 tricks(&ev)[..],
                 [EventKind::Trick {
-                    roll: -1,
-                    spin: 0,
-                    flip: 0,
+                    trick: race::Trick {
+                        roll: -1,
+                        spin: 0,
+                        flip: 0,
+                        ..
+                    },
                     ..
                 }]
             ),
@@ -649,7 +663,8 @@ mod tests {
                     assert!(r.pos.y.is_finite() && r.vel.length().is_finite());
                     assert!(r.pos.y - h < 10.0 && r.pos.y - h > -2.0, "{r:?}");
                     let (_, offset) = OVAL.project(r.pos.x, r.pos.z);
-                    assert!(offset.abs() < OVAL.outer_limit, "left the course: {r:?}");
+                    let limit = OVAL.stadium().unwrap().outer_limit;
+                    assert!(offset.abs() < limit, "left the course: {r:?}");
                 }
             }
         }

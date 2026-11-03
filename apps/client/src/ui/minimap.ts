@@ -1,6 +1,8 @@
-// Minimap: the oval from above, with buoys, ramps and every rider. Seen
-// with +X to the right and +Z down, so the race runs clockwise.
+// Minimaps, seen from above with +X to the right and +Z down. Summer: the
+// oval, with buoys, ramps and every rider (the race runs clockwise).
+// Winter: the run snaking down the mountain, with its checkpoints.
 import type { CourseData } from "../render/course.ts";
+import type { RunData } from "../render/mountain.ts";
 import type { RiderView } from "../render/world.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -24,7 +26,11 @@ function stadium(half: number, r: number): string {
   return `M ${-half} ${-r} L ${half} ${-r} A ${r} ${r} 0 0 1 ${half} ${r} L ${-half} ${r} A ${r} ${r} 0 0 1 ${-half} ${-r} Z`;
 }
 
-export class Minimap {
+export interface CourseMap {
+  update(riders: RiderView[], nextBuoy: number | null): void;
+}
+
+export class Minimap implements CourseMap {
   private svg: SVGSVGElement;
   private dots = new Map<number, SVGCircleElement>();
   private nextRing: SVGCircleElement;
@@ -92,5 +98,77 @@ export class Minimap {
       this.nextRing.setAttribute("cx", String(b.x));
       this.nextRing.setAttribute("cy", String(b.z));
     }
+  }
+}
+
+/** Winter: the run from the top of the screen to the bottom. */
+export class RunMap implements CourseMap {
+  private svg: SVGSVGElement;
+  private dots = new Map<number, SVGCircleElement>();
+
+  constructor(root: HTMLElement, run: RunData) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const p of run.path) {
+      minX = Math.min(minX, p.x - p.half);
+      maxX = Math.max(maxX, p.x + p.half);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    const pad = 30;
+    const w = maxX - minX + pad * 2;
+    const h = maxZ - minZ + pad * 2;
+    const height = Math.min(innerHeight * 0.6, 520);
+    this.svg = node(
+      "svg",
+      {
+        id: "minimap",
+        class: "run",
+        viewBox: `${minX - pad} ${minZ - pad} ${w} ${h}`,
+        width: (height * w) / h,
+        height,
+      },
+      root,
+    );
+    const line = run.path.map((p) => `${p.x.toFixed(1)},${p.z.toFixed(1)}`).join(" ");
+    node("polyline", { points: line, class: "run-edge" }, this.svg);
+    node("polyline", { points: line, class: "run-snow" }, this.svg);
+    const tick = (g: { x: number; z: number; yaw: number; half: number }, cls: string) => {
+      const rx = -Math.cos(g.yaw);
+      const rz = Math.sin(g.yaw);
+      node(
+        "line",
+        {
+          x1: g.x - rx * (g.half + 8),
+          y1: g.z - rz * (g.half + 8),
+          x2: g.x + rx * (g.half + 8),
+          y2: g.z + rz * (g.half + 8),
+          class: cls,
+        },
+        this.svg,
+      );
+    };
+    for (const c of run.checkpoints) tick(c, "checkpoint");
+    tick(run.startGate, "start");
+    tick(run.finish, "start");
+  }
+
+  update(riders: RiderView[]): void {
+    const seen = new Set<number>();
+    for (const r of riders) {
+      seen.add(r.slot);
+      let dot = this.dots.get(r.slot);
+      if (!dot) {
+        dot = node("circle", { r: 16, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" }, this.svg);
+        this.dots.set(r.slot, dot);
+      }
+      dot.setAttribute("cx", r.x.toFixed(1));
+      dot.setAttribute("cy", r.z.toFixed(1));
+      dot.classList.toggle("me", r.isMe);
+      if (r.isMe) this.svg.append(dot);
+    }
+    for (const [slot, dot] of this.dots) dot.style.display = seen.has(slot) ? "" : "none";
   }
 }

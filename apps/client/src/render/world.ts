@@ -1,50 +1,8 @@
 // Rendering: Three.js WebGPURenderer (falls back to WebGL2 automatically)
-// with TSL node materials.
+// with TSL node materials. The world is the renderer, the chase camera and
+// the riders; what surrounds them (the bay in summer, the mountain in
+// winter) is an environment, set once the course is known.
 import * as THREE from "three/webgpu";
-import { CourseView, type CourseData } from "./course.ts";
-import { RiderModel } from "./rider.ts";
-import { buildScenery } from "./scenery.ts";
-import { Spray } from "./spray.ts";
-import { SeaWater, type WakeSource } from "./water.ts";
-import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
-import {
-  Fn,
-  fract,
-  max,
-  mix,
-  normalLocal,
-  positionLocal,
-  positionWorld,
-  smoothstep,
-  step,
-  uniform,
-  vec3,
-} from "three/tsl";
-
-/** The water grid follows the camera and reaches across the whole bay. */
-const WATER_SIZE = 1400;
-const WATER_SEGMENTS = 300;
-const DT = 1 / 60;
-const BASE_FOV = 55;
-/** Chase camera, in metres from the bottom of the hull. */
-const CAM_BACK = 4.3;
-const CAM_BACK_PER_SPEED = 0.02;
-const CAM_UP = 2.35;
-const CAM_LOOK_AHEAD = 8;
-const CAM_LOOK_UP = 0.75;
-/** How fast the camera swings round to the direction of travel (per second). */
-const CAM_TURN = 5;
-/** The camera stays at least this high above the swell under it. */
-const CAM_CLEARANCE = 0.9;
-/** Landing jolt: falls slower than this (m/s) don't move the camera. */
-const JOLT_FROM = 3;
-/** Downward speed (m/s) a full-impact landing kicks the camera with, and its spring. */
-const DIP_KICK = 3.5;
-const DIP_STIFFNESS = 70;
-const DIP_DAMPING = 10;
-/** Air pull-back starts with the hull this high above the water and is full this much higher. */
-const CAM_AIR_FROM = 0.4;
-const CAM_AIR_SPAN = 2;
 
 export interface RiderView {
   slot: number;
@@ -62,7 +20,95 @@ export interface RiderView {
   vx: number;
   vy: number;
   vz: number;
+  /** Snowboard: how loaded the jump is (0-1). */
+  charge: number;
+  /** Snowboard: the grab being held (0 = none). */
+  grab: number;
+  /** The stick: lean (+ = forward/tuck, - = back) and steer. */
+  lean: number;
+  steer: number;
 }
+
+/** A rider as drawn: a jetski, or a snowboarder. */
+export interface RiderModel {
+  readonly mesh: THREE.Group;
+  update(r: RiderView, dt: number): void;
+}
+
+/** How the chase camera sits behind a rider, per sport. Distances in metres. */
+export interface CameraTuning {
+  fov: number;
+  /** Extra field of view at top speed, and high in the air (degrees). */
+  fovSpeed: number;
+  fovAir: number;
+  back: number;
+  backPerSpeed: number;
+  up: number;
+  /** Look this far ahead of the rider, this high above `lookFrom`. */
+  lookAhead: number;
+  lookUp: number;
+  /**
+   * What the look height is measured from: "rider" (halfway between the
+   * rider and the camera's smoothed height) or "ground" (the ground that
+   * far ahead, so the view tips down a slope).
+   */
+  lookFrom: "rider" | "ground";
+  /** How fast the camera swings round to the direction of travel (per second). */
+  turn: number;
+  /** Going backwards, look along the rider's heading (a reversing jetski), not back the way it goes. */
+  reverseLooksAhead: boolean;
+  /** How fast its height follows the rider on the ground, rising in the air, and falling (per second). */
+  heightOnGround: number;
+  heightRising: number;
+  heightInAir: number;
+  /** The camera stays at least this high above the ground under it. */
+  clearance: number;
+  /** Air pull-back starts with the rider this high above the ground, full this much higher. */
+  airFrom: number;
+  airSpan: number;
+  airBack: number;
+  airUp: number;
+  /** How much the horizon tilts with the ground's cross slope (0 = level). */
+  tilt: number;
+}
+
+/** What surrounds the riders: sky, light, ground or water, scenery and effects. */
+export interface Environment {
+  readonly group: THREE.Group;
+  readonly camera: CameraTuning;
+  /** Top speed (m/s), for speed-driven effects. */
+  readonly topSpeed: number;
+  /** Colours the sky, the fog and the lights. */
+  light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
+  /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
+  ground(x: number, z: number, t: number): number;
+  makeRider(slot: number): RiderModel;
+  /** Per frame, once the riders are placed. */
+  update(frame: Frame): void;
+}
+
+export interface Frame {
+  riders: RiderView[];
+  models: Map<number, RiderModel>;
+  /** The camera, and the point it looks at. */
+  eye: THREE.Vector3;
+  look: THREE.Vector3;
+  /** Sim time (s) and frame time. */
+  t: number;
+  dt: number;
+  renderer: THREE.WebGPURenderer;
+  /** Summer: the buoy to pass next (index), if any. */
+  nextBuoy: number | null;
+}
+
+const DT = 1 / 60;
+/** Landing jolt: falls slower than this (m/s) don't move the camera. */
+const JOLT_FROM = 3;
+/** Downward speed (m/s) a full-impact landing kicks the camera with, and its spring. */
+const DIP_KICK = 3.5;
+const DIP_STIFFNESS = 70;
+const DIP_DAMPING = 10;
+const DEFAULT_SKY = 0xa8d8f0;
 
 /** An angle wrapped to (-π, π]. */
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -72,35 +118,26 @@ const smoothstep01 = (x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-export interface WorldOptions {
-  /** "sea" = swells + GPU chop, ripples, foam and reflections (see water.ts); "basic" = swells only, cheap. */
-  water: "basic" | "sea";
-  /** The jetski's top speed (m/s), for speed-driven effects. */
-  topSpeed: number;
-}
-
 export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.3, 4000);
+  readonly camera = new THREE.PerspectiveCamera(55, 1, 0.3, 4000);
   backend: "webgpu" | "webgl2" = "webgl2";
   renderScale = 1;
 
   private sun: THREE.DirectionalLight;
-  private time = uniform(0);
-  private swells = new WaveUniforms(MAX_WAVES);
-  private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  private hemi: THREE.HemisphereLight;
+  private env: Environment | null = null;
   private riders = new Map<number, { model: RiderModel; label: HTMLDivElement }>();
-  private course: CourseView | null = null;
-  private water: THREE.Mesh | null = null;
-  /** World xz of the water grid's centre (it follows the camera). */
-  private waterOrigin = uniform(new THREE.Vector2());
+  private models = new Map<number, RiderModel>();
   private camLook = new THREE.Vector3();
-  /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend. */
+  /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
   private camHeight = 0;
-  private camBack = CAM_BACK;
+  private camBack = 0;
   private camAir = 0;
+  private camTilt = 0;
+  private camLookY = 0;
   /** Landing jolt: a dip on a spring (m, m/s) and a shake that dies away. */
   private camDip = 0;
   private camDipV = 0;
@@ -108,41 +145,23 @@ export class World {
   private camWasGrounded = true;
   private camWasBailing = false;
   private camLastVy = 0;
+  private camReady = false;
   private labels: HTMLElement;
 
-  /** The full water; `null` in basic mode (see `buildWater`). */
-  private sea: SeaWater | null = null;
-  private wakeSources = new Map<number, WakeSource>();
-  private spray: Spray;
-  private topSpeed: number;
-
-  constructor(container: HTMLElement, labels: HTMLElement, opts: WorldOptions) {
+  constructor(container: HTMLElement, labels: HTMLElement) {
     this.labels = labels;
-    this.topSpeed = opts.topSpeed;
-    this.spray = new Spray(opts.topSpeed);
-    this.scene.add(this.spray.group);
     this.renderer = new THREE.WebGPURenderer({ antialias: true });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.append(this.renderer.domElement);
 
-    const sky = new THREE.Color(0xa8d8f0);
-    this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 90, 480);
-    this.scene.add(new THREE.HemisphereLight(0xfff4e0, 0x2a6f8f, 1.2));
+    this.scene.background = new THREE.Color(DEFAULT_SKY);
+    this.hemi = new THREE.HemisphereLight(0xfff4e0, 0x2a6f8f, 1.2);
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
-    this.scene.add(this.sun, this.sun.target);
-    this.scene.add(buildScenery(sky));
-
-    if (opts.water === "sea") {
-      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS);
-      this.scene.add(this.sea.mesh);
-    } else {
-      this.buildWater();
-    }
+    this.scene.add(this.hemi, this.sun, this.sun.target);
     addEventListener("resize", () => this.resize());
     this.resize();
   }
@@ -169,93 +188,56 @@ export class World {
     this.resize();
   }
 
-  setWaves(params: Float32Array): void {
-    // Chop seed only needs to be stable per room: derive it from the swells.
-    this.sea?.setWaves(params, Math.round(Math.abs(params[5] ?? 1) * 1e6));
-    this.waveParams.set(params.subarray(0, MAX_WAVES * WAVE_FIELDS));
-    this.swells.setFromSim(this.waveParams);
+  /** Sets what surrounds the riders (once, when the course is known). */
+  setEnvironment(env: Environment): void {
+    if (this.env) this.scene.remove(this.env.group);
+    this.env = env;
+    this.scene.add(env.group);
+    env.light(this.scene, this.sun, this.hemi);
+    this.camera.fov = env.camera.fov;
+    this.camera.updateProjectionMatrix();
+    for (const r of this.riders.values()) {
+      this.scene.remove(r.model.mesh);
+      r.label.remove();
+    }
+    this.riders.clear();
+    this.models.clear();
+    this.camReady = false;
   }
 
-  private buildWater(): void {
-    const t = this.time;
-    const swells = this.swells;
-    const origin = this.waterOrigin;
-    // Displace vertices with the sim's swell formula; analytic normals.
-    const displaced = Fn(() => {
-      const p = positionLocal;
-      const w = swells.sum(p.add(vec3(origin.x, 0, origin.y)), t);
-      normalLocal.assign(vec3(w.dx.negate(), 1, w.dz.negate()).normalize());
-      return p.add(vec3(0, w.h, 0));
-    });
-    const colour = Fn(() => {
-      const deep = vec3(0.04, 0.32, 0.45);
-      const crest = vec3(0.18, 0.66, 0.72);
-      const base = mix(deep, crest, smoothstep(-0.8, 1.2, positionWorld.y));
-      // Faint 4 m grid so speed reads even on calm water.
-      const gx = step(0.965, fract(positionWorld.x.div(4)));
-      const gz = step(0.965, fract(positionWorld.z.div(4)));
-      return mix(base, vec3(0.85, 0.95, 1.0), max(gx, gz).mul(0.12));
-    });
-    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.38, metalness: 0.0 });
-    mat.positionNode = displaced();
-    mat.colorNode = colour();
-    const water = new THREE.Mesh(waterGrid(WATER_SIZE, WATER_SEGMENTS), mat);
-    water.receiveShadow = true;
-    water.frustumCulled = false;
-    this.scene.add(water);
-    this.water = water;
-  }
-
-  /** Centre the water grid near what the camera looks at, in fixed steps. */
-  private followWater(): void {
-    const x = Math.round(this.camLook.x / WATER_SNAP) * WATER_SNAP;
-    const z = Math.round(this.camLook.z / WATER_SNAP) * WATER_SNAP;
-    this.waterOrigin.value.set(x, z);
-    this.water?.position.set(x, 0, z);
-    this.sea?.follow(x, z);
-  }
-
-  setCourse(data: CourseData): void {
-    if (this.course) this.scene.remove(this.course.group);
-    this.course = new CourseView(data);
-    this.scene.add(this.course.group);
-    this.sea?.setLand(data.land);
-    this.spray.setShore(data.land);
-  }
-
-  private rider(slot: number): { model: RiderModel; label: HTMLDivElement } {
+  private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
     let r = this.riders.get(slot);
     if (r) return r;
-    const model = new RiderModel(slot);
+    const model = env.makeRider(slot);
     this.scene.add(model.mesh);
     const label = document.createElement("div");
     label.className = "label";
     this.labels.append(label);
     r = { model, label };
     this.riders.set(slot, r);
+    this.models.set(slot, model);
     return r;
   }
 
-  /** Draw a frame. `tick` is the fractional sim tick the water should show. */
+  /** Draw a frame. `tick` is the fractional sim tick to show (water, snowfall). */
   render(riders: RiderView[], names: Map<number, string>, tick: number, dt: number, nextBuoy: number | null): void {
+    const env = this.env;
+    if (!env) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     const t = tick * DT;
-    this.time.value = t;
-    this.course?.update(this.waveParams, t, nextBuoy);
-
-    const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, t);
     const seen = new Set<number>();
     let me: RiderView | undefined;
     for (const r of riders) {
       seen.add(r.slot);
-      const { model, label } = this.rider(r.slot);
-      const mesh = model.mesh;
-      mesh.visible = true;
+      const { model, label } = this.rider(env, r.slot);
+      model.mesh.visible = true;
       model.update(r, dt);
-      mesh.updateMatrixWorld();
-      this.spray.emit(r, mesh, water, dt);
+      model.mesh.updateMatrixWorld();
       // Name tags for the other riders only.
       label.textContent = names.get(r.slot) ?? `#${r.slot + 1}`;
-      const p = mesh.position
+      const p = model.mesh.position
         .clone()
         .add(new THREE.Vector3(0, 2.2, 0))
         .project(this.camera);
@@ -271,65 +253,111 @@ export class World {
       }
     }
 
-    if (me) this.followCamera(me, t, dt);
-    this.spray.update(water, this.camera.position, dt);
-    this.followWater();
-    if (this.sea) {
-      this.wakeSources.clear();
-      for (const r of riders) this.wakeSources.set(r.slot, { x: r.x, z: r.z, speed: r.speed, grounded: r.grounded });
-      this.sea.update(this.renderer, t, this.wakeSources, dt);
-    }
+    if (me) this.followCamera(env, me, t, dt);
+    env.update({
+      riders,
+      models: this.models,
+      eye: this.camera.position,
+      look: this.camLook,
+      t,
+      dt,
+      renderer: this.renderer,
+      nextBuoy,
+    });
     this.renderer.render(this.scene, this.camera);
   }
 
   /**
    * Chase camera, low and close behind the rider. It is placed relative to
-   * the rider every frame; only its heading, height and distance are
-   * smoothed. It follows the direction of travel, on the water and in the
-   * air alike: spins don't spin it, and leaving the water mid-turn eases
-   * the swing out smoothly (the hull points further into a turn than it
-   * travels, so following the hull would jump at takeoff). Slow or
-   * reversing, it follows the hull's heading. It pulls back as the rider
-   * gets high above the water (skips off a crest don't move it). Height follows the rider closely, so the
-   * rider stays framed and the horizon rides the swells; it never dips into
-   * a swell, and the view widens with speed. Hard landings jolt it: a dip
-   * and a short shake, harder for a bail.
+   * the rider every frame; only its heading, height, distance and tilt are
+   * smoothed. It follows the direction of travel, on the ground and in the
+   * air alike: spins don't spin it, and leaving the ground mid-turn eases
+   * the swing out smoothly. Slow or reversing, it follows the rider's
+   * heading. It pulls back as the rider gets high above the ground (small
+   * hops don't move it). Its height follows the rider, so the rider stays
+   * framed; it never dips into the ground, and the view widens with speed.
+   * Hard landings jolt it: a dip and a short shake, harder for a bail.
    */
-  private followCamera(me: RiderView, t: number, dt: number): void {
+  private followCamera(env: Environment, me: RiderView, t: number, dt: number): void {
+    const c = env.camera;
+    if (!this.camReady) {
+      this.camHeading = Math.atan2(me.vx, me.vz);
+      if (Math.hypot(me.vx, me.vz) < 2) this.camHeading = me.yaw;
+      this.camHeight = me.y;
+      this.camBack = c.back;
+      this.camLookY = me.y;
+      this.camReady = true;
+    }
     this.jolt(me, dt);
-    const above = me.y - waveHeight(this.waveParams, me.x, me.z, t);
-    const air = me.grounded ? 0 : Math.min(1, Math.max(0, (above - CAM_AIR_FROM) / CAM_AIR_SPAN));
+    const above = me.y - env.ground(me.x, me.z, t);
+    const air = me.grounded ? 0 : Math.min(1, Math.max(0, (above - c.airFrom) / c.airSpan));
     this.camAir += (air - this.camAir) * (1 - Math.exp(-dt * (air > this.camAir ? 3 : 1.5)));
     const ahead = me.vx * Math.sin(me.yaw) + me.vz * Math.cos(me.yaw);
     // Reversing on the water: look along the hull, not back down the wake.
-    const travel = Math.atan2(me.vx, me.vz) + (me.grounded && ahead < 0 ? Math.PI : 0);
+    const travel = Math.atan2(me.vx, me.vz) + (me.grounded && ahead < 0 && c.reverseLooksAhead ? Math.PI : 0);
     const w = smoothstep01((Math.hypot(me.vx, me.vz) - 2) / 4);
     const heading = me.yaw + w * wrapPi(travel - me.yaw);
-    this.camHeading += wrapPi(heading - this.camHeading) * (1 - Math.exp(-dt * CAM_TURN));
-    this.camHeight += (me.y - this.camHeight) * (1 - Math.exp(-dt * (me.grounded ? 7 : 6)));
-    const back = CAM_BACK + me.speed * CAM_BACK_PER_SPEED + this.camAir * 2.5;
+    this.camHeading += wrapPi(heading - this.camHeading) * (1 - Math.exp(-dt * c.turn));
+    const follow = me.grounded ? c.heightOnGround : me.y > this.camHeight ? c.heightRising : c.heightInAir;
+    this.camHeight += (me.y - this.camHeight) * (1 - Math.exp(-dt * follow));
+    const back = c.back + me.speed * c.backPerSpeed + this.camAir * c.airBack;
     this.camBack += (back - this.camBack) * (1 - Math.exp(-dt * 2.5));
 
     const fx = Math.sin(this.camHeading);
     const fz = Math.cos(this.camHeading);
     const x = me.x - fx * this.camBack;
     const z = me.z - fz * this.camBack;
-    const up = CAM_UP + this.camAir * 1.2;
-    const floor = waveHeight(this.waveParams, x, z, t) + CAM_CLEARANCE;
+    const up = c.up + this.camAir * c.airUp;
+    const floor = env.ground(x, z, t) + c.clearance;
     const y = Math.max(this.camHeight + up + this.camDip, floor);
     // Shake: a few unrelated sines, fast enough to read as a jolt.
     const sx = this.camShake * Math.sin(t * 61) * Math.sin(t * 23);
     const sy = this.camShake * Math.sin(t * 53 + 1.3) * Math.sin(t * 29);
     this.camera.position.set(x + fz * sx, y + sy, z - fx * sx);
-    this.camLook.set(me.x + fx * CAM_LOOK_AHEAD, (this.camHeight + me.y) / 2 + CAM_LOOK_UP, me.z + fz * CAM_LOOK_AHEAD);
+    const lx = me.x + fx * c.lookAhead;
+    const lz = me.z + fz * c.lookAhead;
+    let ly: number;
+    if (c.lookFrom === "ground") {
+      // Down a slope the view tips down with it (smoothed, so bumps don't
+      // nod it); high in the air it keeps the rider in view instead.
+      const g = Math.min(env.ground(lx, lz, t), me.y);
+      this.camLookY += (g - this.camLookY) * (1 - Math.exp(-dt * 8));
+      const onGround = Math.max(this.camLookY, this.camHeight - c.lookAhead) + c.lookUp;
+      const lift = me.grounded ? 0 : smoothstep01((above - 0.3) / 1.5);
+      ly = onGround + (me.y - 0.4 - onGround) * Math.max(lift, this.camAir);
+    } else {
+      ly = (this.camHeight + me.y) / 2 + c.lookUp;
+    }
+    this.camLook.set(lx, ly, lz);
+    this.camera.up.set(0, 1, 0);
+    if (c.tilt > 0) {
+      // The horizon leans with the ground across the direction of view.
+      const s = 1.5;
+      const cross =
+        (env.ground(me.x - fz * s, me.z + fx * s, t) - env.ground(me.x + fz * s, me.z - fx * s, t)) / (2 * s);
+      const target = me.grounded ? Math.atan(cross) * c.tilt : 0;
+      this.camTilt += (target - this.camTilt) * (1 - Math.exp(-dt * 3));
+      this.camera.up.set(
+        Math.cos(this.camHeading) * Math.sin(this.camTilt),
+        Math.cos(this.camTilt),
+        -fx * Math.sin(this.camTilt),
+      );
+    }
     this.camera.lookAt(this.camLook);
-    const fov = BASE_FOV + Math.min(1, me.speed / this.topSpeed) * 6 + this.camAir * 4;
+    const fov = c.fov + Math.min(1, me.speed / env.topSpeed) * c.fovSpeed + this.camAir * c.fovAir;
     if (Math.abs(fov - this.camera.fov) > 0.05) {
       this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-dt * 3));
       this.camera.updateProjectionMatrix();
     }
-    this.sun.position.set(me.x + 30, me.y + 60, me.z + 15);
     this.sun.target.position.set(me.x, me.y, me.z);
+    this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
+  }
+
+  private sunOffset = new THREE.Vector3(30, 60, 15);
+
+  /** Where the sun shines from, relative to the rider it follows (and casts shadows around). */
+  setSunOffset(x: number, y: number, z: number): void {
+    this.sunOffset.set(x, y, z);
   }
 
   /** Kick the landing dip and shake on touchdown, and let them settle. */

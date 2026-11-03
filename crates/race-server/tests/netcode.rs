@@ -6,7 +6,7 @@ use protocol::token::JoinClaims;
 use protocol::{ClientMsg, InputPacket, ServerMsg};
 use race_server::room::{ConnId, Room, RoomConfig};
 use sim::math::Pcg32;
-use sim::{Input, SurfaceKind, TICK_HZ};
+use sim::{CourseId, Input, SurfaceKind, TICK_HZ};
 
 #[derive(Clone, Copy)]
 struct NetConditions {
@@ -77,7 +77,7 @@ struct Harness {
     next_tick_at: f64,
 }
 
-fn claims(pid: &str, bots: u8, surface: SurfaceKind) -> JoinClaims {
+fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinClaims {
     JoinClaims {
         v: 1,
         aud: "test".into(),
@@ -87,12 +87,17 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind) -> JoinClaims {
         exp: u64::MAX,
         bots,
         surface: surface as u8,
+        course: course as u8,
     }
 }
 
 impl Harness {
     fn new(bots: u8, surface: SurfaceKind) -> Self {
-        let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface)));
+        Self::on(CourseId::Oval, bots, surface)
+    }
+
+    fn on(course: CourseId, bots: u8, surface: SurfaceKind) -> Self {
+        let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface, course)));
         Self {
             frame_ms: 8,
             stall: None,
@@ -110,7 +115,7 @@ impl Harness {
             client: Client::new("token"),
             up: Link::new(cond, 100 + i as u64),
             down: Link::new(cond, 200 + i as u64),
-            claims: claims(pid, 0, SurfaceKind::Flat),
+            claims: claims(pid, 0, SurfaceKind::Flat, CourseId::Oval),
         });
         i
     }
@@ -478,3 +483,64 @@ fn input_buffer_grows_to_absorb_frame_hitches() {
 }
 
 const TARGET_LEAD_MIN: f64 = client_core::TARGET_LEAD;
+
+/// Down the mountain: carving, tucking, loading and letting go of pops,
+/// spinning and grabbing in the air (often still grabbing on landing, so
+/// falls and getting back up are predicted too).
+fn snowboarding(_: usize, now: f64) -> Input {
+    let steer = ((now / 600.0).sin() * 0.3) as f32;
+    let lean = ((now / 1300.0).cos() * 0.4 + 0.6) as f32;
+    let phase = (now as u64 / 250) % 8;
+    let buttons = match phase {
+        0..=2 => sim::input::buttons::JUMP,
+        4 => sim::input::buttons::TRICK,
+        5 => sim::input::buttons::GRAB,
+        _ => 0,
+    };
+    Input::from_analog(steer, 0.0, lean, buttons)
+}
+
+#[test]
+fn predicts_the_snowboard_run_exactly() {
+    let mut h = Harness::on(CourseId::Mountain, 3, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    h.run(500.0, |_, _| Input::default());
+    assert_eq!(h.peers[0].client.phase(), Phase::Joined);
+    assert_eq!(
+        h.peers[0].client.predicted_world().course,
+        CourseId::Mountain
+    );
+    let before = h.peers[0].client.stats().mispredictions;
+    h.run(8000.0, snowboarding);
+    let s = h.peers[0].client.stats();
+    assert_eq!(s.mispredictions - before, 0, "stats: {s:?}");
+    let slot = h.peers[0].client.slot().unwrap();
+    let r = h.room.world().riders[slot].unwrap();
+    let spot = sim::mountain::MOUNTAIN.grid_spot(slot);
+    let moved = (r.pos.x - spot.x).hypot(r.pos.z - spot.z);
+    assert!(moved > 15.0, "rode off the start: {moved} m");
+}
+
+#[test]
+fn snowboarding_survives_lag_jitter_and_loss() {
+    let bad = NetConditions {
+        latency_ms: 140.0,
+        jitter_ms: 20.0,
+        loss: 0.04,
+    };
+    let mut h = Harness::on(CourseId::Mountain, 3, SurfaceKind::Flat);
+    h.add_peer("a", bad);
+    h.add_peer("b", bad);
+    h.run(1500.0, |_, _| Input::default());
+    let before = h.peers[0].client.stats();
+    h.run(10_000.0, snowboarding);
+    let s = h.peers[0].client.stats();
+    let snaps = s.snapshots - before.snapshots;
+    let misses = s.mispredictions - before.mispredictions;
+    // The other human is extrapolated, so bumps can mispredict; bots and
+    // the rider's own inputs never do.
+    assert!(
+        f64::from(misses) < f64::from(snaps) * 0.15,
+        "{misses} mispredictions in {snaps} snapshots; {s:?}"
+    );
+}

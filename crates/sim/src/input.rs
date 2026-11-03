@@ -17,10 +17,14 @@ pub struct Input {
 pub mod buttons {
     /// In the air: the stick spins (left/right) and flips (front/back).
     pub const TRICK: u8 = 1 << 0;
-    /// In the air: the stick barrel-rolls (left/right) and flips.
+    /// Jetski, in the air: the stick barrel-rolls (left/right) and flips.
     pub const ROLL: u8 = 1 << 1;
+    /// Snowboard: hold to crouch, let go to pop.
+    pub const JUMP: u8 = 1 << 2;
+    /// Snowboard, in the air: grab the board (the stick picks the grab).
+    pub const GRAB: u8 = 1 << 3;
     /// All bits the sim understands. Anything else is stripped by validation.
-    pub const ALL: u8 = TRICK | ROLL;
+    pub const ALL: u8 = TRICK | ROLL | JUMP | GRAB;
 }
 
 impl Input {

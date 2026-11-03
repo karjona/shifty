@@ -1,15 +1,17 @@
-//! Race rules: phases, buoys, laps, the speed meter and standings.
+//! Race rules: phases, gates, laps, the speed meter, trick points and
+//! standings.
 //!
 //! A room loops through warm-up (free riding), a countdown on the grid, the
 //! race, and a results screen. All of it is sim state, so clients predict
 //! it like everything else and the server's copy is the official one.
 //!
-//! Buoys and the finish line are "gates", met in order. Passing a buoy on
-//! the correct side fills the speed meter one step (a passive top-speed
-//! bonus); passing it on the wrong side empties it.
+//! The start line, buoys or checkpoints, and the finish are "gates", met in
+//! order (on a loop the start line is also the finish). In summer, passing a
+//! buoy on the correct side fills the speed meter one step (a passive
+//! top-speed bonus) and passing it on the wrong side empties it; landed
+//! tricks fill it too. In winter there is no meter: tricks score points.
 
-use crate::course::{Course, Keep};
-use crate::jetski::Landing;
+use crate::course::{Course, Gate, Keep, Sport};
 
 pub mod tuning {
     use crate::TICK_HZ;
@@ -92,6 +94,8 @@ pub struct Progress {
     pub misses: u8,
     /// Tricks landed clean in this race.
     pub tricks: u8,
+    /// Trick points scored in this race.
+    pub points: u16,
     /// Race ticks at the finish; 0 = not finished.
     pub finish_ticks: u32,
 }
@@ -115,6 +119,30 @@ impl Progress {
     }
 }
 
+/// A trick landed clean.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Trick {
+    /// Half turns of spin (+ = clockwise seen from above).
+    pub spin: i8,
+    /// Full flips (+ = backflip).
+    pub flip: i8,
+    /// Full barrel rolls (+ = to the right).
+    pub roll: i8,
+    /// The grab held (see `snowboard::grabs`; 0 = none), and for how long.
+    pub grab: u8,
+    pub grab_ticks: u8,
+    /// Points scored for it (winter).
+    pub points: u16,
+}
+
+/// How a jump ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    Clean(Trick),
+    /// Too crooked (or still grabbing): the rider falls.
+    Bail,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventKind {
     /// Passed a buoy (`ok` = on the correct side). `meter` is the new level.
@@ -123,22 +151,24 @@ pub enum EventKind {
         ok: bool,
         meter: u8,
     },
-    /// Started lap `lap` (1-based).
+    /// Passed checkpoint `index` (0-based) of a run.
+    Checkpoint {
+        index: u8,
+    },
+    /// Started lap `lap` (1-based). On a run, lap 1 is the start.
     Lap {
         lap: u8,
     },
     Finish {
         ticks: u32,
     },
-    /// Landed clean with full rotations: spins (+ = clockwise), flips
-    /// (+ = backflip), barrel rolls (+ = to the right). `meter` is the new level.
+    /// Landed a trick clean. `meter` is the new level.
     Trick {
-        spin: i8,
-        flip: i8,
-        roll: i8,
+        trick: Trick,
         meter: u8,
     },
-    /// Crashed on landing: off the ski for a moment, meter emptied.
+    /// Fell: crashed on landing (or into something). Off the board or the
+    /// ski for a moment; the meter is emptied.
     Bail,
 }
 
@@ -179,75 +209,103 @@ pub fn pass_gates(
     }
     p.next_gate = ((gate + 1) % course.gate_count()) as u8;
     let slot = slot as u8;
-    if gate == 0 {
-        if race.phase != Phase::Racing || !p.racing || p.finished() {
-            return;
+    let live = race.phase == Phase::Racing && p.racing && !p.finished();
+    let finish = |p: &mut Progress, events: &mut Vec<SimEvent>| {
+        p.finish_ticks = race.elapsed(tick).max(1);
+        events.push(SimEvent {
+            slot,
+            kind: EventKind::Finish {
+                ticks: p.finish_ticks,
+            },
+        });
+    };
+    match course.gate(gate) {
+        Gate::Start => {
+            if !live {
+                return;
+            }
+            if !course.looped() {
+                if p.lap == 0 {
+                    p.lap = 1;
+                    events.push(SimEvent {
+                        slot,
+                        kind: EventKind::Lap { lap: 1 },
+                    });
+                }
+            } else if p.lap >= course.laps {
+                finish(p, events);
+            } else {
+                p.lap += 1;
+                events.push(SimEvent {
+                    slot,
+                    kind: EventKind::Lap { lap: p.lap },
+                });
+            }
         }
-        if p.lap >= course.laps {
-            p.finish_ticks = race.elapsed(tick).max(1);
+        Gate::Finish => {
+            if live && p.lap >= 1 {
+                finish(p, events);
+            }
+        }
+        Gate::Checkpoint(index) => events.push(SimEvent {
+            slot,
+            kind: EventKind::Checkpoint { index: index as u8 },
+        }),
+        Gate::Buoy(index) => {
+            let buoy = &course.buoys[index];
+            let ok = match buoy.keep {
+                Keep::Right => offset < buoy.offset,
+                Keep::Left => offset > buoy.offset,
+            };
+            if ok {
+                p.meter = (p.meter + 1).min(METER_MAX);
+            } else {
+                p.meter = 0;
+                if live {
+                    p.misses = p.misses.saturating_add(1);
+                }
+            }
             events.push(SimEvent {
                 slot,
-                kind: EventKind::Finish {
-                    ticks: p.finish_ticks,
+                kind: EventKind::Buoy {
+                    buoy: index as u8,
+                    ok,
+                    meter: p.meter,
                 },
             });
-        } else {
-            p.lap += 1;
-            events.push(SimEvent {
-                slot,
-                kind: EventKind::Lap { lap: p.lap },
-            });
-        }
-        return;
-    }
-    let buoy = &course.buoys[gate - 1];
-    let ok = match buoy.keep {
-        Keep::Right => offset < buoy.offset,
-        Keep::Left => offset > buoy.offset,
-    };
-    if ok {
-        p.meter = (p.meter + 1).min(METER_MAX);
-    } else {
-        p.meter = 0;
-        if p.racing && race.phase == Phase::Racing && !p.finished() {
-            p.misses = p.misses.saturating_add(1);
         }
     }
-    events.push(SimEvent {
-        slot,
-        kind: EventKind::Buoy {
-            buoy: (gate - 1) as u8,
-            ok,
-            meter: p.meter,
-        },
-    });
 }
 
-/// Applies a landing to the race: clean tricks fill the meter (two steps
-/// for two rotations or more), a bail empties it. Tricks count toward the
-/// results only while racing.
+/// Applies a landing to the race. With a meter, clean tricks fill it (two
+/// steps for two rotations or more) and a bail empties it. Tricks (and
+/// their points) count toward the results only while racing.
 pub fn landed(
     p: &mut Progress,
     race: &Race,
+    sport: Sport,
     slot: usize,
     landing: Landing,
     events: &mut Vec<SimEvent>,
 ) {
     let slot = slot as u8;
     match landing {
-        Landing::Clean { spin, flip, roll } => {
-            let turns = spin.unsigned_abs() + flip.unsigned_abs() + roll.unsigned_abs();
-            let gain = if turns >= 2 { 2 } else { 1 };
-            p.meter = (p.meter + gain).min(METER_MAX);
+        Landing::Clean(trick) => {
+            if sport.has_meter() {
+                let turns = trick.spin.unsigned_abs() / 2
+                    + trick.flip.unsigned_abs()
+                    + trick.roll.unsigned_abs();
+                let gain = if turns >= 2 { 2 } else { 1 };
+                p.meter = (p.meter + gain).min(METER_MAX);
+            }
             if p.racing && race.phase == Phase::Racing && !p.finished() {
                 p.tricks = p.tricks.saturating_add(1);
+                p.points = p.points.saturating_add(trick.points);
             }
             events.push(SimEvent {
                 slot,
                 kind: EventKind::Trick {
-                    spin,
-                    flip,
-                    roll,
+                    trick,
                     meter: p.meter,
                 },
             });

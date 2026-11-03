@@ -244,3 +244,31 @@ body {
   stroke: #fff;
   stroke-width: 3;
 }
+#minimap.run {
+  bottom: auto;
+  top: 90px;
+}
+#minimap .run-edge {
+  fill: none;
+  stroke: rgb(30 40 60 / 0.55);
+  stroke-width: 56;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+#minimap .run-snow {
+  fill: none;
+  stroke: rgb(170 215 225 / 0.9);
+  stroke-width: 34;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+#minimap .checkpoint {
+  stroke: #e8402a;
+  stroke-width: 8;
+}
+#minimap.run .start {
+  stroke-width: 10;
+}
+#minimap.run circle.me {
+  stroke-width: 7;
+}
