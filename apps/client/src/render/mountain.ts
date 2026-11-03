@@ -469,7 +469,9 @@ export class Mountain implements Environment {
           const i1 = i0 + 1;
           const i2 = i0 + cols;
           const i3 = i2 + 1;
-          idx.push(i0, i2, i1, i1, i2, i3);
+          // Columns run to the right of travel (mirrored against world X),
+          // so this winding faces up.
+          idx.push(i0, i1, i2, i1, i3, i2);
         }
       }
       const geo = new THREE.BufferGeometry();
