@@ -25,9 +25,6 @@ body {
   white-space: nowrap;
   pointer-events: none;
 }
-#labels .label.me {
-  background: rgb(255 120 40 / 0.8);
-}
 #hud {
   position: fixed;
   left: 24px;
@@ -198,9 +195,8 @@ body {
 }
 #minimap {
   position: fixed;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
+  right: 20px;
+  bottom: 16px;
   opacity: 0.9;
   pointer-events: none;
 }
@@ -217,6 +213,14 @@ body {
 }
 #minimap .rock {
   fill: #8a8072;
+}
+#minimap .land {
+  stroke: #c9b98f;
+  stroke-linecap: round;
+}
+#minimap .land.island,
+#minimap .land.rock {
+  stroke: #8a8072;
 }
 #minimap .start {
   stroke: #fff;

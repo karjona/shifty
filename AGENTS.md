@@ -51,7 +51,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 ### Jetski (summer)
 
-- **Course:** an oval in the bay around a breakwater; buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. Rooms loop warm-up → countdown → race → results.
+- **Course:** an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. Rooms loop warm-up → countdown → race → results.
 - **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
 - **One speed meter, passive:** clean buoy passes and landed tricks fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
 - **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail; land clean and you get a short speed boost.
@@ -186,8 +186,8 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 
 ## Workflow
 
-- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells as designed, 2 calm, 3 rough), `scale` (render scale), `water` (`lab` = swells + GPU chop + wake foam), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
-- **Physics tuning:** `cargo run -p sim --example jetski_lab --release [seed]` prints the jetski's draft, top speed, and how often and how high swells launch it (into, with and across the swell, with and without pulling back). `cargo run -p sim --example bot_race --release [seed]` runs a bots-only race and prints times, missed buoys, tricks and bails.
+- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `room`, `bots` (0-7), `surface` (0 flat, 1 swells as designed, 2 calm, 3 rough), `scale` (render scale), `water` (`basic` = swells only, for slow machines; the default adds GPU chop, ripples, wake and shore foam, and reflections), `render=0` (netcode only, for tests). F1 toggles the debug panel (stats, fake lag/jitter/loss).
+- **Physics tuning:** `cargo run -p sim --example jetski_lab --release [seed]` prints the jetski's draft, top speed, how turns build up and carry on, how long tricks take off a ramp, and how often and how high swells launch it and how deep it dives (into, with and across the swell, with and without pulling back). `cargo run -p sim --example bot_race --release [seed]` runs a bots-only race and prints times, missed buoys, tricks and bails.
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, `pnpm audit`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm test:e2e`. CI runs all of them on every PR. The race server image (`.github/workflows/image.yml`) builds on every push to `main`, and on PRs only when packaging changes (Dockerfile, Cargo manifests and lockfile, toolchain, notices config). CI actions are pinned by commit SHA (with the version in a comment).
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.

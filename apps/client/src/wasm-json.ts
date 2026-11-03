@@ -70,5 +70,13 @@ export function parseCourse(json: string): CourseData {
       width: num(r, "width"),
       height: num(r, "height"),
     })),
+    land: list(o.land).map((l) => ({
+      ax: num(l, "ax"),
+      az: num(l, "az"),
+      bx: num(l, "bx"),
+      bz: num(l, "bz"),
+      radius: num(l, "radius"),
+      kind: l.kind === "town" ? "town" : l.kind === "island" ? "island" : "rock",
+    })),
   };
 }

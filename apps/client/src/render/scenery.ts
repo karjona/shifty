@@ -1,7 +1,7 @@
-// Costa Nevada backdrop: a beach and green hills along the north shore and
-// snow-capped peaks behind them, so the bay sits between the sea and the
-// ski slopes. Far and cheap: low-poly, flat-shaded, tinted toward the sky
-// by hand (the scene fog would hide them).
+// Costa Nevada backdrop: the coastal plain behind the town quay, green
+// hills and snow-capped peaks behind them, so the bay sits between the sea
+// and the ski slopes. Far and cheap: low-poly, flat-shaded; hills and peaks
+// are tinted toward the sky by hand (the scene fog would hide them).
 import * as THREE from "three/webgpu";
 
 /** Deterministic noise in [0, 1) for placing scenery. */
@@ -43,19 +43,15 @@ function peak(radius: number, height: number, seed: number, snowline: number, ha
 export function buildScenery(sky: THREE.Color): THREE.Group {
   const g = new THREE.Group();
 
-  // North shore: a long beach, then low hills. Hazed by hand, not by the
-  // scene fog (fogged, they would turn sky-coloured and hide the peaks).
+  // North shore: the coastal plain the town stands on (its beach runs off
+  // past the turns), then low hills. The hills are hazed by hand, not by
+  // the scene fog (fogged, they would turn sky-coloured and hide the peaks).
   const hazed = (hex: number, haze: number) => new THREE.Color(hex).lerp(sky, haze);
-  const sand = new THREE.MeshStandardNodeMaterial({
-    color: hazed(0xe8d6a8, 0.35),
-    roughness: 1,
-    flatShading: true,
-    fog: false,
-  });
-  const beach = new THREE.Mesh(new THREE.BoxGeometry(2400, 4, 90), sand);
-  beach.position.set(0, -1.2, 300);
-  beach.receiveShadow = true;
-  g.add(beach);
+  const sand = new THREE.MeshStandardNodeMaterial({ color: 0xe8d6a8, roughness: 1, flatShading: true });
+  const plain = new THREE.Mesh(new THREE.BoxGeometry(2400, 4, 240), sand);
+  plain.position.set(0, -1.2, 240);
+  plain.receiveShadow = true;
+  g.add(plain);
   const green = new THREE.MeshStandardNodeMaterial({
     color: hazed(0x5f8a46, 0.4),
     roughness: 1,

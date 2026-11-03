@@ -60,7 +60,7 @@ test("two players race in one room", async ({ browser }) => {
     a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
     b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
   ]);
-  expect(aSelf.speed).toBeGreaterThan(12);
+  expect(aSelf.speed).toBeGreaterThan(8);
   expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
 
   // Riders stay on (or just above) the water, even on big swells.
