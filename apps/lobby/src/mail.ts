@@ -1,6 +1,6 @@
-// Sign-in codes by email. Dev prints them to the log (and, for tests, keeps
-// the last one per address); production mail goes through Cloudflare Email
-// Sending once the game has a domain.
+// Sign-in codes by email. `MAIL_MODE=console` prints them to the log (and
+// with `DEV_MAILBOX=1` keeps the last one per address, for tests). There is
+// no mail transport otherwise yet: the code is logged as an error.
 import type { Env } from "./env.ts";
 import type { Locale } from "./locale.ts";
 
@@ -36,7 +36,6 @@ export async function sendSignInCode(env: Env, email: string, code: string, loca
     console.log(`✉  ${email}: ${text.subject(code)}`);
     return;
   }
-  // No mail transport yet: the game has no domain to send from.
   console.error(`no mail transport configured; sign-in code for ${email} not sent`);
   await Promise.resolve();
 }

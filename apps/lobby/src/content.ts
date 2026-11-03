@@ -1,6 +1,5 @@
 // Main menu content from Postgres: banners and news posts, in the player's
-// language only. Edited in the database (an admin screen comes later), so
-// changing it needs no deploy.
+// language only. It lives in the database, so changing it needs no deploy.
 import { and, asc, desc, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { banner, newsPost } from "./db/schema.ts";
