@@ -179,7 +179,7 @@ impl World {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
                 if let Some(landing) = jetski::integrate(r, input, &self.surface, course, tick) {
-                    race::landed(&mut r.race, slot, landing, &mut events);
+                    race::landed(&mut r.race, &self.race, slot, landing, &mut events);
                 }
             }
         }

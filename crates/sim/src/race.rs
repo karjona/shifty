@@ -224,15 +224,24 @@ pub fn pass_gates(
 }
 
 /// Applies a landing to the race: clean tricks fill the meter (two steps
-/// for two rotations or more), a bail empties it.
-pub fn landed(p: &mut Progress, slot: usize, landing: Landing, events: &mut Vec<SimEvent>) {
+/// for two rotations or more), a bail empties it. Tricks count toward the
+/// results only while racing.
+pub fn landed(
+    p: &mut Progress,
+    race: &Race,
+    slot: usize,
+    landing: Landing,
+    events: &mut Vec<SimEvent>,
+) {
     let slot = slot as u8;
     match landing {
         Landing::Clean { spin, flip, roll } => {
             let turns = spin.unsigned_abs() + flip.unsigned_abs() + roll.unsigned_abs();
             let gain = if turns >= 2 { 2 } else { 1 };
             p.meter = (p.meter + gain).min(METER_MAX);
-            p.tricks = p.tricks.saturating_add(1);
+            if p.racing && race.phase == Phase::Racing && !p.finished() {
+                p.tricks = p.tricks.saturating_add(1);
+            }
             events.push(SimEvent {
                 slot,
                 kind: EventKind::Trick {
