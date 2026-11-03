@@ -63,9 +63,11 @@ pub struct SeaState {
     /// Random spread of each wave's direction around the main one.
     pub spread: f32,
     pub waves: usize,
-    /// Wavelength range of the first (longest) wave, metres. Later waves are
-    /// progressively shorter.
+    /// Wavelength range of the first (longest) wave, metres.
     pub wavelength: (f32, f32),
+    /// Later waves are progressively shorter: wave `i` is the first one's
+    /// length divided by `1 + shortening * i`.
+    pub shortening: f32,
     /// Steepness range (`amplitude * k`) per wave.
     pub steepness: (f32, f32),
     pub max_amplitude: f32,
@@ -75,14 +77,17 @@ pub struct SeaState {
 }
 
 impl SeaState {
-    /// Open-sea swell: big rolling waves with pointed crests that throw you
-    /// in the air when you meet them at speed.
+    /// Open-sea swell: long rolling waves, the longest with pointed crests
+    /// that throw you in the air when you meet them at speed. Shorter waves
+    /// stay gentle: steep short ones would launch you off every bump (fine
+    /// chop is the renderer's job).
     pub const OPEN_SEA: Self = Self {
         direction: None,
         spread: 0.35,
-        waves: 5,
-        wavelength: (42.0, 54.0),
-        steepness: (0.06, 0.09),
+        waves: 4,
+        wavelength: (55.0, 68.0),
+        shortening: 0.3,
+        steepness: (0.055, 0.08),
         max_amplitude: 1.15,
         sharpness: 3,
         sharp_waves: 1,
@@ -163,8 +168,8 @@ impl Surface {
             wave_count = sea.waves.min(MAX_WAVES);
             for (i, w) in waves.iter_mut().take(wave_count).enumerate() {
                 let angle = main_dir + rng.range(-sea.spread, sea.spread);
-                let wavelength =
-                    rng.range(sea.wavelength.0, sea.wavelength.1) / (1.0 + i as f32 * 0.55);
+                let wavelength = rng.range(sea.wavelength.0, sea.wavelength.1)
+                    / (1.0 + i as f32 * sea.shortening);
                 let k = TAU / wavelength;
                 let amplitude = steep * rng.range(sea.steepness.0, sea.steepness.1) / k;
                 *w = Wave {
