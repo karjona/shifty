@@ -2,6 +2,7 @@
 // with TSL node materials. Riders are drawn as boxes.
 import * as THREE from "three/webgpu";
 import { CourseView, type CourseData } from "./course.ts";
+import { buildScenery } from "./scenery.ts";
 import { LabWater, type WakeSource } from "./water.ts";
 import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid } from "./waves.ts";
 import {
@@ -47,7 +48,7 @@ export interface RiderView {
 export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900);
+  readonly camera = new THREE.PerspectiveCamera(62, 1, 0.3, 4000);
   backend: "webgpu" | "webgl2" = "webgl2";
   renderScale = 1;
 
@@ -88,6 +89,7 @@ export class World {
     this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
     this.scene.add(this.sun, this.sun.target);
+    this.scene.add(buildScenery(sky));
 
     if (water === "lab") {
       this.lab = new LabWater(WATER_SIZE, WATER_SEGMENTS, sky);
