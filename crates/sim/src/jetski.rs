@@ -120,9 +120,6 @@ pub mod tuning {
     pub const BAIL_DRAG: f32 = 1.6;
     /// How hard the empty ski rights itself.
     pub const BAIL_RIGHTING: f32 = 18.0;
-    /// Speed added on a clean trick landing, per full rotation (up to
-    /// three): stomp it and go. Can exceed top speed; drag eats it back.
-    pub const LANDING_BOOST: f32 = 1.5;
 }
 
 use tuning::*;
@@ -231,9 +228,6 @@ fn land(r: &mut Rider) -> Option<Landing> {
     if rotations == 0 {
         return None;
     }
-    let boost = LANDING_BOOST * f32::from(rotations.min(3));
-    let along = r.forward();
-    r.vel += along * boost;
     Some(Landing::Clean(Trick {
         spin: spin * 2,
         flip,

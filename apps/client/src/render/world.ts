@@ -27,6 +27,8 @@ export interface RiderView {
   /** The stick: lean (+ = forward/tuck, - = back) and steer. */
   lean: number;
   steer: number;
+  /** Snowboard: what is left of a sketchy landing's wobble (1 = just landed, 0 = steady). */
+  wobble: number;
 }
 
 /** A rider as drawn: a jetski, or a snowboarder. */
@@ -63,6 +65,8 @@ export interface CameraTuning {
   heightInAir: number;
   /** The camera stays at least this high above the ground under it. */
   clearance: number;
+  /** If set, that floor follows the ground smoothly (per second), so bumps don't bob the camera. */
+  floorFollow?: number;
   /** Air pull-back starts with the rider this high above the ground, full this much higher. */
   airFrom: number;
   airSpan: number;
@@ -138,6 +142,7 @@ export class World {
   private camAir = 0;
   private camTilt = 0;
   private camLookY = 0;
+  private camFloor = 0;
   /** Landing jolt: a dip on a spring (m, m/s) and a shake that dies away. */
   private camDip = 0;
   private camDipV = 0;
@@ -286,6 +291,7 @@ export class World {
       this.camHeight = me.y;
       this.camBack = c.back;
       this.camLookY = me.y;
+      this.camFloor = env.ground(me.x, me.z, t) + c.clearance;
       this.camReady = true;
     }
     this.jolt(me, dt);
@@ -308,8 +314,12 @@ export class World {
     const x = me.x - fx * this.camBack;
     const z = me.z - fz * this.camBack;
     const up = c.up + this.camAir * c.airUp;
-    const floor = env.ground(x, z, t) + c.clearance;
-    const y = Math.max(this.camHeight + up + this.camDip, floor);
+    let floor = env.ground(x, z, t) + c.clearance;
+    if (c.floorFollow !== undefined) {
+      this.camFloor += (floor - this.camFloor) * (1 - Math.exp(-dt * c.floorFollow));
+      floor = this.camFloor;
+    }
+    const y = Math.max(this.camHeight + up, floor) + this.camDip;
     // Shake: a few unrelated sines, fast enough to read as a jolt.
     const sx = this.camShake * Math.sin(t * 61) * Math.sin(t * 23);
     const sy = this.camShake * Math.sin(t * 53 + 1.3) * Math.sin(t * 29);

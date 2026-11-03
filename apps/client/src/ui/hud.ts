@@ -1,10 +1,13 @@
 // Race HUD: phase banner (warm-up, countdown, results), lap / position /
-// time, the speed meter (summer) or trick score (winter), and short popups
-// for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the state
-// comes from the predicted world every frame.
+// time, the speed meter (summer) or trick score (winter), split times at
+// checkpoints and the finish (against the first rider through), and short
+// popups for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the
+// state comes from the predicted world every frame.
 
 export interface RaceView {
   phase: number;
+  /** World tick the phase began at. */
+  phaseStart: number;
   phaseTicks: number;
   phaseLength: number;
   laps: number;
@@ -30,7 +33,7 @@ export interface RaceView {
 export interface RaceEvent {
   tick: number;
   slot: number;
-  kind: "buoy" | "checkpoint" | "lap" | "finish" | "trick" | "bail";
+  kind: "buoy" | "checkpoint" | "lap" | "finish" | "trick" | "sketchy" | "bail";
   buoy?: number;
   ok?: boolean;
   meter?: number;
@@ -43,6 +46,8 @@ export interface RaceEvent {
   grab?: number;
   grabTicks?: number;
   points?: number;
+  /** A trick landed badly (half points). */
+  sketchy?: boolean;
   index?: number;
 }
 
@@ -90,6 +95,9 @@ export function formatTime(ticks: number, hz: number): string {
   return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 }
 
+/** How long a split time stays up (ms). */
+const SPLIT_MS = 4000;
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, id: string, parent: HTMLElement): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   e.id = id;
@@ -105,6 +113,10 @@ export class Hud {
   private popups: HTMLDivElement;
   private results: HTMLDivElement;
   private lastResultsKey = "";
+  /** Who passed each checkpoint (and the finish) in this race, and when (race ticks). */
+  private passes = new Map<string, { slot: number; ticks: number }[]>();
+  private passesRace = -1;
+  private split: { html: string; until: number } | null = null;
 
   constructor(root: HTMLElement) {
     this.banner = el("div", "banner", root);
@@ -127,9 +139,10 @@ export class Hud {
     while (this.popups.childElementCount > 4) this.popups.firstElementChild?.remove();
   }
 
-  /** Popups for my own race events. */
+  /** Popups for my own race events, and split times from everyone's. */
   events(events: RaceEvent[], mySlot: number, race: RaceView): void {
     for (const e of events) {
+      if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
       if (e.slot !== mySlot) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? "✓ MAX POWER" : "✓", "good");
@@ -145,10 +158,39 @@ export class Hud {
       } else if (e.kind === "trick") {
         const name = trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0, e.grab ?? 0);
         this.popup(race.looped ? `${name}!` : `${name}  +${e.points ?? 0}`, "big");
+        if (e.sketchy) this.popup("SKETCHY", "bad");
+      } else if (e.kind === "sketchy") {
+        this.popup("SKETCHY!", "bad");
       } else if (e.kind === "bail") {
         this.popup("BAIL!", "bad");
       }
     }
+  }
+
+  /** Notes a rider through a checkpoint or the finish; for mine, shows the split against the first one through. */
+  private pass(e: RaceEvent, mySlot: number, race: RaceView): void {
+    if (race.phaseStart !== this.passesRace) {
+      this.passes.clear();
+      this.passesRace = race.phaseStart;
+    }
+    const key = e.kind === "finish" ? "finish" : `cp${e.index ?? 0}`;
+    const ticks = e.kind === "finish" ? (e.ticks ?? 0) : e.tick - race.phaseStart;
+    const list = this.passes.get(key) ?? [];
+    this.passes.set(key, list);
+    if (list.some((p) => p.slot === e.slot)) return;
+    list.push({ slot: e.slot, ticks });
+    if (e.slot !== mySlot || !race.racing) return;
+    const ahead = list.filter((p) => p.slot !== mySlot && p.ticks < ticks);
+    const hz = race.tickHz;
+    let html: string;
+    if (ahead.length === 0) {
+      html = `<div class="split ahead"><span>SPLIT</span> ${formatTime(ticks, hz)} · 1st</div>`;
+    } else {
+      const best = Math.min(...ahead.map((p) => p.ticks));
+      const gap = ((ticks - best) / hz).toFixed(2);
+      html = `<div class="split behind"><span>SPLIT</span> +${gap} · ${ordinal(ahead.length + 1)}</div>`;
+    }
+    this.split = { html, until: performance.now() + SPLIT_MS };
   }
 
   update(
@@ -182,10 +224,12 @@ export class Hud {
       const first = race.looped
         ? `<div><span>LAP</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>`
         : `<div><span>SCORE</span> ${race.points}</div>`;
+      const split = this.split && performance.now() < this.split.until ? this.split.html : "";
       this.info.innerHTML =
         first +
         `<div><span>POS</span> ${race.place}/${race.racers}</div>` +
-        `<div><span>TIME</span> ${formatTime(time, hz)}</div>`;
+        `<div><span>TIME</span> ${formatTime(time, hz)}</div>` +
+        split;
     } else {
       this.info.innerHTML = "";
     }

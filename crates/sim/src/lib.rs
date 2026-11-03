@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn a_full_spin_lands_clean_and_fills_the_meter() {
+    fn a_full_spin_lands_clean_and_does_not_fill_the_meter() {
         let (ev, r) = ramp_jump(|r| {
             if r.air_spin.abs() < 0.8 * math::TAU {
                 Input::from_analog(1.0, 1.0, 0.0, buttons::TRICK)
@@ -378,10 +378,11 @@ mod tests {
                     spin: 2,
                     ..race::Trick::default()
                 },
-                meter: 2
+                sketchy: false
             }]
         );
         assert!(!r.bailing() && r.speed() > 12.0, "{r:?}");
+        assert_eq!(r.race.meter, 1, "tricks never make you faster");
     }
 
     #[test]

@@ -44,6 +44,8 @@ pub struct Rider {
     /// yet), and how long grabs have been held in it.
     pub grab: u8,
     pub grab_ticks: u8,
+    /// Snowboard: ticks left wobbling after a sketchy landing (0 = steady).
+    pub wobble: u8,
     /// The input applied on the last tick. Part of the state: it drives
     /// button edge detection and lets clients extrapolate other riders.
     pub last_input: Input,
@@ -69,6 +71,7 @@ impl Rider {
             charge: 0,
             grab: 0,
             grab_ticks: 0,
+            wobble: 0,
             last_input: Input::default(),
             race: Progress::default(),
         };
@@ -199,14 +202,7 @@ impl World {
                     Line::Run(run) => snowboard::integrate(r, input, run),
                 };
                 if let Some(landing) = landing {
-                    race::landed(
-                        &mut r.race,
-                        &self.race,
-                        course.sport,
-                        slot,
-                        landing,
-                        &mut events,
-                    );
+                    race::landed(&mut r.race, &self.race, slot, landing, &mut events);
                 }
             }
         }
@@ -223,7 +219,6 @@ impl World {
                 race::landed(
                     &mut r.race,
                     &self.race,
-                    course.sport,
                     slot,
                     race::Landing::Bail,
                     &mut events,
@@ -441,7 +436,12 @@ impl World {
             eat(u32::from(r.grounded)
                 | (u32::from(r.state_ticks) << 8)
                 | (u32::from(r.bail_ticks) << 24));
-            eat(u32::from_le_bytes([r.charge, r.grab, r.grab_ticks, 0]));
+            eat(u32::from_le_bytes([
+                r.charge,
+                r.grab,
+                r.grab_ticks,
+                r.wobble,
+            ]));
             eat(u32::from_le_bytes([
                 r.last_input.steer as u8,
                 r.last_input.throttle as u8,

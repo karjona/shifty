@@ -8,10 +8,11 @@
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
 //! order (on a loop the start line is also the finish). In summer, passing a
 //! buoy on the correct side fills the speed meter one step (a passive
-//! top-speed bonus) and passing it on the wrong side empties it; landed
-//! tricks fill it too. In winter there is no meter: tricks score points.
+//! top-speed bonus) and passing it on the wrong side empties it, and so does
+//! a bail. In winter there is no meter. Tricks never make you faster: they
+//! score points (half for a sketchy landing).
 
-use crate::course::{Course, Gate, Keep, Sport};
+use crate::course::{Course, Gate, Keep};
 
 pub mod tuning {
     use crate::TICK_HZ;
@@ -139,6 +140,8 @@ pub struct Trick {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Landing {
     Clean(Trick),
+    /// Down, but crooked or hard: the rider wobbles, with the trick (if any).
+    Sketchy(Option<Trick>),
     /// Too crooked (or still grabbing): the rider falls.
     Bail,
 }
@@ -162,11 +165,13 @@ pub enum EventKind {
     Finish {
         ticks: u32,
     },
-    /// Landed a trick clean. `meter` is the new level.
+    /// Landed a trick (`sketchy`: not cleanly, for half the points).
     Trick {
         trick: Trick,
-        meter: u8,
+        sketchy: bool,
     },
+    /// Landed a plain jump sketchy.
+    Sketchy,
     /// Fell: crashed on landing (or into something). Off the board or the
     /// ski for a moment; the meter is emptied.
     Bail,
@@ -277,38 +282,25 @@ pub fn pass_gates(
     }
 }
 
-/// Applies a landing to the race. With a meter, clean tricks fill it (two
-/// steps for two rotations or more) and a bail empties it. Tricks (and
+/// Applies a landing to the race. A bail empties the meter. Tricks (and
 /// their points) count toward the results only while racing.
 pub fn landed(
     p: &mut Progress,
     race: &Race,
-    sport: Sport,
     slot: usize,
     landing: Landing,
     events: &mut Vec<SimEvent>,
 ) {
     let slot = slot as u8;
-    match landing {
-        Landing::Clean(trick) => {
-            if sport.has_meter() {
-                let turns = trick.spin.unsigned_abs() / 2
-                    + trick.flip.unsigned_abs()
-                    + trick.roll.unsigned_abs();
-                let gain = if turns >= 2 { 2 } else { 1 };
-                p.meter = (p.meter + gain).min(METER_MAX);
-            }
-            if p.racing && race.phase == Phase::Racing && !p.finished() {
-                p.tricks = p.tricks.saturating_add(1);
-                p.points = p.points.saturating_add(trick.points);
-            }
+    let (trick, sketchy) = match landing {
+        Landing::Clean(trick) => (trick, false),
+        Landing::Sketchy(Some(trick)) => (trick, true),
+        Landing::Sketchy(None) => {
             events.push(SimEvent {
                 slot,
-                kind: EventKind::Trick {
-                    trick,
-                    meter: p.meter,
-                },
+                kind: EventKind::Sketchy,
             });
+            return;
         }
         Landing::Bail => {
             p.meter = 0;
@@ -316,8 +308,25 @@ pub fn landed(
                 slot,
                 kind: EventKind::Bail,
             });
+            return;
         }
+    };
+    let trick = if sketchy {
+        Trick {
+            points: trick.points / 2,
+            ..trick
+        }
+    } else {
+        trick
+    };
+    if p.racing && race.phase == Phase::Racing && !p.finished() {
+        p.tricks = p.tricks.saturating_add(1);
+        p.points = p.points.saturating_add(trick.points);
     }
+    events.push(SimEvent {
+        slot,
+        kind: EventKind::Trick { trick, sketchy },
+    });
 }
 
 /// Distance covered in the race so far (for ranking riders still racing).

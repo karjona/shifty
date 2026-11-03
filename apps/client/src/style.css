@@ -88,6 +88,16 @@ body {
   letter-spacing: 0.08em;
   opacity: 0.85;
 }
+#race-info .split {
+  margin-top: 4px;
+  font-size: 24px;
+}
+#race-info .split.ahead {
+  color: #7dff9a;
+}
+#race-info .split.behind {
+  color: #ff8a7a;
+}
 #popups {
   position: fixed;
   top: 36vh;
@@ -182,7 +192,7 @@ body {
 #help {
   position: fixed;
   left: 16px;
-  top: 130px;
+  top: 168px;
   font-size: 12px;
   line-height: 1.5;
   opacity: 0.85;

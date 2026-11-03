@@ -19,7 +19,7 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -303,6 +303,7 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.u8(r.charge);
     w.u8(r.grab);
     w.u8(r.grab_ticks);
+    w.u8(r.wobble);
     write_input(w, &r.last_input);
     w.u8(p.next_gate);
     w.u8(p.lap);
@@ -341,6 +342,7 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
     let charge = r.u8()?;
     let grab = r.u8()?;
     let grab_ticks = r.u8()?;
+    let wobble = r.u8()?;
     let last_input = read_input(r)?;
     let race = Progress {
         racing: flags & FLAG_RACING != 0,
@@ -370,6 +372,7 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
             charge,
             grab,
             grab_ticks,
+            wobble,
             last_input,
             race,
         },

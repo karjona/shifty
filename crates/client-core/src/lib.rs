@@ -98,6 +98,8 @@ pub struct RenderRider {
     pub grab: u8,
     pub lean: f32,
     pub steer: f32,
+    /// Snowboard: how much is left of a sketchy landing's wobble (1 = just landed).
+    pub wobble: f32,
 }
 
 /// A race event to show (buoy, lap, finish), from the predicted world.
@@ -118,6 +120,7 @@ impl HudEvent {
             (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
             (EventKind::Finish { .. }, EventKind::Finish { .. })
             | (EventKind::Trick { .. }, EventKind::Trick { .. })
+            | (EventKind::Sketchy, EventKind::Sketchy)
             | (EventKind::Bail, EventKind::Bail) => true,
             _ => false,
         };
@@ -626,6 +629,7 @@ impl Client {
                     },
                     lean: r.last_input.lean_f(),
                     steer: r.last_input.steer_f(),
+                    wobble: f32::from(r.wobble) / f32::from(sim::snowboard::tuning::WOBBLE_TICKS),
                 });
             }
         }

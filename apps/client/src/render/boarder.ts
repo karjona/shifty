@@ -2,7 +2,8 @@
 // rider on it is render-only and posed every frame: regular stance (left
 // foot forward, chest to the toe edge), knees that load for a pop and soak
 // up landings, a low tuck, sitting back into a skid, arms out for balance
-// in the air, a hand on the board for grabs, and a tumble when bailing.
+// in the air, a hand on the board for grabs, rocking heel to toe with arms
+// windmilling after a sketchy landing, and a tumble when bailing.
 import * as THREE from "three/webgpu";
 import { SLOT_COLORS } from "./rider.ts";
 import type { RiderModel, RiderView } from "./world.ts";
@@ -117,6 +118,8 @@ export class BoarderModel implements RiderModel {
   private reach = new Spring(40, 9);
   private skid = new Spring(30, 9);
   private tumble = 0;
+  /** Time, for the wobble's rocking. */
+  private clock = 0;
   private lastVel: THREE.Vector3 | null = null;
 
   constructor(slot: number) {
@@ -218,25 +221,35 @@ export class BoarderModel implements RiderModel {
     this.lastVel = vel;
     const tuck = Math.max(0, r.lean);
     const brake = Math.max(0, -r.lean);
-    const crouchTarget = r.bailing ? 0.3 : !r.grounded ? (r.grab ? 0.62 : 0.32) : 0.22 + tuck * 0.38 + r.charge * 0.5;
+    this.clock += dt;
+    const wobble = r.bailing ? 0 : r.wobble;
+    const crouchTarget = r.bailing
+      ? 0.3
+      : !r.grounded
+        ? r.grab
+          ? 0.62
+          : 0.32
+        : 0.22 + tuck * 0.38 + r.charge * 0.5 + wobble * 0.3;
     this.crouch.step(Math.min(0.85, crouchTarget), 0.012 * up, dt);
     this.lean.step(r.grounded ? tuck * 0.5 - brake * 0.35 : 0.1, -0.02 * forward, dt);
-    this.reach.step(r.grounded ? 0 : 1, 0, dt);
+    this.reach.step(r.grounded ? wobble : 1, 0, dt);
     // Sitting back throws the board sideways into a skid (drawn only).
     this.skid.step(r.grounded && !r.bailing && r.speed > 3 ? brake * 0.9 * (r.steer >= 0 ? 1 : -1) : 0, 0, dt);
     this.rig.rotation.y = this.skid.x;
 
     // Bailing: the rider goes down beside the board.
     this.tumble += ((r.bailing ? 1 : 0) - this.tumble) * (1 - Math.exp(-dt * (r.bailing ? 9 : 4)));
-    this.pose(Math.max(0, Math.min(0.85, this.crouch.x)), this.lean.x, this.reach.x, r.grab, dt);
+    const windmill = wobble * Math.sin(this.clock * 13);
+    this.pose(Math.max(0, Math.min(0.85, this.crouch.x)), this.lean.x, this.reach.x, r.grab, windmill);
     this.body.position.set(-0.55 * this.tumble, -0.15 * this.tumble, 0);
     this.body.rotation.set(0, -Math.PI / 2, 0);
-    this.body.rotateX(-1.45 * this.tumble);
+    // A wobble rocks the rider between the toe and heel edges.
+    this.body.rotateX(-1.45 * this.tumble + windmill * 0.28);
     this.board.rotation.z = this.tumble * 0.3;
   }
 
-  /** Places the limbs for a crouch (0-0.85), a lean (+ forward), arms out (`spread`) and a grab. */
-  private pose(crouch: number, lean: number, spread: number, grab: number, _dt: number): void {
+  /** Places the limbs for a crouch (0-0.85), a lean (+ forward), arms out (`spread`), a grab, and windmilling arms (-1 to 1). */
+  private pose(crouch: number, lean: number, spread: number, grab: number, windmill: number): void {
     const hipY = STAND - crouch * 0.42 + (grab ? 0.08 : 0);
     // Hips sit back over the heels a little, more when crouched or sitting back.
     const hipZ = -0.06 - crouch * 0.1 - Math.max(0, -lean) * 0.15;
@@ -278,7 +291,7 @@ export class BoarderModel implements RiderModel {
       // Riding: front hand toward the nose, back hand low by the hip. In
       // the air: out wide for balance.
       const ride = new THREE.Vector3(side * 0.45, hipY - 0.05 + (side > 0 ? 0.15 : 0), 0.22);
-      const wide = new THREE.Vector3(side * 0.85, 0.42 + hipY * 0.6, 0.05);
+      const wide = new THREE.Vector3(side * 0.85, 0.42 + hipY * 0.6 + side * windmill * 0.35, 0.05 + windmill * 0.2);
       let hand = ride.lerp(wide, spread);
       const target = this.grabTarget(grab, side);
       if (target) hand = target;

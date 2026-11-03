@@ -37,8 +37,7 @@ impl Sport {
         }
     }
 
-    /// Whether clean gates and tricks fill the speed meter. Without it,
-    /// tricks only score points.
+    /// Whether clean gates fill the speed meter.
     pub fn has_meter(self) -> bool {
         self == Self::Jetski
     }
