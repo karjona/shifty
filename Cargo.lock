@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "client-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "protocol",
  "sim",
@@ -343,7 +343,7 @@ checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
 name = "devkit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "protocol"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -1243,7 +1243,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "race-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1654,14 +1654,14 @@ checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 
 [[package]]
 name = "sim"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "sim-wasm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "client-core",
  "protocol",
