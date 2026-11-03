@@ -238,7 +238,9 @@ async function main(): Promise<void> {
       sport = course.sport;
       input.sport = course.sport;
       if (help) help.innerHTML = course.sport === "snow" ? HELP.snow : HELP.jetski;
-      if (course.sport === "snow") {
+      if (!renderEnabled) {
+        // Netcode only: nothing to draw.
+      } else if (course.sport === "snow") {
         world.setEnvironment(
           new Mountain(course.run, {
             ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
