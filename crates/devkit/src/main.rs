@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! devkit determinism [ticks]            native determinism hash
-//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--surface 1] [--pid p]
+//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--surface 1] [--course 0] [--pid p]
 //! devkit bots [--server localhost:4433] [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0]
 //! ```
 //!
@@ -110,6 +110,7 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         exp: now_unix() + 10 * 60,
         bots: m.get("bots").map_or(Ok(0), |b| b.parse())?,
         surface: m.get("surface").map_or(Ok(1), |b| b.parse())?,
+        course: m.get("course").map_or(Ok(0), |b| b.parse())?,
     })
 }
 

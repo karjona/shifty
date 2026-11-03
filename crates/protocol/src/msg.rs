@@ -19,7 +19,7 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -300,12 +300,16 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.u16(r.state_ticks);
     w.i16(quant::angle_to_wire(r.air_spin));
     w.u8(r.bail_ticks);
+    w.u8(r.charge);
+    w.u8(r.grab);
+    w.u8(r.grab_ticks);
     write_input(w, &r.last_input);
     w.u8(p.next_gate);
     w.u8(p.lap);
     w.u8(p.meter);
     w.u8(p.misses);
     w.u8(p.tricks);
+    w.u16(p.points);
     w.u32(p.finish_ticks);
 }
 
@@ -334,6 +338,9 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
     let state_ticks = r.u16()?;
     let air_spin = quant::angle_from_wire(r.i16()?);
     let bail_ticks = r.u8()?;
+    let charge = r.u8()?;
+    let grab = r.u8()?;
+    let grab_ticks = r.u8()?;
     let last_input = read_input(r)?;
     let race = Progress {
         racing: flags & FLAG_RACING != 0,
@@ -342,6 +349,7 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
         meter: r.u8()?,
         misses: r.u8()?,
         tricks: r.u8()?,
+        points: r.u16()?,
         finish_ticks: r.u32()?,
     };
     Ok(RiderState {
@@ -359,6 +367,9 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
             state_ticks,
             air_spin,
             bail_ticks,
+            charge,
+            grab,
+            grab_ticks,
             last_input,
             race,
         },

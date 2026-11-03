@@ -13,7 +13,11 @@ mod tests {
     use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 
     fn full_snapshot() -> Snapshot {
-        let mut world = World::on_course(CourseId::Oval, SurfaceKind::Swells, 9);
+        full_snapshot_on(CourseId::Oval)
+    }
+
+    fn full_snapshot_on(course: CourseId) -> Snapshot {
+        let mut world = World::on_course(course, SurfaceKind::Swells, 9);
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }
@@ -66,9 +70,11 @@ mod tests {
 
     #[test]
     fn snapshot_roundtrip_is_lossless() {
-        let snap = full_snapshot();
-        let decoded = ServerMsg::decode(&ServerMsg::Snapshot(snap.clone()).encode()).unwrap();
-        assert_eq!(decoded, ServerMsg::Snapshot(snap));
+        for course in [CourseId::Oval, CourseId::Mountain] {
+            let snap = full_snapshot_on(course);
+            let decoded = ServerMsg::decode(&ServerMsg::Snapshot(snap.clone()).encode()).unwrap();
+            assert_eq!(decoded, ServerMsg::Snapshot(snap));
+        }
     }
 
     #[test]

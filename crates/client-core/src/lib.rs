@@ -92,6 +92,12 @@ pub struct RenderRider {
     pub bailing: bool,
     pub is_me: bool,
     pub is_bot: bool,
+    /// Snowboard: how loaded the jump is (0-1), the grab being held (0 =
+    /// none), and the stick (lean: + = tucked, - = sitting back).
+    pub charge: f32,
+    pub grab: u8,
+    pub lean: f32,
+    pub steer: f32,
 }
 
 /// A race event to show (buoy, lap, finish), from the predicted world.
@@ -108,6 +114,7 @@ impl HudEvent {
     fn same_as(&self, o: &HudEvent) -> bool {
         let same_kind = match (self.kind, o.kind) {
             (EventKind::Buoy { buoy: a, .. }, EventKind::Buoy { buoy: b, .. }) => a == b,
+            (EventKind::Checkpoint { index: a }, EventKind::Checkpoint { index: b }) => a == b,
             (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
             (EventKind::Finish { .. }, EventKind::Finish { .. })
             | (EventKind::Trick { .. }, EventKind::Trick { .. })
@@ -611,6 +618,14 @@ impl Client {
                     bailing: r.bailing(),
                     is_me,
                     is_bot,
+                    charge: f32::from(r.charge) / f32::from(sim::snowboard::tuning::CHARGE_TICKS),
+                    grab: if !r.grounded && r.last_input.pressed(sim::input::buttons::GRAB) {
+                        r.grab
+                    } else {
+                        0
+                    },
+                    lean: r.last_input.lean_f(),
+                    steer: r.last_input.steer_f(),
                 });
             }
         }

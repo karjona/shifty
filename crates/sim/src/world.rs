@@ -1,15 +1,14 @@
 use crate::MAX_RIDERS;
-use crate::course::{Course, CourseId, Frame};
+use crate::course::{Course, CourseId, Frame, Line, Sport};
 use crate::input::Input;
-use crate::jetski;
 use crate::math::{Vec3, cos, sin};
 use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::surface::{Surface, SurfaceKind};
+use crate::{jetski, snowboard};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
-    pub const RIDER_RADIUS: f32 = crate::course::tuning::RIDER_RADIUS;
     pub const RIDER_HALF_HEIGHT: f32 = 0.8;
     pub const BUMP_RESTITUTION: f32 = 0.35;
 }
@@ -37,8 +36,14 @@ pub struct Rider {
     /// Heading change since leaving the water (spins), radians. Pitch and
     /// roll are not wrapped in the air either, so flips and rolls add up.
     pub air_spin: f32,
-    /// Ticks left in the water after a bail (0 = riding).
+    /// Ticks left down after a bail (0 = riding).
     pub bail_ticks: u8,
+    /// Snowboard: ticks the jump has been loaded (crouched) for.
+    pub charge: u8,
+    /// Snowboard: the grab of this jump (see `snowboard::grabs`; 0 = none
+    /// yet), and how long grabs have been held in it.
+    pub grab: u8,
+    pub grab_ticks: u8,
     /// The input applied on the last tick. Part of the state: it drives
     /// button edge detection and lets clients extrapolate other riders.
     pub last_input: Input,
@@ -61,6 +66,9 @@ impl Rider {
             state_ticks: 0,
             air_spin: 0.0,
             bail_ticks: 0,
+            charge: 0,
+            grab: 0,
+            grab_ticks: 0,
             last_input: Input::default(),
             race: Progress::default(),
         };
@@ -137,12 +145,20 @@ impl World {
         self.course.course()
     }
 
-    /// Places a rider at its grid spot, floating. Riders who arrive during
+    /// Where a rider at rest at `(x, z)` sits: floating, or standing on the snow.
+    fn rest_height(&self, x: f32, z: f32) -> f32 {
+        match self.course().line {
+            Line::Run(run) => snowboard::rest_height(run, x, z),
+            Line::Stadium(_) => jetski::rest_height(self.surface.height(x, z, self.tick)),
+        }
+    }
+
+    /// Places a rider at its grid spot, at rest. Riders who arrive during
     /// the countdown join the race; at any other time they ride free until
     /// the next one.
     pub fn spawn(&mut self, slot: usize) {
         let spot = self.course().grid_spot(slot);
-        let y = jetski::rest_height(self.surface.height(spot.x, spot.z, self.tick));
+        let y = self.rest_height(spot.x, spot.z);
         let mut r = Rider::at(spot, y);
         if self.race.phase == Phase::Countdown {
             r.race = Progress::lined_up();
@@ -178,8 +194,19 @@ impl World {
             if let Some(r) = rider {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
-                if let Some(landing) = jetski::integrate(r, input, &self.surface, course, tick) {
-                    race::landed(&mut r.race, &self.race, slot, landing, &mut events);
+                let landing = match course.line {
+                    Line::Stadium(_) => jetski::integrate(r, input, &self.surface, course, tick),
+                    Line::Run(run) => snowboard::integrate(r, input, run),
+                };
+                if let Some(landing) = landing {
+                    race::landed(
+                        &mut r.race,
+                        &self.race,
+                        course.sport,
+                        slot,
+                        landing,
+                        &mut events,
+                    );
                 }
             }
         }
@@ -187,16 +214,35 @@ impl World {
         let holding = self.race.phase == Phase::Countdown;
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
-            course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            if course.sport == Sport::Snowboard
+                && impact.is_some_and(|i| i > snowboard::tuning::CRASH_SPEED)
+                && !r.bailing()
+            {
+                snowboard::fall(r);
+                race::landed(
+                    &mut r.race,
+                    &self.race,
+                    course.sport,
+                    slot,
+                    race::Landing::Bail,
+                    &mut events,
+                );
+            }
             if holding && r.race.racing {
-                // On the grid: engines rev, the hull bobs, nobody moves.
+                // On the grid: nobody moves (engines rev, hulls bob).
                 let spot = course.grid_spot(slot);
-                r.pos.x = spot.x;
-                r.pos.z = spot.z;
-                r.yaw = spot.yaw;
-                r.yaw_rate = 0.0;
-                r.vel.x = 0.0;
-                r.vel.z = 0.0;
+                match course.line {
+                    Line::Run(run) => snowboard::hold(r, spot, run),
+                    Line::Stadium(_) => {
+                        r.pos.x = spot.x;
+                        r.pos.z = spot.z;
+                        r.yaw = spot.yaw;
+                        r.yaw_rate = 0.0;
+                        r.vel.x = 0.0;
+                        r.vel.z = 0.0;
+                    }
+                }
             }
             // Gates are judged on the final (grid) position, which is where
             // the next tick starts from, so crossings can't fall in a gap.
@@ -268,12 +314,13 @@ impl World {
     /// Everyone to the grid for a new race.
     fn line_up(&mut self) {
         let course = self.course();
-        for (slot, rider) in self.riders.iter_mut().enumerate() {
-            if let Some(r) = rider {
+        for slot in 0..MAX_RIDERS {
+            if self.riders[slot].is_some() {
                 let spot = course.grid_spot(slot);
-                let y = jetski::rest_height(self.surface.height(spot.x, spot.z, self.tick));
-                *r = Rider::at(spot, y);
+                let y = self.rest_height(spot.x, spot.z);
+                let mut r = Rider::at(spot, y);
                 r.race = Progress::lined_up();
+                self.riders[slot] = Some(r);
             }
         }
     }
@@ -320,6 +367,7 @@ impl World {
     /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
     /// slot order so every machine gets the same result.
     fn resolve_collisions(&mut self) {
+        let radius = self.course().sport.rider_radius();
         for i in 0..MAX_RIDERS {
             for j in (i + 1)..MAX_RIDERS {
                 let (Some(a), Some(b)) = (self.riders[i], self.riders[j]) else {
@@ -330,7 +378,7 @@ impl World {
                 }
                 let d = (b.pos - a.pos).horizontal();
                 let dist = d.length();
-                let min_dist = RIDER_RADIUS * 2.0;
+                let min_dist = radius * 2.0;
                 if dist >= min_dist {
                     continue;
                 }
@@ -393,6 +441,7 @@ impl World {
             eat(u32::from(r.grounded)
                 | (u32::from(r.state_ticks) << 8)
                 | (u32::from(r.bail_ticks) << 24));
+            eat(u32::from_le_bytes([r.charge, r.grab, r.grab_ticks, 0]));
             eat(u32::from_le_bytes([
                 r.last_input.steer as u8,
                 r.last_input.throttle as u8,
@@ -406,7 +455,7 @@ impl World {
                 p.lap,
                 p.meter,
             ]));
-            eat(u32::from(p.misses) | (u32::from(p.tricks) << 8));
+            eat(u32::from(p.misses) | (u32::from(p.tricks) << 8) | (u32::from(p.points) << 16));
             eat(p.finish_ticks);
         }
         h

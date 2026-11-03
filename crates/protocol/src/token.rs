@@ -35,6 +35,9 @@ pub struct JoinClaims {
     pub bots: u8,
     #[serde(default)]
     pub surface: u8,
+    /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
+    #[serde(default)]
+    pub course: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +163,7 @@ mod tests {
             exp: 1_000_060,
             bots: 2,
             surface: 1,
+            course: 1,
         }
     }
 
