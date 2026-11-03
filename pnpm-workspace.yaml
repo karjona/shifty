@@ -4,3 +4,7 @@ allowBuilds:
   lefthook: true
   esbuild: false
   workerd: false
+# drizzle-kit 0.31 loads its config through @esbuild-kit, which pins an old
+# esbuild with a dev-server advisory (GHSA-67mh-4wv8-2f99).
+overrides:
+  "@esbuild-kit/core-utils>esbuild": 0.25.12

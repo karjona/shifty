@@ -1,7 +1,7 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
 // ticket from the dev server (see vite.config.ts). The netcode e2e tests
-// use it too. URL options: name, room, bots, event (snow), surface, pid,
-// render=0, autopilot=1, scale, water.
+// use it too. URL options: name, room, bots, event (snow, or gp for the
+// Grand Prix), surface, pid, render=0, autopilot=1, scale, water.
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -28,6 +28,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
     status.hidden = text === "";
   };
   const snow = params.get("event") === "snow";
+  const gp = params.get("event") === "gp";
   const help = document.querySelector<HTMLDivElement>("#help")!;
   help.innerHTML = snow ? HELP.snow : HELP.jetski;
   help.hidden = false;
@@ -42,6 +43,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
       surface: params.get("surface") ?? "1",
       course: snow ? "1" : "0",
     });
+    if (gp) q.set("events", "0,1");
     const pid = params.get("pid");
     if (pid) q.set("pid", pid);
     const res = await fetch(`/__dev/join?${q}`);

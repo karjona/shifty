@@ -3,6 +3,7 @@
 // moves from course to course in the same session, with a short season
 // change in between.
 import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
+import { messages } from "../i18n/index.ts";
 import { InputReader } from "../input.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
@@ -17,14 +18,19 @@ import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
 import { SeasonChange } from "./season-change.ts";
 
-export const REJECT_REASONS: Record<number, string> = {
-  3: "the game was updated, please reload the page",
-  4: "invalid join ticket",
-  5: "room is full (4 players max)",
-  6: "server is shutting down",
-  7: "disconnected for inactivity",
-  8: "this Grand Prix has already started",
-};
+/** Why the race server said no, by client phase (2 + the protocol's reject reason). */
+function rejectReason(phase: number): string {
+  const r = messages().race.reasons;
+  const reasons: Record<number, string> = {
+    3: r.version,
+    4: r.token,
+    5: r.full,
+    6: r.draining,
+    7: r.kicked,
+    8: r.started,
+  };
+  return reasons[phase] ?? String(phase);
+}
 
 export interface RaceOptions {
   ticket: JoinTicket;
@@ -110,7 +116,7 @@ export class RaceSession implements Stage {
 
   start(engine: Engine): void {
     this.engine = engine;
-    this.opts.status("Connecting…");
+    this.opts.status(messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
       this.opts.status(e instanceof Error ? e.message : String(e));
       this.opts.onJoin?.(false);
@@ -131,7 +137,7 @@ export class RaceSession implements Stage {
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.opts.status("Joining room…");
+    this.opts.status(messages().race.joining);
     if (this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.view.scale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -293,9 +299,10 @@ export class RaceSession implements Stage {
     const render = this.opts.render ?? engine.render;
     const phase = client.phase();
     this.state.phase = phase;
-    if (phase === 0) this.opts.status("Joining room…");
-    else if (phase >= 2) this.opts.status(`Rejected: ${REJECT_REASONS[phase] ?? phase}`);
-    else if (this.closedReason) this.opts.status(`Connection lost: ${this.closedReason}`);
+    const m = messages().race;
+    if (phase === 0) this.opts.status(m.joining);
+    else if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
+    else if (this.closedReason) this.opts.status(m.lost(this.closedReason));
     else this.opts.status("");
     if (!this.joined && phase !== 0) {
       this.joined = true;

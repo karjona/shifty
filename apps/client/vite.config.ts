@@ -34,6 +34,7 @@ const devLobby = (): Plugin => ({
             bots: Number(q.get("bots") ?? 2),
             surface: Number(q.get("surface") ?? 1),
             course: Number(q.get("course") ?? 0),
+            events: (q.get("events") ?? "").split(",").filter(Boolean).map(Number),
             pid: q.get("pid") || undefined,
           });
           res.setHeader("content-type", "application/json");
