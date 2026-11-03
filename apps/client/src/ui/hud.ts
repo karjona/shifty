@@ -22,12 +22,15 @@ export interface RaceView {
 export interface RaceEvent {
   tick: number;
   slot: number;
-  kind: "buoy" | "lap" | "finish";
+  kind: "buoy" | "lap" | "finish" | "trick" | "bail";
   buoy?: number;
   ok?: boolean;
   meter?: number;
   lap?: number;
   ticks?: number;
+  spin?: number;
+  flip?: number;
+  roll?: number;
 }
 
 export interface StandingView {
@@ -36,6 +39,7 @@ export interface StandingView {
   lap: number;
   finishTicks: number;
   misses: number;
+  tricks: number;
 }
 
 const WARMUP = 0;
@@ -47,6 +51,19 @@ export function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
+}
+
+const TIMES = ["", "", "Double ", "Triple ", "Quad "];
+const times = (k: number) => TIMES[Math.min(Math.abs(k), 4)] ?? "";
+
+/** "Backflip 360", "Double barrel roll"... from signed rotation counts. */
+export function trickName(spin: number, flip: number, roll: number): string {
+  const parts: string[] = [];
+  if (flip !== 0) parts.push(`${times(flip)}${flip > 0 ? "backflip" : "frontflip"}`);
+  if (roll !== 0) parts.push(`${times(roll)}barrel roll`);
+  if (spin !== 0) parts.push(String(Math.abs(spin) * 360));
+  const name = parts.join(" ");
+  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 export function formatTime(ticks: number, hz: number): string {
@@ -104,6 +121,10 @@ export class Hud {
         if ((e.lap ?? 0) > 1) this.popup((e.lap ?? 0) === race.laps ? "FINAL LAP" : `LAP ${e.lap}`, "big");
       } else if (e.kind === "finish") {
         this.popup(`FINISH! ${ordinal(race.place)}`, "big");
+      } else if (e.kind === "trick") {
+        this.popup(`${trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0)}!`, "big");
+      } else if (e.kind === "bail") {
+        this.popup("BAIL!", "bad");
       }
     }
   }
@@ -154,10 +175,10 @@ export class Hud {
           .map((s) => {
             const name = names.get(s.slot) ?? `#${s.slot + 1}`;
             const time = s.finishTicks > 0 ? formatTime(s.finishTicks, hz) : "DNF";
-            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td><td>${s.misses}</td></tr>`;
+            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td><td>${s.misses}</td><td>${s.tricks}</td></tr>`;
           })
           .join("");
-        this.results.innerHTML = `<h2>Results</h2><table><tr><th></th><th></th><th>time</th><th>missed</th></tr>${rows}</table>`;
+        this.results.innerHTML = `<h2>Results</h2><table><tr><th></th><th></th><th>time</th><th>missed</th><th>tricks</th></tr>${rows}</table>`;
       }
     }
   }

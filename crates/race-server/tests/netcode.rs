@@ -415,7 +415,7 @@ fn server_does_not_trust_client_inputs() {
             steer: -127,
             throttle: -127,
             lean: -127,
-            buttons: 0
+            buttons: 0xFE & sim::buttons::ALL,
         }
     );
 

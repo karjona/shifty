@@ -38,6 +38,7 @@ export interface RiderView {
   grounded: boolean;
   isMe: boolean;
   isBot: boolean;
+  bailing: boolean;
   vx: number;
   vy: number;
   vz: number;
@@ -54,7 +55,7 @@ export class World {
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
   private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
-  private riders = new Map<number, { mesh: THREE.Group; label: HTMLDivElement }>();
+  private riders = new Map<number, { mesh: THREE.Group; body: THREE.Group; label: HTMLDivElement }>();
   private course: CourseView | null = null;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
@@ -172,7 +173,7 @@ export class World {
     this.scene.add(this.course.group);
   }
 
-  private riderMesh(slot: number): { mesh: THREE.Group; label: HTMLDivElement } {
+  private riderMesh(slot: number): { mesh: THREE.Group; body: THREE.Group; label: HTMLDivElement } {
     let r = this.riders.get(slot);
     if (r) return r;
     const mesh = new THREE.Group();
@@ -180,11 +181,19 @@ export class World {
     const paint = new THREE.MeshStandardNodeMaterial({ color: colour, roughness: 0.45 });
     const white = new THREE.MeshStandardNodeMaterial({ color: 0xf4f4f0, roughness: 0.6 });
     const dark = new THREE.MeshStandardNodeMaterial({ color: 0x23262b, roughness: 0.7 });
-    const part = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => {
+    const body = new THREE.Group();
+    const part = (
+      geo: THREE.BufferGeometry,
+      mat: THREE.Material,
+      x: number,
+      y: number,
+      z: number,
+      parent: THREE.Group = mesh,
+    ) => {
       const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
       m.castShadow = true;
-      mesh.add(m);
+      parent.add(m);
       return m;
     };
     // Hull (the rider position is the bottom of the hull), nose, seat.
@@ -192,16 +201,18 @@ export class World {
     const nose = part(new THREE.BoxGeometry(0.9, 0.42, 0.7), white, 0, 0.3, 1.25);
     nose.rotation.x = 0.35;
     part(new THREE.BoxGeometry(0.5, 0.2, 1.0), dark, 0, 0.6, -0.3);
-    // Rider: legs, torso, head, standing slightly back.
-    part(new THREE.BoxGeometry(0.42, 0.55, 0.3), dark, 0, 0.95, -0.35);
-    part(new THREE.BoxGeometry(0.5, 0.6, 0.32), paint, 0, 1.5, -0.25);
-    part(new THREE.SphereGeometry(0.2, 10, 8), white, 0, 1.95, -0.22);
+    // Rider: legs, torso, head, standing slightly back. A group of its
+    // own, so it can fall off.
+    part(new THREE.BoxGeometry(0.42, 0.55, 0.3), dark, 0, 0.95, -0.35, body);
+    part(new THREE.BoxGeometry(0.5, 0.6, 0.32), paint, 0, 1.5, -0.25, body);
+    part(new THREE.SphereGeometry(0.2, 10, 8), white, 0, 1.95, -0.22, body);
+    mesh.add(body);
     mesh.rotation.order = "YXZ";
     this.scene.add(mesh);
     const label = document.createElement("div");
     label.className = "label";
     this.labels.append(label);
-    r = { mesh, label };
+    r = { mesh, body, label };
     this.riders.set(slot, r);
     return r;
   }
@@ -216,10 +227,18 @@ export class World {
     let me: RiderView | undefined;
     for (const r of riders) {
       seen.add(r.slot);
-      const { mesh, label } = this.riderMesh(r.slot);
+      const { mesh, body, label } = this.riderMesh(r.slot);
       mesh.visible = true;
       mesh.position.set(r.x, r.y, r.z);
       mesh.rotation.set(-r.pitch, r.yaw, r.roll);
+      // Bailed: the rider lies in the water beside the ski.
+      if (r.bailing) {
+        body.position.set(1.3, -1.1, -0.4);
+        body.rotation.set(0.3, 0, 1.45);
+      } else {
+        body.position.set(0, 0, 0);
+        body.rotation.set(0, 0, 0);
+      }
       label.textContent = names.get(r.slot) ?? `#${r.slot + 1}`;
       label.classList.toggle("me", r.isMe);
       const p = mesh.position

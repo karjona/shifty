@@ -9,6 +9,7 @@
 //! bonus); passing it on the wrong side empties it.
 
 use crate::course::{Course, Keep};
+use crate::jetski::Landing;
 
 pub mod tuning {
     use crate::TICK_HZ;
@@ -89,6 +90,8 @@ pub struct Progress {
     pub lap: u8,
     pub meter: u8,
     pub misses: u8,
+    /// Tricks landed clean in this race.
+    pub tricks: u8,
     /// Race ticks at the finish; 0 = not finished.
     pub finish_ticks: u32,
 }
@@ -127,6 +130,16 @@ pub enum EventKind {
     Finish {
         ticks: u32,
     },
+    /// Landed clean with full rotations: spins (+ = clockwise), flips
+    /// (+ = backflip), barrel rolls (+ = to the right). `meter` is the new level.
+    Trick {
+        spin: i8,
+        flip: i8,
+        roll: i8,
+        meter: u8,
+    },
+    /// Crashed on landing: off the ski for a moment, meter emptied.
+    Bail,
 }
 
 /// Something worth telling the player about, produced by a tick. Not state:
@@ -208,6 +221,45 @@ pub fn pass_gates(
             meter: p.meter,
         },
     });
+}
+
+/// Applies a landing to the race: clean tricks fill the meter (two steps
+/// for two rotations or more), a bail empties it. Tricks count toward the
+/// results only while racing.
+pub fn landed(
+    p: &mut Progress,
+    race: &Race,
+    slot: usize,
+    landing: Landing,
+    events: &mut Vec<SimEvent>,
+) {
+    let slot = slot as u8;
+    match landing {
+        Landing::Clean { spin, flip, roll } => {
+            let turns = spin.unsigned_abs() + flip.unsigned_abs() + roll.unsigned_abs();
+            let gain = if turns >= 2 { 2 } else { 1 };
+            p.meter = (p.meter + gain).min(METER_MAX);
+            if p.racing && race.phase == Phase::Racing && !p.finished() {
+                p.tricks = p.tricks.saturating_add(1);
+            }
+            events.push(SimEvent {
+                slot,
+                kind: EventKind::Trick {
+                    spin,
+                    flip,
+                    roll,
+                    meter: p.meter,
+                },
+            });
+        }
+        Landing::Bail => {
+            p.meter = 0;
+            events.push(SimEvent {
+                slot,
+                kind: EventKind::Bail,
+            });
+        }
+    }
 }
 
 /// Distance covered in the race so far (for ranking riders still racing).

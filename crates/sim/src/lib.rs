@@ -301,6 +301,128 @@ mod tests {
         assert!(w.riders[0].unwrap().speed() > 12.0);
     }
 
+    /// Hits the first ramp at speed and lets `air` drive while airborne.
+    /// Returns the events of the whole jump and the rider after it.
+    fn ramp_jump(mut air: impl FnMut(&Rider) -> Input) -> (Vec<SimEvent>, Rider) {
+        let ramp = OVAL.ramps[0];
+        let mut w = straight_world(SurfaceKind::Flat, 0);
+        place(&mut w, 0, ramp.s - 30.0, ramp.offset, 21.0);
+        let mut r = w.riders[0].unwrap();
+        r.race.meter = 1;
+        r.race.next_gate = 9; // no buoys in the way
+        w.riders[0] = Some(r);
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        let mut events = Vec::new();
+        let mut flew = false;
+        for _ in 0..60 * 4 {
+            let r = w.riders[0].unwrap();
+            flew |= !r.grounded;
+            inputs[0] = Some(if r.grounded {
+                // Pull back up the ramp for a bigger pop.
+                Input::from_analog(0.0, 1.0, -1.0, 0)
+            } else {
+                air(&r)
+            });
+            events.extend(w.step(&inputs));
+        }
+        assert!(flew);
+        (events, w.riders[0].unwrap())
+    }
+
+    fn tricks(events: &[SimEvent]) -> Vec<EventKind> {
+        events
+            .iter()
+            .map(|e| e.kind)
+            .filter(|k| matches!(k, EventKind::Trick { .. } | EventKind::Bail))
+            .collect()
+    }
+
+    #[test]
+    fn a_full_spin_lands_clean_and_fills_the_meter() {
+        let (ev, r) = ramp_jump(|r| {
+            if r.air_spin.abs() < 0.8 * math::TAU {
+                Input::from_analog(1.0, 1.0, 0.0, buttons::TRICK)
+            } else {
+                Input::from_analog(0.0, 1.0, 0.0, 0)
+            }
+        });
+        assert_eq!(
+            tricks(&ev),
+            [EventKind::Trick {
+                spin: 1,
+                flip: 0,
+                roll: 0,
+                meter: 2
+            }]
+        );
+        assert!(!r.bailing() && r.speed() > 12.0, "{r:?}");
+    }
+
+    #[test]
+    fn backflips_and_barrel_rolls() {
+        let (ev, _) = ramp_jump(|r| {
+            if r.pitch < 0.75 * math::TAU {
+                Input::from_analog(0.0, 1.0, -1.0, buttons::TRICK)
+            } else {
+                Input::from_analog(0.0, 1.0, 0.0, 0)
+            }
+        });
+        assert!(
+            matches!(
+                tricks(&ev)[..],
+                [EventKind::Trick {
+                    flip: 1,
+                    spin: 0,
+                    roll: 0,
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+        let (ev, _) = ramp_jump(|r| {
+            if r.roll > -0.75 * math::TAU {
+                Input::from_analog(-1.0, 1.0, 0.0, buttons::ROLL)
+            } else {
+                Input::from_analog(0.0, 1.0, 0.0, 0)
+            }
+        });
+        assert!(
+            matches!(
+                tricks(&ev)[..],
+                [EventKind::Trick {
+                    roll: -1,
+                    spin: 0,
+                    flip: 0,
+                    ..
+                }]
+            ),
+            "{ev:?}"
+        );
+    }
+
+    #[test]
+    fn landing_backwards_is_a_bail() {
+        // Spin half a turn and hold it there (button held, stick centred).
+        let (ev, r) = ramp_jump(|r| {
+            let steer = if r.air_spin.abs() < 0.5 * math::TAU {
+                1.0
+            } else {
+                0.0
+            };
+            Input::from_analog(steer, 1.0, 0.0, buttons::TRICK)
+        });
+        assert_eq!(tricks(&ev), [EventKind::Bail]);
+        assert_eq!(r.race.meter, 0);
+        assert!(r.speed() < 8.0, "a bail costs speed: {}", r.speed());
+    }
+
+    #[test]
+    fn plain_jumps_are_never_judged_as_tricks() {
+        let (ev, r) = ramp_jump(|_| Input::from_analog(0.4, 1.0, 0.0, 0));
+        assert!(tricks(&ev).is_empty(), "{ev:?}");
+        assert!(!r.bailing());
+    }
+
     #[test]
     fn a_slow_rider_slides_back_off_a_ramp() {
         let ramp = OVAL.ramps[0];

@@ -12,7 +12,7 @@ use sim::{Input, MAX_RIDERS};
 use wasm_bindgen::prelude::*;
 
 /// Floats per rider in the render buffer: `[slot, x, y, z, yaw, pitch, roll,
-/// speed, grounded, is_me, is_bot, vx, vy, vz, _, _]`.
+/// speed, grounded, is_me, is_bot, vx, vy, vz, bailing, _]`.
 pub const RENDER_STRIDE: usize = 16;
 /// Layout of the stats buffer (f64).
 pub const STATS_FIELDS: [&str; 17] = [
@@ -121,7 +121,7 @@ impl WasmClient {
                 r.vel.x,
                 r.vel.y,
                 r.vel.z,
-                0.0,
+                f32::from(u8::from(r.bailing)),
                 0.0,
             ]);
         }
@@ -249,7 +249,7 @@ impl WasmClient {
         self.race_buf.as_ptr()
     }
 
-    /// Race order as JSON: `[{slot, place, lap, finishTicks, misses}]`.
+    /// Race order as JSON: `[{slot, place, lap, finishTicks, misses, tricks}]`.
     #[wasm_bindgen(js_name = standingsJson)]
     pub fn standings_json(&self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -263,6 +263,7 @@ impl WasmClient {
                     "lap": st.progress.lap,
                     "finishTicks": st.progress.finish_ticks,
                     "misses": st.progress.misses,
+                    "tricks": st.progress.tricks,
                 })
             })
             .collect();
@@ -270,7 +271,8 @@ impl WasmClient {
     }
 
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
-    /// `buoy` (`buoy`, `ok`, `meter`), `lap` (`lap`) or `finish` (`ticks`).
+    /// `buoy` (`buoy`, `ok`, `meter`), `lap` (`lap`), `finish` (`ticks`),
+    /// `trick` (`spin`, `flip`, `roll`, `meter`) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
     pub fn take_events_json(&mut self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -287,6 +289,15 @@ impl WasmClient {
                 EventKind::Finish { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
                 }
+                EventKind::Trick {
+                    spin,
+                    flip,
+                    roll,
+                    meter,
+                } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "trick", "spin": spin, "flip": flip, "roll": roll, "meter": meter })
+                }
+                EventKind::Bail => json!({ "tick": e.tick, "slot": e.slot, "kind": "bail" }),
             })
             .collect();
         serde_json::Value::Array(list).to_string()

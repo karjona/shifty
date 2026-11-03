@@ -15,8 +15,12 @@ pub struct Input {
 }
 
 pub mod buttons {
+    /// In the air: the stick spins (left/right) and flips (front/back).
+    pub const TRICK: u8 = 1 << 0;
+    /// In the air: the stick barrel-rolls (left/right) and flips.
+    pub const ROLL: u8 = 1 << 1;
     /// All bits the sim understands. Anything else is stripped by validation.
-    pub const ALL: u8 = 0;
+    pub const ALL: u8 = TRICK | ROLL;
 }
 
 impl Input {
