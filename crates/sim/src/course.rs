@@ -1,4 +1,4 @@
-//! Courses: the racing line, buoys, ramps and the walls around them.
+//! Courses: the racing line, buoys, ramps, land and the walls around them.
 //!
 //! The jetski course is a long oval ("stadium") around a rock breakwater:
 //! two straights joined by half circles. Positions along it are measured by
@@ -38,6 +38,28 @@ pub struct RampDef {
     pub width: f32,
     /// Height of the lip above the low edge.
     pub height: f32,
+}
+
+/// What a piece of land is, for drawing it. To the sim all land is the same:
+/// solid, and too high to jump onto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LandKind {
+    /// A stone quay with a waterfront town on it.
+    Town,
+    /// A small rocky island with trees.
+    Island,
+    /// A rock sticking out of the water.
+    Rock,
+}
+
+/// Land: a capsule around the segment from `a` to `b` (world x, z) with
+/// this radius (`a == b` makes a round island).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LandDef {
+    pub a: (f32, f32),
+    pub b: (f32, f32),
+    pub radius: f32,
+    pub kind: LandKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +103,7 @@ pub struct Course {
     /// Buoys in the order they are met after the start line.
     pub buoys: &'static [BuoyDef],
     pub ramps: &'static [RampDef],
+    pub land: &'static [LandDef],
     pub sea: SeaState,
 }
 
@@ -136,8 +159,9 @@ use tuning::*;
 const HALF_PI: f32 = PI * 0.5;
 
 /// Summer: an 860 m oval in the bay, three laps. The swell rolls in along
-/// the course: the first straight heads into it (crests launch you), the
-/// back straight runs with it and has the floating ramps.
+/// the course: the first straight heads into it (crests launch you) past a
+/// small island, the back straight runs with it along the town quay and has
+/// the floating ramps.
 pub static OVAL: Course = Course {
     straight_half: 150.0,
     radius: 42.0,
@@ -153,9 +177,10 @@ pub static OVAL: Course = Course {
             offset: -5.0,
             keep: Keep::Right,
         },
+        // Leads you along the island's shore.
         BuoyDef {
-            s: 200.0,
-            offset: 5.0,
+            s: 225.0,
+            offset: -8.0,
             keep: Keep::Left,
         },
         BuoyDef {
@@ -216,6 +241,53 @@ pub static OVAL: Course = Course {
             length: 9.0,
             width: 5.0,
             height: 2.6,
+        },
+    ],
+    land: &[
+        // The town quay, 24 m outside the back straight.
+        LandDef {
+            a: (-120.0, 126.0),
+            b: (120.0, 126.0),
+            radius: 60.0,
+            kind: LandKind::Town,
+        },
+        // A small island off the first straight, and rocks around it.
+        LandDef {
+            a: (80.0, -63.0),
+            b: (80.0, -63.0),
+            radius: 8.0,
+            kind: LandKind::Island,
+        },
+        LandDef {
+            a: (64.0, -58.0),
+            b: (64.0, -58.0),
+            radius: 2.0,
+            kind: LandKind::Rock,
+        },
+        LandDef {
+            a: (97.0, -60.0),
+            b: (97.0, -60.0),
+            radius: 2.5,
+            kind: LandKind::Rock,
+        },
+        // Rocks on the outside of the turns.
+        LandDef {
+            a: (200.0, -29.0),
+            b: (200.0, -29.0),
+            radius: 3.0,
+            kind: LandKind::Rock,
+        },
+        LandDef {
+            a: (197.0, 33.0),
+            b: (197.0, 33.0),
+            radius: 2.5,
+            kind: LandKind::Rock,
+        },
+        LandDef {
+            a: (-203.0, 20.0),
+            b: (-203.0, 20.0),
+            radius: 3.0,
+            kind: LandKind::Rock,
         },
     ],
     sea: SeaState {
@@ -388,7 +460,7 @@ impl Course {
     }
 
     /// Keeps a body at `pos` with velocity `vel` out of the breakwater, the
-    /// buoys and the sides of the ramps, and inside the outer limit.
+    /// buoys, the land and the sides of the ramps, and inside the outer limit.
     /// Returns true on any contact.
     pub fn collide(&self, pos: &mut Vec3, vel: &mut Vec3, surface: &Surface, tick: u32) -> bool {
         let mut hit = false;
@@ -418,6 +490,14 @@ impl Course {
             }
         }
 
+        for land in self.land {
+            let (d, nx, nz) = land.distance(pos.x, pos.z);
+            let min = land.radius + RIDER_RADIUS;
+            if d < min {
+                hit |= push(pos, vel, nx, nz, min - d);
+            }
+        }
+
         for (i, rd) in self.ramps.iter().enumerate() {
             let (frame, base) = self.ramp_frame(i, surface, tick);
             let (u, v) = self.ramp_local(i, &frame, pos.x, pos.z);
@@ -442,6 +522,29 @@ impl Course {
             }
         }
         hit
+    }
+}
+
+impl LandDef {
+    /// Distance from the land's spine (the segment `a`–`b`), and the unit
+    /// direction away from it.
+    pub fn distance(&self, x: f32, z: f32) -> (f32, f32, f32) {
+        let (ax, az) = self.a;
+        let (abx, abz) = (self.b.0 - ax, self.b.1 - az);
+        let len2 = abx * abx + abz * abz;
+        let t = if len2 > 1e-6 {
+            clamp(((x - ax) * abx + (z - az) * abz) / len2, 0.0, 1.0)
+        } else {
+            0.0
+        };
+        let dx = x - (ax + abx * t);
+        let dz = z - (az + abz * t);
+        let d = sqrt(dx * dx + dz * dz);
+        if d > 1e-4 {
+            (d, dx / d, dz / d)
+        } else {
+            (0.0, 0.0, 1.0)
+        }
     }
 }
 
@@ -485,6 +588,36 @@ mod tests {
                 f.yaw
             );
             s += 7.3;
+        }
+    }
+
+    #[test]
+    fn land_is_solid_and_clear_of_the_racing_line() {
+        let c = &OVAL;
+        for land in c.land {
+            let (cx, cz) = land.a;
+            let mut pos = Vec3::new(cx + 0.5, 0.0, cz + 0.5);
+            let mut vel = Vec3::new(0.0, 0.0, -10.0);
+            assert!(c.collide(&mut pos, &mut vel, &Surface::flat(), 0));
+            assert!(land.distance(pos.x, pos.z).0 >= land.radius + RIDER_RADIUS - 1e-3);
+        }
+        // Bots ride within a few metres of the centre line and of the buoys.
+        let mut s = 0.0;
+        while s < c.length() {
+            let (x, z) = c.centerline(s).at_offset(0.0);
+            for land in c.land {
+                assert!(
+                    land.distance(x, z).0 - land.radius > 10.0,
+                    "land at s = {s}"
+                );
+            }
+            s += 1.0;
+        }
+        for i in 0..c.buoys.len() {
+            let (x, z) = c.buoy_pos(i);
+            for land in c.land {
+                assert!(land.distance(x, z).0 - land.radius > 4.0, "buoy {i}");
+            }
         }
     }
 
