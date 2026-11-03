@@ -210,6 +210,53 @@ export class World {
     this.camReady = false;
   }
 
+  /** Takes the surroundings away (the caller disposes them). */
+  clearEnvironment(): void {
+    if (this.env) this.scene.remove(this.env.group);
+    this.env = null;
+    for (const r of this.riders.values()) {
+      this.scene.remove(r.model.mesh);
+      r.label.remove();
+    }
+    this.riders.clear();
+    this.models.clear();
+    this.camReady = false;
+  }
+
+  get environment(): Environment | null {
+    return this.env;
+  }
+
+  /**
+   * Draws the surroundings from a set viewpoint, without the chase camera
+   * (menus, the season change). `riders` are drawn by their own models,
+   * placed by the caller.
+   */
+  renderFrom(eye: THREE.Vector3, look: THREE.Vector3, t: number, dt: number, fov = 50): void {
+    this.camera.position.copy(eye);
+    this.camera.up.set(0, 1, 0);
+    this.camera.lookAt(look);
+    this.camLook.copy(look);
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    this.sun.target.position.copy(look);
+    this.sun.position.copy(look).add(this.sunOffset);
+    this.env?.update({
+      riders: [],
+      models: this.models,
+      eye: this.camera.position,
+      look,
+      t,
+      dt,
+      renderer: this.renderer,
+      nextBuoy: null,
+    });
+    this.renderer.render(this.scene, this.camera);
+    this.camReady = false;
+  }
+
   private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
     let r = this.riders.get(slot);
     if (r) return r;

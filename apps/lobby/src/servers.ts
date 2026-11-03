@@ -41,14 +41,18 @@ export class ServerRegistry extends DurableObject<Env> {
     const servers = await this.load();
     const now = Date.now();
     let best: Entry | null = null;
+    const gone: string[] = [];
     for (const [addr, s] of servers) {
       if (now - s.seenAt > ALIVE_MS * 20) {
-        servers.delete(addr);
-        await this.ctx.storage.delete(addr);
+        gone.push(addr);
         continue;
       }
       if (s.draining || now - s.seenAt > ALIVE_MS) continue;
       if (!best || s.humans < best.humans || (s.humans === best.humans && s.rooms < best.rooms)) best = s;
+    }
+    if (gone.length > 0) {
+      for (const addr of gone) servers.delete(addr);
+      await this.ctx.storage.delete(gone);
     }
     if (!best) return null;
     // Count the room about to start, so a burst spreads over servers.

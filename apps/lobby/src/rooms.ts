@@ -3,6 +3,7 @@
 // Object per code; members are hibernatable WebSockets.
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
+import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, startMatch } from "./matches.ts";
 import { type EventChoice, isEventChoice, type JoinTicket, mintTicket } from "./tickets.ts";
 
@@ -45,7 +46,8 @@ export type RoomServerMsg =
 /** Codes avoid look-alikes (0/O, 1/I). */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 export const CODE_LENGTH = 6;
-export const isRoomCode = (s: string) => s.length === CODE_LENGTH && [...s].every((c) => CODE_ALPHABET.includes(c));
+const CODE = new RegExp(`^[${CODE_ALPHABET}]{${CODE_LENGTH}}$`, "u");
+export const isRoomCode = (s: string) => CODE.test(s);
 
 export function newRoomCode(): string {
   const bytes = new Uint8Array(CODE_LENGTH);
@@ -58,7 +60,43 @@ const EMPTY_TTL_MS = 10 * 60_000;
 /** A started race counts as running (members can rejoin it) this long. */
 const RACE_TTL_MS = 30 * 60_000;
 
-const clampBots = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.min(FIELD - 1, Math.round(n))) : 3);
+/** A socket's member, as stored on it. */
+function memberOf(ws: WebSocket): Member | null {
+  const m: unknown = ws.deserializeAttachment();
+  return isRecord(m) &&
+    typeof m.userId === "string" &&
+    typeof m.handle === "string" &&
+    typeof m.ready === "boolean" &&
+    typeof m.joinedAt === "number"
+    ? { userId: m.userId, handle: m.handle, ready: m.ready, joinedAt: m.joinedAt }
+    : null;
+}
+
+/** A message from a member, or null if it isn't one. */
+function parseMessage(data: string): RoomClientMsg | null {
+  let m: unknown;
+  try {
+    m = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  if (!isRecord(m)) return null;
+  switch (m.t) {
+    case "settings":
+      return isEventChoice(m.event) ? { t: "settings", event: m.event, bots: clampBots(m.bots) } : null;
+    case "ready":
+      return { t: "ready", ready: m.ready === true };
+    case "start":
+      return { t: "start" };
+    case "rejoin":
+      return { t: "rejoin" };
+    default:
+      return null;
+  }
+}
+
+const clampBots = (n: unknown) =>
+  typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.min(FIELD - 1, Math.round(n))) : 3;
 
 export class RoomLobby extends DurableObject<Env> {
   private settings: RoomSettings | null | undefined;
@@ -91,7 +129,7 @@ export class RoomLobby extends DurableObject<Env> {
 
   private members(except?: WebSocket): Member[] {
     return this.sockets(except)
-      .map((ws) => ws.deserializeAttachment() as Member)
+      .flatMap((ws) => memberOf(ws) ?? [])
       .toSorted((a, b) => a.joinedAt - b.joinedAt);
   }
 
@@ -108,8 +146,8 @@ export class RoomLobby extends DurableObject<Env> {
     // A second tab replaces the first.
     let joinedAt = Date.now();
     for (const ws of this.sockets()) {
-      const m = ws.deserializeAttachment() as Member;
-      if (m.userId === userId) {
+      const m = memberOf(ws);
+      if (m?.userId === userId) {
         joinedAt = m.joinedAt;
         ws.close(4000, "replaced");
       }
@@ -155,11 +193,10 @@ export class RoomLobby extends DurableObject<Env> {
   override async webSocketMessage(ws: WebSocket, data: string | ArrayBuffer): Promise<void> {
     const s = await this.load();
     if (!s || typeof data !== "string" || data.length > 1024) return;
-    const me = ws.deserializeAttachment() as Member;
-    let msg: RoomClientMsg;
-    try {
-      msg = JSON.parse(data) as RoomClientMsg;
-    } catch {
+    const me = memberOf(ws);
+    const msg = parseMessage(data);
+    if (!me) return;
+    if (!msg) {
       this.send(ws, { t: "error", error: "bad_message" });
       return;
     }
@@ -167,17 +204,16 @@ export class RoomLobby extends DurableObject<Env> {
     switch (msg.t) {
       case "settings": {
         if (!isHost) return this.send(ws, { t: "error", error: "not_host" });
-        if (!isEventChoice(msg.event)) return this.send(ws, { t: "error", error: "bad_message" });
-        await this.save({ ...s, event: msg.event, bots: clampBots(msg.bots) });
+        await this.save({ ...s, event: msg.event, bots: msg.bots });
         // New settings: everyone confirms again.
         for (const other of this.sockets()) {
-          const m = other.deserializeAttachment() as Member;
-          other.serializeAttachment({ ...m, ready: false });
+          const m = memberOf(other);
+          if (m) other.serializeAttachment({ ...m, ready: false });
         }
         break;
       }
       case "ready":
-        ws.serializeAttachment({ ...me, ready: msg.ready === true });
+        ws.serializeAttachment({ ...me, ready: msg.ready });
         break;
       case "start":
         await this.start(ws, me, s);
@@ -204,7 +240,8 @@ export class RoomLobby extends DurableObject<Env> {
   private async start(ws: WebSocket, me: Member, s: RoomSettings): Promise<void> {
     if (me.userId !== s.hostId) return this.send(ws, { t: "error", error: "not_host" });
     const members = this.members();
-    if (members.some((m) => m.userId !== s.hostId && !m.ready)) return this.send(ws, { t: "error", error: "not_ready" });
+    if (members.some((m) => m.userId !== s.hostId && !m.ready))
+      return this.send(ws, { t: "error", error: "not_ready" });
     let tickets: Map<string, JoinTicket>;
     try {
       tickets = await startMatch(
@@ -223,7 +260,8 @@ export class RoomLobby extends DurableObject<Env> {
     const server = { addr: new URL(first.webTransportUrl).host, certHash: first.certHash };
     await this.save({ ...s, race: { room: first.room, server, userIds: [...tickets.keys()], at: Date.now() } });
     for (const sock of this.sockets()) {
-      const m = sock.deserializeAttachment() as Member;
+      const m = memberOf(sock);
+      if (!m) continue;
       sock.serializeAttachment({ ...m, ready: false });
       const ticket = tickets.get(m.userId);
       if (ticket) this.send(sock, { t: "ticket", ticket });
@@ -234,7 +272,7 @@ export class RoomLobby extends DurableObject<Env> {
   override async webSocketClose(ws: WebSocket): Promise<void> {
     const s = await this.load();
     if (!s) return;
-    const left = ws.deserializeAttachment() as Member | null;
+    const left = memberOf(ws);
     const rest = this.members(ws);
     if (left && left.userId === s.hostId && rest.length > 0 && !rest.some((m) => m.userId === s.hostId)) {
       await this.save({ ...s, hostId: rest[0]!.userId });

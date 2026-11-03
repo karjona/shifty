@@ -2,7 +2,7 @@
 // `shifty-postgres` (Apple `container` or Docker) with its data in the
 // `shifty-pgdata` volume. It keeps running after `pnpm dev` stops.
 import { execFileSync, spawnSync } from "node:child_process";
-import pg from "pg";
+import { Client } from "pg";
 
 const NAME = "shifty-postgres";
 const VOLUME = "shifty-pgdata";
@@ -29,7 +29,7 @@ function state(rt: string): "running" | "stopped" | "missing" {
 async function waitReady(url: string, timeoutMs = 60_000): Promise<void> {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    const client = new pg.Client({ connectionString: url });
+    const client = new Client({ connectionString: url });
     try {
       // oxlint-disable-next-line eslint/no-await-in-loop
       await client.connect();

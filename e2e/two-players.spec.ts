@@ -1,30 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { decodePng, distinctColours } from "./png.ts";
 
-declare global {
-  interface Window {
-    __shifty: {
-      phase(): number;
-      slot(): number;
-      transport: string;
-      renderer: string;
-      sport(): "jetski" | "snow";
-      stats(): {
-        snapshots: number;
-        mispredictions: number;
-        lastSnapshotBytes: number;
-        rttMs: number;
-        inputLead: number;
-      };
-      riders(): { slot: number; x: number; y: number; z: number; speed: number; isMe: boolean }[];
-      race(): { phase: number; laps: number; racers: number };
-      names(): Record<string, string>;
-      setInput(v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null): void;
-      net: { lagMs: number; jitterMs: number; lossPct: number };
-    };
-  }
-}
-
 const joined = (p: Page) => p.waitForFunction(() => window.__shifty?.phase() === 1, null, { timeout: 20_000 });
 
 async function openPlayer(page: Page, name: string, room: string) {

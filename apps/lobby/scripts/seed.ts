@@ -2,7 +2,7 @@
 // only when those tables are empty. Edit them with `pnpm --filter lobby db:studio`.
 import { count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
+import { Pool } from "pg";
 import { banner, newsPost } from "../src/db/schema.ts";
 
 const url = process.env.DATABASE_URL;
@@ -98,25 +98,29 @@ const NEWS = {
   ],
 };
 
-const pool = new pg.Pool({ connectionString: url, max: 1 });
+const pool = new Pool({ connectionString: url, max: 1 });
 const db = drizzle(pool);
 try {
   const [banners] = await db.select({ n: count() }).from(banner);
   if (banners?.n === 0) {
-    await db.insert(banner).values(
-      Object.entries(BANNERS).flatMap(([locale, list]) =>
-        list.map((b, sort) => ({ ...b, locale, sort, published: true })),
-      ),
-    );
+    await db
+      .insert(banner)
+      .values(
+        Object.entries(BANNERS).flatMap(([locale, list]) =>
+          list.map((b, sort) => ({ ...b, locale, sort, published: true })),
+        ),
+      );
   }
   const [posts] = await db.select({ n: count() }).from(newsPost);
   if (posts?.n === 0) {
     const day = 24 * 60 * 60 * 1000;
-    await db.insert(newsPost).values(
-      Object.entries(NEWS).flatMap(([locale, list]) =>
-        list.map(({ daysAgo, ...n }) => ({ ...n, locale, publishedAt: new Date(Date.now() - daysAgo * day) })),
-      ),
-    );
+    await db
+      .insert(newsPost)
+      .values(
+        Object.entries(NEWS).flatMap(([locale, list]) =>
+          list.map(({ daysAgo, ...n }) => ({ ...n, locale, publishedAt: new Date(Date.now() - daysAgo * day) })),
+        ),
+      );
   }
 } finally {
   await pool.end();

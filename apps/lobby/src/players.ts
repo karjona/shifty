@@ -2,7 +2,15 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { player } from "./db/schema.ts";
-import { checkName, cleanName, formatHandle, nameKey, type NameProblem, RENAME_COOLDOWN_MS, randomTag } from "./handles.ts";
+import {
+  checkName,
+  cleanName,
+  formatHandle,
+  nameKey,
+  type NameProblem,
+  RENAME_COOLDOWN_MS,
+  randomTag,
+} from "./handles.ts";
 
 export const TITLES = ["rookie", "local", "regular", "all_seasons"] as const;
 export const CARDS = ["bay", "peaks", "sunset", "night"] as const;
@@ -40,7 +48,10 @@ export async function getPlayer(db: Db, userId: string): Promise<Row | null> {
 
 const UNIQUE_VIOLATION = "23505";
 const isUniqueViolation = (e: unknown) =>
-  typeof e === "object" && e !== null && "code" in e && (e as { code: unknown }).code === UNIQUE_VIOLATION;
+  typeof e === "object" && e !== null && "code" in e && e.code === UNIQUE_VIOLATION;
+
+export const isTitle = (v: unknown): v is Title => typeof v === "string" && (TITLES as readonly string[]).includes(v);
+export const isCard = (v: unknown): v is Card => typeof v === "string" && (CARDS as readonly string[]).includes(v);
 
 export type ClaimResult = { ok: true; player: Row } | { ok: false; problem: NameProblem | "cooldown" | "taken" };
 

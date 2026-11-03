@@ -12,7 +12,7 @@
     "lint": "oxlint",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "typecheck": "tsc -p apps/client && tsc -p tsconfig.scripts.json",
+    "typecheck": "tsc -p apps/client && tsc -p apps/lobby && tsc -p tsconfig.json",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

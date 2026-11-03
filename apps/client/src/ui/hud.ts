@@ -51,6 +51,13 @@ export interface RaceEvent {
   index?: number;
 }
 
+/** A Grand Prix: which race of how many, and the points so far by seat. */
+export interface GrandPrixView {
+  index: number;
+  count: number;
+  points: Map<number, number>;
+}
+
 export interface StandingView {
   slot: number;
   place: number;
@@ -199,6 +206,7 @@ export class Hud {
     airborne: boolean,
     standings: () => StandingView[],
     names: Map<number, string>,
+    gp: GrandPrixView | null = null,
   ): void {
     const hz = race.tickHz;
     const left = Math.max(0, race.phaseLength - race.phaseTicks);
@@ -225,7 +233,9 @@ export class Hud {
         ? `<div><span>LAP</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>`
         : `<div><span>SCORE</span> ${race.points}</div>`;
       const split = this.split && performance.now() < this.split.until ? this.split.html : "";
+      const event = gp ? `<div><span>RACE</span> ${gp.index + 1}/${gp.count}</div>` : "";
       this.info.innerHTML =
+        event +
         first +
         `<div><span>POS</span> ${race.place}/${race.racers}</div>` +
         `<div><span>TIME</span> ${formatTime(time, hz)}</div>` +
@@ -246,7 +256,7 @@ export class Hud {
     this.results.hidden = race.phase !== RESULTS;
     if (race.phase === RESULTS) {
       const list = standings();
-      const key = JSON.stringify(list);
+      const key = JSON.stringify([list, gp ? [...gp.points] : null]);
       if (key !== this.lastResultsKey) {
         this.lastResultsKey = key;
         const rows = list
@@ -260,10 +270,26 @@ export class Hud {
           })
           .join("");
         const heads = race.looped ? "<th>missed</th><th>tricks</th>" : "<th>tricks</th><th>points</th>";
-        this.results.innerHTML = `<h2>Results</h2><table><tr><th></th><th></th><th>time</th>${heads}</tr>${rows}</table>`;
+        this.results.innerHTML =
+          `<h2>Results${gp ? ` · race ${gp.index + 1}/${gp.count}` : ""}</h2>` +
+          `<table><tr><th></th><th></th><th>time</th>${heads}</tr>${rows}</table>` +
+          (gp ? grandPrixTable(gp, names) : "");
       }
     }
   }
+}
+
+/** Grand Prix standings: everyone's points so far, best first. */
+function grandPrixTable(gp: GrandPrixView, names: Map<number, string>): string {
+  const rows = [...gp.points]
+    .toSorted((a, b) => b[1] - a[1] || a[0] - b[0])
+    .map(
+      ([slot, points], i) =>
+        `<tr><td>${ordinal(i + 1)}</td><td>${escapeHtml(names.get(slot) ?? `#${slot + 1}`)}</td><td>${points}</td></tr>`,
+    )
+    .join("");
+  const title = gp.index + 1 === gp.count ? "Grand Prix · final standings" : "Grand Prix";
+  return `<h2>${title}</h2><table class="gp"><tr><th></th><th></th><th>points</th></tr>${rows}</table>`;
 }
 
 function escapeHtml(s: string): string {

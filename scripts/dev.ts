@@ -21,8 +21,23 @@ const key = ensureDevKey();
 /** Dev secrets, made once and kept in .dev/ (gitignored). */
 function devSecrets(): { betterAuth: string; raceServer: string } {
   const path = join(repoRoot, ".dev", "lobby-secrets.json");
-  if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8")) as { betterAuth: string; raceServer: string };
-  const secrets = { betterAuth: randomBytes(32).toString("base64url"), raceServer: randomBytes(32).toString("base64url") };
+  if (existsSync(path)) {
+    const saved: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      typeof saved === "object" &&
+      saved !== null &&
+      "betterAuth" in saved &&
+      "raceServer" in saved &&
+      typeof saved.betterAuth === "string" &&
+      typeof saved.raceServer === "string"
+    ) {
+      return { betterAuth: saved.betterAuth, raceServer: saved.raceServer };
+    }
+  }
+  const secrets = {
+    betterAuth: randomBytes(32).toString("base64url"),
+    raceServer: randomBytes(32).toString("base64url"),
+  };
   writeFileSync(path, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
   return secrets;
 }
@@ -87,7 +102,10 @@ const run = (name: string, color: number, cmd: string, args: string[], { cwd = r
   const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   const prefix = `\x1b[${color}m${name.padEnd(6)}\x1b[0m│ `;
   const pipe = (data: Buffer) => {
-    for (const line of data.toString().split("\n")) if (line.trim()) console.log(prefix + line);
+    for (const line of data.toString().split("\n")) {
+      // Race servers check in every few seconds; that's noise in dev.
+      if (line.trim() && !line.includes("POST /api/servers/heartbeat 200")) console.log(prefix + line);
+    }
   };
   child.stdout?.on("data", pipe);
   child.stderr?.on("data", pipe);

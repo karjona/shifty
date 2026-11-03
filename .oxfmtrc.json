@@ -8,6 +8,10 @@
     "target/**",
     "pnpm-lock.yaml",
     "AGENTS.md",
-    ".release-please-manifest.json"
+    ".release-please-manifest.json",
+    ".agents/**",
+    ".claude/**",
+    "skills-lock.json",
+    "apps/lobby/drizzle/**"
   ]
 }

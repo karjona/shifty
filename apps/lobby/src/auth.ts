@@ -41,6 +41,9 @@ export function authOptions(env: Env, db: Db, waitUntil: (p: Promise<unknown>) =
         expiresIn: 10 * 60,
         allowedAttempts: 5,
         storeOTP: "hashed",
+        // Three codes a minute per address in production; tests sign many
+        // players up from one machine.
+        rateLimit: env.DEV_MAILBOX === "1" ? { window: 60, max: 200 } : { window: 60, max: 3 },
         sendVerificationOTP: async ({ email, otp }, ctx) => {
           const locale = pickLocale(ctx?.headers?.get("x-shifty-locale") ?? ctx?.headers?.get("accept-language"));
           waitUntil(sendSignInCode(env, email, otp, locale));

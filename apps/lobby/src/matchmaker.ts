@@ -3,6 +3,7 @@
 // long enough (bots fill the empty seats). One instance (named "gp").
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
+import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, startMatch } from "./matches.ts";
 import type { JoinTicket } from "./tickets.ts";
 
@@ -18,6 +19,13 @@ export type MatchServerMsg =
   | { t: "error"; error: "no_server" };
 
 const DEFAULT_WAIT_SECS = 20;
+
+function queuedOf(ws: WebSocket): Queued | null {
+  const q: unknown = ws.deserializeAttachment();
+  return isRecord(q) && typeof q.userId === "string" && typeof q.handle === "string" && typeof q.since === "number"
+    ? { userId: q.userId, handle: q.handle, since: q.since }
+    : null;
+}
 const TICK_MS = 1000;
 
 export class Matchmaker extends DurableObject<Env> {
@@ -33,7 +41,10 @@ export class Matchmaker extends DurableObject<Env> {
     return this.ctx
       .getWebSockets()
       .filter((ws) => ws !== except && ws.readyState === WebSocket.OPEN)
-      .map((ws) => ({ ws, q: ws.deserializeAttachment() as Queued }))
+      .flatMap((ws) => {
+        const q = queuedOf(ws);
+        return q ? [{ ws, q }] : [];
+      })
       .toSorted((a, b) => a.q.since - b.q.since);
   }
 

@@ -54,6 +54,11 @@ export async function menuContent(db: Db, locale: Locale, now = new Date()) {
   ]);
   return {
     banners: banners satisfies BannerView[],
-    news: news.map((n): NewsView => ({ ...n, publishedAt: (n.publishedAt ?? now).toISOString() })),
+    news: news.map((n): NewsView => ({
+      slug: n.slug,
+      title: n.title,
+      body: n.body,
+      publishedAt: (n.publishedAt ?? now).toISOString(),
+    })),
   };
 }

@@ -41,14 +41,25 @@ export class InputReader {
   /** Test hook: when set, overrides real input. */
   forced: Partial<FrameInput> | null = null;
 
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement) return;
+    if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
+      e.preventDefault();
+    this.keys.add(e.code);
+  };
+  private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
+  private onBlur = () => this.keys.clear();
+
   constructor() {
-    addEventListener("keydown", (e) => {
-      if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
-        e.preventDefault();
-      this.keys.add(e.code);
-    });
-    addEventListener("keyup", (e) => this.keys.delete(e.code));
-    addEventListener("blur", () => this.keys.clear());
+    addEventListener("keydown", this.onKeyDown);
+    addEventListener("keyup", this.onKeyUp);
+    addEventListener("blur", this.onBlur);
+  }
+
+  dispose(): void {
+    removeEventListener("keydown", this.onKeyDown);
+    removeEventListener("keyup", this.onKeyUp);
+    removeEventListener("blur", this.onBlur);
   }
 
   read(dt: number): FrameInput {

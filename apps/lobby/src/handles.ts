@@ -33,7 +33,7 @@ export function nameKey(name: string): string {
 const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b" };
 const deLeet = (key: string) => key.replaceAll(/[0134578]/gu, (d) => LEET[d] ?? d);
 
-const RESERVED = [
+const RESERVED = new Set([
   "admin",
   "administrator",
   "administrador",
@@ -52,7 +52,7 @@ const RESERVED = [
   "bot",
   "root",
   "deletedrider",
-];
+]);
 
 /** Words no handle may contain anywhere (English, Spanish, Catalan). */
 const RUDE_ANYWHERE = ["fuck", "nigger", "nigga", "faggot", "gilipollas", "hijoputa", "fillputa", "hitler", "motherf"];
@@ -61,7 +61,7 @@ const RUDE_ANYWHERE = ["fuck", "nigger", "nigga", "faggot", "gilipollas", "hijop
  * Words no handle may have as a whole word: inside longer words they are
  * often innocent (`computadora`, `balcony`, `Scunthorpe`).
  */
-const RUDE_WORDS = [
+const RUDE_WORDS = new Set([
   "shit",
   "cunt",
   "bitch",
@@ -86,27 +86,23 @@ const RUDE_WORDS = [
   "cony",
   "mamon",
   "pajero",
-];
+]);
 
-const fold = (s: string) =>
-  s
-    .normalize("NFKD")
-    .replaceAll(/\p{M}/gu, "")
-    .toLowerCase();
+const fold = (s: string) => s.normalize("NFKD").replaceAll(/\p{M}/gu, "").toLowerCase();
 
 /** Why a name can't be a handle, or null if it can. */
 export function checkName(raw: string): NameProblem | null {
   const name = cleanName(raw);
-  const chars = [...name].length;
+  const chars = Array.from(new Intl.Segmenter().segment(name)).length;
   if (chars < NAME_MIN) return "short";
   if (chars > NAME_MAX || new TextEncoder().encode(name).length > NAME_MAX_BYTES) return "long";
   if (!ALLOWED.test(name) || !/[\p{L}\p{N}]/u.test(name)) return "chars";
   const key = nameKey(name);
   const plain = deLeet(key);
-  if (RESERVED.some((r) => key === r || plain === r)) return "reserved";
+  if (RESERVED.has(key) || RESERVED.has(plain)) return "reserved";
   if (RUDE_ANYWHERE.some((w) => key.includes(w) || plain.includes(w))) return "rude";
   const words = name.split(/[ _.\-·]+/u).map((w) => fold(w).replaceAll(/^x+|x+$/gu, ""));
-  if (words.some((w) => RUDE_WORDS.includes(w) || RUDE_WORDS.includes(deLeet(w)))) return "rude";
+  if (words.some((w) => RUDE_WORDS.has(w) || RUDE_WORDS.has(deLeet(w)))) return "rude";
   return null;
 }
 

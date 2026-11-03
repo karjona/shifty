@@ -1,15 +1,19 @@
 import { execFileSync } from "node:child_process";
+import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { devJoinTicket, repoRoot } from "../../scripts/dev-lobby.ts";
 
 // Where the race server listens in dev. Clients reach it directly; this is
 // also the audience their join tokens are signed for.
 const RACE_SERVER = process.env.RACE_SERVER ?? "localhost:4433";
+/** The lobby Worker in dev (wrangler dev); the game's `/api` goes there. */
+const LOBBY = process.env.LOBBY ?? "http://127.0.0.1:8787";
 
 /**
- * Dev-only lobby: `GET /__dev/join?name=..&room=..&bots=..&surface=..&course=..` returns
- * a join ticket: a signed join token, the race server URL and (hash mode) its
- * certificate hash. Not part of builds.
+ * Dev-only quick join (`/?name=You` and the netcode tests skip the menus):
+ * `GET /__dev/join?name=..&room=..&bots=..&surface=..&course=..` returns a
+ * join ticket: a token signed with the dev lobby key, the race server URL
+ * and (hash mode) its certificate hash. Not part of builds.
  */
 const devLobby = (): Plugin => ({
   name: "shifty-dev-lobby",
@@ -85,7 +89,11 @@ const rustNotices = (): Plugin => ({
 });
 
 export default defineConfig({
-  plugins: [devLobby(), rustNotices()],
-  server: { port: 5173, strictPort: true },
+  plugins: [react(), devLobby(), rustNotices()],
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: { "/api": { target: LOBBY, ws: true } },
+  },
   build: { target: "es2024", license: { fileName: "licenses/npm.md" } },
 });

@@ -8,7 +8,7 @@ export type Db = NodePgDatabase<typeof schema>;
 
 export interface DbHandle {
   db: Db;
-  close(): Promise<void>;
+  close: () => Promise<void>;
 }
 
 export function openDb(url: string): DbHandle {

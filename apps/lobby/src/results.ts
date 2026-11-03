@@ -3,6 +3,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { match, matchPlayer, raceResult } from "./db/schema.ts";
+import { isRecord } from "./json.ts";
 
 export interface ResultReport {
   room: string;
@@ -24,17 +25,16 @@ const int = (v: unknown, min: number, max: number): number | null =>
 
 /** Validates a report body instead of trusting its shape. */
 export function parseReport(v: unknown): ResultReport | null {
-  if (typeof v !== "object" || v === null) return null;
-  const o = v as Record<string, unknown>;
+  if (!isRecord(v)) return null;
+  const o = v;
   const round = int(o.round, 0, 32_767);
   const event = int(o.event, 0, 31);
   const course = int(o.course, 0, 255);
   if (typeof o.room !== "string" || round === null || event === null || course === null) return null;
   if (!Array.isArray(o.entries) || o.entries.length > 8) return null;
   const entries: ResultReport["entries"] = [];
-  for (const e of o.entries as unknown[]) {
-    if (typeof e !== "object" || e === null) return null;
-    const x = e as Record<string, unknown>;
+  for (const x of o.entries as unknown[]) {
+    if (!isRecord(x)) return null;
     const place = int(x.place, 1, 8);
     const trickPoints = int(x.trickPoints, 0, 1_000_000);
     if (place === null || trickPoints === null) return null;
