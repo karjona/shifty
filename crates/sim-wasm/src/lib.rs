@@ -38,7 +38,7 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 19] = [
+pub const RACE_FIELDS: [&str; 23] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -58,6 +58,10 @@ pub const RACE_FIELDS: [&str; 19] = [
     "points",
     "gates",
     "looped",
+    "course",
+    "eventIndex",
+    "eventCount",
+    "gpVersion",
 ];
 
 #[wasm_bindgen]
@@ -267,9 +271,26 @@ impl WasmClient {
             f64::from(p.points),
             world.course().gate_count() as f64,
             f64::from(u8::from(world.course().looped())),
+            f64::from(self.inner.course() as u8),
+            f64::from(self.inner.event_index()),
+            f64::from(self.inner.event_count()),
+            f64::from(self.inner.gp_version()),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
+    }
+
+    /// Grand Prix points as JSON: `[{slot, points}]` (seats with a rider).
+    #[wasm_bindgen(js_name = grandPrixJson)]
+    pub fn grand_prix_json(&self) -> String {
+        let list: Vec<serde_json::Value> = self
+            .inner
+            .gp_points()
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, p)| p.map(|points| json!({ "slot": slot, "points": points })))
+            .collect();
+        serde_json::Value::Array(list).to_string()
     }
 
     /// Race order as JSON: `[{slot, place, lap, finishTicks, misses, tricks, points}]`.

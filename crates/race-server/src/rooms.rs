@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -12,7 +12,7 @@ use protocol::{InputPacket, RejectReason, ServerMsg};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use crate::room::{ConnId, Room, RoomConfig};
+use crate::room::{ConnId, RaceReport, Room, RoomConfig};
 
 /// Rooms with no humans for this long shut down.
 const EMPTY_ROOM_TTL: Duration = Duration::from_secs(30);
@@ -58,11 +58,18 @@ pub struct Rooms {
     rooms: Mutex<HashMap<String, RoomHandle>>,
     pub draining: AtomicBool,
     pub metrics: Metrics,
+    /// Where finished races go (the lobby reporter), if anywhere.
+    reports: OnceLock<mpsc::Sender<RaceReport>>,
 }
 
 impl Rooms {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// Sends every finished race to `tx` from now on.
+    pub fn report_to(&self, tx: mpsc::Sender<RaceReport>) {
+        let _ = self.reports.set(tx);
     }
 
     pub fn room_count(&self) -> usize {
@@ -88,7 +95,7 @@ impl Rooms {
         let handle = RoomHandle { tx };
         rooms.insert(claims.room.clone(), handle.clone());
         let config = RoomConfig::from_claims(claims);
-        info!(room = %config.id, course = ?config.course, bots = config.bots, surface = ?config.surface_kind, "room created");
+        info!(room = %config.id, plan = ?config.plan, bots = config.bots, surface = ?config.surface_kind, "room created");
         self.metrics.rooms.fetch_add(1, Ordering::Relaxed);
         let me = Arc::clone(self);
         tokio::spawn(async move {
@@ -118,6 +125,7 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
     let mut next = start + tick;
     let mut conns: HashMap<ConnId, mpsc::Sender<Bytes>> = HashMap::new();
     let mut empty_since = Some(Instant::now());
+    let mut humans = 0usize;
     let now_ms = |at: Instant| at.duration_since(start).as_millis() as u64;
     loop {
         tokio::time::sleep_until(next.into()).await;
@@ -180,6 +188,22 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
         }
         for conn in out.close {
             conns.remove(&conn);
+        }
+        for report in out.reports {
+            if let Some(tx) = rooms.reports.get()
+                && tx.try_send(report).is_err()
+            {
+                warn!(room = %room.config.id, "result report dropped (reporter backed up)");
+            }
+        }
+        let now_humans = room.human_count();
+        if now_humans != humans {
+            rooms
+                .metrics
+                .humans
+                .fetch_add(now_humans, Ordering::Relaxed);
+            rooms.metrics.humans.fetch_sub(humans, Ordering::Relaxed);
+            humans = now_humans;
         }
 
         if room.human_count() == 0 {

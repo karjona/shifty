@@ -1,15 +1,60 @@
 // `pnpm dev`: everything needed to play locally, in one command.
-//  1. creates the dev lobby key (.dev/lobby-key.json) if missing
-//  2. builds the WASM sim for the browser
-//  3. builds and runs the race server (WebTransport on UDP :4433)
-//  4. runs the Vite dev server (http://localhost:5173), which also stands in
-//     for the lobby by handing out signed join tickets
+//  1. creates the dev keys and secrets (.dev/) if missing
+//  2. starts Postgres (see dev-db.ts), migrates it and seeds menu content
+//  3. builds the WASM sim for the browser
+//  4. runs the lobby Worker (wrangler dev, http://127.0.0.1:8787)
+//  5. builds and runs the race server (WebTransport on UDP :4433), which
+//     reports to the lobby
+//  6. runs the Vite dev server (http://localhost:5173): the game, with /api
+//     proxied to the lobby, and dev-only quick join tickets for tests
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ensureDatabase } from "./dev-db.ts";
 import { ensureDevKey, repoRoot } from "./dev-lobby.ts";
 
 const RACE_PORT = process.env.RACE_PORT ?? "4433";
+const LOBBY_PORT = process.env.LOBBY_PORT ?? "8787";
 const key = ensureDevKey();
+
+/** Dev secrets, made once and kept in .dev/ (gitignored). */
+function devSecrets(): { betterAuth: string; raceServer: string } {
+  const path = join(repoRoot, ".dev", "lobby-secrets.json");
+  if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8")) as { betterAuth: string; raceServer: string };
+  const secrets = { betterAuth: randomBytes(32).toString("base64url"), raceServer: randomBytes(32).toString("base64url") };
+  writeFileSync(path, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 });
+  return secrets;
+}
+const secrets = devSecrets();
+
+console.log("▸ starting Postgres…");
+const databaseUrl = await ensureDatabase();
+const lobbyDir = join(repoRoot, "apps/lobby");
+const dbEnv = { ...process.env, DATABASE_URL: databaseUrl };
+execFileSync(process.execPath, ["scripts/migrate.ts"], { cwd: lobbyDir, stdio: "inherit", env: dbEnv });
+execFileSync(process.execPath, ["scripts/seed.ts"], { cwd: lobbyDir, stdio: "inherit", env: dbEnv });
+
+// The lobby's settings: generated ones first, then .dev/lobby.env (your
+// GitHub OAuth app, if any) overrides them.
+const lobbyEnv = join(repoRoot, ".dev", "lobby.generated.env");
+writeFileSync(
+  lobbyEnv,
+  Object.entries({
+    DATABASE_URL: databaseUrl,
+    BETTER_AUTH_URL: "http://localhost:5173",
+    BETTER_AUTH_SECRET: secrets.betterAuth,
+    LOBBY_SIGNING_KEY: key.privateKey,
+    RACE_SERVER_SECRET: secrets.raceServer,
+    MAIL_MODE: "console",
+    DEV_MAILBOX: "1",
+    MATCH_WAIT_SECS: process.env.MATCH_WAIT_SECS ?? "10",
+  })
+    .map(([k, v]) => `${k}=${v}\n`)
+    .join(""),
+  { mode: 0o600 },
+);
+const userEnv = join(repoRoot, ".dev", "lobby.env");
 
 console.log("▸ building WASM sim…");
 execFileSync("node", ["scripts/build-wasm.ts"], { cwd: repoRoot, stdio: "inherit" });
@@ -55,9 +100,31 @@ const run = (name: string, color: number, cmd: string, args: string[], { cwd = r
   children.push(child);
 };
 
+run(
+  "lobby",
+  33,
+  process.execPath,
+  [
+    "node_modules/wrangler/bin/wrangler.js",
+    "dev",
+    "--port",
+    LOBBY_PORT,
+    "--ip",
+    "127.0.0.1",
+    "--persist-to",
+    join(repoRoot, ".dev", "wrangler"),
+    "--show-interactive-dev-session=false",
+    "--env-file",
+    lobbyEnv,
+    ...(existsSync(userEnv) ? ["--env-file", userEnv] : []),
+  ],
+  { cwd: lobbyDir },
+);
 run("race", 36, "target/debug/race-server", [], {
   env: {
     LOBBY_PUBLIC_KEY: key.publicKey,
+    LOBBY_URL: `http://127.0.0.1:${LOBBY_PORT}`,
+    RACE_SERVER_SECRET: secrets.raceServer,
     PUBLIC_ADDR: `localhost:${RACE_PORT}`,
     BIND: `[::]:${RACE_PORT}`,
     REGION: "dev",
@@ -67,12 +134,12 @@ run("race", 36, "target/debug/race-server", [], {
 });
 run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js"], {
   cwd: join(repoRoot, "apps/client"),
-  env: { RACE_SERVER: `localhost:${RACE_PORT}` },
+  env: { RACE_SERVER: `localhost:${RACE_PORT}`, LOBBY: `http://127.0.0.1:${LOBBY_PORT}` },
 });
 
 console.log(`
-  ▸ open http://localhost:5173/?name=YourName in two browser windows
-    URL options: name, room, bots (0-7), event (jetski, snow),
-                 surface (0 flat, 1 swells), scale (0.25-1),
-                 water=basic (plain swells, for slow machines)
+  ▸ open http://localhost:5173 (sign-in codes show up in the lobby log)
+    quick race without the menus: http://localhost:5173/?name=YourName
+    URL options: name, room, bots (0-7), event (snow), surface (0-3),
+                 scale (0.25-1), water=basic (plain swells, for slow machines)
 `);

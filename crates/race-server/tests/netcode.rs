@@ -88,6 +88,7 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         bots,
         surface: surface as u8,
         course: course as u8,
+        events: vec![],
     }
 }
 

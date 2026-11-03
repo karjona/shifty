@@ -111,6 +111,11 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         bots: m.get("bots").map_or(Ok(0), |b| b.parse())?,
         surface: m.get("surface").map_or(Ok(1), |b| b.parse())?,
         course: m.get("course").map_or(Ok(0), |b| b.parse())?,
+        events: m.get("events").map_or(Ok(vec![]), |list| {
+            list.split(',')
+                .map(str::parse)
+                .collect::<Result<Vec<u8>, _>>()
+        })?,
     })
 }
 

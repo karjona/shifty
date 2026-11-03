@@ -38,6 +38,27 @@ pub struct JoinClaims {
     /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
     #[serde(default)]
     pub course: u8,
+    /// Every course the room races, in order (a Grand Prix has several).
+    /// Empty = just `course`.
+    #[serde(default)]
+    pub events: Vec<u8>,
+}
+
+/// Most races in one room's plan.
+pub const MAX_EVENTS: usize = 8;
+
+impl JoinClaims {
+    /// The courses the room races, in order.
+    pub fn plan(&self) -> Vec<sim::CourseId> {
+        let ids = if self.events.is_empty() {
+            std::slice::from_ref(&self.course)
+        } else {
+            &self.events[..]
+        };
+        ids.iter()
+            .filter_map(|&c| sim::CourseId::from_u8(c))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +151,15 @@ pub fn verify(
     if sim::SurfaceKind::from_u8(claims.surface).is_none() {
         return Err(TokenError::BadClaims("surface"));
     }
+    if sim::CourseId::from_u8(claims.course).is_none()
+        || claims.events.len() > MAX_EVENTS
+        || claims
+            .events
+            .iter()
+            .any(|&c| sim::CourseId::from_u8(c).is_none())
+    {
+        return Err(TokenError::BadClaims("course"));
+    }
     Ok(claims)
 }
 
@@ -164,6 +194,7 @@ mod tests {
             bots: 2,
             surface: 1,
             course: 1,
+            events: vec![0, 1],
         }
     }
 

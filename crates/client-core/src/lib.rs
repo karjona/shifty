@@ -23,7 +23,9 @@ use protocol::{
 use sim::bot::bot_input;
 use sim::math::{Vec3, angle_diff, wrap_angle};
 use sim::race::{EventKind, Race, Standing};
-use sim::{CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Surface, TICK_HZ, World};
+use sim::{
+    CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Surface, SurfaceKind, TICK_HZ, World,
+};
 
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
 /// How many ticks early we want our inputs to reach the server (minimum).
@@ -142,6 +144,15 @@ pub struct Client {
     last_hello_ms: f64,
     slot: usize,
     surface: Surface,
+    /// The room's sea, rebuilt for each course of a Grand Prix.
+    surface_kind: SurfaceKind,
+    surface_seed: u32,
+    /// Which race of the room's plan is on, out of how many.
+    event_index: u8,
+    event_count: u8,
+    /// Grand Prix points by seat, from the server.
+    gp_points: [Option<u16>; MAX_RIDERS],
+    gp_version: u32,
     /// Predicted world, at `world.tick`.
     world: World,
     /// Rider states one tick before `world`, for smooth frame interpolation.
@@ -178,6 +189,12 @@ impl Client {
             last_hello_ms: f64::NEG_INFINITY,
             slot: 0,
             surface: Surface::flat(),
+            surface_kind: SurfaceKind::Flat,
+            surface_seed: 0,
+            event_index: 0,
+            event_count: 1,
+            gp_points: [None; MAX_RIDERS],
+            gp_version: 0,
             world: World::new(CourseId::Oval, Surface::flat()),
             prev_riders: [None; MAX_RIDERS],
             history: [None; HISTORY],
@@ -231,6 +248,30 @@ impl Client {
     /// Bumps every time the roster changes, so UIs can refresh cheaply.
     pub fn roster_version(&self) -> u32 {
         self.roster_version
+    }
+
+    pub fn course(&self) -> CourseId {
+        self.world.course
+    }
+
+    /// Which race of the room's plan is on (0-based).
+    pub fn event_index(&self) -> u8 {
+        self.event_index
+    }
+
+    /// How many races the room's plan has (more than one: a Grand Prix).
+    pub fn event_count(&self) -> u8 {
+        self.event_count
+    }
+
+    /// Grand Prix points by seat (None: no rider there).
+    pub fn gp_points(&self) -> &[Option<u16>; MAX_RIDERS] {
+        &self.gp_points
+    }
+
+    /// Bumps every time the Grand Prix table changes.
+    pub fn gp_version(&self) -> u32 {
+        self.gp_version
     }
 
     pub fn predicted_world(&self) -> &World {
@@ -425,6 +466,8 @@ impl Client {
                 let rtt_ticks = self.rtt_ms.unwrap_or(100.0) / TICK_MS;
                 self.phase = Phase::Joined;
                 self.slot = w.slot as usize;
+                self.surface_kind = w.surface_kind;
+                self.surface_seed = w.surface_seed;
                 self.world = World::on_course(w.course, w.surface_kind, w.surface_seed);
                 self.surface = self.world.surface.clone();
                 // Run ahead of the server by the trip time plus a small lead.
@@ -473,6 +516,13 @@ impl Client {
                     self.roster[slot as usize] = Some(RosterEntry { kind, name });
                 }
                 EventBody::RiderLeft { slot } => self.roster[slot as usize] = None,
+                EventBody::Standings { points } => {
+                    self.gp_points = [None; MAX_RIDERS];
+                    for (slot, pts) in points {
+                        self.gp_points[slot as usize] = Some(pts);
+                    }
+                    self.gp_version = self.gp_version.wrapping_add(1);
+                }
             }
             self.next_event_id = self.next_event_id.wrapping_add(1);
             self.roster_version = self.roster_version.wrapping_add(1);
@@ -526,11 +576,27 @@ impl Client {
             riders[rs.slot as usize] = Some(rs.rider);
         }
 
+        self.event_index = s.event_index;
+        self.event_count = s.event_count.max(1);
+        // A Grand Prix moved on to its next course: a new sea, and nothing to
+        // smooth from the old one.
+        let new_course = s.course != self.world.course;
+        if new_course {
+            self.surface = s
+                .course
+                .course()
+                .surface(self.surface_kind, self.surface_seed);
+        }
+
         // Reconcile: authoritative state at s.tick, re-simulated to the present.
-        let before = self.world.riders;
+        let before = if new_course {
+            [None; MAX_RIDERS]
+        } else {
+            self.world.riders
+        };
         let mut world = World {
             tick: s.tick,
-            course: self.world.course,
+            course: s.course,
             surface: self.surface.clone(),
             race: s.race,
             riders,

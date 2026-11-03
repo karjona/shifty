@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shifty-lobby",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomLobby" },
+      { "name": "MATCHMAKER", "class_name": "Matchmaker" },
+      { "name": "SERVERS", "class_name": "ServerRegistry" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomLobby", "Matchmaker", "ServerRegistry"] }],
+  "observability": { "enabled": true },
+}

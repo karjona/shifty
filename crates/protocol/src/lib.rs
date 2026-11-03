@@ -32,13 +32,16 @@ mod tests {
             echo_client_time: 999,
             echo_hold_ms: 12,
             race: world.race,
+            course: world.course,
+            event_index: 1,
+            event_count: 2,
             events: (0..MAX_EVENTS_PER_SNAPSHOT as u16)
                 .map(|i| Event {
                     id: i,
                     body: EventBody::RiderJoined {
                         slot: i as u8,
                         kind: RiderKind::Human,
-                        name: "Ñandú the Shifty Rider".into(), // exactly NAME_MAX_BYTES
+                        name: "Ñandú the Shifty Rider, Ñandú the Shift#1234".into(), // exactly NAME_MAX_BYTES
                     },
                 })
                 .collect(),
