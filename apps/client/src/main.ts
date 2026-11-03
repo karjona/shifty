@@ -1,5 +1,5 @@
 import "./style.css";
-import init, { WasmClient, raceFields, renderStride, statsFields } from "./wasm/sim.js";
+import init, { WasmClient, raceFields, renderStride, statsFields, topSpeed } from "./wasm/sim.js";
 import { InputReader } from "./input.ts";
 import { conditioned, type NetConditions } from "./net/conditioner.ts";
 import { connect, WebTransportUnavailable, parseJoinTicket, type JoinTicket, type Transport } from "./net/transport.ts";
@@ -67,7 +67,10 @@ async function main(): Promise<void> {
   const world = new World(
     document.querySelector<HTMLElement>("#app")!,
     document.querySelector<HTMLElement>("#labels")!,
-    params.get("water") === "lab" ? "lab" : "basic",
+    {
+      water: params.get("water") === "basic" ? "basic" : "sea",
+      topSpeed: topSpeed(),
+    },
   );
   await world.init();
 

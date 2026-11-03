@@ -45,6 +45,11 @@ export class Minimap {
     node("path", { d: stadium(half, lane + course.laneHalf), class: "lane" }, this.svg);
     node("path", { d: stadium(half, lane - course.laneHalf), class: "lane" }, this.svg);
     node("path", { d: stadium(half, course.breakwaterRadius), class: "rock" }, this.svg);
+    // Land: a capsule is a line with round caps, as thick as it is wide.
+    for (const l of course.land) {
+      const line = { x1: l.ax, y1: l.az, x2: l.bx, y2: l.bz, "stroke-width": l.radius * 2 };
+      node("line", { ...line, class: `land ${l.kind}` }, this.svg);
+    }
     const s = course.start;
     const rx = -Math.cos(s.yaw);
     const rz = Math.sin(s.yaw);

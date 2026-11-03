@@ -1,8 +1,9 @@
 // The jetski course: buoys (with an arrow showing the side to pass), the
-// breakwater and its lighthouse, the start/finish gate, floating ramps and
-// the boundary markers. Geometry comes from the sim (`courseJson`), so what
+// breakwater and its lighthouse, the land, the start/finish gate, floating
+// ramps and the boundary markers. Geometry comes from the sim (`courseJson`), so what
 // you see is what you collide with.
 import * as THREE from "three/webgpu";
+import { buildLand } from "./land.ts";
 import { waveHeight } from "./waves.ts";
 
 export interface CourseData {
@@ -17,6 +18,26 @@ export interface CourseData {
   start: { x: number; z: number; yaw: number };
   buoys: { x: number; z: number; yaw: number; keep: "left" | "right" }[];
   ramps: { x: number; z: number; yaw: number; length: number; width: number; height: number }[];
+  land: LandData[];
+}
+
+/** Solid land: a capsule around the segment a-b (see `sim::course::LandDef`). */
+export interface LandData {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  radius: number;
+  kind: "town" | "island" | "rock";
+}
+
+/** Distance from (x, z) to a piece of land's shore (negative inside it). */
+export function landDistance(l: LandData, x: number, z: number): number {
+  const abx = l.bx - l.ax;
+  const abz = l.bz - l.az;
+  const len2 = abx * abx + abz * abz;
+  const t = len2 > 1e-6 ? Math.min(1, Math.max(0, ((x - l.ax) * abx + (z - l.az) * abz) / len2)) : 0;
+  return Math.hypot(x - (l.ax + abx * t), z - (l.az + abz * t)) - l.radius;
 }
 
 /** Keep red on your right, green on your left ("red right returning"). */
@@ -97,6 +118,7 @@ export class CourseView {
   constructor(data: CourseData) {
     this.data = data;
     this.buildBreakwater();
+    this.group.add(buildLand(this.data.land));
     this.buildStartGate();
     this.buildBuoys();
     this.buildRamps();
@@ -247,6 +269,8 @@ export class CourseView {
         x = -d.straightHalf + r * Math.cos(th);
         z = r * Math.sin(th);
       }
+      // No markers on (or right against) land: the shore is the boundary there.
+      if (d.land.some((l) => landDistance(l, x, z) < 3)) continue;
       this.boundaryPoints.push({ x, z });
     }
     const mesh = new THREE.InstancedMesh(

@@ -6,7 +6,7 @@
 
 use client_core::{Client, Phase};
 use serde_json::json;
-use sim::course::{Keep, tuning as course_tuning};
+use sim::course::{Keep, LandKind, tuning as course_tuning};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{Input, MAX_RIDERS};
 use wasm_bindgen::prelude::*;
@@ -337,6 +337,18 @@ impl WasmClient {
                 json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
             })
             .collect();
+        let land: Vec<serde_json::Value> = c
+            .land
+            .iter()
+            .map(|l| {
+                let kind = match l.kind {
+                    LandKind::Town => "town",
+                    LandKind::Island => "island",
+                    LandKind::Rock => "rock",
+                };
+                json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+            })
+            .collect();
         let start = c.centerline(c.start_s);
         json!({
             "length": c.length(),
@@ -350,6 +362,7 @@ impl WasmClient {
             "start": { "x": start.x, "z": start.z, "yaw": start.yaw },
             "buoys": buoys,
             "ramps": ramps,
+            "land": land,
         })
         .to_string()
     }
@@ -359,6 +372,12 @@ impl WasmClient {
     pub fn surface_height(&self, x: f32, z: f32, tick: u32) -> f32 {
         self.inner.surface().height(x, z, tick)
     }
+}
+
+/// The jetski's top speed (m/s) before the meter's bonus.
+#[wasm_bindgen(js_name = topSpeed)]
+pub fn top_speed() -> f32 {
+    sim::jetski::tuning::MAX_SPEED
 }
 
 #[wasm_bindgen(js_name = statsFields)]

@@ -324,7 +324,7 @@ mod tests {
     fn ramp_jump(mut air: impl FnMut(&Rider) -> Input) -> (Vec<SimEvent>, Rider) {
         let ramp = OVAL.ramps[0];
         let mut w = straight_world(SurfaceKind::Flat, 0);
-        place(&mut w, 0, ramp.s - 30.0, ramp.offset, 21.0);
+        place(&mut w, 0, ramp.s - 30.0, ramp.offset, jet::MAX_SPEED * 0.9);
         let mut r = w.riders[0].unwrap();
         r.race.meter = 1;
         r.race.next_gate = 9; // no buoys in the way
@@ -600,14 +600,23 @@ mod tests {
             for pair in standings.windows(2) {
                 assert!(pair[0].progress.finish_ticks <= pair[1].progress.finish_ticks);
             }
-            // The results don't change while everyone keeps riding.
+            // The results don't change while everyone keeps riding (the
+            // meter does: it is riding state, not a result).
+            let results = |st: &[race::Standing]| -> Vec<_> {
+                st.iter()
+                    .map(|s| {
+                        let p = s.progress;
+                        (s.slot, s.place, p.finish_ticks, p.misses, p.tricks)
+                    })
+                    .collect()
+            };
             for _ in 0..60 * 5 {
                 for (slot, i) in inputs.iter_mut().enumerate() {
                     *i = Some(bot::bot_input(&w, slot));
                 }
                 w.step(&inputs);
             }
-            assert_eq!(w.standings(), standings);
+            assert_eq!(results(&w.standings()), results(&standings));
             // Results, then a new warm-up.
             run(&mut w, Input::default(), race::tuning::RESULTS_TICKS);
             assert_eq!(w.race.phase, Phase::Warmup);

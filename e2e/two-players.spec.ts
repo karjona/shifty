@@ -60,7 +60,7 @@ test("two players race in one room", async ({ browser }) => {
     a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
     b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
   ]);
-  expect(aSelf.speed).toBeGreaterThan(12);
+  expect(aSelf.speed).toBeGreaterThan(8);
   expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
 
   // Riders stay on (or just above) the water, even on big swells.
@@ -101,7 +101,10 @@ test("a fifth human is turned away (4 humans max)", async ({ browser }) => {
 
 test("the world renders", async ({ page }, info) => {
   page.on("pageerror", (e) => console.log(`page error: ${e.message}`));
-  await page.goto(`/?name=Painter&room=e2e-render-${Date.now()}&bots=2&scale=0.5`);
+  // Without a GPU (CI runners, E2E_SOFTWARE_GL) the full sea water is too
+  // slow to draw in time; the basic water still checks the whole renderer.
+  const water = process.env.CI || process.env.E2E_SOFTWARE_GL ? "&water=basic" : "";
+  await page.goto(`/?name=Painter&room=e2e-render-${Date.now()}&bots=2&scale=0.5${water}`);
   await joined(page);
   await page.evaluate(() => window.__shifty.setInput({ steer: 0.3, throttle: 1, buttons: 0 }));
   await page.waitForTimeout(2000);

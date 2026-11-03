@@ -20,10 +20,10 @@ use crate::surface::Surface;
 use crate::world::Rider;
 
 pub mod tuning {
-    pub const GRAVITY: f32 = 13.0;
-    pub const MAX_SPEED: f32 = 23.0;
+    pub const GRAVITY: f32 = 15.0;
+    pub const MAX_SPEED: f32 = 30.0;
     pub const MAX_REVERSE: f32 = 5.0;
-    pub const ACCEL: f32 = 16.0;
+    pub const ACCEL: f32 = 14.0;
     pub const BRAKE: f32 = 16.0;
     pub const REVERSE_ACCEL: f32 = 5.0;
     /// Water drag on horizontal speed, per second.
@@ -34,7 +34,9 @@ pub mod tuning {
     /// Sideways velocity bleed per second (the keel biting).
     pub const GRIP: f32 = 5.5;
     pub const TURN_RATE: f32 = 2.1;
-    pub const TURN_RESPONSE: f32 = 8.0;
+    /// Fraction of `TURN_RATE` lost at top speed: fast turns are wide.
+    pub const TURN_FADE: f32 = 0.45;
+    pub const TURN_RESPONSE: f32 = 3.5;
 
     /// Hull sample points in body space (x = left, y = up, z = forward),
     /// relative to the rider position (the bottom of the hull).
@@ -46,13 +48,13 @@ pub mod tuning {
     ];
     pub const STERN: usize = 1;
     /// How deep the hull sits at rest.
-    pub const DRAFT: f32 = 0.14;
+    pub const DRAFT: f32 = 0.28;
     /// Upward push per point per metre of depth.
     pub const BUOYANCY: f32 = GRAVITY / (4.0 * DRAFT);
     /// Depth beyond which a point pushes no harder.
-    pub const MAX_DEPTH: f32 = 0.7;
+    pub const MAX_DEPTH: f32 = 1.0;
     /// Damping of each point's vertical speed relative to the water.
-    pub const BUOY_DAMP: f32 = 3.6;
+    pub const BUOY_DAMP: f32 = 1.6;
     pub const PITCH_INERTIA: f32 = 1.1;
     pub const ROLL_INERTIA: f32 = 0.3;
     /// Extra angular damping while wet, per second.
@@ -61,7 +63,7 @@ pub mod tuning {
     pub const STERN_WET_DEPTH: f32 = -0.12;
 
     /// Rider weight shift front/back (angular acceleration at full lean).
-    pub const LEAN_ACCEL: f32 = 10.0;
+    pub const LEAN_ACCEL: f32 = 5.5;
     /// How far the rider banks into a full-speed, full-lock turn.
     pub const MAX_BANK: f32 = 0.5;
     pub const BANK_STIFFNESS: f32 = 26.0;
@@ -70,11 +72,11 @@ pub mod tuning {
     pub const PLANING_LIFT: f32 = 0.3;
     /// Extra drag per metre a point sits deeper than twice the draft (nose
     /// dives, belly flops).
-    pub const DIG_DRAG: f32 = 1.4;
+    pub const DIG_DRAG: f32 = 1.0;
 
     /// Pulling back as the hull leaves the water adds this much upward speed
     /// (at full lean).
-    pub const POP_SPEED: f32 = 3.0;
+    pub const POP_SPEED: f32 = 3.6;
     /// Only a real launch (rising this fast) can be popped.
     pub const POP_MIN_RISE: f32 = 1.0;
     /// Ticks on the water before another pop is possible.
@@ -85,24 +87,24 @@ pub mod tuning {
     pub const RAMP_DRAG: f32 = 0.3;
 
     pub const AIR_STEER_RATE: f32 = 0.6;
-    pub const AIR_TURN_RESPONSE: f32 = 6.0;
+    pub const AIR_TURN_RESPONSE: f32 = 3.0;
     /// With no trick button held, the hull turns back toward its flight
     /// path (heading error to yaw rate, per second): a released spin
     /// finishes itself.
     pub const AIR_ALIGN: f32 = 3.5;
     /// In the air the nose eases toward the flight path (plus lean).
-    pub const AIR_PITCH_STIFFNESS: f32 = 14.0;
-    pub const AIR_PITCH_DAMP: f32 = 6.0;
+    pub const AIR_PITCH_STIFFNESS: f32 = 8.0;
+    pub const AIR_PITCH_DAMP: f32 = 4.5;
     pub const AIR_LEAN_PITCH: f32 = 0.45;
     pub const AIR_PITCH_LIMIT: f32 = 0.7;
-    pub const AIR_ROLL_STIFFNESS: f32 = 12.0;
-    pub const AIR_ROLL_DAMP: f32 = 6.0;
+    pub const AIR_ROLL_STIFFNESS: f32 = 7.0;
+    pub const AIR_ROLL_DAMP: f32 = 4.0;
 
     /// Trick rotation speeds at full stick, rad/s.
-    pub const SPIN_RATE: f32 = 9.0;
-    pub const FLIP_RATE: f32 = 7.5;
-    pub const ROLL_RATE: f32 = 9.0;
-    pub const TRICK_RESPONSE: f32 = 10.0;
+    pub const SPIN_RATE: f32 = 5.5;
+    pub const FLIP_RATE: f32 = 5.0;
+    pub const ROLL_RATE: f32 = 5.5;
+    pub const TRICK_RESPONSE: f32 = 4.0;
 
     /// Landing more crooked than this is a bail.
     pub const LAND_PITCH: f32 = 0.9;
@@ -295,10 +297,12 @@ pub fn integrate(
         pitch_acc -= BAIL_RIGHTING * r.pitch + 6.0 * r.pitch_rate;
         roll_acc -= BAIL_RIGHTING * r.roll + 6.0 * r.roll_rate;
     } else if grounded {
-        // Steering: stronger with speed, reversed when going backwards.
+        // Steering: bites harder as you get going, then turns get wider
+        // toward top speed; reversed when going backwards.
         let speed_factor = clamp(speed_fwd.abs() / 6.0, 0.2, 1.0);
+        let fade = 1.0 - TURN_FADE * clamp(speed_fwd.abs() / MAX_SPEED, 0.0, 1.0);
         let dir = if speed_fwd < -0.5 { -1.0 } else { 1.0 };
-        let target_rate = -steer * TURN_RATE * speed_factor * dir;
+        let target_rate = -steer * TURN_RATE * speed_factor * fade * dir;
         r.yaw_rate += (target_rate - r.yaw_rate) * clamp(TURN_RESPONSE * bite * DT, 0.0, 1.0);
 
         if wet.stern_wet {

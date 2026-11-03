@@ -3,29 +3,40 @@
 //  1. Swells  - physics. Same parameters and formula as crates/sim (uniforms
 //               filled from WASM). The rider's height comes from these only.
 //  2. Chop    - visual only. Many small waves on the GPU. They never touch
-//               physics, so they can be as fancy as the GPU allows.
+//               physics, so they can be as fancy as the GPU allows. Longer
+//               chop moves the vertices; fine ripples only bend the
+//               per-pixel normal, fading out with distance before they
+//               would shimmer, and fleck the water near you with foam.
+//     Surf foams along every shore, heaviest where a crest is hitting.
 //  3. Wakes   - visual only. A world-locked texture that every rider's path
 //               is stamped into each frame and that slowly fades; the water
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
+import type { LandData } from "./course.ts";
 import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
   abs,
   cameraPosition,
   clamp,
+  cos,
   dot,
   float,
   max,
+  min,
   mix,
   normalLocal,
+  normalWorldGeometry,
   positionLocal,
   positionWorld,
   pow,
+  reflector,
+  screenUV,
   sin,
   smoothstep,
   texture,
+  transformNormalToView,
   uniform,
   uniformArray,
   uv,
@@ -34,7 +45,12 @@ import {
   vec4,
 } from "three/tsl";
 
-const CHOP_WAVES = 14;
+const CHOP_WAVES = 10;
+/** The reflection is rendered at this fraction of the screen resolution. */
+const REFLECTION_SCALE = 0.5;
+/** Most land pieces the shore foam knows about. */
+const MAX_LAND = 16;
+const RIPPLES = 12;
 const MAX_WAKE_RIDERS = 8;
 /** Wake texture covers this many metres, centred on the course. */
 const WAKE_SPAN = 512;
@@ -62,7 +78,7 @@ function chopWaves(
   const out = [];
   for (let i = 0; i < CHOP_WAVES; i++) {
     const angle = mainDir + (rnd() - 0.5) * 2.2;
-    const wavelength = 1.2 + rnd() * 7;
+    const wavelength = 3 + rnd() * 6;
     const k = (2 * Math.PI) / wavelength;
     out.push({
       dx: Math.cos(angle),
@@ -71,6 +87,45 @@ function chopWaves(
       a: (0.012 + rnd() * 0.018) / k,
       w: Math.sqrt(9.81 * k),
       p: rnd() * 6.283,
+    });
+  }
+  return out;
+}
+
+interface Ripple {
+  kx: number;
+  kz: number;
+  amp: number;
+  omega: number;
+  phase: number;
+  /** Fully faded out this far from the camera (m). */
+  far: number;
+  /** Under a metre long: these fleck the water with foam. */
+  short: boolean;
+}
+
+/** Seeded fine ripples, 0.3 to 3 m long, in every direction. */
+function rippleWaves(seed: number): Ripple[] {
+  let s = (seed ^ 0x9e3779b9) >>> 0 || 1;
+  const rnd = () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 4294967296;
+  };
+  const out: Ripple[] = [];
+  for (let i = 0; i < RIPPLES; i++) {
+    const wavelength = 0.3 * Math.pow(10, i / (RIPPLES - 1)) * (0.9 + rnd() * 0.2);
+    const k = (2 * Math.PI) / wavelength;
+    const angle = (i * 2.4 + rnd()) % (2 * Math.PI);
+    out.push({
+      kx: Math.cos(angle) * k,
+      kz: Math.sin(angle) * k,
+      amp: 0.055 / k,
+      omega: Math.sqrt(9.81 * k),
+      phase: rnd() * 6.283,
+      far: 30 * wavelength + 6,
+      short: wavelength < 1,
     });
   }
   return out;
@@ -170,17 +225,26 @@ class WakeField {
   }
 }
 
-export class LabWater {
+export class SeaWater {
   readonly mesh: THREE.Mesh;
   private wake = new WakeField();
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
   private chop = new WaveUniforms(CHOP_WAVES);
   private origin = uniform(new THREE.Vector2());
+  /** Land capsules: segment (ax, az, bx, bz) and radius; unused ones sit far away. */
+  private landSeg = uniformArray<"vec4">(
+    Array.from({ length: MAX_LAND }, () => new THREE.Vector4(1e6, 1e6, 1e6, 1e6)),
+    "vec4",
+  );
+  private landRadius = uniformArray<"float">(
+    Array.from({ length: MAX_LAND }, () => 0),
+    "float",
+  );
 
-  constructor(size: number, segments: number, sky: THREE.Color) {
+  constructor(size: number, segments: number) {
     const t = this.time;
-    const { swells, chop, origin } = this;
+    const { swells, chop, origin, landSeg, landRadius } = this;
     const wakeTex = this.wake.output;
 
     const displaced = Fn(() => {
@@ -189,6 +253,50 @@ export class LabWater {
       const ripple = chop.sum(p, t);
       normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
       return positionLocal.add(vec3(0, swell.h.add(ripple.h), 0));
+    });
+
+    // Fine ripples at this pixel: slope (x, z) and height (y), faded by
+    // distance; `w` is the height of the shortest ones alone (for flecks).
+    const ripples = Fn(() => {
+      const p = positionWorld.xz;
+      const dist = cameraPosition.distance(positionWorld);
+      let dx: THREE.Node<"float"> = float(0);
+      let dz: THREE.Node<"float"> = float(0);
+      let h: THREE.Node<"float"> = float(0);
+      let short: THREE.Node<"float"> = float(0);
+      for (const w of rippleWaves(7)) {
+        const fade = smoothstep(w.far, w.far * 0.35, dist);
+        const arg = p.x.mul(w.kx).add(p.y.mul(w.kz)).sub(t.mul(w.omega)).add(w.phase);
+        const slope = cos(arg).mul(fade);
+        dx = dx.add(slope.mul(w.amp * w.kx));
+        dz = dz.add(slope.mul(w.amp * w.kz));
+        const height = sin(arg).mul(fade).mul(w.amp);
+        h = h.add(height);
+        if (w.short) short = short.add(height);
+      }
+      return vec4(dx, h, dz, short);
+    });
+    const fine = ripples();
+    const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.z.negate())).normalize();
+
+    // Distance from this pixel to the nearest shore (metres).
+    const shoreAt = Fn(() => {
+      const p = positionWorld.xz;
+      let d: THREE.Node<"float"> = float(1e6);
+      for (let i = 0; i < MAX_LAND; i++) {
+        const seg = landSeg.element(i);
+        const a = seg.xy;
+        const ab = seg.zw.sub(a);
+        const k = clamp(dot(p.sub(a), ab).div(max(dot(ab, ab), 1e-4)), 0, 1);
+        d = min(
+          d,
+          p
+            .sub(a.add(ab.mul(k)))
+            .length()
+            .sub(landRadius.element(i)),
+        );
+      }
+      return d;
     });
 
     const wakeAt = Fn(() => {
@@ -210,27 +318,66 @@ export class LabWater {
         .mul(0.5)
         .add(0.5);
       const wake = smoothstep(0.04, 0.7, wakeAt()).mul(mix(float(0.55), float(1.0), streaks));
-      const foam = clamp(crest.add(wake.mul(0.85)), 0, 1);
+      // Flecks of foam where the fine ripples peak together, near you only.
+      const near = smoothstep(45, 10, cameraPosition.distance(positionWorld));
+      const flecks = smoothstep(0.011, 0.016, fine.w).mul(near).mul(0.5);
+      // Surf: a white line where water meets land, bands of foam rolling
+      // in, and more of both where a crest is hitting the shore.
+      const shore = shoreAt();
+      const hitting = smoothstep(-0.4, 1.1, h);
+      const bands = sin(
+        shore
+          .mul(2.2)
+          .add(t.mul(2.4))
+          .add(sin(p.x.mul(0.31).add(p.y.mul(0.27))).mul(2)),
+      )
+        .mul(0.5)
+        .add(0.5);
+      const surf = smoothstep(1.4, 0.1, shore)
+        .add(
+          smoothstep(7, 1, shore)
+            .mul(bands)
+            .mul(mix(float(0.25), float(0.8), hitting)),
+        )
+        .mul(mix(float(0.6), float(1), hitting));
+      const foam = clamp(crest.add(wake.mul(0.85)).add(flecks).add(surf), 0, 1);
       c = mix(c, vec3(0.93, 0.97, 1.0), foam);
-      return c;
+      return vec4(c, foam);
     });
 
-    // Sky reflection, stronger at grazing angles (Fresnel).
-    const skyColour = vec3(sky.r, sky.g, sky.b);
-    const reflection = Fn(() => {
+    // The world reflected (sky, land, riders, spray): mirrored about the
+    // mean water level and bent by the waves, stronger at grazing angles
+    // (Fresnel), none on foam.
+    const mirror = reflector({ resolutionScale: REFLECTION_SCALE });
+    mirror.target.rotateX(-Math.PI / 2);
+    mirror.uvNode = screenUV.flipX().add(surfaceNormal.xz.mul(0.06));
+    const surface = colour();
+    const fresnel = Fn(() => {
       const v = cameraPosition.sub(positionWorld).normalize();
-      const fres = pow(float(1).sub(abs(v.y)), 4).mul(0.55);
-      return skyColour.mul(fres);
-    });
+      const f = float(0.04).add(pow(float(1).sub(abs(dot(v, surfaceNormal))), 5).mul(0.62));
+      return f.mul(float(1).sub(surface.w));
+    })();
 
     const geo = waterGrid(size, segments);
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0 });
     mat.positionNode = displaced();
-    mat.colorNode = colour();
-    mat.emissiveNode = reflection();
+    mat.colorNode = surface.xyz.mul(float(1).sub(fresnel));
+    mat.emissiveNode = mirror.rgb.mul(fresnel);
+    mat.normalNode = transformNormalToView(surfaceNormal);
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
+    // The mirror plane follows the grid (it only matters that it is level at y = 0).
+    this.mesh.add(mirror.target);
+  }
+
+  /** Where the shores are, for the surf. */
+  setLand(land: LandData[]): void {
+    for (let i = 0; i < MAX_LAND; i++) {
+      const l = land[i];
+      this.landSeg.array[i] = l ? new THREE.Vector4(l.ax, l.az, l.bx, l.bz) : new THREE.Vector4(1e6, 1e6, 1e6, 1e6);
+      this.landRadius.array[i] = l ? l.radius : 0;
+    }
   }
 
   /** Move the grid's centre to world `(x, z)`. */

@@ -74,5 +74,5 @@ console.log(`
   ▸ open http://localhost:5173/?name=YourName in two browser windows
     URL options: name, room, bots (0-7), surface (0 flat, 1 swells),
                  scale (0.25-1),
-                 water=lab (GPU chop + wake foam)
+                 water=basic (plain swells, for slow machines)
 `);
