@@ -152,6 +152,21 @@ export const en = {
     connecting: "Connecting…",
     gpOver: "The Grand Prix is over. Race it again, or leave.",
     joining: "Joining the race…",
+    controls: "Controls",
+    help: {
+      jetski: [
+        "Stick: steer and lean (pull back on a crest to fly) · RT throttle · LT brake",
+        "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!",
+        "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks",
+        "Pass red buoys on your right, green ones on your left.",
+      ],
+      snow: [
+        "Stick: steer · up (or RT) tuck · down (or LT) sit back and brake",
+        "Hold A to load a jump, let go at the lip · in the air: X + stick spins and flips, B grabs",
+        "Keyboard: WASD steer, tuck, brake · Space jump · J / Shift spin · K / E grab",
+        "Land flat on the board, along the slope, and let go of the grab first!",
+      ],
+    },
     lost: (why: string) => `Connection lost: ${why}`,
     rejected: (why: string) => `Can't join: ${why}`,
     reasons: {

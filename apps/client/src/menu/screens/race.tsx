@@ -19,6 +19,7 @@ export function RaceScreen() {
   const [menu, setMenu] = useState(false);
   const [status, setStatus] = useState(t.race.connecting);
   const [failed, setFailed] = useState(false);
+  const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow" } | null>(null);
 
   const back = () => {
     if (!race) {
@@ -55,6 +56,16 @@ export function RaceScreen() {
     };
   }, [race, navigate]);
 
+  // What the race is up to, for the help (a few times a second is plenty).
+  useEffect(() => {
+    if (!session) return undefined;
+    const id = setInterval(() => {
+      const { phase, racePhase, sport } = session.state;
+      setView(phase === 1 ? { racePhase, sport } : null);
+    }, 250);
+    return () => clearInterval(id);
+  }, [session]);
+
   // The controller drives the rider; only Start (or Esc) reaches the menus.
   useEffect(() => {
     nav.setEnabled(menu || failed);
@@ -70,6 +81,14 @@ export function RaceScreen() {
     <div className="screen race-screen">
       <div ref={hudRef} className="race-hud" />
       {status && <div className="race-status">{status}</div>}
+      {view && (view.racePhase === 0 || menu) && (
+        <div className={`race-help ${menu ? "in-menu" : ""}`}>
+          <b>{t.race.controls}</b>
+          {t.race.help[view.sport].map((line) => (
+            <span key={line}>{line}</span>
+          ))}
+        </div>
+      )}
       {!menu && !failed && (
         <div className="race-menu-hint">
           <Glyph action="menu" />
@@ -80,11 +99,11 @@ export function RaceScreen() {
           <div className="panel">
             <h2 className="panel-title">{t.race.menu}</h2>
             {!failed && (
-              <Button kind="primary" onClick={() => setMenu(false)} autoFocus>
+              <Button kind="primary" glyph="back" onClick={() => setMenu(false)} autoFocus>
                 {t.race.resume}
               </Button>
             )}
-            <Button glyph="back" onClick={back} autoFocus={failed}>
+            <Button glyph={failed ? "back" : undefined} onClick={back} autoFocus={failed}>
               {t.race.leave}
             </Button>
             {!failed && <p className="muted small">{t.race.noPause}</p>}

@@ -152,6 +152,21 @@ export const ca: Messages = {
     connecting: "Connectant…",
     gpOver: "El Gran Premi s'ha acabat. Torna-hi o surt.",
     joining: "Entrant a la cursa…",
+    controls: "Controls",
+    help: {
+      jetski: [
+        "Estic: girar i inclinar-te (estira enrere en una cresta per volar) · RT accelerar · LT frenar",
+        "A l'aire: mantén A + estic per girar i fer tombarelles, B + estic per al tonell. Aterra recte!",
+        "Teclat: WASD conduir · fletxes girar i inclinar-te · Espai / Maj trucs",
+        "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
+      ],
+      snow: [
+        "Estic: girar · amunt (o RT) ajupir-te · avall (o LT) tirar-te enrere i frenar",
+        "Mantén A per carregar el salt i deixa'l anar a la vora · a l'aire: X + estic girs i tombarelles, B grabs",
+        "Teclat: WASD girar, ajupir-te, frenar · Espai saltar · J / Maj girs · K / E grab",
+        "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
+      ],
+    },
     lost: (why: string) => `Connexió perduda: ${why}`,
     rejected: (why: string) => `No pots entrar: ${why}`,
     reasons: {

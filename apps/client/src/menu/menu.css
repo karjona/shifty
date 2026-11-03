@@ -877,6 +877,30 @@ a {
   font-size: 22px;
   font-weight: 800;
 }
+.race-help {
+  position: absolute;
+  left: 22px;
+  top: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(560px, 46vw);
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgb(4 10 18 / 0.35);
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.race-help b {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.race-help.in-menu {
+  z-index: 1;
+}
 .race-menu-hint {
   position: absolute;
   right: 18px;

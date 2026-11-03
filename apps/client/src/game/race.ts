@@ -50,7 +50,11 @@ export interface RaceOptions {
 
 /** What the menus (and tests) can see of a race. */
 export interface RaceState {
+  /** Netcode: 0 joining, 1 joined, 2+ turned away. */
   phase: number;
+  /** The race: 0 warm-up, 1 countdown, 2 racing, 3 results. */
+  racePhase: number;
+  sport: "jetski" | "snow";
   course: number;
   eventIndex: number;
   eventCount: number;
@@ -96,7 +100,7 @@ export class RaceSession implements Stage {
   private seasonChange: SeasonChange | null = null;
   private debug: ReturnType<typeof createDebugPanel> | null = null;
   private fps = { frames: 0, since: performance.now(), bytesIn: 0, bytesOut: 0, at: performance.now() };
-  readonly state: RaceState = { phase: 0, course: -1, eventIndex: 0, eventCount: 1 };
+  readonly state: RaceState = { phase: 0, racePhase: 0, sport: "jetski", course: -1, eventIndex: 0, eventCount: 1 };
 
   private opts: RaceOptions;
 
@@ -314,7 +318,13 @@ export class RaceSession implements Stage {
     }
 
     const race = this.readRace();
-    Object.assign(this.state, { course: race.course, eventIndex: race.eventIndex, eventCount: race.eventCount });
+    Object.assign(this.state, {
+      racePhase: race.phase,
+      sport: this.sport,
+      course: race.course,
+      eventIndex: race.eventIndex,
+      eventCount: race.eventCount,
+    });
     if (race.course !== this.course) {
       const first = this.course === -1;
       this.course = race.course;

@@ -152,6 +152,21 @@ export const es: Messages = {
     connecting: "Conectando…",
     gpOver: "El Gran Premio ha terminado. Vuelve a correrlo o sal.",
     joining: "Entrando en la carrera…",
+    controls: "Controles",
+    help: {
+      jetski: [
+        "Stick: girar e inclinarte (tira hacia atrás en una cresta para volar) · RT acelerar · LT frenar",
+        "En el aire: mantén A + stick para girar y dar volteretas, B + stick para el tonel. ¡Aterriza recto!",
+        "Teclado: WASD conducir · flechas girar e inclinarte · Espacio / Mayús trucos",
+        "Pasa las boyas rojas por tu derecha y las verdes por tu izquierda.",
+      ],
+      snow: [
+        "Stick: girar · arriba (o RT) agacharte · abajo (o LT) echarte atrás y frenar",
+        "Mantén A para cargar el salto y suéltalo en el borde · en el aire: X + stick giros y volteretas, B grabs",
+        "Teclado: WASD girar, agacharte, frenar · Espacio saltar · J / Mayús giros · K / E grab",
+        "Aterriza con la tabla plana, a favor de la pendiente, ¡y suelta el grab antes!",
+      ],
+    },
     lost: (why: string) => `Conexión perdida: ${why}`,
     rejected: (why: string) => `No puedes entrar: ${why}`,
     reasons: {
