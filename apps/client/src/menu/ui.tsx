@@ -9,6 +9,7 @@ import {
   useId,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import { labelOf, useT } from "../i18n/index.ts";
 import type { Player } from "./api.ts";
 import { useAction, useAutoFocus, useDevice } from "./hooks.ts";
@@ -235,14 +236,16 @@ export function Modal({
 }) {
   useAction("back", onClose);
   useAutoFocus();
-  return (
+  // On the page's root: animated screens would otherwise hold it in place.
+  return createPortal(
     <div className="modal-backdrop" data-nav-scope="" onClick={onClose}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <h2>{title}</h2>
         <div className="modal-body">{children}</div>
         {actions && <div className="modal-actions">{actions}</div>}
       </div>
-    </div>
+    </div>,
+    document.querySelector("#root") ?? document.body,
   );
 }
 
