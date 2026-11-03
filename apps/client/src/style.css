@@ -184,11 +184,59 @@ body {
 }
 #help {
   position: fixed;
-  right: 16px;
-  bottom: 12px;
-  text-align: right;
+  left: 16px;
+  top: 130px;
   font-size: 12px;
   line-height: 1.5;
   opacity: 0.85;
   text-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
+}
+#banner.wrong {
+  top: 22vh;
+  font-size: 64px;
+  color: #ff6b5a;
+}
+#minimap {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+#minimap .sea {
+  fill: rgb(10 40 60 / 0.45);
+  stroke: rgb(255 255 255 / 0.5);
+  stroke-width: 2;
+}
+#minimap .lane {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.18);
+  stroke-width: 2;
+  stroke-dasharray: 8 8;
+}
+#minimap .rock {
+  fill: #8a8072;
+}
+#minimap .start {
+  stroke: #fff;
+  stroke-width: 3;
+}
+#minimap .ramp {
+  fill: #f2b630;
+}
+#minimap .buoy.right {
+  fill: #e8402a;
+}
+#minimap .buoy.left {
+  fill: #2fb34a;
+}
+#minimap .next {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+#minimap circle.me {
+  stroke: #fff;
+  stroke-width: 3;
 }

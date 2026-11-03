@@ -17,6 +17,7 @@ export interface RaceView {
   racers: number;
   misses: number;
   tickHz: number;
+  wrongWay: boolean;
 }
 
 export interface RaceEvent {
@@ -146,8 +147,13 @@ export class Hud {
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = "GO!";
     else if (race.phase === RACING && !race.racing) banner = "Free ride · next race soon";
     else if (race.phase === RESULTS) banner = `RESULTS · next race in ${Math.ceil(left / hz)}`;
+    if (race.wrongWay && race.phase !== COUNTDOWN) banner = "WRONG WAY";
     this.banner.textContent = banner;
-    this.banner.className = race.phase === COUNTDOWN || (race.phase === RACING && race.phaseTicks < hz) ? "count" : "";
+    this.banner.className = race.wrongWay
+      ? "wrong"
+      : race.phase === COUNTDOWN || (race.phase === RACING && race.phaseTicks < hz)
+        ? "count"
+        : "";
 
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
