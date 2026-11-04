@@ -18,7 +18,7 @@ import {
   roomExists,
   setPendingRace,
 } from "../api.ts";
-import { PlusIcon } from "../icons.tsx";
+import { PlusIcon, SlidersIcon } from "../icons.tsx";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker, Spinner, TabBar, TextField } from "../ui.tsx";
@@ -94,64 +94,67 @@ export function ModeSelect() {
 
   return (
     <div className="screen mode-select">
-      <TopBar>
-        <h1 className="screen-title">{t.play.title}</h1>
-      </TopBar>
-      <TabBar
-        className="mode-tabs"
-        value={mode}
-        onChange={setMode}
-        tabs={[
-          { id: "trial", label: t.play.modes.trial },
-          { id: "single", label: t.play.modes.single },
-          { id: "room", label: t.play.modes.room },
-          { id: "matchmaking", label: t.play.modes.matchmaking },
-        ]}
-      />
+      <TopBar title={t.play.title} kicker={t.play.club} />
       <main className="mode-body">
         <div className="party">
           <Button kind="ghost" className="party-add" onClick={() => toast(t.play.partySoon)}>
             <PlusIcon />
             {t.play.party}
+            <span className="badge">{t.common.soonTag}</span>
           </Button>
         </div>
-        <Panel className="mode-panel" title={t.play.modes[mode]}>
-          <p className="muted">{t.play.about[mode]}</p>
-          {mode === "trial" && <p className="soon-badge">{t.common.soon}</p>}
-          {mode === "single" && (
-            <>
-              {eventPicker}
-              <p className="muted small">{t.play.eventAbout[event]}</p>
-            </>
-          )}
-          {mode === "room" && (
-            <>
-              {eventPicker}
-              <Picker
-                label={t.room.bots}
-                options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
-                value={bots}
-                onChange={setBots}
-              />
-              <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
-            </>
-          )}
-          {mode === "matchmaking" && <p className="muted small">{t.play.eventAbout.gp}</p>}
-        </Panel>
+        <div className="mode-side">
+          <TabBar
+            className="mode-tabs"
+            value={mode}
+            onChange={setMode}
+            tabs={[
+              { id: "trial", label: t.play.modes.trial, tag: t.common.soonTag },
+              { id: "single", label: t.play.modes.single },
+              { id: "room", label: t.play.modes.room },
+              { id: "matchmaking", label: t.play.modes.matchmaking },
+            ]}
+          />
+          <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
+            <p>{t.play.about[mode]}</p>
+            {mode === "single" && eventPicker}
+            {mode === "room" && (
+              <>
+                {eventPicker}
+                <Picker
+                  label={t.room.bots}
+                  options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
+                  value={bots}
+                  onChange={setBots}
+                />
+              </>
+            )}
+            {(mode === "single" || mode === "matchmaking") && <Races event={mode === "single" ? event : "gp"} />}
+            {mode === "room" && (
+              <>
+                <p className="muted">{t.play.eventAbout[event]}</p>
+                <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
+              </>
+            )}
+          </Panel>
+          <footer className="actions">
+            <Button onClick={() => setTuning(true)}>
+              <SlidersIcon />
+              {t.setup.open}
+            </Button>
+            <Button
+              kind="primary"
+              glyph="play"
+              className="play-button"
+              onClick={() => void play()}
+              disabled={busy || mode === "trial"}
+              autoFocus
+            >
+              {mode === "room" ? t.play.createRoom : mode === "matchmaking" ? t.play.findRace : t.common.play}
+            </Button>
+          </footer>
+        </div>
       </main>
-      <footer className="mode-footer">
-        <Button onClick={() => setTuning(true)}>{t.setup.open}</Button>
-        <Button
-          kind="primary"
-          glyph="play"
-          className="play-button big"
-          onClick={() => void play()}
-          disabled={busy || mode === "trial"}
-          autoFocus
-        >
-          {mode === "room" ? t.play.createRoom : mode === "matchmaking" ? t.play.findRace : t.common.play}
-        </Button>
-      </footer>
       <Hints
         items={[
           ["confirm", t.common.select],
@@ -163,6 +166,26 @@ export function ModeSelect() {
       {joining && <JoinRoom onClose={() => setJoining(false)} />}
       {searching && <Searching onClose={() => setSearching(false)} />}
       {tuning && <SetupEditor onClose={() => setTuning(false)} />}
+    </div>
+  );
+}
+
+/** The races an event runs, in order. */
+function Races({ event }: { event: EventChoice }) {
+  const t = useT();
+  const seasons = event === "gp" ? (["summer", "winter"] as const) : [event];
+  return (
+    <div className="races">
+      <p className="muted">{t.play.eventAbout[event]}</p>
+      <ol>
+        {seasons.map((s, i) => (
+          <li key={s}>
+            <span className="num">{String(i + 1).padStart(2, "0")}</span>
+            <b>{t.seasons[s]}</b>
+            <span className="muted">{t.play.eventAbout[s]}</span>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

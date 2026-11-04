@@ -11,6 +11,7 @@ export const en = {
     close: "Close",
     cancel: "Cancel",
     soon: "Coming soon",
+    soonTag: "Soon",
     error: "Something went wrong. Please try again.",
     noServer: "No race server is available right now. Please try again in a moment.",
   },
@@ -63,6 +64,7 @@ export const en = {
   },
   home: {
     missions: "Missions",
+    featured: "Featured",
     missionsEmpty: "Missions are on their way.",
     news: "News",
     newsEmpty: "No news yet.",
@@ -226,6 +228,7 @@ export const en = {
   },
   play: {
     title: "Select mode",
+    club: "Costa Nevada Country Club",
     modes: { trial: "Time trial", single: "Single player", room: "Room", matchmaking: "Matchmaking" },
     about: {
       trial: "Race the clock and chase ghosts.",

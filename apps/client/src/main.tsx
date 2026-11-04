@@ -1,6 +1,8 @@
 import "@fontsource-variable/archivo/wdth.css";
+import "@fontsource-variable/archivo/wdth-italic.css";
 import "./style.css";
 import "./menu/menu.css";
+import "./menu/scale.ts";
 import { createRoot } from "react-dom/client";
 import { App } from "./menu/app.tsx";
 
