@@ -11,6 +11,7 @@ export const es: Messages = {
     close: "Cerrar",
     cancel: "Cancelar",
     soon: "Muy pronto",
+    soonTag: "Pronto",
     error: "Algo ha fallado. Vuelve a intentarlo.",
     noServer: "Ahora mismo no hay ningún servidor de carreras disponible. Prueba de nuevo en un momento.",
   },
@@ -63,6 +64,7 @@ export const es: Messages = {
   },
   home: {
     missions: "Misiones",
+    featured: "Destacado",
     missionsEmpty: "Las misiones están en camino.",
     news: "Noticias",
     newsEmpty: "Todavía no hay noticias.",
@@ -226,6 +228,7 @@ export const es: Messages = {
   },
   play: {
     title: "Elige modo",
+    club: "Club de campo de Costa Nevada",
     modes: { trial: "Contrarreloj", single: "Un jugador", room: "Sala", matchmaking: "Emparejamiento" },
     about: {
       trial: "Corre contra el reloj y persigue fantasmas.",

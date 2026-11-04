@@ -102,44 +102,46 @@ export function RiderScreen() {
 
   return (
     <div className="screen rider-screen">
-      <TopBar />
+      <TopBar title={t.rider.title} kicker={t.menu.collection} sub={t.rider.body} />
       <main className="menu-body creator">
         <div className="rider-space" aria-hidden="true" />
-        <Panel title={t.rider.title} className="creator-panel">
-          <p className="muted small">{t.rider.body}</p>
-          <div className="creator-rows">
-            <Picker
-              label={t.rider.bodyType}
-              value={a.look.body}
-              onChange={(body) => setLook({ ...a.look, body, facialHair: body === "male" ? a.look.facialHair : 0 })}
-              onFocus={() => setMenuFocus("body")}
-              options={(["male", "female"] as const).map((b) => ({ value: b, label: t.rider.bodies[b] }))}
-            />
-            {PARTS.filter((p) => partApplies(a.look.body, p)).map((part) => (
+        <div className="creator-side">
+          <Panel className="creator-panel">
+            <div className="creator-rows numbered">
               <Picker
-                key={part}
-                label={t.rider.parts[part]}
-                value={a.look[part]}
-                onChange={(v) => setPart(part, v)}
-                onFocus={() => setMenuFocus(FACE.has(part) ? "face" : "body")}
-                options={Array.from({ length: PRESETS[part] }, (_, v) => {
-                  const swatch = SWATCHES[part]?.[v];
-                  return {
-                    value: v,
-                    label: label(part, v),
-                    swatch: swatch === undefined ? undefined : hexColour(swatch),
-                  };
-                })}
+                label={t.rider.bodyType}
+                autoFocus
+                value={a.look.body}
+                onChange={(body) => setLook({ ...a.look, body, facialHair: body === "male" ? a.look.facialHair : 0 })}
+                onFocus={() => setMenuFocus("body")}
+                options={(["male", "female"] as const).map((b) => ({ value: b, label: t.rider.bodies[b] }))}
               />
-            ))}
-          </div>
-          <div className="row">
+              {PARTS.filter((p) => partApplies(a.look.body, p)).map((part) => (
+                <Picker
+                  key={part}
+                  label={t.rider.parts[part]}
+                  value={a.look[part]}
+                  onChange={(v) => setPart(part, v)}
+                  onFocus={() => setMenuFocus(FACE.has(part) ? "face" : "body")}
+                  options={Array.from({ length: PRESETS[part] }, (_, v) => {
+                    const swatch = SWATCHES[part]?.[v];
+                    return {
+                      value: v,
+                      label: label(part, v),
+                      swatch: swatch === undefined ? undefined : hexColour(swatch),
+                    };
+                  })}
+                />
+              ))}
+            </div>
+          </Panel>
+          <footer className="actions">
             <Button onClick={() => setLook({ ...randomLook(Math.random) })}>{t.rider.random}</Button>
             <Button kind="primary" glyph="confirm" disabled={busy} onClick={() => void done()}>
               {t.rider.done}
             </Button>
-          </div>
-        </Panel>
+          </footer>
+        </div>
       </main>
       <Hints
         items={

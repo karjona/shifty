@@ -71,11 +71,9 @@ export function ShopScreen() {
 
   return (
     <div className="screen shop-screen">
-      <TopBar>
-        <h1 className="screen-title">{t.shop.title}</h1>
-      </TopBar>
+      <TopBar title={t.shop.title} kicker={t.play.club} />
       <main className="menu-body shop">
-        <Panel title={t.shop.title} className="shop-panel">
+        <Panel className="shop-panel">
           <Picker
             label={t.wardrobe.season}
             value={sport}
@@ -98,13 +96,14 @@ export function ShopScreen() {
             }))}
           />
           <ul className="shop-items">
-            {items.map((it) => {
+            {items.map((it, n) => {
               const owned = rider.owned.has(it.id);
               return (
                 <li key={it.id}>
                   <button
                     type="button"
                     data-nav=""
+                    data-nav-autofocus={n === 0 ? "" : undefined}
                     className={`shop-item ${owned ? "owned" : ""}`}
                     onFocus={() => setTrying(it.id)}
                     onMouseEnter={() => setTrying(it.id)}

@@ -11,6 +11,7 @@ export const ca: Messages = {
     close: "Tanca",
     cancel: "Cancel·la",
     soon: "Molt aviat",
+    soonTag: "Aviat",
     error: "Alguna cosa ha fallat. Torna-ho a provar.",
     noServer: "Ara mateix no hi ha cap servidor de curses disponible. Prova-ho d'aquí a una estona.",
   },
@@ -63,6 +64,7 @@ export const ca: Messages = {
   },
   home: {
     missions: "Missions",
+    featured: "Destacat",
     missionsEmpty: "Les missions són de camí.",
     news: "Notícies",
     newsEmpty: "Encara no hi ha notícies.",
@@ -226,6 +228,7 @@ export const ca: Messages = {
   },
   play: {
     title: "Tria el mode",
+    club: "Club de camp de Costa Nevada",
     modes: { trial: "Contrarellotge", single: "Un jugador", room: "Sala", matchmaking: "Emparellament" },
     about: {
       trial: "Corre contra el rellotge i persegueix fantasmes.",

@@ -83,7 +83,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - **Single player** is a race against bots on our servers, but it never counts (no times, no progression). Rooms and matchmaking are recorded (`match`, `race_result`).
 - **Banners and news** are rows in Postgres, one language each (a player sees their language only), shown without a deploy. For now edit them with `pnpm --filter lobby db:studio`; an admin screen comes later. Banner actions: `play`, `news:<slug>`, `url:<https url>`.
 - **Languages:** English, Spanish, Catalan (`apps/client/src/i18n/`; `en.ts` is the reference and the type checker makes the others match). The lobby's emails come in the player's language too. No hard-coded UI text.
-- Look: frosted panels over the 3D, big type you can read from the couch, an accent colour that follows the season on screen. The diamond logo is a placeholder. No component library (shadcn & co. look like a dashboard): our own handful of components.
+- Look ("Riviera"): opaque paper panels floating over the 3D (no blur, square corners, a 1px ink edge and a soft drop), ink type in Archivo using its widths (expanded italic for display, condensed for numbers), numbered rows, and one accent per season that follows the season on screen (summer Riviera blue, fall brick, winter piste red, spring fern). Focus is the accent filling the row, text turned to paper. Laid out on a 1920×1080 canvas and scaled to the window (`menu/scale.ts`). The "23.4° / SHIFTY" wordmark (the slash tilted 23.4°) is a placeholder logo. No component library (shadcn & co. look like a dashboard): our own handful of components.
 
 ### Customization
 

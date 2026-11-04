@@ -51,19 +51,44 @@ export function usePlayer(): Player | null {
   return data?.player ?? null;
 }
 
-/** Logo, a slot for the screen's controls, your credits and your card. */
-export function TopBar({ children }: { children?: ReactNode }) {
+/**
+ * The logo (or the screen's title, on paper, with a kicker over it), a slot
+ * for the screen's controls, and your card and credits.
+ */
+export function TopBar({
+  title,
+  kicker,
+  sub,
+  children,
+}: {
+  title?: string;
+  kicker?: string;
+  sub?: string;
+  children?: ReactNode;
+}) {
   const player = usePlayer();
   const { data: me } = useSuspenseQuery(meQuery);
   const [editing, setEditing] = useState(false);
   return (
     <header className="topbar">
-      <Link to="/" className="topbar-logo" tabIndex={-1}>
-        <Wordmark small />
-      </Link>
+      {title ? (
+        <div className="title-panel">
+          {kicker && <span className="label">{kicker}</span>}
+          <h1 className="screen-title">{title}</h1>
+          {sub && <p className="muted">{sub}</p>}
+        </div>
+      ) : (
+        <Link to="/" className="topbar-logo" tabIndex={-1}>
+          <Wordmark />
+        </Link>
+      )}
       <div className="topbar-middle">{children}</div>
-      {me?.rider && <Credits credits={me.rider.credits} />}
-      {player && <SocialCard player={player} onClick={() => setEditing(true)} />}
+      {player && (
+        <div className="account">
+          <SocialCard player={player} onClick={() => setEditing(true)} />
+          {me?.rider && <Credits credits={me.rider.credits} />}
+        </div>
+      )}
       {player && editing && <CardEditor player={player} onClose={() => setEditing(false)} />}
     </header>
   );
