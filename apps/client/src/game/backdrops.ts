@@ -4,6 +4,7 @@
 // at a time, and they keep what they built for the next time.
 import * as THREE from "three/webgpu";
 import { Fn, abs, clamp, float, length, mix, screenUV, sin, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+import type { Appearance, Sport } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Avatar } from "../render/avatar.ts";
 import { Bay } from "../render/bay.ts";
@@ -167,6 +168,19 @@ class SeasonField implements Stage {
     this.avatar.mesh.visible = on;
   }
 
+  /** Dresses the rider. */
+  setRider(appearance: Appearance, sport: Sport): void {
+    this.avatar.set(appearance, sport);
+  }
+
+  /** Frames the whole rider, or their face (the creator, on face parts). */
+  setFocus(focus: "body" | "face"): void {
+    this.focus = focus;
+  }
+
+  private focus: "body" | "face" = "body";
+  private zoom = 0;
+
   frame(now: number, dt: number): void {
     const engine = this.engine;
     if (!engine?.render) return;
@@ -187,13 +201,17 @@ class SeasonField implements Stage {
     const h = innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    const distance = 6.4;
+    // Closing in on the face eases in and out.
+    this.zoom += ((this.focus === "face" ? 1 : 0) - this.zoom) * (1 - Math.exp(-dt * 4));
+    const z = this.zoom * this.zoom * (3 - 2 * this.zoom);
+    const distance = 6.4 - z * 4.9;
     const halfW = Math.tan((this.camera.fov * Math.PI) / 360) * distance * this.camera.aspect;
     this.avatar.mesh.position.set(-halfW * 0.5, 0, 0);
-    this.avatar.mesh.rotation.y = 0.35 + Math.sin(this.t * 0.25) * 0.3;
+    this.avatar.mesh.rotation.y = 0.35 * (1 - z) + Math.sin(this.t * 0.25) * 0.3 * (1 - z * 0.6);
     this.avatar.update(dt);
-    this.camera.position.set(0, 0.95, distance);
-    this.camera.lookAt(0, 0.85, 0);
+    const lookY = 0.85 + z * 0.62;
+    this.camera.position.set(0, 0.95 + z * 0.52, distance);
+    this.camera.lookAt(0, lookY, 0);
     engine.world.renderer.render(this.scene, this.camera);
   }
 
@@ -208,6 +226,21 @@ class Club implements Stage {
   private t = 0;
   private count = 1;
 
+  private you: { appearance: Appearance; sport: Sport } | null = null;
+  private closeUp = 0;
+  private wantCloseUp = false;
+
+  /** Frames your rider up close (the pro shop) instead of the whole terrace. */
+  setCloseUp(on: boolean): void {
+    this.wantCloseUp = on;
+  }
+
+  /** Dresses your rider (the one in front). */
+  setYou(appearance: Appearance, sport: Sport): void {
+    this.you = { appearance, sport };
+    this.avatars[0]?.set(appearance, sport);
+  }
+
   /** How many riders stand on the terrace (you and your party). */
   setRiders(count: number): void {
     this.count = Math.max(1, Math.min(4, count));
@@ -217,7 +250,8 @@ class Club implements Stage {
   private place(): void {
     const spots = riderSpots();
     while (this.avatars.length < this.count) {
-      const a = new Avatar(null, this.avatars.length);
+      const you = this.avatars.length === 0 ? this.you : null;
+      const a = new Avatar(you?.appearance ?? null, this.avatars.length, you?.sport ?? "summer");
       this.avatars.push(a);
     }
     this.avatars.forEach((a, i) => {
@@ -249,6 +283,24 @@ class Club implements Stage {
     const { eye: e, look: l } = CLUB_VIEW;
     const eye = new THREE.Vector3(e.x, e.y + Math.sin(this.t * 0.5) * 0.04, e.z + sway * 0.25);
     const look = new THREE.Vector3(l.x, l.y, l.z);
+    // Up close: in front of your rider, who stands left of the shop's panel.
+    this.closeUp += ((this.wantCloseUp ? 1 : 0) - this.closeUp) * (1 - Math.exp(-dt * 3));
+    if (this.closeUp > 1e-3) {
+      const spot = riderSpots()[0]!;
+      const k = this.closeUp * this.closeUp * (3 - 2 * this.closeUp);
+      const toward = new THREE.Vector3(Math.sin(spot.yaw), 0, Math.cos(spot.yaw));
+      const side = new THREE.Vector3(toward.z, 0, -toward.x);
+      const at = new THREE.Vector3(spot.x, CLUB.floor + 1.05, spot.z);
+      // Looking past the rider's shoulder puts them left of the panel.
+      eye.lerp(
+        at
+          .clone()
+          .addScaledVector(toward, 3.6)
+          .add(new THREE.Vector3(0, 0.25, 0)),
+        k,
+      );
+      look.lerp(at.clone().addScaledVector(side, 1.15), k);
+    }
     engine.world.renderFrom(eye, look, now / 1000, dt, 50);
   }
 
@@ -271,6 +323,26 @@ export function backdrop(kind: BackdropKind): Stage {
 /** Shows or hides the rider on the main menu's colours. */
 export function showMenuRider(on: boolean): void {
   (field ??= new SeasonField()).showRider(on);
+}
+
+/** Dresses your rider on the main menu. */
+export function setMenuRider(appearance: Appearance, sport: Sport): void {
+  (field ??= new SeasonField()).setRider(appearance, sport);
+}
+
+/** Frames your rider whole or close on the face (main menu backdrop). */
+export function setMenuFocus(focus: "body" | "face"): void {
+  (field ??= new SeasonField()).setFocus(focus);
+}
+
+/** Frames your rider up close on the club's terrace (the pro shop). */
+export function setClubCloseUp(on: boolean): void {
+  (club ??= new Club()).setCloseUp(on);
+}
+
+/** Dresses your rider on the club's terrace. */
+export function setClubRider(appearance: Appearance, sport: Sport): void {
+  (club ??= new Club()).setYou(appearance, sport);
 }
 
 /** Sets how many riders stand on the club's terrace. */

@@ -4,16 +4,13 @@
 import {
   type Appearance,
   type Item,
-  type Kit,
-  type Outfits,
-  SLOTS,
   SPORTS,
   STARTER,
   type Setups,
   defaultSetups,
   encodeAppearance,
   item,
-  kitProblem,
+  parseAppearance,
   parseLook,
   parseSetup,
   setupBytes,
@@ -52,28 +49,11 @@ export async function riderView(db: Db, row: PlayerRow): Promise<RiderView> {
   };
 }
 
-/** Parses an untrusted appearance; null with a reason if it isn't one this player can wear. */
-export function parseAppearance(v: unknown, owns: (id: string) => boolean): Appearance | string {
+/** Parses an untrusted appearance; a reason if it isn't one this player can wear. */
+export function checkAppearance(v: unknown, owns: (id: string) => boolean): Appearance | string {
   if (!isRecord(v)) return "bad_request";
-  const look = parseLook(v.look);
-  if (!look) return "bad_look";
-  if (!isRecord(v.outfits)) return "bad_outfit";
-  const outfits: Outfits = { summer: {}, winter: {} };
-  for (const sport of SPORTS) {
-    const raw = v.outfits[sport];
-    if (!isRecord(raw)) return "bad_outfit";
-    const kit: Kit = {};
-    for (const slot of SLOTS[sport]) {
-      const id = raw[slot];
-      if (id === undefined || id === null) continue;
-      if (typeof id !== "string") return "bad_outfit";
-      kit[slot] = id;
-    }
-    if (Object.keys(raw).some((k) => !(SLOTS[sport] as readonly string[]).includes(k))) return "bad_outfit";
-    if (kitProblem(sport, kit, look.body, owns)) return "bad_outfit";
-    outfits[sport] = kit;
-  }
-  return { look, outfits };
+  if (!parseLook(v.look)) return "bad_look";
+  return parseAppearance(v, owns) ?? "bad_outfit";
 }
 
 export function parseSetups(v: unknown): Setups | null {

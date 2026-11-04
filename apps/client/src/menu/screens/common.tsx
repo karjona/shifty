@@ -7,7 +7,7 @@ import { labelOf, type Locale, LOCALES, setLocale, useLocale, useT } from "../..
 import { ApiError, claimHandle, meQuery, type Player, saveCard } from "../api.ts";
 import { GlobeIcon } from "../icons.tsx";
 import { toast } from "../toast.tsx";
-import { Button, Modal, Picker, SocialCard, TextField, Wordmark } from "../ui.tsx";
+import { Button, Credits, Modal, Picker, SocialCard, TextField, Wordmark } from "../ui.tsx";
 
 export function LanguagePicker() {
   const t = useT();
@@ -51,9 +51,10 @@ export function usePlayer(): Player | null {
   return data?.player ?? null;
 }
 
-/** Logo, a slot for the screen's controls, and the player's card. */
+/** Logo, a slot for the screen's controls, your credits and your card. */
 export function TopBar({ children }: { children?: ReactNode }) {
   const player = usePlayer();
+  const { data: me } = useSuspenseQuery(meQuery);
   const [editing, setEditing] = useState(false);
   return (
     <header className="topbar">
@@ -61,6 +62,7 @@ export function TopBar({ children }: { children?: ReactNode }) {
         <Wordmark small />
       </Link>
       <div className="topbar-middle">{children}</div>
+      {me?.rider && <Credits credits={me.rider.credits} />}
       {player && <SocialCard player={player} onClick={() => setEditing(true)} />}
       {player && editing && <CardEditor player={player} onClose={() => setEditing(false)} />}
     </header>

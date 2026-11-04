@@ -59,7 +59,7 @@ export function Welcome() {
               className="wide"
               glyph="confirm"
               autoFocus
-              onClick={() => void navigate({ to: "/" })}
+              onClick={() => void navigate({ to: "/rider" })}
             >
               {t.welcome.submit}
             </Button>

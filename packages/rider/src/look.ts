@@ -122,3 +122,13 @@ export function randomLook(next: () => number): Look {
   if (body !== "male" || next() < 0.45) look.facialHair = 0;
   return look;
 }
+
+/**
+ * The colour of each colour preset (0xRRGGBB), for swatches in the
+ * creator; the art takes its base tones from these too.
+ */
+export const SKIN_TONES: readonly number[] = [0xf1d0b8, 0xe2b896, 0xc99a72, 0xa8774f, 0x7d5235, 0x55361f];
+/** Black, dark brown, brown, auburn, blonde, grey. */
+export const HAIR_COLOURS: readonly number[] = [0x1a1512, 0x3b2617, 0x6a4527, 0x8c3f1f, 0xc9a25e, 0x9a9590];
+/** Dark brown, hazel, green, blue, grey. */
+export const EYE_COLOURS: readonly number[] = [0x3a2414, 0x7a5a2a, 0x4f7a3e, 0x3f6f9e, 0x6f7c86];

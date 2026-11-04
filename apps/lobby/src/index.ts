@@ -15,7 +15,7 @@ import { parseReport, storeReport } from "./results.ts";
 import {
   buy,
   ownedItems,
-  parseAppearance,
+  checkAppearance,
   parseSetups,
   recentEarnings,
   riderView,
@@ -128,7 +128,7 @@ app.put("/api/me/rider", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   const owned = await ownedItems(c.var.db, p.user.id);
-  const appearance = parseAppearance(await jsonBody(c.req.raw), (id) => owned.has(id));
+  const appearance = checkAppearance(await jsonBody(c.req.raw), (id) => owned.has(id));
   if (typeof appearance === "string") return c.json({ error: appearance }, 400);
   const row = await saveAppearance(c.var.db, p.user.id, appearance);
   return row ? c.json({ rider: await riderView(c.var.db, row) }) : c.json({ error: "no_handle" }, 409);

@@ -139,11 +139,14 @@ export function Picker<T extends string | number>({
   options,
   value,
   onChange,
+  onFocus,
 }: {
   label: string;
-  options: { value: T; label: string }[];
+  /** Options; a `swatch` (CSS colour) shows a dot of that colour by the label. */
+  options: { value: T; label: string; swatch?: string }[];
   value: T;
   onChange: (v: T) => void;
+  onFocus?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const i = Math.max(
@@ -174,6 +177,8 @@ export function Picker<T extends string | number>({
         if (e.key === "Enter" || e.key === " ") step(1);
       }}
       onClick={() => step(1)}
+      onFocus={onFocus}
+      onMouseEnter={onFocus}
     >
       <span className="picker-label">{label}</span>
       <span className="picker-value">
@@ -188,7 +193,10 @@ export function Picker<T extends string | number>({
         >
           ◀
         </button>
-        <b>{options[i]?.label}</b>
+        <b>
+          {options[i]?.swatch && <i className="swatch" style={{ background: options[i].swatch }} />}
+          {options[i]?.label}
+        </b>
         <button
           type="button"
           tabIndex={-1}
@@ -299,4 +307,15 @@ export function Hints({ items }: { items: [GlyphAction, string][] }) {
 
 export function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
+}
+
+/** Your credits, to spend in the pro shop. */
+export function Credits({ credits }: { credits: number }) {
+  const t = useT();
+  return (
+    <span className="credits" title={t.shop.credits}>
+      <i aria-hidden="true">◆</i>
+      {t.shop.amount(credits)}
+    </span>
+  );
 }

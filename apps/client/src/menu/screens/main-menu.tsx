@@ -2,7 +2,7 @@
 // along the top; on Home your rider stands over the seasons' colours with
 // a banner, missions and news around.
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { showMenuRider } from "../../game/backdrops.ts";
+import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useReducer, useState } from "react";
 import { type Locale, LOCALES, setLocale, useLocale, useT } from "../../i18n/index.ts";
@@ -11,6 +11,7 @@ import { DiamondIcon, GearIcon, HomeIcon } from "../icons.tsx";
 import { useAction, useAutoFocus, useBackdrop, useEngine } from "../hooks.ts";
 import { Button, Hints, Modal, Panel, Picker, TabBar } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { Wardrobe } from "./wardrobe.tsx";
 
 export type MenuTab = "home" | "collection" | "settings";
 const route = getRouteApi("/");
@@ -20,7 +21,12 @@ export function MainMenu() {
   const t = useT();
   const navigate = useNavigate();
   const { tab = "home" } = route.useSearch();
-  useEffect(() => showMenuRider(tab === "home"), [tab]);
+  const { data: me } = useSuspenseQuery(meQuery);
+  const appearance = me?.rider?.appearance ?? null;
+  useEffect(() => showMenuRider(tab !== "settings"), [tab]);
+  useEffect(() => {
+    if (appearance && tab === "home") setMenuRider(appearance, "summer");
+  }, [appearance, tab]);
   const setTab = (next: MenuTab) => void navigate({ to: "/", search: { tab: next }, replace: true });
   const play = () => void navigate({ to: "/play" });
   useAction("play", play);
@@ -44,13 +50,7 @@ export function MainMenu() {
         />
       </TopBar>
       {tab === "home" && <HomeTab />}
-      {tab === "collection" && (
-        <main className="menu-body centered">
-          <Panel title={t.menu.collection}>
-            <p>{t.menu.collectionEmpty}</p>
-          </Panel>
-        </main>
-      )}
+      {tab === "collection" && <Wardrobe />}
       {tab === "settings" && <SettingsTab />}
       <Hints
         items={[

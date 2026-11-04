@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { ITEMS, STARTER, defaultOutfits, defaultAppearance } from "@shifty/rider";
 import { GRAND_PRIX_BONUS, PLACE_CREDITS, STYLE_CAP, payouts } from "../src/rewards.ts";
 import type { ResultReport } from "../src/results.ts";
-import { parseAppearance, parseSetups } from "../src/riders.ts";
+import { checkAppearance, parseSetups } from "../src/riders.ts";
 
 const report = (entries: ResultReport["entries"], event = 0): ResultReport => ({
   room: "m_1",
@@ -65,13 +65,13 @@ void test("a rider can only wear what they own, in the right slots", () => {
   const owned = new Set(STARTER.map((i) => i.id));
   const owns = (id: string) => owned.has(id);
   const a = defaultAppearance();
-  assert.deepEqual(parseAppearance(a, owns), a);
+  assert.deepEqual(checkAppearance(a, owns), a);
   const shop = { ...a, outfits: { ...a.outfits, summer: { ...a.outfits.summer, vest: "summer.vest.race.orange" } } };
-  assert.equal(parseAppearance(shop, owns), "bad_outfit");
+  assert.equal(checkAppearance(shop, owns), "bad_outfit");
   const beard = { ...a, look: { ...a.look, body: "female", facialHair: 2 }, outfits: defaultOutfits("female") };
-  assert.equal(parseAppearance(beard, owns), "bad_look");
+  assert.equal(checkAppearance(beard, owns), "bad_look");
   const extra = { ...a, outfits: { ...a.outfits, winter: { ...a.outfits.winter, cape: "x" } } };
-  assert.equal(parseAppearance(extra, owns), "bad_outfit");
+  assert.equal(checkAppearance(extra, owns), "bad_outfit");
   assert.equal(parseSetups({ summer: { speed: 6, handling: 2, stability: 2, tricks: 2 } }), null);
   assert.ok(
     parseSetups({

@@ -1,7 +1,17 @@
 // A rider's whole appearance (body and face, and what they wear for each
 // sport), and its compact bytes: the lobby signs them into join tokens, the
 // race server passes them on to everyone in the room without reading them.
-import { type Kit, type Outfits, SLOTS, SPORTS, type Slot, defaultOutfits, item, itemByNumber } from "./catalog.ts";
+import {
+  type Kit,
+  type Outfits,
+  SLOTS,
+  SPORTS,
+  type Slot,
+  defaultOutfits,
+  item,
+  itemByNumber,
+  kitProblem,
+} from "./catalog.ts";
 import { DEFAULT_LOOK, type Look, PARTS, parseLook, randomLook, rng } from "./look.ts";
 
 export interface Appearance {
@@ -10,6 +20,33 @@ export interface Appearance {
 }
 
 export const defaultAppearance = (): Appearance => ({ look: { ...DEFAULT_LOOK }, outfits: defaultOutfits("male") });
+
+/**
+ * Parses an untrusted appearance: a valid look, and for each sport a kit of
+ * known items in their own slots that fit the body and are owned (`owns`;
+ * anything by default). Null if it is not one.
+ */
+export function parseAppearance(v: unknown, owns: (id: string) => boolean = () => true): Appearance | null {
+  if (typeof v !== "object" || v === null) return null;
+  const look = parseLook(Reflect.get(v, "look"));
+  const raw: unknown = Reflect.get(v, "outfits");
+  if (!look || typeof raw !== "object" || raw === null) return null;
+  const outfits: Outfits = { summer: {}, winter: {} };
+  for (const sport of SPORTS) {
+    const k: unknown = Reflect.get(raw, sport);
+    if (typeof k !== "object" || k === null) return null;
+    const kit: Kit = {};
+    for (const [key, id] of Object.entries(k)) {
+      if (id === undefined || id === null) continue;
+      const slot = SLOTS[sport].find((s) => s === key);
+      if (typeof id !== "string" || !slot) return null;
+      kit[slot] = id;
+    }
+    if (kitProblem(sport, kit, look.body, owns)) return null;
+    outfits[sport] = kit;
+  }
+  return { look, outfits };
+}
 
 const VERSION = 1;
 /** Longest encoding: version, body, parts, and per sport a count and three bytes per slot. */

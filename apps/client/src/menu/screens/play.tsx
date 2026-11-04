@@ -3,7 +3,8 @@
 // members will join you there.
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
-import { setClubRiders } from "../../game/backdrops.ts";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
 import {
@@ -11,6 +12,7 @@ import {
   createRoom,
   type EventChoice,
   lobbySocket,
+  meQuery,
   type Mode,
   playSingle,
   roomExists,
@@ -21,6 +23,7 @@ import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker, Spinner, TabBar, TextField } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { SetupEditor } from "./setup.tsx";
 
 export type { Mode };
 const route = getRouteApi("/play");
@@ -36,9 +39,15 @@ export function ModeSelect() {
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [tuning, setTuning] = useState(false);
+  const { data: me } = useSuspenseQuery(meQuery);
+  const appearance = me?.rider?.appearance ?? null;
   useEffect(() => setClubRiders(1), []);
+  useEffect(() => {
+    if (appearance) setClubRider(appearance, event === "winter" ? "winter" : "summer");
+  }, [appearance, event]);
   useAutoFocus();
-  useAction("back", () => void navigate({ to: "/" }), !joining && !searching);
+  useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
   const setMode = (m: Mode) => void navigate({ to: "/play", search: { mode: m }, replace: true });
 
@@ -131,6 +140,7 @@ export function ModeSelect() {
         </Panel>
       </main>
       <footer className="mode-footer">
+        <Button onClick={() => setTuning(true)}>{t.setup.open}</Button>
         <Button
           kind="primary"
           glyph="play"
@@ -152,6 +162,7 @@ export function ModeSelect() {
       />
       {joining && <JoinRoom onClose={() => setJoining(false)} />}
       {searching && <Searching onClose={() => setSearching(false)} />}
+      {tuning && <SetupEditor onClose={() => setTuning(false)} />}
     </div>
   );
 }
