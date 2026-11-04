@@ -2,9 +2,11 @@ import "@fontsource-variable/archivo/wdth.css";
 import "@fontsource-variable/archivo/wdth-italic.css";
 import "./style.css";
 import "./menu/menu.css";
-import "./menu/scale.ts";
 import { createRoot } from "react-dom/client";
 import { App } from "./menu/app.tsx";
+import { fitUi } from "./menu/scale.ts";
+
+fitUi();
 
 const params = new URLSearchParams(location.search);
 // The quick race only exists on the dev server: builds drop this branch and

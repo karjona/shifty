@@ -223,7 +223,13 @@ export class Hud {
     else if (race.phase === RACING && !race.racing) banner = m.freeRide;
     else if (race.phase === RESULTS) banner = m.results(Math.ceil(left / hz));
     if (race.wrongWay && race.phase !== COUNTDOWN) banner = m.wrongWay;
-    this.banner.textContent = banner;
+    if (banner !== this.banner.textContent) {
+      this.banner.textContent = banner;
+      // Each number of the countdown lands on its own.
+      this.banner.style.animation = "none";
+      void this.banner.offsetWidth;
+      this.banner.style.animation = "";
+    }
     this.banner.className = race.wrongWay
       ? "wrong"
       : race.phase === COUNTDOWN || (race.phase === RACING && race.phaseTicks < hz)
@@ -248,7 +254,7 @@ export class Hud {
       this.info.innerHTML = "";
     }
 
-    this.speed.textContent = `${Math.round(speedKmh)} km/h${airborne ? " ✈" : ""}`;
+    this.speed.innerHTML = `${Math.round(speedKmh)}<small>km/h${airborne ? " ✈" : ""}</small>`;
     if (race.looped) {
       let pips = "";
       for (let i = 0; i < race.meterMax; i++) pips += `<i class="${i < race.meter ? "on" : ""}"></i>`;
