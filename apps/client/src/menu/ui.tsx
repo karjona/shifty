@@ -185,7 +185,7 @@ export function Picker<T extends string | number>({
         >
           ◀
         </button>
-        <b>
+        <b key={String(value)}>
           {options[i]?.swatch && <i className="swatch" style={{ background: options[i].swatch }} />}
           {options[i]?.label}
         </b>

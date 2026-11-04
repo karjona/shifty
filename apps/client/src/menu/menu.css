@@ -235,6 +235,9 @@ a {
 
 .btn {
   --glyph-ink: var(--paper);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -279,15 +282,28 @@ a {
   color: var(--danger);
   box-shadow: inset 0 0 0 2px var(--danger);
 }
+.btn::before,
+.tab::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0;
+}
 .btn:focus,
 .btn:focus-visible {
   --glyph-ink: var(--accent);
-  background: var(--accent);
   color: var(--on-accent);
   box-shadow: none;
 }
+.btn:focus::before {
+  opacity: 1;
+}
 .btn-danger:focus {
   --glyph-ink: var(--danger);
+}
+.btn-danger::before {
   background: var(--danger);
 }
 .btn .icon {
@@ -436,9 +452,14 @@ a {
 .tabbar .play-button:not(:focus) {
   box-shadow: none;
 }
+.tab {
+  isolation: isolate;
+}
 .tab:focus {
-  background: var(--accent);
   color: var(--on-accent);
+}
+.tab:focus::before {
+  opacity: 1;
 }
 
 /* --- pickers and rows: ◀ value ▶, the arrows show on the focused one --- */
@@ -1317,7 +1338,6 @@ a {
   background: var(--accent);
   box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
   opacity: 0;
-  transition: opacity 120ms var(--ease);
 }
 .mode-tabs .tab.tagged {
   color: var(--ink-3);
@@ -1883,5 +1903,199 @@ a {
   .mode-body,
   .creator {
     grid-template-columns: 1fr;
+  }
+}
+
+/* --- motion --- */
+
+/* The focus fill wipes in from the side the focus came from. */
+.picker:focus::before,
+.stat-row:focus::before,
+.news-item:focus::before,
+.shop-item:focus::before,
+.tab:focus::before,
+.btn:focus::before {
+  transition: none;
+  animation: wipe-right 200ms var(--ease);
+}
+[data-nav-dir="left"] :focus::before {
+  animation-name: wipe-left;
+}
+[data-nav-dir="down"] :focus::before {
+  animation-name: wipe-down;
+}
+[data-nav-dir="up"] :focus::before {
+  animation-name: wipe-up;
+}
+@keyframes wipe-right {
+  from {
+    clip-path: inset(-40px 100% -40px -40px);
+  }
+  to {
+    clip-path: inset(-40px);
+  }
+}
+@keyframes wipe-left {
+  from {
+    clip-path: inset(-40px -40px -40px 100%);
+  }
+  to {
+    clip-path: inset(-40px);
+  }
+}
+@keyframes wipe-down {
+  from {
+    clip-path: inset(-40px -40px 100% -40px);
+  }
+  to {
+    clip-path: inset(-40px);
+  }
+}
+@keyframes wipe-up {
+  from {
+    clip-path: inset(100% -40px -40px -40px);
+  }
+  to {
+    clip-path: inset(-40px);
+  }
+}
+
+/* The primary action catches the light once, along the axis. */
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: linear-gradient(113.4deg, transparent 35%, rgb(255 255 255 / 0.32) 50%, transparent 65%);
+  transform: translateX(-110%);
+  pointer-events: none;
+}
+.btn-primary:focus::after {
+  animation: shine 900ms 140ms var(--ease) both;
+}
+@keyframes shine {
+  to {
+    transform: translateX(110%);
+  }
+}
+.btn-label,
+.btn > .glyph {
+  position: relative;
+  z-index: 1;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* The current tab's bar grows in under it. */
+.tab.on::after {
+  animation: grow 280ms var(--ease) both;
+}
+.mode-tabs .tab.on::after {
+  animation: none;
+}
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* A new value slides into its picker. */
+.picker-value b {
+  animation: value-in 180ms var(--ease);
+}
+@keyframes value-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Panels come in from their side of the screen, one after another. */
+.home-right > *,
+.mode-side > *,
+.creator-side > *,
+.shop-panel,
+.settings > * {
+  animation: enter-right 460ms var(--ease) both;
+}
+.home-right > :nth-child(2),
+.mode-side > :nth-child(2),
+.creator-side > :nth-child(2),
+.settings > :nth-child(2) {
+  animation-delay: 70ms;
+}
+.home-right > :nth-child(3),
+.mode-side > :nth-child(3),
+.settings > :nth-child(3) {
+  animation-delay: 140ms;
+}
+.title-panel,
+.menu-tabs,
+.login-card,
+.info-card {
+  animation: enter-left 460ms var(--ease) both;
+}
+.menu-tabs {
+  animation-delay: 60ms;
+}
+.login-card,
+.info-card {
+  animation-name: enter-right;
+}
+.account,
+.language {
+  animation: rise 420ms 120ms var(--ease) both;
+}
+.hints,
+.footer {
+  animation: rise 420ms 200ms var(--ease) both;
+}
+@keyframes enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+}
+@keyframes enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+}
+
+/* The season's word wipes in along the axis. */
+.season-word b,
+.season-change.shown b {
+  animation: axis-wipe 900ms var(--ease) both;
+}
+.season-word span {
+  animation: rise 500ms 500ms var(--ease) both;
+}
+@keyframes axis-wipe {
+  from {
+    clip-path: polygon(0 -20%, 0 -20%, -25% 120%, -25% 120%);
+  }
+  to {
+    clip-path: polygon(0 -20%, 125% -20%, 100% 120%, -25% 120%);
+  }
+}
+
+/* The banner's text turns over with it. */
+.hero-block > :not(.glyph) {
+  animation: rise 420ms var(--ease) both;
+}
+.hero-block > span:not(.glyph) {
+  animation-delay: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #root *,
+  #root *::before,
+  #root *::after,
+  .season-change b {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
   }
 }

@@ -167,7 +167,7 @@ function HeroBanner({ banners, onOpen }: { banners: Banner[]; onOpen: (b: Banner
         )}
       </span>
       {b.imageUrl && <span className="hero-image" style={{ backgroundImage: `url("${encodeURI(b.imageUrl)}")` }} />}
-      <span className="hero-block">
+      <span className="hero-block" key={b.id}>
         <Glyph action="confirm" />
         <b>{b.title}</b>
         {b.subtitle && <span>{b.subtitle}</span>}

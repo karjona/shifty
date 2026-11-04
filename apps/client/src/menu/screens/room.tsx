@@ -130,6 +130,11 @@ export function RoomScreen() {
   const host = room !== null && me !== null && room.hostId === me;
   const mine = room?.members.find((m) => m.userId === me);
   const start = () => send({ t: "start" });
+  // The ready (or start) button waits for the room; it takes the focus once it's here.
+  const loaded = room !== null;
+  useEffect(() => {
+    if (loaded) document.querySelector<HTMLElement>(".room .actions .btn-primary")?.focus();
+  }, [loaded]);
   useAction("play", () => (host ? start() : send({ t: "ready", ready: !mine?.ready })), room !== null);
 
   return (

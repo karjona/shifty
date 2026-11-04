@@ -185,7 +185,6 @@ body {
   background: var(--accent, #2b3fd0);
   color: #f6f1e7;
   font-size: 36px;
-  animation: hud-in 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 #race-info .split span {
   color: inherit;
@@ -194,10 +193,42 @@ body {
 #race-info .split.behind {
   background: #1d1b17;
 }
-@keyframes hud-in {
+#banner {
+  animation: banner-in 320ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+#banner.count {
+  animation: count-in 700ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+#banner.wrong {
+  animation: wrong 800ms ease-in-out infinite alternate;
+}
+@keyframes banner-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translate(-50%, -12px);
+  }
+}
+@keyframes count-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(1.6);
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@keyframes wrong {
+  to {
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+#results:not([hidden]) {
+  animation: results-in 420ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+@keyframes results-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 24px));
   }
 }
 #popups {
