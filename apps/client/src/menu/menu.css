@@ -1531,13 +1531,16 @@ a {
 }
 .race-menu-hint {
   position: absolute;
+  top: var(--margin-y);
   right: var(--margin-x);
-  bottom: var(--margin-y);
-  color: var(--on-accent);
-  opacity: 0.8;
+  display: flex;
+  padding: 10px;
+  background: var(--paper);
+  box-shadow: var(--lift);
+  color: var(--ink);
 }
 .race-menu-hint .glyph {
-  --glyph-ink: var(--ink);
+  --glyph-ink: var(--paper);
 }
 .race-menu {
   position: absolute;

@@ -248,7 +248,7 @@ export class Hud {
       this.info.innerHTML = "";
     }
 
-    this.speed.textContent = `${Math.round(speedKmh)} km/h${airborne ? " ✈" : ""}`;
+    this.speed.innerHTML = `${Math.round(speedKmh)}<small>km/h${airborne ? " ✈" : ""}</small>`;
     if (race.looped) {
       let pips = "";
       for (let i = 0; i < race.meterMax; i++) pips += `<i class="${i < race.meter ? "on" : ""}"></i>`;
