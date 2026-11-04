@@ -22,6 +22,8 @@ pub struct Config {
     pub public_addr: String,
     pub region: String,
     pub lobby_url: Option<String>,
+    /// Shared secret for heartbeats and results sent to the lobby.
+    pub race_server_secret: Option<String>,
     pub lobby_public_key: VerifyingKey,
     pub tls: TlsMode,
     /// On SIGTERM: how long to wait for rooms to finish before exiting.
@@ -54,6 +56,7 @@ impl Config {
             public_addr: env("PUBLIC_ADDR").unwrap_or_else(|| "localhost:443".into()),
             region: env("REGION").unwrap_or_else(|| "local".into()),
             lobby_url: env("LOBBY_URL"),
+            race_server_secret: env("RACE_SERVER_SECRET"),
             lobby_public_key: protocol::token::parse_public_key(&key)
                 .map_err(|e| anyhow::anyhow!("LOBBY_PUBLIC_KEY: {e}"))?,
             tls,

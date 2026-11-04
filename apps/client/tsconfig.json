@@ -15,7 +15,8 @@
     "allowImportingTsExtensions": true,
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true
+    "noImplicitOverride": true,
+    "jsx": "react-jsx"
   },
   "include": ["src", "vite.config.ts"]
 }

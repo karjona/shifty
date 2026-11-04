@@ -35,6 +35,22 @@ jobs:
   web:
     name: Web (determinism, lint, types, build, e2e, audit)
     runs-on: ubuntu-latest
+    # The lobby's database for the e2e tests (scripts/dev.ts migrates it).
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_USER: shifty
+          POSTGRES_PASSWORD: shifty
+          POSTGRES_DB: shifty
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U shifty"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://shifty:shifty@127.0.0.1:54329/shifty
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show
@@ -57,6 +73,8 @@ jobs:
       - run: pnpm fmt:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Lobby unit tests
+        run: pnpm --filter lobby test
       - run: pnpm --filter client build
       - run: pnpm exec playwright install --with-deps --no-shell chromium
       - run: pnpm test:e2e

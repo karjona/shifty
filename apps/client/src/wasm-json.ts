@@ -25,6 +25,11 @@ export function parseStandings(json: string): StandingView[] {
   }));
 }
 
+/** Grand Prix points by seat. */
+export function parseGrandPrix(json: string): Map<number, number> {
+  return new Map(list(JSON.parse(json)).map((o) => [num(o, "slot"), num(o, "points")]));
+}
+
 export function parseEvents(json: string): RaceEvent[] {
   const out: RaceEvent[] = [];
   for (const o of list(JSON.parse(json))) {

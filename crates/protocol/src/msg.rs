@@ -19,14 +19,15 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
 pub const MAX_INPUTS_PER_PACKET: usize = 32;
 /// Most reliable events packed in one snapshot.
 pub const MAX_EVENTS_PER_SNAPSHOT: usize = 4;
-pub const NAME_MAX_BYTES: usize = 24;
+/// Names are player handles (`Name#1234`): 40 bytes of name plus the tag.
+pub const NAME_MAX_BYTES: usize = 48;
 pub const TOKEN_MAX_BYTES: usize = 900;
 
 pub mod kind {
@@ -169,6 +170,8 @@ pub enum RejectReason {
     RoomFull = 3,
     Draining = 4,
     Kicked = 5,
+    /// The Grand Prix in this room has started: no new riders until it's over.
+    Started = 6,
 }
 
 impl RejectReason {
@@ -179,6 +182,7 @@ impl RejectReason {
             3 => Self::RoomFull,
             4 => Self::Draining,
             5 => Self::Kicked,
+            6 => Self::Started,
             _ => return Err(DecodeError::Invalid("reject reason")),
         })
     }
@@ -216,6 +220,11 @@ pub enum EventBody {
     RiderLeft {
         slot: u8,
     },
+    /// Grand Prix points after a race, by seat (seats without a rider are
+    /// left out).
+    Standings {
+        points: Vec<(u8, u16)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -243,6 +252,11 @@ pub struct Snapshot {
     /// Ms between receiving the echoed packet and sending this snapshot.
     pub echo_hold_ms: u16,
     pub events: Vec<Event>,
+    /// The course raced now (a Grand Prix moves on to the next one).
+    pub course: CourseId,
+    /// Which race of the room's plan this is (0-based), out of `event_count`.
+    pub event_index: u8,
+    pub event_count: u8,
     pub race: Race,
     pub riders: Vec<RiderState>,
 }
@@ -394,6 +408,15 @@ fn write_event(w: &mut Writer, e: &Event) {
             w.u8(2);
             w.u8(*slot);
         }
+        EventBody::Standings { points } => {
+            w.u8(3);
+            let n = points.len().min(MAX_RIDERS);
+            w.u8(n as u8);
+            for (slot, pts) in &points[..n] {
+                w.u8(*slot);
+                w.u16(*pts);
+            }
+        }
     }
 }
 
@@ -420,6 +443,21 @@ fn read_event(r: &mut Reader<'_>) -> Result<Event, DecodeError> {
             }
         }
         2 => EventBody::RiderLeft { slot: r.u8()? },
+        3 => {
+            let n = r.u8()? as usize;
+            if n > MAX_RIDERS {
+                return Err(DecodeError::Invalid("too many standings"));
+            }
+            let mut points = Vec::with_capacity(n);
+            for _ in 0..n {
+                let slot = r.u8()?;
+                if slot as usize >= MAX_RIDERS {
+                    return Err(DecodeError::Invalid("standings slot"));
+                }
+                points.push((slot, r.u16()?));
+            }
+            EventBody::Standings { points }
+        }
         _ => return Err(DecodeError::Invalid("event kind")),
     };
     Ok(Event { id, body })
@@ -457,6 +495,9 @@ impl ServerMsg {
                 for e in &s.events {
                     write_event(&mut w, e);
                 }
+                w.u8(s.course as u8);
+                w.u8(s.event_index);
+                w.u8(s.event_count);
                 w.u8(s.race.phase as u8);
                 w.u32(s.race.phase_tick);
                 w.u8(s.riders.len() as u8);
@@ -513,6 +554,9 @@ impl ServerMsg {
                 let events = (0..n_events)
                     .map(|_| read_event(&mut r))
                     .collect::<Result<Vec<_>, _>>()?;
+                let course = CourseId::from_u8(r.u8()?).ok_or(DecodeError::Invalid("course"))?;
+                let event_index = r.u8()?;
+                let event_count = r.u8()?;
                 let race = Race {
                     phase: Phase::from_u8(r.u8()?).ok_or(DecodeError::Invalid("race phase"))?,
                     phase_tick: r.u32()?,
@@ -531,6 +575,9 @@ impl ServerMsg {
                     echo_client_time,
                     echo_hold_ms,
                     events,
+                    course,
+                    event_index,
+                    event_count,
                     race,
                     riders,
                 }))

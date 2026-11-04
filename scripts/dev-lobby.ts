@@ -24,6 +24,8 @@ export interface JoinClaims {
   surface: number;
   /** 0 = the summer bay (jetski), 1 = the winter mountain (snowboard). */
   course: number;
+  /** Every course of the room, in order (a Grand Prix); empty = just `course`. */
+  events: number[];
 }
 
 const b64url = (b: Buffer): string => b.toString("base64url");
@@ -71,6 +73,7 @@ export interface DevJoinOptions {
   bots?: number;
   surface?: number;
   course?: number;
+  events?: number[];
   pid?: string;
 }
 
@@ -87,6 +90,7 @@ export function devJoinTicket(raceServer: string, opts: DevJoinOptions) {
     bots: opts.bots ?? 2,
     surface: opts.surface ?? 1,
     course: opts.course ?? 0,
+    events: opts.events ?? [],
   };
   return { token: mintJoinToken(key, claims), claims };
 }

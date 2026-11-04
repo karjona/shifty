@@ -68,6 +68,23 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - **Look:** 1080° Avalanche framing. The camera is close and low, the rider fills about half the screen's height, the view tips down the slope so the snow rushing past fills the screen to about a third from the top, the horizon leans with the slope, and in the air the camera's height lags so the rider drops in the frame.
 - **Snow you can read:** a low sun ahead of the riders, shade baked into faces that rise toward you and into hollows (so rollers and kickers show even in flat light), blue dye lines on lips, knuckles and the cliff edge, old tracks streaking down the run, and every board carves a fading track of its own. Fog closes in at a few hundred metres.
 
+### Grand Prix
+
+- A room races a plan: one event over and over, or the **Grand Prix** (summer then winter for now; each season in turn as they're built), then from the top again.
+- Points by finishing place: 10, 8, 6, 5, 4, 3, 2, 1. Tricks don't count. Riders who haven't finished when the race ends get last place's points. The last race breaks ties.
+- Nobody new joins a Grand Prix once its first countdown starts (reconnecting is fine). A rider who leaves keeps the points already reported; a bot takes the seat.
+- Between races the camera lifts off the course while the screen washes into the next season's colours and name, and the next course comes up behind (the simple version of the season change).
+
+### Menus
+
+- **Every menu works with a controller, the keyboard and the mouse.** The stick, the d-pad and the arrows move the focus to the nearest item in that direction; the mouse focuses what it hovers. A / ✕ / Enter picks, B / ○ / Esc goes back, Y / △ / P plays, LB RB / L1 R1 / Q E change tabs, Start / Esc opens the race menu. Button glyphs follow the device you last touched (Xbox, PlayStation, Nintendo, keyboard; none for the mouse).
+- Screens (Kilian's sketch): **login** (GitHub, or a 6-digit code by email; Costa Nevada flies by behind), **handle** (first time in), **main menu** (Play, tabs home / collection / settings, the social card; home has your rider, a banner, missions, news; the seasons' colours drift behind), **mode select** at the country club (time trial (soon), single player, room, matchmaking; your rider on the terrace, "add party member" (soon)), **rooms** (a 6-letter code to share, ready-up, the host starts), and the race with its menu.
+- **Handles** are `Name#1234`: 3-20 letters (any script, accents, the Catalan `l·l`), digits, spaces and `_ - . ·`; the lobby picks the number. Reserved names and a list of rude words (English, Spanish, Catalan) are refused. A new name once a week.
+- **Single player** is a race against bots on our servers, but it never counts (no times, no progression). Rooms and matchmaking are recorded (`match`, `race_result`).
+- **Banners and news** are rows in Postgres, one language each (a player sees their language only), shown without a deploy. For now edit them with `pnpm --filter lobby db:studio`; an admin screen comes later. Banner actions: `play`, `news:<slug>`, `url:<https url>`.
+- **Languages:** English, Spanish, Catalan (`apps/client/src/i18n/`; `en.ts` is the reference and the type checker makes the others match). The lobby's emails come in the player's language too. No hard-coded UI text.
+- Look: frosted panels over the 3D, big type you can read from the couch, an accent colour that follows the season on screen. The diamond logo is a placeholder. No component library (shadcn & co. look like a dashboard): our own handful of components.
+
 ### Customization
 
 Character type, body, name, clothes... (Seasonal outfits fit the season concept.)
@@ -124,12 +141,12 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 - One Rust binary, many rooms (one Tokio task per room). Docker image based on distroless, about 10-20 MB.
 - WebTransport with **`web-transport-quinn` + `quinn`** (the stack behind Cloudflare's production MoQ relay).
 - Ports: 443/UDP (WebTransport, all game traffic). 443/TCP serves only ops HTTP (`/healthz`, `/metrics`, `/cert-hash`). Docker needs `-p 443:443/udp` explicitly, or `--network host`.
-- Config through env vars: `LOBBY_URL`, `REGION`, `PUBLIC_ADDR`, `LOBBY_PUBLIC_KEY`, plus `BIND` (default `[::]:443`), `TLS_CERT`/`TLS_KEY` (domain mode), `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
-- Join tokens: `base64url(claims JSON) "." base64url(Ed25519 sig over "shifty-join-v1." + payload)`. Claims carry `aud` = the race server's `PUBLIC_ADDR`, so a token only works on the server it was issued for. Format lives in `crates/protocol/src/token.rs`; the dev stand-in signer is `scripts/dev-lobby.ts`.
+- Config through env vars: `LOBBY_URL`, `RACE_SERVER_SECRET`, `REGION`, `PUBLIC_ADDR`, `LOBBY_PUBLIC_KEY`, plus `BIND` (default `[::]:443`), `TLS_CERT`/`TLS_KEY` (domain mode), `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
+- Join tokens: `base64url(claims JSON) "." base64url(Ed25519 sig over "shifty-join-v1." + payload)`. Claims carry `aud` = the race server's `PUBLIC_ADDR`, so a token only works on the server it was issued for, and `events` (the room's plan of courses). Format lives in `crates/protocol/src/token.rs`; the lobby signs them (`apps/lobby/src/tickets.ts`; a test pins one token both sides must agree on). `scripts/dev-lobby.ts` signs dev quick-race tickets with the same dev key.
 - Paths: WebTransport `/race`; ops HTTP `/healthz`, `/metrics`, `/cert-hash`.
 - On boot it registers with the lobby and sends heartbeats (region, load).
 - Verifies join tokens with the lobby's **public key only**. A race server can check tokens but never create them.
-- Reports results to the lobby. **Race servers never touch Postgres.**
+- Heartbeats to the lobby every 5 s (address, region, certificate hash, rooms, humans, draining) and reports every finished race (`POST /api/servers/results`, retried), both with the shared `RACE_SERVER_SECRET`. **Race servers never touch Postgres.**
 - Graceful shutdown on SIGTERM: no new rooms, finish current races, then exit.
 - `/healthz`, logs to stdout, tick-time metrics.
 - TLS, two modes:
@@ -138,6 +155,11 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 
 ### Lobby
 
+- `apps/lobby`: a Worker (Hono) with **Better Auth** (GitHub OAuth and email one-time codes, sessions in Postgres, the admin plugin for roles and bans) on **Drizzle + Postgres** (`src/db/schema.ts`; migrations in `drizzle/`, made with `pnpm --filter lobby db:generate`). Postgres comes from Hyperdrive in production, `DATABASE_URL` in dev and self-hosting.
+- Durable Objects: `RoomLobby` (one per room code: members over hibernatable WebSockets, host settings, ready, start), `Matchmaker` (the Grand Prix queue: a race starts with four, or when the first in line has waited `MATCH_WAIT_SECS`, 20 by default; bots fill the seats), `ServerRegistry` (race servers from their heartbeats; picks the least busy).
+- API under `/api`: `auth/*` (Better Auth), `me`, `me/handle`, `me/card`, `content`, `play/single`, `rooms`, `rooms/:code/ws`, `matchmaking/ws`; race servers use `servers/heartbeat` and `servers/results`. Our own endpoints only take requests from the game's origin.
+- Secrets: `BETTER_AUTH_SECRET`, `LOBBY_SIGNING_KEY` (Ed25519 seed for join tokens), `RACE_SERVER_SECRET`, `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`; `BETTER_AUTH_URL` is the public origin. Email: `MAIL_MODE=console` prints codes (dev); production sends through Cloudflare Email Sending once the game has a domain (not wired yet). `DEV_MAILBOX=1` (dev and tests only) exposes the last code per address at `/api/dev/mailbox`.
+- Client and lobby share one origin (the lobby serves `/api`), so the session cookie just works.
 - TypeScript Worker + Durable Objects. Runs on Cloudflare, or self-hosted with **`workerd`** (Cloudflare's open-source runtime) in Docker. Same code.
 - **Durable Object state is temporary only** (rooms, presence, matchmaking queues), all rebuildable. **Postgres is the source of truth** (accounts, results, ghosts). This also makes workerd's experimental on-disk storage low-risk for self-hosters.
 - Use WebSocket hibernation when idle so idle rooms cost nothing.
@@ -165,7 +187,7 @@ crates/
   devkit/       # dev-only: mint tokens, headless bot clients, determinism hash
 apps/
   client/       # Vite + Three.js + TypeScript
-  lobby/        # Cloudflare Worker + Durable Objects (not started)
+  lobby/        # Cloudflare Worker + Durable Objects: accounts, rooms, matchmaking
 scripts/        # dev.ts (one-command dev), build-wasm, determinism check, dev lobby
 e2e/            # Playwright tests (real browsers, two players)
 ```
@@ -174,7 +196,7 @@ The sim and the protocol are written once in Rust and used by both the race serv
 
 ### Language
 
-- **TypeScript:** client (rendering, UI, input, audio) and lobby.
+- **TypeScript:** client (rendering, UI, input, audio) and lobby. Menus are React (TanStack Router and Query) DOM over the canvas; the race HUD stays plain DOM (it updates every frame).
 - **Rust:** sim, protocol, race server.
 - Pass state across the Rust/JS boundary with shared typed arrays, not many small calls.
 
@@ -198,9 +220,9 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 
 ## Workflow
 
-- **Run everything:** `pnpm install`, then `pnpm dev`, then open `http://localhost:5173/?name=You` in two windows. URL options: `event` (`snow` = the winter mountain; the summer bay otherwise), `room`, `bots` (0-7), `surface` (0 flat, 1 swells as designed, 2 calm, 3 rough), `scale` (render scale), `water` (`basic` = swells only, for slow machines; the default adds GPU chop, ripples, wake and shore foam, and reflections), `render=0` (netcode only, for tests), `autopilot=1` (dev: ride with the bot's inputs, to look around a course). F1 toggles the debug panel (stats, fake lag/jitter/loss).
+- **Run everything:** `pnpm install`, then `pnpm dev` (Postgres in a container, the lobby, the race server, Vite), then open `http://localhost:5173` and log in: sign-in codes show up in the lobby's log. For GitHub sign-in put a dev OAuth app (callback `http://localhost:5173/api/auth/callback/github`) in `.dev/lobby.env` as `GITHUB_CLIENT_ID=` / `GITHUB_CLIENT_SECRET=`. Postgres keeps running after `pnpm dev` (`container stop shifty-postgres`); set `DATABASE_URL` to use another one. **Quick race without the menus** (dev server only; `pnpm build` fails if it ends up in a build): `http://localhost:5173/?name=You` in two windows. URL options: `event` (`snow` = the winter mountain, `gp` = the Grand Prix; the summer bay otherwise), `room`, `bots` (0-7), `surface` (0 flat, 1 swells as designed, 2 calm, 3 rough), `scale` (render scale), `water` (`basic` = swells only, for slow machines; the default adds GPU chop, ripples, wake and shore foam, and reflections), `render=0` (nothing drawn: netcode and menu tests; works on the menus too), `autopilot=1` (dev: ride with the bot's inputs, to look around a course). F1 toggles the debug panel (stats, fake lag/jitter/loss).
 - **Physics tuning:** `cargo run -p sim --example jetski_lab --release [seed]` prints the jetski's draft, top speed, how turns build up and carry on, how long tricks take off a ramp, and how often and how high swells launch it and how deep it dives (into, with and across the swell, with and without pulling back). `cargo run -p sim --example bot_race --release [seed]` runs a bots-only race and prints times, missed buoys, tricks and bails. `cargo run -p sim --example snow_lab --release` prints the mountain run's profile (pitch, banks, widths), snowboard speeds standing, tucked and braking, the air off every table and the cliff with and without a pop, and a bots-only race down the run (times, falls, tricks, points, cost per tick).
-- **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, `pnpm audit`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm test:e2e`. CI runs all of them on every PR. The race server image (`.github/workflows/image.yml`) builds on every push to `main`, and on PRs only when packaging changes (Dockerfile, Cargo manifests and lockfile, toolchain, notices config). CI actions are pinned by commit SHA (with the version in a comment).
+- **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, `pnpm audit`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm --filter lobby test`, `pnpm test:e2e` (menus against the real lobby, and the netcode). CI runs all of them on every PR. The race server image (`.github/workflows/image.yml`) builds on every push to `main`, and on PRs only when packaging changes (Dockerfile, Cargo manifests and lockfile, toolchain, notices config). CI actions are pinned by commit SHA (with the version in a comment).
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.
 - **Containers:** Kilian's Mac has no Docker; use Apple's `container` CLI (Docker-compatible): `container build -f crates/race-server/Dockerfile -t shifty-race-server .`. For UDP from the host use `127.0.0.1`, not `::1`.

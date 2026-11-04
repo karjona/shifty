@@ -4,11 +4,11 @@ An online racing game about one place and four seasons: jetski in summer, skateb
 
 > 23.4° is Earth's axial tilt, the reason seasons exist. A shifty is a board trick: twist in the air, bring it back.
 
-**Status:** early prototype. Boxes ride gentle ocean swells with up to 4 friends and some bots. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
+**Status:** early prototype. A jetski race on the bay and a snowboard run down the mountain, raced alone against bots, with friends in a private room, or through matchmaking, as a Grand Prix that changes season between races. Accounts (GitHub or an email code), menus you can drive with a controller, the keyboard or the mouse, in English, Spanish and Catalan. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
 
 ## Play locally
 
-Needs Rust (the toolchain is pinned in `rust-toolchain.toml`), Node 24+ and pnpm, plus the `wasm-bindgen` CLI at the version in `Cargo.lock` (if it's missing, `pnpm dev` prints the exact install command):
+Needs Rust (the toolchain is pinned in `rust-toolchain.toml`), Node 24+ and pnpm, the `wasm-bindgen` CLI at the version in `Cargo.lock` (if it's missing, `pnpm dev` prints the exact install command), and Apple's `container` or Docker for the dev database (or point `DATABASE_URL` at any Postgres):
 
 ```sh
 cargo install wasm-bindgen-cli --version 0.2.130 --locked
@@ -16,15 +16,17 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad (left stick, RT/LT, A) or keyboard (WASD/arrows, Space). F1 opens the netcode debug panel, which has fake lag and packet-loss sliders.
+Open <http://localhost:5173> and log in with an email address: the code shows up in the lobby's log. GitHub login needs a dev OAuth app in `.dev/lobby.env` (see AGENTS.md). On the dev server you can skip the menus and race straight away: open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad (left stick, RT/LT, A) or keyboard (WASD/arrows, Space). F1 opens the netcode debug panel in a quick race, which has fake lag and packet-loss sliders.
 
 Production builds (`pnpm build`) also need `cargo install cargo-about --locked --features cli`, which writes the third-party license notices.
 
 ## How it works
 
 ```
-Browser (Three.js WebGPU + Rust sim in WASM)
-   │  inputs (60 Hz, redundant)        ▲ snapshots (30 Hz, ~150 B)
+Browser (Three.js WebGPU + Rust sim in WASM, React menus)
+   ├─ HTTPS / WebSocket ──► Lobby (Cloudflare Worker + Durable Objects, Postgres)
+   │                          accounts, rooms, matchmaking, signed join tickets
+   │  inputs (60 Hz, redundant)        ▲ snapshots (30 Hz, ~250 B)
    ▼                                   │
 Race server (Rust, WebTransport over UDP)
    └─ one authoritative room per race, same Rust sim, bit-identical to the WASM build
@@ -46,7 +48,8 @@ See [AGENTS.md](AGENTS.md) for the full design, decisions and workflow.
 | `crates/race-server` | The authoritative server (WebTransport over UDP)       |
 | `crates/sim-wasm`    | Browser bindings                                       |
 | `crates/devkit`      | Dev tools: tokens, headless bots, determinism hash     |
-| `apps/client`        | Vite + Three.js client                                 |
+| `apps/client`        | Vite + Three.js client, React menus                    |
+| `apps/lobby`         | Accounts, rooms, matchmaking (Worker, Postgres)        |
 | `e2e`                | Playwright tests with real browsers                    |
 
 ## License

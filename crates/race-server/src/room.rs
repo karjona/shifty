@@ -2,6 +2,9 @@
 //! sockets and no clock of its own. The caller passes `now_ms` in and ships
 //! the returned packets. This keeps the netcode testable in-process with a
 //! simulated network (see `tests/netcode.rs`).
+//!
+//! A room races its plan: one course over and over, or a Grand Prix (every
+//! course in order, points by finishing place, then from the top again).
 
 use std::collections::VecDeque;
 
@@ -10,7 +13,9 @@ use protocol::{
     Event, EventBody, InputPacket, MAX_EVENTS_PER_SNAPSHOT, PROTOCOL_VERSION, RejectReason,
     RiderKind, RiderState, ServerMsg, Snapshot, Welcome, truncate_utf8,
 };
+use serde::Serialize;
 use sim::bot::bot_input;
+use sim::race::{Phase, Race};
 use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, SurfaceKind, TICK_HZ, World};
 
 pub type ConnId = u64;
@@ -28,10 +33,15 @@ const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
 const INPUT_RING: usize = 128;
 
+/// Grand Prix points by finishing place. Riders who don't finish get the
+/// last place's points.
+pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
+
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
     pub id: String,
-    pub course: CourseId,
+    /// The courses raced, in order: one, or a Grand Prix.
+    pub plan: Vec<CourseId>,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     pub bots: u8,
@@ -43,14 +53,54 @@ impl RoomConfig {
         for b in claims.room.bytes() {
             seed = (seed ^ u32::from(b)).wrapping_mul(0x0100_0193);
         }
+        let mut plan = claims.plan();
+        if plan.is_empty() {
+            plan.push(CourseId::Oval);
+        }
         Self {
             id: claims.room.clone(),
-            course: CourseId::from_u8(claims.course).unwrap_or(CourseId::Oval),
+            plan,
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
             bots: claims.bots.min((MAX_RIDERS - 1) as u8),
         }
     }
+
+    pub fn grand_prix(&self) -> bool {
+        self.plan.len() > 1
+    }
+}
+
+/// One rider's race, for the lobby (JSON).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportEntry {
+    /// Account id; None for bots.
+    pub pid: Option<String>,
+    pub place: u8,
+    pub time_ms: Option<u32>,
+    pub trick_points: u16,
+    /// Grand Prix points after this race.
+    pub gp_points: Option<u16>,
+}
+
+/// A finished race, for the lobby (JSON).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RaceReport {
+    pub room: String,
+    /// Counts runs through the plan (a Grand Prix raced again is a new round).
+    pub round: u16,
+    /// The race's place in the plan.
+    pub event: u8,
+    pub course: u8,
+    pub entries: Vec<ReportEntry>,
+}
+
+/// Whoever holds a seat in this Grand Prix, and their points.
+#[derive(Clone, Debug)]
+struct Entrant {
+    pid: Option<String>,
+    points: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -125,6 +175,10 @@ pub struct Room {
     world: World,
     seats: [Seat; MAX_RIDERS],
     players: [Option<Player>; MAX_RIDERS],
+    entrants: [Option<Entrant>; MAX_RIDERS],
+    /// Which race of the plan is on.
+    event_index: usize,
+    round: u16,
     pub stats: RoomStats,
 }
 
@@ -134,14 +188,19 @@ pub struct Outbox {
     pub packets: Vec<(ConnId, Vec<u8>)>,
     /// Connections to close (kicked or replaced).
     pub close: Vec<ConnId>,
+    /// Races that just ended, for the lobby.
+    pub reports: Vec<RaceReport>,
 }
 
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
         let mut room = Self {
-            world: World::on_course(config.course, config.surface_kind, config.surface_seed),
+            world: World::on_course(config.plan[0], config.surface_kind, config.surface_seed),
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
+            entrants: Default::default(),
+            event_index: 0,
+            round: 1,
             stats: RoomStats::default(),
             config,
         };
@@ -149,9 +208,33 @@ impl Room {
         for i in 0..room.config.bots as usize {
             let slot = MAX_RIDERS - 1 - i;
             room.seats[slot] = Seat::Bot;
+            room.entrants[slot] = Some(Entrant {
+                pid: None,
+                points: 0,
+            });
             room.world.spawn(slot);
         }
         room
+    }
+
+    /// The Grand Prix is under way: past the first warm-up.
+    pub fn grand_prix_started(&self) -> bool {
+        self.config.grand_prix() && (self.event_index > 0 || self.world.race.phase != Phase::Warmup)
+    }
+
+    pub fn event_index(&self) -> usize {
+        self.event_index
+    }
+
+    fn standings_event(&self) -> EventBody {
+        EventBody::Standings {
+            points: self
+                .entrants
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, e)| e.as_ref().map(|e| (slot as u8, e.points)))
+                .collect(),
+        }
     }
 
     pub fn tick(&self) -> u32 {
@@ -229,9 +312,11 @@ impl Room {
                     return Err(RejectReason::RoomFull);
                 }
                 if self.human_count() == 0 {
-                    // First player in: a fresh warm-up, not the middle of a
-                    // bots-only race.
-                    self.world.restart_warmup();
+                    // First player in: a fresh warm-up (and Grand Prix), not
+                    // the middle of a bots-only race.
+                    self.restart_plan();
+                } else if self.grand_prix_started() {
+                    return Err(RejectReason::Started);
                 }
                 let slot = match self.seats.iter().position(|s| *s == Seat::Empty) {
                     Some(s) => s,
@@ -249,6 +334,10 @@ impl Room {
                     }
                 };
                 self.seats[slot] = Seat::Human;
+                self.entrants[slot] = Some(Entrant {
+                    pid: Some(claims.pid.clone()),
+                    points: 0,
+                });
                 self.world.spawn(slot);
                 let mut player = Player {
                     conn,
@@ -266,7 +355,8 @@ impl Room {
                     events: VecDeque::new(),
                     next_event_id: 0,
                 };
-                // The newcomer learns the whole roster, in slot order.
+                // The newcomer learns the whole roster, in slot order, and
+                // the Grand Prix table.
                 for s in 0..MAX_RIDERS {
                     if s == slot {
                         player.push_event(EventBody::RiderJoined {
@@ -277,6 +367,9 @@ impl Room {
                     } else if let Some(e) = self.roster_event(s) {
                         player.push_event(e);
                     }
+                }
+                if self.config.grand_prix() {
+                    player.push_event(self.standings_event());
                 }
                 let joined = EventBody::RiderJoined {
                     slot: slot as u8,
@@ -298,7 +391,7 @@ impl Room {
             tick_hz: TICK_HZ as u8,
             snapshot_interval: SNAPSHOT_INTERVAL as u8,
             max_riders: MAX_RIDERS as u8,
-            course: self.config.course,
+            course: self.world.course,
             surface_kind: self.config.surface_kind,
             surface_seed: self.config.surface_seed,
             server_tick: self.world.tick,
@@ -306,13 +399,121 @@ impl Room {
         }
     }
 
+    /// A player leaves. In a Grand Prix under way a bot takes the seat (the
+    /// player's points so far were already reported).
     pub fn leave(&mut self, conn: ConnId) {
-        if let Some(slot) = self.slot_of(conn) {
-            self.players[slot] = None;
-            self.seats[slot] = Seat::Empty;
+        let Some(slot) = self.slot_of(conn) else {
+            return;
+        };
+        self.players[slot] = None;
+        self.broadcast_event(&EventBody::RiderLeft { slot: slot as u8 }, None);
+        if self.grand_prix_started() && self.human_count() > 0 {
+            self.seats[slot] = Seat::Bot;
+            self.entrants[slot] = Some(Entrant {
+                pid: None,
+                points: 0,
+            });
+            // The bot starts from the grid; it rides free until the next race.
             self.world.remove(slot);
-            self.broadcast_event(&EventBody::RiderLeft { slot: slot as u8 }, None);
+            self.world.spawn(slot);
+            if let Some(e) = self.roster_event(slot) {
+                self.broadcast_event(&e, None);
+            }
+            let table = self.standings_event();
+            self.broadcast_event(&table, None);
+        } else {
+            self.seats[slot] = Seat::Empty;
+            self.entrants[slot] = None;
+            self.world.remove(slot);
         }
+    }
+
+    /// The race just ended: points (Grand Prix) and the report.
+    fn race_ended(&mut self, out: &mut Outbox) {
+        let standings = self.world.standings();
+        let gp = self.config.grand_prix();
+        let last = GP_POINTS[standings.len().clamp(1, MAX_RIDERS) - 1];
+        let mut entries = Vec::with_capacity(standings.len());
+        for st in &standings {
+            let slot = st.slot as usize;
+            let finished = st.progress.finished();
+            let Some(entrant) = self.entrants[slot].as_mut() else {
+                continue;
+            };
+            if gp {
+                let won = if finished {
+                    GP_POINTS[(st.place as usize - 1).min(MAX_RIDERS - 1)]
+                } else {
+                    last
+                };
+                entrant.points = entrant.points.saturating_add(won);
+            }
+            entries.push(ReportEntry {
+                pid: entrant.pid.clone(),
+                place: st.place,
+                time_ms: finished.then(|| st.progress.finish_ticks * 1000 / TICK_HZ),
+                trick_points: st.progress.points,
+                gp_points: gp.then_some(entrant.points),
+            });
+        }
+        if gp {
+            let table = self.standings_event();
+            self.broadcast_event(&table, None);
+        }
+        if entries.iter().any(|e| e.pid.is_some()) {
+            out.reports.push(RaceReport {
+                room: self.config.id.clone(),
+                round: self.round,
+                event: self.event_index as u8,
+                course: self.world.course as u8,
+                entries,
+            });
+        }
+    }
+
+    /// Back to a warm-up before the first race of the plan, with no points.
+    fn restart_plan(&mut self) {
+        if self.event_index != 0 || self.world.course != self.config.plan[0] {
+            // Past the last race: `next_event` starts a new round at the top.
+            self.event_index = self.config.plan.len() - 1;
+            self.next_event();
+        }
+        for e in self.entrants.iter_mut().flatten() {
+            e.points = 0;
+        }
+        self.world.restart_warmup();
+    }
+
+    /// The results are over: on to the next race of the plan (from the top
+    /// after the last one, as a new round).
+    fn next_event(&mut self) {
+        self.event_index += 1;
+        if self.event_index >= self.config.plan.len() {
+            self.event_index = 0;
+            self.round = self.round.wrapping_add(1);
+            if self.config.grand_prix() {
+                for e in self.entrants.iter_mut().flatten() {
+                    e.points = 0;
+                }
+                let table = self.standings_event();
+                self.broadcast_event(&table, None);
+            }
+        }
+        let course = self.config.plan[self.event_index];
+        if course == self.world.course {
+            return;
+        }
+        let tick = self.world.tick;
+        let mut world =
+            World::on_course(course, self.config.surface_kind, self.config.surface_seed);
+        world.tick = tick;
+        world.race = Race::new(tick);
+        for slot in 0..MAX_RIDERS {
+            if self.seats[slot] != Seat::Empty {
+                world.spawn(slot);
+            }
+        }
+        self.world = world;
     }
 
     /// Validate and buffer a packet of inputs. Never trusts the client: values
@@ -383,7 +584,13 @@ impl Room {
                 }
             }
         }
+        let phase_before = self.world.race.phase;
         self.world.step(&inputs);
+        match (phase_before, self.world.race.phase) {
+            (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
+            (Phase::Results, Phase::Warmup) => self.next_event(),
+            _ => {}
+        }
 
         let tick = self.world.tick;
         if tick.is_multiple_of(LEAD_WINDOW_TICKS) {
@@ -432,6 +639,9 @@ impl Room {
                     echo_hold_ms: now_ms
                         .saturating_sub(p.echo_received_ms)
                         .min(u64::from(u16::MAX)) as u16,
+                    course: self.world.course,
+                    event_index: self.event_index as u8,
+                    event_count: self.config.plan.len() as u8,
                     race: self.world.race,
                     events: p
                         .events
@@ -446,5 +656,78 @@ impl Room {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claims(pid: &str, events: Vec<u8>, bots: u8) -> JoinClaims {
+        JoinClaims {
+            v: 1,
+            aud: "test".into(),
+            room: "gp".into(),
+            pid: pid.into(),
+            name: pid.into(),
+            exp: u64::MAX,
+            bots,
+            surface: SurfaceKind::Flat as u8,
+            course: events[0],
+            events,
+        }
+    }
+
+    #[test]
+    fn a_grand_prix_scores_reports_and_moves_on() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        let mut reports = Vec::new();
+        // Ana idles on the grid; the bots race. Until the mountain is up.
+        for _ in 0..TICK_HZ * 60 * 8 {
+            now += 16;
+            let packet = InputPacket {
+                event_ack: 0,
+                last_snapshot_tick: 0,
+                client_time: 0,
+                first_tick: room.tick() + 1,
+                inputs: vec![Input::default()],
+            };
+            room.handle_inputs(1, &packet, now);
+            reports.extend(room.step(now).reports);
+            if room.world().course == CourseId::Mountain {
+                break;
+            }
+        }
+        assert_eq!(room.world().course, CourseId::Mountain);
+        assert_eq!(room.event_index(), 1);
+        assert_eq!(room.world().race.phase, Phase::Warmup);
+        assert!(room.grand_prix_started());
+
+        let [report] = &reports[..] else {
+            panic!("one race, one report: {reports:?}")
+        };
+        assert_eq!((report.round, report.event, report.course), (1, 0, 0));
+        assert_eq!(report.entries.len(), 4);
+        let mine = report
+            .entries
+            .iter()
+            .find(|e| e.pid.as_deref() == Some("ana"))
+            .unwrap();
+        // Never left the grid: last place's points.
+        assert_eq!(mine.time_ms, None);
+        assert_eq!(mine.gp_points, Some(GP_POINTS[3]));
+        let winner = report.entries.iter().find(|e| e.place == 1).unwrap();
+        assert!(winner.time_ms.is_some());
+        assert_eq!(winner.gp_points, Some(GP_POINTS[0]));
+
+        // Nobody new joins a Grand Prix under way; Ana can come back.
+        assert_eq!(
+            room.join(2, &claims("bea", vec![0, 1], 3), 0, now).err(),
+            Some(RejectReason::Started)
+        );
+        assert!(room.join(3, &ana, 0, now).is_ok());
     }
 }

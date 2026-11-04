@@ -14,5 +14,12 @@
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["scripts", "e2e", "playwright.config.ts", "commitlint.config.ts"]
+  "include": [
+    "scripts",
+    "e2e",
+    "playwright.config.ts",
+    "commitlint.config.ts",
+    "apps/lobby/scripts",
+    "apps/lobby/drizzle.config.ts"
+  ]
 }

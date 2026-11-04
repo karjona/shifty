@@ -38,6 +38,27 @@ pub struct JoinClaims {
     /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
     #[serde(default)]
     pub course: u8,
+    /// Every course the room races, in order (a Grand Prix has several).
+    /// Empty = just `course`.
+    #[serde(default)]
+    pub events: Vec<u8>,
+}
+
+/// Most races in one room's plan.
+pub const MAX_EVENTS: usize = 8;
+
+impl JoinClaims {
+    /// The courses the room races, in order.
+    pub fn plan(&self) -> Vec<sim::CourseId> {
+        let ids = if self.events.is_empty() {
+            std::slice::from_ref(&self.course)
+        } else {
+            &self.events[..]
+        };
+        ids.iter()
+            .filter_map(|&c| sim::CourseId::from_u8(c))
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +151,15 @@ pub fn verify(
     if sim::SurfaceKind::from_u8(claims.surface).is_none() {
         return Err(TokenError::BadClaims("surface"));
     }
+    if sim::CourseId::from_u8(claims.course).is_none()
+        || claims.events.len() > MAX_EVENTS
+        || claims
+            .events
+            .iter()
+            .any(|&c| sim::CourseId::from_u8(c).is_none())
+    {
+        return Err(TokenError::BadClaims("course"));
+    }
     Ok(claims)
 }
 
@@ -164,6 +194,7 @@ mod tests {
             bots: 2,
             surface: 1,
             course: 1,
+            events: vec![0, 1],
         }
     }
 
@@ -212,6 +243,23 @@ mod tests {
         assert_eq!(
             verify("garbage", &vk, "race.example:443", 1_000_000),
             Err(TokenError::Malformed)
+        );
+    }
+
+    /// The lobby's signer (apps/lobby/src/tickets.ts) signs this exact token
+    /// for a Grand Prix (see apps/lobby/test/tickets.test.ts).
+    #[test]
+    fn verifies_a_token_signed_by_the_lobby() {
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJib3RzIjo3LCJzdXJmYWNlIjoxLCJjb3Vyc2UiOjAsImV2ZW50cyI6WzAsMV19.eMBZeAYgcGluX_xHlndGuqz7i133iyLf8hPvaRudW2izHmeXo8i8GCs3oagqLWlD-0CCo3RozYJEOvrg1eLeDw";
+        let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
+        let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
+        assert_eq!(claims.room, "m_test");
+        assert_eq!(claims.pid, "user_1");
+        assert_eq!(claims.name, "Lord Kylian#0042");
+        assert_eq!(claims.bots, 7);
+        assert_eq!(
+            claims.plan(),
+            vec![sim::CourseId::Oval, sim::CourseId::Mountain]
         );
     }
 

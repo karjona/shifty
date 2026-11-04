@@ -74,18 +74,23 @@ export function createDebugPanel(net: NetConditions, settings: DebugSettings, on
   view.add(settings, "renderScale", 0.25, 1, 0.05).name("render scale").onChange(onRenderScale);
 
   let visible = true;
-  addEventListener("keydown", (e) => {
+  const onKey = (e: KeyboardEvent) => {
     if (e.code === "F1") {
       e.preventDefault();
       visible = !visible;
       gui.show(visible);
     }
-  });
+  };
+  addEventListener("keydown", onKey);
 
   return {
     state,
     refresh() {
       for (const c of gui.controllersRecursive()) c.updateDisplay();
+    },
+    destroy() {
+      removeEventListener("keydown", onKey);
+      gui.destroy();
     },
   };
 }

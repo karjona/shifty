@@ -2,8 +2,9 @@
 //! over UDP only; plain HTTP on TCP (same port number) serves ops endpoints.
 //!
 //! Env: `LOBBY_PUBLIC_KEY` (required), `PUBLIC_ADDR`, `BIND`, `REGION`,
-//! `LOBBY_URL`, `TLS_CERT` + `TLS_KEY` (domain mode; otherwise hash mode),
-//! `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
+//! `LOBBY_URL` + `RACE_SERVER_SECRET` (report to the lobby), `TLS_CERT` +
+//! `TLS_KEY` (domain mode; otherwise hash mode), `DRAIN_TIMEOUT_SECS`,
+//! `RUST_LOG`.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -11,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use race_server::config::{Config, TlsMode};
+use race_server::lobby::Lobby;
 use race_server::rooms::Rooms;
 use race_server::tls;
 use race_server::transport::{self, AppState};
@@ -54,10 +56,16 @@ async fn main() -> Result<()> {
         cert_sha256 = material.info.sha256_b64.as_deref().unwrap_or("-"),
         "race server listening (WebTransport on UDP /race; ops HTTP on TCP: /healthz /metrics /cert-hash)"
     );
-    match &config.lobby_url {
-        // TODO: register with the lobby and send heartbeats (region, load, cert hash).
-        Some(url) => warn!(%url, "lobby registration is not implemented yet; running standalone"),
-        None => info!("LOBBY_URL not set; running standalone"),
+    match (&config.lobby_url, &config.race_server_secret) {
+        (Some(url), Some(secret)) => {
+            let lobby = Lobby::new(url, secret)?;
+            rooms.report_to(lobby.clone().reporter());
+            tokio::spawn(lobby.heartbeats(config.clone(), rooms.clone(), cert.clone()));
+        }
+        (Some(_), None) => {
+            warn!("LOBBY_URL is set but RACE_SERVER_SECRET is not; running standalone")
+        }
+        (None, _) => info!("LOBBY_URL not set; running standalone"),
     }
 
     // Hash mode: rotate the short-lived certificate without dropping sessions.
