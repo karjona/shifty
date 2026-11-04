@@ -56,6 +56,21 @@ const devLobby = (): Plugin => ({
 });
 
 /**
+ * Fails the build if dev-only code (the quick race, which fetches
+ * `/__dev/join`) made it into the bundle.
+ */
+const noDevCode = (): Plugin => ({
+  name: "shifty-no-dev-code",
+  apply: "build",
+  generateBundle(_, bundle) {
+    for (const file of Object.values(bundle)) {
+      const text = file.type === "chunk" ? file.code : typeof file.source === "string" ? file.source : "";
+      if (text.includes("/__dev/")) this.error(`${file.fileName} contains dev-only code (/__dev/)`);
+    }
+  },
+});
+
+/**
  * Emits `licenses/rust.md`: the license notices of the Rust crates compiled
  * into the WASM sim. Needs `cargo-about` (version pinned in CI).
  */
@@ -90,7 +105,7 @@ const rustNotices = (): Plugin => ({
 });
 
 export default defineConfig({
-  plugins: [react(), devLobby(), rustNotices()],
+  plugins: [react(), devLobby(), noDevCode(), rustNotices()],
   server: {
     port: 5173,
     strictPort: true,

@@ -16,7 +16,7 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:5173> and log in with an email address: the code shows up in the lobby's log. GitHub login needs a dev OAuth app in `.dev/lobby.env` (see AGENTS.md). To skip the menus and race straight away, open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad (left stick, RT/LT, A) or keyboard (WASD/arrows, Space). F1 opens the netcode debug panel in a quick race, which has fake lag and packet-loss sliders.
+Open <http://localhost:5173> and log in with an email address: the code shows up in the lobby's log. GitHub login needs a dev OAuth app in `.dev/lobby.env` (see AGENTS.md). On the dev server you can skip the menus and race straight away: open <http://localhost:5173/?name=You> in two browser windows. Controls: gamepad (left stick, RT/LT, A) or keyboard (WASD/arrows, Space). F1 opens the netcode debug panel in a quick race, which has fake lag and packet-loss sliders.
 
 Production builds (`pnpm build`) also need `cargo install cargo-about --locked --features cli`, which writes the third-party license notices.
 
