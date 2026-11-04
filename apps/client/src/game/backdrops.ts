@@ -98,7 +98,7 @@ class SeasonField implements Stage {
   private deep = uniform(new THREE.Color());
   private mid = uniform(new THREE.Color());
   private bright = uniform(new THREE.Color());
-  private avatar = new Avatar(0);
+  private avatar = new Avatar(null, 0);
   private t = Math.random() * 40;
   private accentAt = 0;
 
@@ -217,7 +217,7 @@ class Club implements Stage {
   private place(): void {
     const spots = riderSpots();
     while (this.avatars.length < this.count) {
-      const a = new Avatar(this.avatars.length);
+      const a = new Avatar(null, this.avatars.length);
       this.avatars.push(a);
     }
     this.avatars.forEach((a, i) => {

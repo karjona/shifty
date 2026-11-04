@@ -3,6 +3,7 @@
 // the riders; what surrounds them (the bay in summer, the mountain in
 // winter) is an environment, set once the course is known.
 import * as THREE from "three/webgpu";
+import type { Appearance } from "@shifty/rider";
 
 export interface RiderView {
   slot: number;
@@ -86,7 +87,8 @@ export interface Environment {
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
   ground(x: number, z: number, t: number): number;
-  makeRider(slot: number): RiderModel;
+  /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
+  makeRider(slot: number, appearance: Appearance | null): RiderModel;
   /** Per frame, once the riders are placed. */
   update(frame: Frame): void;
 }
@@ -152,6 +154,8 @@ export class World {
   private camLastVy = 0;
   private camReady = false;
   private labels: HTMLElement;
+  /** What each seat's rider looks like, as told by the race server. */
+  private appearances = new Map<number, Appearance | null>();
 
   constructor(container: HTMLElement, labels: HTMLElement) {
     this.labels = labels;
@@ -191,6 +195,19 @@ export class World {
     this.renderScale = scale;
     this.renderer.domElement.style.imageRendering = scale < 1 ? "pixelated" : "auto";
     this.resize();
+  }
+
+  /** Sets what a seat's rider looks like; their model is rebuilt if it changed. */
+  setAppearance(slot: number, appearance: Appearance | null): void {
+    if (JSON.stringify(this.appearances.get(slot) ?? null) === JSON.stringify(appearance)) return;
+    this.appearances.set(slot, appearance);
+    const r = this.riders.get(slot);
+    if (r) {
+      this.scene.remove(r.model.mesh);
+      r.label.remove();
+      this.riders.delete(slot);
+      this.models.delete(slot);
+    }
   }
 
   /** Sets what surrounds the riders (once, when the course is known). */
@@ -260,7 +277,7 @@ export class World {
   private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
     let r = this.riders.get(slot);
     if (r) return r;
-    const model = env.makeRider(slot);
+    const model = env.makeRider(slot, this.appearances.get(slot) ?? null);
     this.scene.add(model.mesh);
     const label = document.createElement("div");
     label.className = "label";

@@ -8,6 +8,7 @@
 // lodge by the cliff drop, peaks in the haze, falling snow, powder thrown up
 // by the boards, and the tracks they carve.
 import * as THREE from "three/webgpu";
+import type { Appearance } from "@shifty/rider";
 import {
   Fn,
   abs,
@@ -491,7 +492,7 @@ export class Mountain implements Environment {
     return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
   }
 
-  makeRider(slot: number): RiderModel {
+  makeRider(slot: number, _appearance: Appearance | null): RiderModel {
     return new BoarderModel(slot);
   }
 

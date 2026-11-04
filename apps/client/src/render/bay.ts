@@ -2,6 +2,7 @@
 // ripples, wakes, foam and reflections, or the swells alone), the course
 // on it, the coast behind, and the spray the jetskis throw.
 import * as THREE from "three/webgpu";
+import type { Appearance } from "@shifty/rider";
 import {
   Fn,
   fract,
@@ -114,7 +115,7 @@ export class Bay implements Environment {
     return waveHeight(this.waveParams, x, z, t);
   }
 
-  makeRider(slot: number): RiderModel {
+  makeRider(slot: number, _appearance: Appearance | null): RiderModel {
     return new JetskiModel(slot);
   }
 
