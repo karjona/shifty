@@ -1,177 +1,154 @@
-// A whole rider, built for a look and an outfit: skin, face, hair and
-// garments as skinned meshes on one skeleton.
+// A rider's figure: the body and what they wear for a sport, skinned to
+// one rig. The art loads in the background; the figure fills in when it
+// arrives (and is empty until then).
 import * as THREE from "three/webgpu";
-import type { Look } from "@shifty/rider";
-import { Anatomy, type PartName } from "./anatomy.ts";
-import type { Fabric, Garment } from "./clothes.ts";
-import { FacePainter } from "./face.ts";
-import { buildHair, hairline } from "./hair.ts";
-import { type Detail, MeshBuilder } from "./mesh.ts";
-import { HAIR, SKIN } from "./palette.ts";
-import { Rig } from "./rig.ts";
+import {
+  type Appearance,
+  type Colourway,
+  EYE_COLOURS,
+  HAIR_COLOURS,
+  type Kit,
+  type Look,
+  SKIN_TONES,
+  type Sport,
+  item,
+} from "@shifty/rider";
+import { type ModelAsset, builtModels, loadModel } from "./assets.ts";
+import { TintMaterial } from "./material.ts";
+import { type Pose, Rig } from "./rig.ts";
+import { type Body, bodyFromRest } from "./skeleton.ts";
 
-/** How riders are drawn: how finely they are built, shaded and textured. */
-export interface RiderStyle {
-  name: string;
-  detail: Detail;
-  /** Faceted (flat-shaded) instead of smooth. */
-  flat: boolean;
-  /** Face texture width, and nearest-pixel filtering. */
-  face: number;
-  nearest: boolean;
-  /** Head size relative to real proportions. */
-  headScale: number;
+/** Standing heights per height preset (m); the art is built at the middle one. */
+const HEIGHTS = { male: [1.68, 1.73, 1.78, 1.83, 1.88], female: [1.58, 1.63, 1.68, 1.73, 1.78] };
+const ART_HEIGHT = { male: 1.78, female: 1.68 };
+
+interface Worn {
+  model: string;
+  colours: Colourway | null;
+  /** Only these pieces of the model (all if absent). */
+  pieces?: readonly string[];
 }
 
-export const STYLES: Record<"psx" | "n64" | "ps2", RiderStyle> = {
-  psx: { name: "PS1", detail: { rings: 5, sides: 8 }, flat: true, face: 128, nearest: true, headScale: 1.15 },
-  n64: {
-    name: "N64 / GameCube",
-    detail: { rings: 8, sides: 11 },
-    flat: false,
-    face: 256,
-    nearest: false,
-    headScale: 1.12,
-  },
-  ps2: { name: "PS2", detail: { rings: 12, sides: 16 }, flat: false, face: 512, nearest: false, headScale: 1.07 },
-};
+/** How each hat leaves the hair: the hair model's piece that shows under it. */
+const HAIR_UNDER: Record<string, string> = { "summer.head.cap": "cap" };
 
-const SKIN_PARTS: PartName[] = [
-  "torso",
-  "arm.L",
-  "arm.R",
-  "hand.L",
-  "hand.R",
-  "thumb.L",
-  "thumb.R",
-  "leg.L",
-  "leg.R",
-  "foot.L",
-  "foot.R",
-  "ear.L",
-  "ear.R",
-];
-
-/** The parts of [t0, t1] not inside any of `hidden` (each hidden stretch shrunk a little at its ends, so skin runs under a garment's edge). */
-function visible(t0: number, t1: number, hidden: [number, number][]): [number, number][] {
-  const overlap = 0.03;
-  let spans: [number, number][] = [[t0, t1]];
-  for (const [h0, h1] of hidden) {
-    const a = h0 <= t0 + 1e-6 ? h0 : h0 + overlap;
-    const b = h1 >= t1 - 1e-6 ? h1 : h1 - overlap;
-    if (b <= a) continue;
-    const next: [number, number][] = [];
-    for (const [s0, s1] of spans) {
-      if (b <= s0 || a >= s1) next.push([s0, s1]);
-      else {
-        if (a > s0) next.push([s0, a]);
-        if (b < s1) next.push([b, s1]);
-      }
-    }
-    spans = next;
-  }
-  return spans.filter(([a, b]) => b - a > 0.005);
+/** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has. */
+async function worn(look: Look, kit: Kit): Promise<Worn[]> {
+  const built = await builtModels(look.body);
+  const items = Object.values(kit).flatMap((id) => {
+    const it = id ? item(id) : undefined;
+    return it && built.has(it.model) ? [{ model: it.model, colours: it.colours }] : [];
+  });
+  const style = built.has(`hair.${look.hair}`) ? `hair.${look.hair}` : "hair.0";
+  const hat = items.find((i) => i.model in HAIR_UNDER);
+  const hair: Worn[] = built.has(style)
+    ? [{ model: style, colours: null, pieces: [hat ? HAIR_UNDER[hat.model]! : "free"] }]
+    : [];
+  return [...hair, ...items];
 }
 
-export class RiderMesh {
+export class RiderFigure {
   readonly group = new THREE.Group();
-  readonly rig: Rig;
-  readonly anatomy: Anatomy;
-  /** The painted face (look testing). */
-  readonly faceTexture: THREE.Texture;
-  private disposables: { dispose(): void }[] = [];
+  /** The rig and the body's measures, once the art has loaded. */
+  rig: Rig | null = null;
+  body: Body | null = null;
+  private meshes: THREE.SkinnedMesh[] = [];
+  private materials: TintMaterial[] = [];
+  private key = "";
+  private version = 0;
+  private pending: Pose | null = null;
+  private rigFor: Look["body"] | null = null;
+  /** Called each time the figure has been (re)built. */
+  onBuilt: (() => void) | null = null;
 
-  constructor(look: Look, outfit: Garment[], style: RiderStyle) {
-    const a = new Anatomy(look, style.headScale);
-    this.anatomy = a;
-    this.rig = new Rig(a);
-    this.group.add(this.rig.root);
-    const hides = new Map<PartName, [number, number][]>();
-    for (const g of outfit) {
-      for (const [part, span] of Object.entries(g.hides?.(a) ?? {}) as [PartName, [number, number]][]) {
-        hides.set(part, [...(hides.get(part) ?? []), span]);
-      }
-    }
-    const hat = outfit.find((g) => g.hatLine)?.hatLine ?? null;
-
-    const [skinColor] = SKIN[look.skin] ?? SKIN[1]!;
-    const skin = new MeshBuilder(style.detail);
-    for (const name of SKIN_PARTS) {
-      const part = a.part(name);
-      for (const [from, to] of visible(part.t0, part.t1, hides.get(name) ?? [])) skin.tube(part, { from, to });
-    }
-    this.add(skin, { color: skinColor, roughness: 0.7 }, style);
-
-    const face = new MeshBuilder(style.detail);
-    const head = a.part("head");
-    for (const [from, to] of visible(head.t0, head.t1, hides.get("head") ?? [])) face.tube(head, { from, to });
-    const painter = new FacePainter(a);
-    const faceTex = painter.paint(look, {
-      size: style.face,
-      nearest: style.nearest,
-      hairline: hairline(look),
-    });
-    this.faceTexture = faceTex;
-    this.add(face, { color: 0xffffff, roughness: 0.68, texture: faceTex }, style);
-
-    const hair = new MeshBuilder(style.detail);
-    buildHair(hair, a, look, hat);
-    this.add(hair, { color: HAIR[look.hairColor] ?? HAIR[1]!, roughness: 0.55 }, style);
-
-    for (const g of outfit) {
-      for (const layer of g.layers) {
-        const m = new MeshBuilder(style.detail);
-        layer.build(m, a);
-        this.add(m, layer.fabric, style);
-      }
-    }
+  constructor(appearance: Appearance, sport: Sport) {
+    this.set(appearance, sport);
   }
 
-  private add(m: MeshBuilder, fabric: Fabric, style: RiderStyle): void {
-    if (m.empty) return;
-    const geo = m.build();
-    let texture = fabric.texture;
-    let color = fabric.color;
-    if (fabric.paint) {
-      const size = style.face >= 512 ? 256 : 128;
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = size;
-      const c = canvas.getContext("2d")!;
-      c.fillStyle = `#${fabric.color.toString(16).padStart(6, "0")}`;
-      c.fillRect(0, 0, size, size);
-      fabric.paint(c, size, this.anatomy);
-      texture = new THREE.CanvasTexture(canvas);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.wrapS = THREE.RepeatWrapping;
-      if (style.nearest) {
-        texture.magFilter = THREE.NearestFilter;
-        texture.minFilter = THREE.NearestFilter;
-        texture.generateMipmaps = false;
-      }
-      color = 0xffffff;
+  /** Dresses the figure (rebuilt only when something changed). */
+  set(appearance: Appearance, sport: Sport): void {
+    const key = JSON.stringify([appearance.look, appearance.outfits[sport], sport]);
+    if (key === this.key) return;
+    this.key = key;
+    const version = ++this.version;
+    const look = appearance.look;
+    void (async () => {
+      const items = await worn(look, appearance.outfits[sport]);
+      const assets = await Promise.all([
+        loadModel(look.body, "body"),
+        ...items.map((i) => loadModel(look.body, i.model)),
+      ]);
+      if (version === this.version) this.build(look, assets, [{ model: "body", colours: null }, ...items]);
+    })();
+  }
+
+  /** Poses the rig (kept for when the art arrives, if it hasn't yet). */
+  pose(p: Pose): void {
+    if (this.rig) this.rig.apply(p);
+    else this.pending = p;
+  }
+
+  /** Model-space units per metre of the art: poses work in the art's size, the group scales it. */
+  get scale(): number {
+    return this.group.scale.x;
+  }
+
+  private build(look: Look, assets: ModelAsset[], wearing: Worn[]): void {
+    this.clear();
+    const [body] = assets;
+    if (!body) return;
+    if (!this.rig || this.rigFor !== look.body) {
+      this.rig?.root.removeFromParent();
+      this.body = bodyFromRest(body.rest, ART_HEIGHT[look.body]);
+      this.rig = new Rig(this.body);
+      this.rigFor = look.body;
+      this.group.add(this.rig.root);
     }
-    const mat = new THREE.MeshStandardNodeMaterial({
-      color,
-      roughness: fabric.roughness ?? 0.8,
-      metalness: fabric.metalness ?? 0,
-      flatShading: style.flat,
-    });
-    if (texture) mat.map = texture;
-    const mesh = new THREE.SkinnedMesh(geo, mat);
-    // The sun's shadow map is far too coarse for a rider to shadow itself.
-    mesh.castShadow = true;
-    mesh.receiveShadow = false;
-    // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
-    mesh.frustumCulled = false;
-    this.group.add(mesh);
-    this.group.updateMatrixWorld(true);
-    mesh.bind(this.rig.skeleton, mesh.matrixWorld);
-    this.disposables.push(geo, mat);
-    if (texture) this.disposables.push(texture);
+    const s = (HEIGHTS[look.body][look.height] ?? ART_HEIGHT[look.body]) / ART_HEIGHT[look.body];
+    this.group.scale.setScalar(s);
+    const hair = HAIR_COLOURS[look.hairColor] ?? HAIR_COLOURS[1]!;
+    const own: Colourway = [
+      SKIN_TONES[look.skin] ?? SKIN_TONES[1]!,
+      EYE_COLOURS[look.eyeColor] ?? EYE_COLOURS[0]!,
+      hair,
+    ];
+    const hidden = assets.reduce((h, a, i) => (i === 0 ? h : a.pieces.reduce((g, p) => g | p.hides, h)), 0);
+    for (const [i, asset] of assets.entries()) {
+      const w = wearing[i];
+      for (const piece of asset.pieces) {
+        if (w?.pieces && !w.pieces.includes(piece.name)) continue;
+        const regions = piece.geometry.hasAttribute("_region");
+        const mat = new TintMaterial(piece.detail, piece.mask, piece.finish, regions);
+        if (regions) mat.hide(hidden);
+        const tints: Colourway =
+          piece.tints === "look" ? own : piece.tints === "hair" ? [hair, hair, hair] : (w?.colours ?? own);
+        mat.setTints(...tints);
+        const mesh = new THREE.SkinnedMesh(piece.geometry, mat);
+        mesh.castShadow = true;
+        // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
+        mesh.frustumCulled = false;
+        this.group.add(mesh);
+        mesh.bind(this.rig.skeleton, new THREE.Matrix4());
+        this.meshes.push(mesh);
+        this.materials.push(mat);
+      }
+    }
+    if (this.pending) {
+      this.rig.apply(this.pending);
+      this.pending = null;
+    }
+    this.onBuilt?.();
+  }
+
+  private clear(): void {
+    for (const m of this.meshes) m.removeFromParent();
+    for (const m of this.materials) m.dispose();
+    this.meshes = [];
+    this.materials = [];
   }
 
   dispose(): void {
-    for (const d of this.disposables) d.dispose();
-    this.disposables = [];
+    this.version++;
+    this.clear();
   }
 }

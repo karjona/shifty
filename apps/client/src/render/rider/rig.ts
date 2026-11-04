@@ -2,7 +2,7 @@
 // directly, arms and legs reach for targets (two-bone IK, elbows and knees
 // bent toward a hint), hands and feet turn to an orientation.
 import * as THREE from "three/webgpu";
-import { type Anatomy, BONE, BONES, type BoneName, boneParent } from "./anatomy.ts";
+import { BONE, BONES, type Body, type BoneName, boneParent } from "./skeleton.ts";
 
 /** An arm reaching for a point (wrist), elbow toward `bend`; the hand turned so the fingers and palm point along `fingers` and `palm`. */
 export interface Reach {
@@ -91,8 +91,8 @@ export class Rig {
   private handRest: { fingers: THREE.Vector3; palm: THREE.Vector3 }[];
   private curlAxis: THREE.Vector3[];
 
-  constructor(anatomy: Anatomy) {
-    this.rest = anatomy.rest.map((p) => p.clone());
+  constructor(body: Body) {
+    this.rest = body.rest.map((p) => p.clone());
     this.bones = BONES.map((name) => {
       const b = new THREE.Bone();
       b.name = name;
@@ -111,12 +111,7 @@ export class Rig {
     this.skeleton = new THREE.Skeleton(this.bones);
     this.modelP = BONES.map(() => v());
     this.modelQ = BONES.map(() => q());
-    this.lengths = {
-      upperArm: anatomy.upperArm,
-      foreArm: anatomy.foreArm,
-      thigh: this.restPos("shin.L").distanceTo(this.restPos("thigh.L")),
-      shin: this.restPos("foot.L").distanceTo(this.restPos("shin.L")),
-    };
+    this.lengths = { upperArm: body.upperArm, foreArm: body.foreArm, thigh: body.thigh, shin: body.shin };
     this.handRest = [1, -1].map((side) => {
       const fingers = this.restPos(side > 0 ? "fingers.L" : "fingers.R")
         .sub(this.restPos(side > 0 ? "hand.L" : "hand.R"))
