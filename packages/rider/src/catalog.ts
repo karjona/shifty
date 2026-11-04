@@ -261,7 +261,8 @@ export function defaultOutfits(body: Body): Outfits {
  * this sport and slot, fits the body and is owned; required slots are filled.
  */
 export function kitProblem(sport: Sport, kit: Kit, body: Body, owns: (id: string) => boolean): string | null {
-  for (const [slot, id] of Object.entries(kit) as [Slot, string | undefined][]) {
+  for (const slot of SLOTS[sport]) {
+    const id = kit[slot];
     if (id === undefined) continue;
     const i = byId.get(id);
     const m = i && models.get(i.model);
@@ -271,6 +272,7 @@ export function kitProblem(sport: Sport, kit: Kit, body: Body, owns: (id: string
     if (!owns(id)) return `${id} not owned`;
   }
   for (const slot of REQUIRED[sport]) if (!kit[slot]) return `${sport} ${slot} is required`;
+  if (Object.keys(kit).some((k) => !(SLOTS[sport] as readonly string[]).includes(k))) return `not a ${sport} slot`;
   return null;
 }
 

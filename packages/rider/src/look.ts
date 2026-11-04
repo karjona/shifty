@@ -77,7 +77,7 @@ export function partApplies(body: Body, part: Part): boolean {
 export function normalizeLook(look: Look): Look {
   const out: Look = { ...look, body: look.body === "female" ? "female" : "male" };
   for (const part of PARTS) {
-    const v = Math.trunc(Number(look[part]));
+    const v = Math.trunc(look[part]);
     out[part] = Number.isFinite(v) && v >= 0 && v < PRESETS[part] ? v : DEFAULT_LOOK[part];
   }
   if (out.body !== "male") out.facialHair = 0;

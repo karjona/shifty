@@ -1,13 +1,16 @@
 // Postgres schema: Better Auth's tables (user, session, account,
 // verification, rateLimit, with the admin plugin's fields), then the game's.
 // Migrations are generated from this file: `pnpm --filter lobby db:generate`.
+import type { Appearance, Setups } from "@shifty/rider";
 import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
+  primaryKey,
   serial,
   smallint,
   text,
@@ -112,10 +115,55 @@ export const player = pgTable(
     tag: smallint("tag").notNull(),
     title: text("title").notNull().default("rookie"),
     card: text("card").notNull().default("bay"),
+    /** The rider (look and outfits); null until the player makes one. */
+    appearance: jsonb("appearance").$type<Appearance>(),
+    /** Setup per sport; null = balanced. */
+    setups: jsonb("setups").$type<Setups>(),
+    /** Credits to spend: the sum of the player's ledger, kept here too. */
+    credits: integer("credits").notNull().default(0),
     createdAt: createdAt(),
     nameChangedAt: timestamp("name_changed_at").notNull().defaultNow(),
   },
   (t) => [uniqueIndex("player_handle_idx").on(t.nameKey, t.tag)],
+);
+
+/** Items a player owns beyond the starter kit (see `@shifty/rider`'s catalog). */
+export const inventory = pgTable(
+  "inventory",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    item: text("item").notNull(),
+    /** `shop` or `reward`. */
+    source: text("source").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.item] })],
+);
+
+/**
+ * Every change to a player's credits, with why: earned in a race (`race`,
+ * `style`, `grand_prix`) or spent (`purchase`). `ref` says what it was for
+ * (a race, an item); a reason and ref pay out once, so retried race
+ * reports never pay twice.
+ */
+export const ledger = pgTable(
+  "ledger",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    delta: integer("delta").notNull(),
+    reason: text("reason").notNull(),
+    ref: text("ref").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("ledger_once_idx").on(t.userId, t.reason, t.ref),
+    index("ledger_user_idx").on(t.userId, t.createdAt),
+  ],
 );
 
 /** Main menu banners, per language. Shown while published and in their window. */
@@ -184,6 +232,9 @@ export const matchPlayer = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
+    /** The rider and setups the player entered with: locked for the match. */
+    look: text("look"),
+    setups: jsonb("setups").$type<number[][]>(),
   },
   (t) => [uniqueIndex("match_player_idx").on(t.matchId, t.userId)],
 );

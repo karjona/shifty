@@ -34,6 +34,7 @@ use crate::math::{
 };
 use crate::mountain::Run;
 use crate::race::{Landing, Trick};
+use crate::setup::Setup;
 use crate::world::Rider;
 
 pub mod tuning {
@@ -215,7 +216,7 @@ pub fn hold(r: &mut Rider, spot: Frame, run: &Run) {
 
 /// Advance one rider one tick on the snow (or above it). Returns how a jump
 /// ended, on the tick it touches down.
-pub fn integrate(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
+pub fn integrate(r: &mut Rider, input: Input, setup: Setup, run: &Run) -> Option<Landing> {
     let was_bailing = r.bailing();
     r.bail_ticks = r.bail_ticks.saturating_sub(1);
     if was_bailing && !r.bailing() {
@@ -225,17 +226,17 @@ pub fn integrate(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
         r.yaw_rate = 0.0;
     }
     let landing = if r.grounded {
-        ride(r, input, run);
+        ride(r, input, setup, run);
         None
     } else {
-        fly(r, input, run)
+        fly(r, input, setup, run)
     };
     r.last_input = input;
     landing
 }
 
 /// One tick on the snow.
-fn ride(r: &mut Rider, input: Input, run: &Run) {
+fn ride(r: &mut Rider, input: Input, setup: Setup, run: &Run) {
     let steer = input.steer_f();
     let lean = input.lean_f();
     let bailing = r.bailing();
@@ -262,15 +263,16 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
     } else {
         -downhill.dot(right)
     };
-    let grip = CARVE_GRIP * steady * (1.0 - TUCK_TURN_LOSS * tuck) + inward.max(0.0);
-    let cap = (grip / speed.max(1.0)).min(MAX_TURN_RATE) * (1.0 + SKID_TURN * brake);
+    let handling = setup.handling();
+    let grip = CARVE_GRIP * handling * steady * (1.0 - TUCK_TURN_LOSS * tuck) + inward.max(0.0);
+    let cap = (grip / speed.max(1.0)).min(MAX_TURN_RATE * handling) * (1.0 + SKID_TURN * brake);
     let target = if bailing { 0.0 } else { -steer * cap };
     r.yaw_rate += (target - r.yaw_rate) * clamp(TURN_RESPONSE * DT, 0.0, 1.0);
 
     // Gravity along the slope; friction, drag, braking and carving against
     // the motion (never reversing it).
     v += downhill * DT;
-    let drag = DRAG + (TUCK_DRAG - DRAG) * tuck;
+    let drag = (DRAG + (TUCK_DRAG - DRAG) * tuck) * setup.glide();
     let decel = if bailing {
         BAIL_DECEL + SNOW_FRICTION * GRAVITY * n.y
     } else {
@@ -296,7 +298,11 @@ fn ride(r: &mut Rider, input: Input, run: &Run) {
         let along = v.dot(f);
         let lat = v.dot(right);
         let sp = v.length();
-        let grip = clamp(GRIP * steady * (1.0 - 0.6 * brake) * DT, 0.0, 1.0);
+        let grip = clamp(
+            GRIP * handling * steady * (1.0 - 0.6 * brake) * DT,
+            0.0,
+            1.0,
+        );
         let lat_after = lat * (1.0 - grip);
         let carving = if sp > 1e-3 {
             crate::math::smoothstep(0.5, 0.2, lat.abs() / sp)
@@ -380,7 +386,7 @@ fn take_off(r: &mut Rider, input: Input) {
 }
 
 /// One tick in the air.
-fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
+fn fly(r: &mut Rider, input: Input, setup: Setup, run: &Run) -> Option<Landing> {
     let steer = input.steer_f();
     let lean = input.lean_f();
     let bailing = r.bailing();
@@ -418,8 +424,8 @@ fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
     let mut pitch_acc;
     let roll_acc;
     if input.pressed(buttons::TRICK) && !bailing {
-        let spin = -steer * SPIN_RATE;
-        let flip = -lean * FLIP_RATE;
+        let spin = -steer * SPIN_RATE * setup.tricks();
+        let flip = -lean * FLIP_RATE * setup.tricks();
         r.yaw_rate += (spin - r.yaw_rate) * clamp(TRICK_RESPONSE * DT, 0.0, 1.0);
         pitch_acc = (flip - r.pitch_rate) * TRICK_RESPONSE;
         roll_acc = -AIR_ROLL_STIFFNESS * (r.roll - TAU * round(r.roll / TAU))
@@ -490,14 +496,14 @@ fn fly(r: &mut Rider, input: Input, run: &Run) -> Option<Landing> {
     if into < 0.0 {
         r.vel -= n * into;
     }
-    let landing = judge(r, input, n, -into);
+    let landing = judge(r, input, setup, n, -into);
     settle(r, true);
     landing
 }
 
 /// Judges a touchdown, scores it, and puts the board flat on the snow.
 /// Returns `None` for a plain jump landed clean.
-fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
+fn judge(r: &mut Rider, input: Input, setup: Setup, n: Vec3, impact: f32) -> Option<Landing> {
     let spin = -(clamp(round(r.air_spin / PI), -18.0, 18.0) as i8);
     let (snow_pitch, snow_roll) = snow_attitude(r.yaw, n);
     let flip = clamp(round((r.pitch - snow_pitch) / TAU), -9.0, 9.0) as i8;
@@ -514,6 +520,7 @@ fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
     let grab_ticks = r.grab_ticks;
     let air_ticks = r.state_ticks;
     let grabbing = input.pressed(buttons::GRAB) && grab != 0;
+    let tolerance = setup.stability();
 
     r.pitch = snow_pitch;
     r.roll = snow_roll;
@@ -528,10 +535,10 @@ fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
         return None;
     }
     if grabbing
-        || heading_err > LAND_HEADING
-        || pitch_err.abs() > LAND_PITCH
-        || roll_err.abs() > LAND_ROLL
-        || impact > HARD_LANDING
+        || heading_err > LAND_HEADING * tolerance
+        || pitch_err.abs() > LAND_PITCH * tolerance
+        || roll_err.abs() > LAND_ROLL * tolerance
+        || impact > HARD_LANDING * tolerance
     {
         fall(r);
         return Some(Landing::Bail);
@@ -549,10 +556,10 @@ fn judge(r: &mut Rider, input: Input, n: Vec3, impact: f32) -> Option<Landing> {
         grab_ticks,
         points: points(spin, flip, grab_ticks),
     });
-    if heading_err > CLEAN_HEADING
-        || pitch_err.abs() > CLEAN_PITCH
-        || roll_err.abs() > CLEAN_ROLL
-        || impact > SKETCHY_IMPACT
+    if heading_err > CLEAN_HEADING * tolerance
+        || pitch_err.abs() > CLEAN_PITCH * tolerance
+        || roll_err.abs() > CLEAN_ROLL * tolerance
+        || impact > SKETCHY_IMPACT * tolerance
     {
         r.vel = r.vel * SKETCHY_SPEED;
         r.yaw_rate *= 0.5;
@@ -924,7 +931,7 @@ mod tests {
             r.vel = Vec3::new(0.0, 0.0, 20.0);
             r.yaw = wrap_angle(yaw_off);
             r.pitch = pitch;
-            let landing = judge(&mut r, Input::default(), n, impact);
+            let landing = judge(&mut r, Input::default(), Setup::BALANCED, n, impact);
             (landing, r)
         };
         assert_eq!(judged(0.1, 0.1, 10.0).0, None);

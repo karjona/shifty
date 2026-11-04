@@ -31,7 +31,7 @@ export function validSetup(s: Setup): boolean {
 /** Parses an untrusted value into a valid setup (null if it is not one). */
 export function parseSetup(v: unknown): Setup | null {
   if (typeof v !== "object" || v === null) return null;
-  const s = {} as Setup;
+  const s: Setup = { ...BALANCED };
   for (const k of STATS) {
     const n: unknown = Reflect.get(v, k);
     if (typeof n !== "number") return null;

@@ -42,12 +42,25 @@ pub struct JoinClaims {
     /// Empty = just `course`.
     #[serde(default)]
     pub events: Vec<u8>,
+    /// The rider's appearance (look and outfits; `@shifty/rider` bytes,
+    /// base64url). The race server passes it on to the room unread.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub look: String,
+    /// The rider's setup per sport, in sport order (summer, winter):
+    /// `sim::Setup` bytes, locked for the whole room plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setups: Vec<[u8; 4]>,
 }
 
 /// Most races in one room's plan.
 pub const MAX_EVENTS: usize = 8;
 
 impl JoinClaims {
+    /// The appearance bytes (empty if absent).
+    pub fn look_bytes(&self) -> Vec<u8> {
+        URL_SAFE_NO_PAD.decode(&self.look).unwrap_or_default()
+    }
+
     /// The courses the room races, in order.
     pub fn plan(&self) -> Vec<sim::CourseId> {
         let ids = if self.events.is_empty() {
@@ -160,6 +173,21 @@ pub fn verify(
     {
         return Err(TokenError::BadClaims("course"));
     }
+    if claims.look.len() > crate::LOOK_MAX_BYTES.div_ceil(3) * 4
+        || URL_SAFE_NO_PAD
+            .decode(&claims.look)
+            .map_or(true, |b| b.len() > crate::LOOK_MAX_BYTES)
+    {
+        return Err(TokenError::BadClaims("look"));
+    }
+    if claims.setups.len() > crate::MAX_SETUPS
+        || claims
+            .setups
+            .iter()
+            .any(|&b| !sim::Setup::from_bytes(b).is_valid())
+    {
+        return Err(TokenError::BadClaims("setups"));
+    }
     Ok(claims)
 }
 
@@ -195,7 +223,33 @@ mod tests {
             surface: 1,
             course: 1,
             events: vec![0, 1],
+            look: b64(&[1, 0, 2, 3]),
+            setups: vec![[3, 3, 3, 3], [6, 2, 2, 2]],
         }
+    }
+
+    #[test]
+    fn rejects_bad_setups_and_looks() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let vk = key.verifying_key();
+        let mut c = claims();
+        c.setups = vec![[6, 6, 6, 6]];
+        assert_eq!(
+            verify(&sign(&c, &key), &vk, "race.example:443", 1_000_000),
+            Err(TokenError::BadClaims("setups"))
+        );
+        let mut c = claims();
+        c.look = b64(&[0; 200]);
+        assert_eq!(
+            verify(&sign(&c, &key), &vk, "race.example:443", 1_000_000),
+            Err(TokenError::BadClaims("look"))
+        );
+        let mut c = claims();
+        c.look = "not base64!".into();
+        assert_eq!(
+            verify(&sign(&c, &key), &vk, "race.example:443", 1_000_000),
+            Err(TokenError::BadClaims("look"))
+        );
     }
 
     #[test]
@@ -261,6 +315,16 @@ mod tests {
             claims.plan(),
             vec![sim::CourseId::Oval, sim::CourseId::Mountain]
         );
+    }
+
+    /// The same Grand Prix with a rider on it (see tickets.test.ts too).
+    #[test]
+    fn verifies_a_lobby_token_with_a_rider() {
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJib3RzIjo3LCJzdXJmYWNlIjoxLCJjb3Vyc2UiOjAsImV2ZW50cyI6WzAsMV0sImxvb2siOiJBUUFCQWdNIiwic2V0dXBzIjpbWzMsMywzLDNdLFs2LDIsMiwyXV19.XDaA_EOm3gHDyjXoHwBse8_f60mZJR3y-N7kyS2SkooOFUNwgEwRFLMUFVp_stLYVQ2zvR2EL2in_2bolS8oBw";
+        let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
+        let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
+        assert_eq!(claims.look_bytes(), vec![1, 0, 1, 2, 3]);
+        assert_eq!(claims.setups, vec![[3, 3, 3, 3], [6, 2, 2, 2]]);
     }
 
     #[test]

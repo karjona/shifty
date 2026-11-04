@@ -4,7 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
 import { isRecord } from "./json.ts";
-import { FIELD, MAX_HUMANS, NoRaceServer, startMatch } from "./matches.ts";
+import { FIELD, MAX_HUMANS, NoRaceServer, matchRider, startMatch } from "./matches.ts";
 import { type EventChoice, isEventChoice, type JoinTicket, mintTicket } from "./tickets.ts";
 
 export interface RoomSettings {
@@ -228,6 +228,7 @@ export class RoomLobby extends DurableObject<Env> {
           name: me.handle,
           event: s.event,
           bots: s.bots,
+          rider: await matchRider(this.env, race.room, me.userId),
         });
         return this.send(ws, { t: "ticket", ticket });
       }

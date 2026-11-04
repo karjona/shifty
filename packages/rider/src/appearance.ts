@@ -41,7 +41,7 @@ export function decodeAppearance(bytes: Uint8Array): Appearance | null {
   for (const p of PARTS) raw[p] = next();
   const look = parseLook(raw);
   if (!look) return null;
-  const outfits = {} as Outfits;
+  const outfits: Outfits = { summer: {}, winter: {} };
   for (const sport of SPORTS) {
     const kit: Kit = {};
     const count = next();
@@ -101,6 +101,6 @@ export function botAppearance(seed: number, slot: number): Appearance {
     ["winter", "bottom", ["winter.bottom.pants.navy", "winter.bottom.pants.grey"]],
     ["winter", "ride", ["winter.ride.freestyle.lime", "winter.ride.freestyle.pink"]],
   ];
-  for (const [sport, slot, ids] of swap) outfits[sport][slot] = pick(ids);
+  for (const [sport, where, ids] of swap) outfits[sport][where] = pick(ids);
   return { look, outfits };
 }

@@ -4,6 +4,7 @@ use crate::input::Input;
 use crate::math::{Vec3, cos, sin};
 use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
+use crate::setup::Setup;
 use crate::surface::{Surface, SurfaceKind};
 use crate::{jetski, snowboard};
 
@@ -124,6 +125,9 @@ pub struct World {
     pub surface: Surface,
     pub race: Race,
     pub riders: [Option<Rider>; MAX_RIDERS],
+    /// Each seat's setup for this course's sport. Not part of snapshots:
+    /// it is set when a rider joins and stays for the whole room plan.
+    pub setups: [Setup; MAX_RIDERS],
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
@@ -136,6 +140,7 @@ impl World {
             surface,
             race: Race::new(0),
             riders: [None; MAX_RIDERS],
+            setups: [Setup::BALANCED; MAX_RIDERS],
         }
     }
 
@@ -197,9 +202,12 @@ impl World {
             if let Some(r) = rider {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = inputs[slot].map_or(r.last_input, Input::sanitized);
+                let setup = self.setups[slot].sanitized();
                 let landing = match course.line {
-                    Line::Stadium(_) => jetski::integrate(r, input, &self.surface, course, tick),
-                    Line::Run(run) => snowboard::integrate(r, input, run),
+                    Line::Stadium(_) => {
+                        jetski::integrate(r, input, setup, &self.surface, course, tick)
+                    }
+                    Line::Run(run) => snowboard::integrate(r, input, setup, run),
                 };
                 if let Some(landing) = landing {
                     race::landed(&mut r.race, &self.race, slot, landing, &mut events);
@@ -212,7 +220,9 @@ impl World {
             let Some(r) = rider else { continue };
             let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
             if course.sport == Sport::Snowboard
-                && impact.is_some_and(|i| i > snowboard::tuning::CRASH_SPEED)
+                && impact.is_some_and(|i| {
+                    i > snowboard::tuning::CRASH_SPEED * self.setups[slot].sanitized().stability()
+                })
                 && !r.bailing()
             {
                 snowboard::fall(r);
@@ -416,6 +426,7 @@ impl World {
         for (slot, r) in self.riders.iter().enumerate() {
             let Some(r) = r else { continue };
             eat(slot as u32);
+            eat(u32::from_le_bytes(self.setups[slot].to_bytes()));
             for v in [
                 r.pos.x,
                 r.pos.y,

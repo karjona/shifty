@@ -32,6 +32,10 @@ export interface JoinClaims {
   course: number;
   /** Every course of the room, in order (a Grand Prix has several). */
   events: number[];
+  /** The rider's appearance bytes (base64url), passed on to the room. */
+  look?: string;
+  /** Setup per sport (summer, winter), four stats each. */
+  setups?: number[][];
 }
 
 /** What a client needs to join a race. */
@@ -89,6 +93,8 @@ export interface TicketRequest {
   name: string;
   event: EventChoice;
   bots: number;
+  /** The rider, as the race server should show and simulate them. */
+  rider?: { look: string; setups: number[][] };
 }
 
 export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Date.now()): Promise<JoinTicket> {
@@ -105,6 +111,8 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
     course: events[0] ?? COURSE.summer,
     events,
   };
+  if (req.rider?.look) claims.look = req.rider.look;
+  if (req.rider?.setups.length) claims.setups = req.rider.setups;
   return {
     token: await signJoinToken(seedB64, claims),
     room: req.room,

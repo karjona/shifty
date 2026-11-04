@@ -134,6 +134,10 @@ impl HudEvent {
 pub struct RosterEntry {
     pub kind: RiderKind,
     pub name: String,
+    /// Appearance bytes (empty for bots).
+    pub look: Vec<u8>,
+    /// Setups per sport: the predicted world rides with them.
+    pub setups: Vec<[u8; 4]>,
 }
 
 type Riders = [Option<Rider>; MAX_RIDERS];
@@ -512,8 +516,19 @@ impl Client {
         {
             let e = self.pending_events.swap_remove(i);
             match e.body {
-                EventBody::RiderJoined { slot, kind, name } => {
-                    self.roster[slot as usize] = Some(RosterEntry { kind, name });
+                EventBody::RiderJoined {
+                    slot,
+                    kind,
+                    name,
+                    look,
+                    setups,
+                } => {
+                    self.roster[slot as usize] = Some(RosterEntry {
+                        kind,
+                        name,
+                        look,
+                        setups,
+                    });
                 }
                 EventBody::RiderLeft { slot } => self.roster[slot as usize] = None,
                 EventBody::Standings { points } => {
@@ -594,12 +609,21 @@ impl Client {
         } else {
             self.world.riders
         };
+        let sport = s.course.course().sport;
+        let setups = core::array::from_fn(|slot| {
+            self.roster[slot]
+                .as_ref()
+                .map_or(sim::Setup::BALANCED, |e| {
+                    sim::Setup::for_sport(&e.setups, sport)
+                })
+        });
         let mut world = World {
             tick: s.tick,
             course: s.course,
             surface: self.surface.clone(),
             race: s.race,
             riders,
+            setups,
         };
         let mut prev = world.riders;
         if target_tick.wrapping_sub(s.tick) as usize >= HISTORY - 8 {
