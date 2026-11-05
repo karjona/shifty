@@ -12,19 +12,8 @@
 // Render-only: driven by the drawn rider state, simulated on the CPU, each
 // layer drawn as one batch of camera-facing sprites.
 import * as THREE from "three/webgpu";
-import { CEL } from "./cel/look.ts";
 import { inkNode, inkOnlyInPass } from "./cel/material.ts";
-import {
-  cameraPosition,
-  float,
-  hash,
-  instanceIndex,
-  instancedDynamicBufferAttribute,
-  mix,
-  smoothstep,
-  uv,
-  vec3,
-} from "three/tsl";
+import { cameraPosition, instancedDynamicBufferAttribute, mix, smoothstep, uv, vec3 } from "three/tsl";
 import type { LandData } from "./course.ts";
 import type { RiderView } from "./world.ts";
 
@@ -41,13 +30,9 @@ const SPLASH_RANGE = 140;
 
 export interface PoolLook {
   max: number;
-  /** Particle colour (linear RGB); spray white by default. */
-  color?: [number, number, number];
   /** Downward pull (m/s²) and air drag (per second). */
   gravity: number;
   drag: number;
-  /** Where the disc starts to fade toward its rim (0.5 = hard edge, 0 = all soft). */
-  rim: number;
   /** Fully gone this close to the camera, fully shown from `lensTo`. */
   lensFrom: number;
   lensTo: number;
@@ -89,28 +74,16 @@ export class ParticlePool {
 
     const ps = instancedDynamicBufferAttribute<"vec4">(this.posSizeAttr, "vec4");
     const a = instancedDynamicBufferAttribute<"float">(this.alphaAttr, "float");
-    const mat = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
+    // Cut-out splashes: solid white puffs with a pale blue underside, shrinking as they fade.
+    const mat = new THREE.SpriteNodeMaterial({ transparent: false, depthWrite: true });
     mat.positionNode = ps.xyz;
-    mat.scaleNode = ps.w;
-    // A disc, a touch shaded toward its bottom and varied per particle so
-    // a plume has body.
+    // Droplets, not mist: smaller, and only while the particle is still dense.
+    mat.scaleNode = ps.w.mul(0.55);
     const r = uv().sub(0.5).length();
-    const shade = float(0.9).add(uv().y.mul(0.06)).add(hash(instanceIndex).mul(0.06));
-    const [cr, cg, cb] = look.color ?? [0.9, 0.95, 0.98];
-    mat.colorNode = vec3(cr, cg, cb).mul(shade);
     const lens = smoothstep(look.lensFrom, look.lensTo, ps.xyz.distance(cameraPosition));
-    mat.opacityNode = smoothstep(0.5, look.rim, r).mul(a).mul(lens);
-    if (CEL) {
-      // Cut-out splashes: solid white puffs with a pale blue underside, shrinking as they fade.
-      mat.transparent = false;
-      mat.depthWrite = true;
-      mat.opacityNode = null;
-      // Droplets, not mist: smaller, and only while the particle is still dense.
-      mat.scaleNode = ps.w.mul(0.55);
-      mat.maskNode = r.lessThan(a.mul(lens).sub(0.15).max(0).mul(0.55));
-      mat.colorNode = mix(vec3(0.74, 0.88, 0.97), vec3(1), smoothstep(0.45, 0.6, uv().y));
-      inkOnlyInPass(mat, inkNode(1, 0, 0.77, 0.25));
-    }
+    mat.maskNode = r.lessThan(a.mul(lens).sub(0.15).max(0).mul(0.55));
+    mat.colorNode = mix(vec3(0.74, 0.88, 0.97), vec3(1), smoothstep(0.45, 0.6, uv().y));
+    inkOnlyInPass(mat, inkNode(1, 0, 0.77, 0.25));
     this.sprite = new THREE.Sprite(mat);
     this.sprite.count = n;
     this.sprite.frustumCulled = false;
@@ -195,7 +168,6 @@ export class Spray {
     max: 4096,
     gravity: 9.8,
     drag: 1.4,
-    rim: 0.12,
     // Droplets right at the lens would smear across the screen.
     lensFrom: 0.7,
     lensTo: 2.2,
@@ -206,7 +178,6 @@ export class Spray {
     max: 768,
     gravity: 1.2,
     drag: 1.1,
-    rim: 0,
     lensFrom: 0.2,
     lensTo: 0.9,
     peak: 0.3,

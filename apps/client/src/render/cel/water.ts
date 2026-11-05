@@ -31,8 +31,6 @@ export interface CelWaterInputs {
   position: THREE.Node<"vec3">;
   /** Per-pixel normal with the fine ripples (world). */
   surfaceNormal: THREE.Node<"vec3">;
-  /** Fine ripples: slope x, height, slope z, height of the shortest. */
-  fine: THREE.Node<"vec4">;
   shore: THREE.Node<"float">;
   wake: THREE.Node<"float">;
   /** The reflected scene (rgb). */

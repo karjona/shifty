@@ -55,9 +55,20 @@ const devLobby = (): Plugin => ({
   },
 });
 
+/** Dev-only code a build must not contain, and what it is. */
+const DEV_ONLY: [RegExp, string][] = [
+  [/\/__dev\//u, "the quick race (it fetches /__dev/join)"],
+  [/__shifty/u, "the e2e test hooks (window.__shifty)"],
+  [/__celFly/u, "the flyover capture hook (window.__celFly)"],
+  [/Shifty debug \(F1\)/u, "the netcode debug panel"],
+  [/URLSearchParams\(\s*(?:window\.|globalThis\.|self\.)?location\.search/u, "a read of the page's URL query"],
+  [/dev-params-read-in-a-build/u, "a URL switch read outside import.meta.env.DEV (dev-params.ts)"],
+];
+
 /**
- * Fails the build if dev-only code (the quick race, which fetches
- * `/__dev/join`) made it into the bundle.
+ * Fails the build if dev-only code made it into the bundle. URL switches
+ * are dev-only too: in a build, dev-params.ts is empty and nothing else may
+ * read the query (the router reads only its own routes).
  */
 const noDevCode = (): Plugin => ({
   name: "shifty-no-dev-code",
@@ -65,7 +76,9 @@ const noDevCode = (): Plugin => ({
   generateBundle(_, bundle) {
     for (const file of Object.values(bundle)) {
       const text = file.type === "chunk" ? file.code : typeof file.source === "string" ? file.source : "";
-      if (text.includes("/__dev/")) this.error(`${file.fileName} contains dev-only code (/__dev/)`);
+      for (const [pattern, what] of DEV_ONLY) {
+        if (pattern.test(text)) this.error(`${file.fileName} contains dev-only code: ${what}`);
+      }
     }
   },
 });

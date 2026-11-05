@@ -28,12 +28,11 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
-import { STYLE } from "./look.ts";
+import { devParams } from "../../dev-params.ts";
 
 /** Dev: `?inkdebug=line|normal|ink|depth` shows one of the ink pass's inputs instead of the frame. */
-const DEBUG = import.meta.env.DEV ? new URLSearchParams(location.search).get("inkdebug") : null;
+const DEBUG = import.meta.env.DEV ? devParams.get("inkdebug") : null;
 
 export class CelPost {
   readonly pipeline: THREE.RenderPipeline;
@@ -43,7 +42,7 @@ export class CelPost {
   readonly near = uniform(60);
   readonly far = uniform(900);
   /** Colour of the ink, as a multiple of the colour under it. */
-  readonly ink = uniform(STYLE === "comic" ? new THREE.Color(0.04, 0.03, 0.05) : new THREE.Color(0.2, 0.16, 0.24));
+  readonly ink = uniform(new THREE.Color(0.2, 0.16, 0.24));
   readonly saturation = uniform(1.08);
   private camNear = uniform(0.3);
   private camFar = uniform(4000);
@@ -139,10 +138,7 @@ export class CelPost {
       if (DEBUG === "depth") return vec4(vec3(z0.div(500)), 1);
       return graded;
     })();
-    // Dev: `?glow=` adds a soft glow off the brightest whites (clouds, foam, glints).
-    const glow = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get("glow") ?? 0) : 0;
-    const lit = glow > 0 ? inked.add(bloom(inked, glow, 0.6, 0.82)) : inked;
-    this.pipeline.outputNode = fxaa(renderOutput(lit));
+    this.pipeline.outputNode = fxaa(renderOutput(inked));
   }
 
   render(): void {

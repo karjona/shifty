@@ -4,7 +4,7 @@
 // winter) is an environment, set once the course is known.
 import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
-import { CEL, STYLE } from "./cel/look.ts";
+import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH } from "./cel/material.ts";
 import { CelPost } from "./cel/post.ts";
 import { PIXEL_AT_1M } from "./cel/rider.ts";
@@ -158,15 +158,15 @@ export class World {
   private camLastVy = 0;
   private camReady = false;
   private labels: HTMLElement;
-  /** The cel look's frame (ink and all), or null for the classic look. */
-  readonly cel: CelPost | null;
+  /** The frame: the scene, inked. */
+  readonly cel: CelPost;
   /** What each seat's rider looks like, as told by the race server. */
   private appearances = new Map<number, Appearance | null>();
 
   constructor(container: HTMLElement, labels: HTMLElement) {
     this.labels = labels;
     // Dev: `?webgl` forces the WebGL2 fallback (browsers without WebGPU).
-    const webgl = import.meta.env.DEV && new URLSearchParams(location.search).has("webgl");
+    const webgl = import.meta.env.DEV && devParams.has("webgl");
     this.renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: webgl });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -179,7 +179,7 @@ export class World {
     this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
     this.scene.add(this.hemi, this.sun, this.sun.target);
-    this.cel = CEL ? new CelPost(this.renderer, this.scene, this.camera) : null;
+    this.cel = new CelPost(this.renderer, this.scene, this.camera);
     addEventListener("resize", () => this.resize());
     this.resize();
   }
@@ -206,17 +206,15 @@ export class World {
     this.resize();
   }
 
-  /** Draws the scene through the cel look's ink, or plainly. */
+  /** Draws the scene, inked. */
   draw(): void {
-    if (this.cel) {
-      SUN_STRENGTH.value = (this.sun.color.r + this.sun.color.g + this.sun.color.b) * this.sun.intensity;
-      SUN_DIR.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
-      // Line widths are in pixels of a 1080p frame, whatever the resolution.
-      PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
-      const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-      this.cel.width.value = (STYLE === "comic" ? 2.4 : 1.6) * (size.y / 1080);
-      this.cel.render();
-    } else this.renderer.render(this.scene, this.camera);
+    SUN_STRENGTH.value = (this.sun.color.r + this.sun.color.g + this.sun.color.b) * this.sun.intensity;
+    SUN_DIR.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
+    // Line widths are in pixels of a 1080p frame, whatever the resolution.
+    PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.cel.width.value = 1.6 * (size.y / 1080);
+    this.cel.render();
   }
 
   /** The sun, for stages that light their own shots. */

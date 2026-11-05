@@ -4,7 +4,6 @@
 // you see is what you collide with.
 import * as THREE from "three/webgpu";
 import { buildLand } from "./land.ts";
-import { CEL } from "./cel/look.ts";
 import { waveHeight } from "./waves.ts";
 
 export interface CourseData {
@@ -124,7 +123,7 @@ export class CourseView {
     this.buildBuoys();
     this.buildRamps();
     this.boundary = this.buildBoundary();
-    if (CEL) this.buildBoats();
+    this.buildBoats();
     this.ring = new THREE.Mesh(
       new THREE.TorusGeometry(2.6, 0.12, 6, 32),
       new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
@@ -153,7 +152,7 @@ export class CourseView {
     mound.castShadow = true;
     mound.receiveShadow = true;
     this.group.add(mound);
-    if (CEL) this.group.add(this.armourStones());
+    this.group.add(this.armourStones());
 
     // Lighthouse on the east tip.
     const lh = new THREE.Group();
@@ -176,7 +175,7 @@ export class CourseView {
     this.group.add(lh);
   }
 
-  /** The cel look: fishing boats (llaüts) moored off the town quay, riding the swell. */
+  /** Fishing boats (llaüts) moored off the town quay, riding the swell. */
   private buildBoats(): void {
     const town = this.data.land.find((l) => l.kind === "town");
     if (!town) return;
@@ -239,7 +238,7 @@ export class CourseView {
     }
   }
 
-  /** The cel look: the mound faced with big squared stones, so it draws as a breakwater. */
+  /** The mound faced with big squared stones, so it draws as a breakwater. */
   private armourStones(): THREE.InstancedMesh {
     const d = this.data;
     const len = d.straightHalf * 2 + d.breakwaterRadius * 2;

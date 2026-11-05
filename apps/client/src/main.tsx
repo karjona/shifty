@@ -5,13 +5,16 @@ import "./menu/menu.css";
 import { createRoot } from "react-dom/client";
 import { App } from "./menu/app.tsx";
 import { fitUi } from "./menu/scale.ts";
+import { devParams } from "./dev-params.ts";
 
 fitUi();
 
-const params = new URLSearchParams(location.search);
-// The quick race only exists on the dev server: builds drop this branch and
-// the module with it (and vite.config.ts fails a build that still has it).
-if (import.meta.env.DEV && params.has("name")) void import("./game/quick.ts").then((m) => m.quickRace(params));
-else if (import.meta.env.DEV && params.has("lookdev")) void import("./game/lookdev.ts").then((m) => m.lookdev(params));
-else if (import.meta.env.DEV && params.has("celshot")) void import("./game/celshot.ts").then((m) => m.celshot(params));
+// The quick race and the look checks only exist on the dev server: builds
+// drop these branches and the modules with them (and vite.config.ts fails a
+// build that still has them).
+if (import.meta.env.DEV && devParams.has("name")) void import("./game/quick.ts").then((m) => m.quickRace(devParams));
+else if (import.meta.env.DEV && devParams.has("lookdev"))
+  void import("./game/lookdev.ts").then((m) => m.lookdev(devParams));
+else if (import.meta.env.DEV && devParams.has("celshot"))
+  void import("./game/celshot.ts").then((m) => m.celshot(devParams));
 else createRoot(document.querySelector("#root")!).render(<App />);

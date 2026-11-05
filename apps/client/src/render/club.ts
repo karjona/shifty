@@ -25,7 +25,7 @@ function block(w: number, h: number, d: number, m: THREE.Material, x: number, y:
   return mesh;
 }
 
-/** Where the club stands, and where riders stand on its terrace. */
+/** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
   x: 157,
@@ -34,30 +34,6 @@ export const CLUB = {
   floor: 5.2,
   /** The terrace faces the bay (−z). */
 };
-
-/** Where the club's camera stands (off the pier, over the water) and looks (north-west, at the riders). */
-export const CLUB_VIEW = {
-  eye: { x: CLUB.x + 7, y: CLUB.floor + 3.2, z: CLUB.z - 15 },
-  look: { x: CLUB.x - 6, y: CLUB.floor + 2.4, z: CLUB.z + 4 },
-};
-
-/**
- * Spots for up to four riders on the terrace, turned toward the camera:
- * you in front, friends gathering beside you.
- */
-function facingCamera(x: number, z: number): { x: number; z: number; yaw: number } {
-  return { x, z, yaw: Math.atan2(CLUB_VIEW.eye.x - x, CLUB_VIEW.eye.z - z) + 0.25 };
-}
-
-export function riderSpots(): { x: number; z: number; yaw: number }[] {
-  const face = facingCamera;
-  return [
-    face(CLUB.x + 4.0, CLUB.z - 5.0),
-    face(CLUB.x + 2.4, CLUB.z - 3.6),
-    face(CLUB.x + 5.6, CLUB.z - 3.4),
-    face(CLUB.x + 0.8, CLUB.z - 4.8),
-  ];
-}
 
 export function buildClub(): THREE.Group {
   const g = new THREE.Group();

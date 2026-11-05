@@ -4,8 +4,13 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Body as BodyKind } from "@shifty/rider";
-import type { Finish } from "./material.ts";
 import { BONE, BONES, boneOf } from "./skeleton.ts";
+
+/** How a piece's surface takes the light. */
+export interface Finish {
+  /** Below about 0.45 the piece is glossy: it gets a highlight. */
+  roughness: number;
+}
 
 /** What a piece's tints come from: the item's colourway, or the rider's skin, eyes and hair. */
 export type TintSource = "kit" | "look" | "hair";
@@ -56,13 +61,7 @@ function finishOf(v: unknown): Finish {
   const f: Finish = { roughness: 0.7 };
   if (typeof v === "object" && v !== null) {
     const r: unknown = Reflect.get(v, "roughness");
-    const m: unknown = Reflect.get(v, "metalness");
-    const rim: unknown = Reflect.get(v, "rim");
-    const flat: unknown = Reflect.get(v, "flat");
     if (typeof r === "number") f.roughness = r;
-    if (typeof m === "number") f.metalness = m;
-    if (typeof rim === "number") f.rim = rim;
-    if (typeof flat === "number") f.flat = flat;
   }
   return f;
 }
