@@ -4,12 +4,18 @@
 import * as THREE from "three/webgpu";
 import { type Appearance, type Sport, botAppearance } from "@shifty/rider";
 import { RiderFigure } from "./rider/model.ts";
-import { idlePose } from "./rider/poses.ts";
+import { crossedPose, idlePose } from "./rider/poses.ts";
+import { CEL } from "./cel/look.ts";
+
+/** Anime motion: in the cel look, poses are held on twos (12 a second), not tweened. */
+const ON_TWOS = 12;
 
 export class Avatar {
   readonly mesh = new THREE.Group();
   private figure: RiderFigure;
   private t: number;
+  /** Arms crossed, as on a character select (else standing about). */
+  crossed = false;
 
   /** Without an appearance, a rider made up for the seat. */
   constructor(appearance: Appearance | null, slot: number, sport: Sport = "summer") {
@@ -27,7 +33,8 @@ export class Avatar {
   /** Idle for `dt` seconds. */
   update(dt: number): void {
     this.t += dt;
-    if (this.figure.body) this.figure.pose(idlePose(this.figure.body, this.t));
+    const t = CEL ? Math.floor(this.t * ON_TWOS) / ON_TWOS : this.t;
+    if (this.figure.body) this.figure.pose((this.crossed ? crossedPose : idlePose)(this.figure.body, t));
   }
 
   dispose(): void {

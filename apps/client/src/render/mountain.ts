@@ -34,6 +34,9 @@ import {
 import { CarveTrails } from "./trails.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
+import { CEL } from "./cel/look.ts";
+import { celify } from "./cel/material.ts";
+import { skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -457,6 +460,15 @@ export class Mountain implements Environment {
     this.buildLodge();
     this.group.add(peakRange(this.sky, run.path[0]!.y, run.path.at(-1)!.y, run.path));
     this.group.add(this.trails.group, this.flakes.sprite, this.powder.sprite, this.mist.sprite);
+    if (CEL) {
+      // Snow shades to a cool lavender, as drawn; the rest takes the usual cel tones.
+      celify(
+        this.group,
+        (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
+        true,
+      );
+      this.group.add(skyDome());
+    }
   }
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
@@ -493,7 +505,9 @@ export class Mountain implements Environment {
   }
 
   makeRider(slot: number, _appearance: Appearance | null): RiderModel {
-    return new BoarderModel(slot);
+    const model = new BoarderModel(slot);
+    if (CEL) celify(model.mesh);
+    return model;
   }
 
   /** The run's snow: a ribbon of the sim's own heights, in chunks (so off-screen ones are culled). */

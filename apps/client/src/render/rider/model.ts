@@ -18,6 +18,9 @@ import {
 } from "@shifty/rider";
 import { type ModelAsset, builtModels, loadModel } from "./assets.ts";
 import { TintMaterial } from "./material.ts";
+import { CEL } from "../cel/look.ts";
+import { inkId } from "../cel/material.ts";
+import { CelTintMaterial, faceGeometry, limbGeometry, outlineOf } from "../cel/rider.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
 
@@ -68,7 +71,7 @@ export class RiderFigure {
   rig: Rig | null = null;
   body: Body | null = null;
   private meshes: THREE.SkinnedMesh[] = [];
-  private materials: TintMaterial[] = [];
+  private materials: (TintMaterial | CelTintMaterial)[] = [];
   private key = "";
   private version = 0;
   private pending: Pose | null = null;
@@ -133,18 +136,44 @@ export class RiderFigure {
       for (const piece of asset.pieces) {
         if (w?.pieces && !w.pieces.includes(piece.name)) continue;
         const regions = piece.geometry.hasAttribute("_region");
-        const mat = new TintMaterial(piece.detail, piece.mask, piece.finish, regions);
+        const mat = CEL
+          ? new CelTintMaterial(
+              piece.detail,
+              piece.mask,
+              piece.finish,
+              regions,
+              piece.tints,
+              // The body's pieces are one skin: no line where they meet.
+              inkId(i === 0 ? "body" : `${w?.model}.${piece.name}`),
+              i === 0 && piece.name === "face",
+              piece.flat,
+            )
+          : new TintMaterial(piece.detail, piece.mask, piece.finish, regions);
         if (regions) mat.hide(hidden);
         const tints: Colourway =
           piece.tints === "look" ? own : piece.tints === "hair" ? [hair, hair, hair] : (w?.colours ?? own);
         mat.setTints(...tints);
-        const mesh = new THREE.SkinnedMesh(piece.geometry, mat);
+        const geometry = !CEL
+          ? piece.geometry
+          : piece.name === "face" && i === 0
+            ? faceGeometry(piece.geometry)
+            : piece.tints === "hair"
+              ? piece.geometry
+              : limbGeometry(piece.geometry, body.rest);
+        const mesh = new THREE.SkinnedMesh(geometry, mat);
         mesh.castShadow = true;
         // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
         mesh.frustumCulled = false;
         this.group.add(mesh);
         mesh.bind(this.rig.skeleton, new THREE.Matrix4());
         this.meshes.push(mesh);
+        if (mat instanceof CelTintMaterial) {
+          mesh.receiveShadow = true;
+          const outline = outlineOf(mesh, mat);
+          this.group.add(outline);
+          outline.bind(this.rig.skeleton, new THREE.Matrix4());
+          this.meshes.push(outline);
+        }
         this.materials.push(mat);
       }
     }

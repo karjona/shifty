@@ -16,6 +16,8 @@ export interface Piece {
   geometry: THREE.BufferGeometry;
   detail: THREE.Texture;
   mask: THREE.Texture;
+  /** The paint without its baked light, where the art has one (the face). */
+  flat: THREE.Texture | null;
   finish: Finish;
   tints: TintSource;
   /** Body regions this piece covers (bits of REGIONS), hidden while it is worn. */
@@ -129,9 +131,10 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
         meshes.map(async (m) => {
           // A mesh split into primitives comes back as a group of meshes named after the node.
           const name = m.name.replace(/_\d+$/, "");
-          const [detail, mask] = await Promise.all([
+          const [detail, mask, flat] = await Promise.all([
             loadTexture(`${BASE}/${key}.${name}.detail.png`),
             loadTexture(`${BASE}/${key}.${name}.mask.png`),
+            name === "face" ? loadTexture(`${BASE}/${key}.${name}.flat.png`).catch(() => null) : Promise.resolve(null),
           ]);
           const finish: unknown = Reflect.get(m.userData, "finish");
           const tints: unknown = Reflect.get(m.userData, "tints");
@@ -141,6 +144,7 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
             geometry: remapJoints(m),
             detail,
             mask,
+            flat,
             finish: finishOf(finish),
             tints: tintsOf(tints),
             hides: hidesOf(hides),

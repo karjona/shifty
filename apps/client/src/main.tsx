@@ -13,4 +13,5 @@ const params = new URLSearchParams(location.search);
 // the module with it (and vite.config.ts fails a build that still has it).
 if (import.meta.env.DEV && params.has("name")) void import("./game/quick.ts").then((m) => m.quickRace(params));
 else if (import.meta.env.DEV && params.has("lookdev")) void import("./game/lookdev.ts").then((m) => m.lookdev(params));
+else if (import.meta.env.DEV && params.has("celshot")) void import("./game/celshot.ts").then((m) => m.celshot(params));
 else createRoot(document.querySelector("#root")!).render(<App />);

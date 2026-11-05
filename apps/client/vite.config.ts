@@ -104,12 +104,31 @@ const rustNotices = (): Plugin => ({
   },
 });
 
+const LOBBY_ORIGIN = process.env.LOBBY_ORIGIN;
+
+type ProxyReq = { setHeader: (k: string, v: string) => void };
+
+/** Proxy setup that sends every request and socket upgrade with the given Origin. */
+function asOrigin(origin: string) {
+  return (proxy: { on: (e: string, f: (req: ProxyReq) => void) => void }) => {
+    proxy.on("proxyReq", (req) => req.setHeader("origin", origin));
+    proxy.on("proxyReqWs", (req) => req.setHeader("origin", origin));
+  };
+}
+
 export default defineConfig({
   plugins: [react(), devLobby(), noDevCode(), rustNotices()],
   server: {
     port: 5173,
     strictPort: true,
-    proxy: { "/api": { target: LOBBY, ws: true } },
+    proxy: {
+      "/api": {
+        target: LOBBY,
+        ws: true,
+        // A checkout on another port speaks to the shared dev lobby as its origin.
+        ...(LOBBY_ORIGIN ? { configure: asOrigin(LOBBY_ORIGIN) } : {}),
+      },
+    },
   },
   build: { target: "es2024", license: { fileName: "licenses/npm.md" } },
 });
