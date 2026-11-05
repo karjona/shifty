@@ -35,8 +35,9 @@ export function Welcome() {
     setError(null);
     try {
       const player = await claimHandle(name);
-      setDone(player.handle);
+      // The creator's route checks the cached player, so it must have the handle before the button shows.
       await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      setDone(player.handle);
     } catch (err) {
       const code = err instanceof ApiError ? err.code : "";
       setError(labelOf(t.welcome.problems, code) ?? t.common.error);
