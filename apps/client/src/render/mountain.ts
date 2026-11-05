@@ -495,8 +495,8 @@ export class Mountain implements Environment {
     return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
   }
 
-  makeRider(slot: number, _appearance: Appearance | null): RiderModel {
-    const model = new BoarderModel(slot);
+  makeRider(slot: number, appearance: Appearance | null): RiderModel {
+    const model = new BoarderModel(slot, appearance);
     celify(model.mesh);
     return model;
   }

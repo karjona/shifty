@@ -1,15 +1,25 @@
-// A rider on a jetski, drawn as boxes. The ski follows the sim exactly; the
-// body on top is render-only and carries its own inertia: the knees soak up
-// landings and swells, and the body lags behind the hull when it speeds up
-// or digs in.
+// A rider on a jetski. The ski follows the sim exactly and wears the
+// colours of the rider's ride; the rider on it is render-only and carries
+// their own inertia: the knees soak up landings and swells, the body lags
+// behind the hull when it speeds up or digs in, and leans into turns with
+// the bars.
 import * as THREE from "three/webgpu";
+import { type Appearance, type Colourway, botAppearance, item } from "@shifty/rider";
+import { RiderFigure } from "./rider/model.ts";
+import { floatPose, jetskiPose } from "./rider/ride.ts";
 import type { RiderModel, RiderView } from "./world.ts";
 
 export const SLOT_COLORS = [0xff5a36, 0x2bb3ff, 0xffd23f, 0x7ae582, 0xc77dff, 0xff8fab, 0xf4a261, 0xe9edf2];
 
-/** Leg length and the feet's place on the deck, in hull space. */
-const LEGS = 0.55;
-const FEET = new THREE.Vector3(0, 0.675, -0.35);
+/** The deck the feet stand on (hull space), the footwells either side of the seat. */
+const DECK = new THREE.Vector3(0, 0.5, -0.25);
+const FOOTWELL = 0.34;
+/** Where the bars turn (hull space), and the grips either side of it. */
+const BARS = new THREE.Vector3(0, 1.12, 0.22);
+const GRIP = 0.3;
+/** How far the bars turn at full lock (rad), and how fast they follow the stick (1/s). */
+const BAR_LOCK = 0.4;
+const BAR_FOLLOW = 10;
 
 /** Body springs: stiffness (1/s²) and damping (1/s). */
 const STIFFNESS = 80;
@@ -40,7 +50,7 @@ export class Spring {
 function part(
   geo: THREE.BufferGeometry,
   mat: THREE.Material,
-  parent: THREE.Group,
+  parent: THREE.Object3D,
   x: number,
   y: number,
   z: number,
@@ -52,40 +62,59 @@ function part(
   return m;
 }
 
+/** The ride's colours (hull, seat, stripe), or the seat's colour with a dark seat. */
+function rideColours(appearance: Appearance, slot: number): Colourway {
+  const ride = appearance.outfits.summer.ride;
+  const it = ride ? item(ride) : undefined;
+  return it?.colours ?? [SLOT_COLORS[slot % SLOT_COLORS.length]!, 0xf4f4f0, 0x23262b];
+}
+
 export class JetskiModel implements RiderModel {
   readonly mesh = new THREE.Group();
-  /** The whole rider, moved off the ski when bailing. */
+  /** The ski's own meshes. */
+  private hull = new THREE.Group();
+  /** Turns with the stick. */
+  private bars = new THREE.Group();
+  /** The rider, moved off the ski when bailing. */
   private body = new THREE.Group();
-  /** Pivots at the feet: leans the rider fore and aft. */
-  private pose = new THREE.Group();
-  private legs: THREE.Mesh;
-  /** Hips up: torso and head, tipped forward as the knees bend. */
-  private upper = new THREE.Group();
+  private figure: RiderFigure;
 
   private crouch = new Spring();
   private lean = new Spring();
+  private steer = 0;
+  private clock = 0;
   private lastVel: THREE.Vector3 | null = null;
 
-  constructor(slot: number) {
-    const colour = SLOT_COLORS[slot % SLOT_COLORS.length];
-    const paint = new THREE.MeshStandardNodeMaterial({ color: colour, roughness: 0.45 });
-    const white = new THREE.MeshStandardNodeMaterial({ color: 0xf4f4f0, roughness: 0.6 });
+  /** Without an appearance, a rider made up for the seat. */
+  constructor(slot: number, appearance: Appearance | null) {
+    const look = appearance ?? botAppearance(1, slot);
+    const [main, seat, stripe] = rideColours(look, slot);
+    const paint = new THREE.MeshStandardNodeMaterial({ color: main, roughness: 0.45 });
+    const second = new THREE.MeshStandardNodeMaterial({ color: seat, roughness: 0.7 });
+    const accent = new THREE.MeshStandardNodeMaterial({ color: stripe, roughness: 0.5 });
     const dark = new THREE.MeshStandardNodeMaterial({ color: 0x23262b, roughness: 0.7 });
-    // Hull (the rider position is the bottom of the hull), nose, seat.
-    part(new THREE.BoxGeometry(1.1, 0.5, 2.5), paint, this.mesh, 0, 0.25, -0.1);
-    const nose = part(new THREE.BoxGeometry(0.9, 0.42, 0.7), white, this.mesh, 0, 0.3, 1.25);
+    // Hull (the rider position is the bottom of the hull), a stripe down each side, the nose, the hood the bars
+    // stand on, the seat.
+    part(new THREE.BoxGeometry(1.1, 0.5, 2.5), paint, this.hull, 0, 0.25, -0.1);
+    for (const side of [1, -1])
+      part(new THREE.BoxGeometry(0.02, 0.1, 2.3), accent, this.hull, side * 0.555, 0.32, -0.1);
+    const nose = part(new THREE.BoxGeometry(0.9, 0.42, 0.7), paint, this.hull, 0, 0.3, 1.25);
     nose.rotation.x = 0.35;
-    part(new THREE.BoxGeometry(0.5, 0.2, 1.0), dark, this.mesh, 0, 0.6, -0.3);
-    // Rider, standing slightly back: legs from the feet up, then torso and head.
-    const legs = new THREE.BoxGeometry(0.42, LEGS, 0.3);
-    legs.translate(0, LEGS / 2, 0);
-    this.legs = part(legs, dark, this.pose, 0, 0, 0);
-    part(new THREE.BoxGeometry(0.5, 0.6, 0.32), paint, this.upper, 0, 0.3, 0.1);
-    part(new THREE.SphereGeometry(0.2, 10, 8), white, this.upper, 0, 0.75, 0.13);
-    this.upper.position.y = LEGS;
-    this.pose.add(this.upper);
-    this.pose.position.copy(FEET);
-    this.body.add(this.pose);
+    const hood = part(new THREE.BoxGeometry(0.8, 0.22, 0.75), paint, this.hull, 0, 0.6, 0.6);
+    hood.rotation.x = 0.12;
+    part(new THREE.BoxGeometry(0.5, 0.2, 1.0), second, this.hull, 0, 0.6, -0.5);
+    // The steering column, and the bars with their grips.
+    const column = part(new THREE.BoxGeometry(0.08, 0.5, 0.08), dark, this.hull, 0, 0.9, 0.36);
+    column.rotation.x = -0.45;
+    this.bars.position.copy(BARS);
+    part(new THREE.BoxGeometry(GRIP * 2, 0.035, 0.035), dark, this.bars, 0, 0, 0);
+    for (const side of [1, -1]) part(new THREE.BoxGeometry(0.12, 0.05, 0.05), dark, this.bars, side * GRIP, 0, 0);
+    this.hull.add(this.bars);
+    this.mesh.add(this.hull);
+
+    this.figure = new RiderFigure(look, "summer");
+    this.figure.group.position.copy(DECK);
+    this.body.add(this.figure.group);
     this.mesh.add(this.body);
     this.mesh.rotation.order = "YXZ";
   }
@@ -93,14 +122,7 @@ export class JetskiModel implements RiderModel {
   update(r: RiderView, dt: number): void {
     this.mesh.position.set(r.x, r.y, r.z);
     this.mesh.rotation.set(-r.pitch, r.yaw, r.roll);
-    if (r.bailing) {
-      // The rider lies in the water beside the ski.
-      this.body.position.set(1.3, -1.1, -0.4);
-      this.body.rotation.set(0.3, 0, 1.45);
-    } else {
-      this.body.position.set(0, 0, 0);
-      this.body.rotation.set(0, 0, 0);
-    }
+    this.clock += dt;
 
     const vel = new THREE.Vector3(r.vx, r.vy, r.vz);
     if (this.lastVel && dt > 0 && dt < 0.1 && !r.bailing) {
@@ -114,13 +136,42 @@ export class JetskiModel implements RiderModel {
       this.crouch.x = this.crouch.v = this.lean.x = this.lean.v = 0;
     }
     this.lastVel = vel;
+    const steer = r.bailing ? 0 : Math.max(-1, Math.min(1, r.steer));
+    this.steer += (steer - this.steer) * (1 - Math.exp(-BAR_FOLLOW * dt));
+    this.bars.rotation.y = -this.steer * BAR_LOCK;
 
+    const body = this.figure.body;
+    if (!body) return;
+    if (r.bailing) {
+      // Floating on the back in the water beside the ski, head toward the stern.
+      this.body.position.set(1.4, -0.35, -0.2);
+      this.body.rotation.set(-Math.PI / 2 + 0.25, 0.4, 0);
+      this.figure.pose(floatPose(body, this.clock));
+      return;
+    }
+    this.body.position.set(0, 0, 0);
+    this.body.rotation.set(0, 0, 0);
     const k = this.crouch.x > 0 ? MAX_CROUCH : MAX_STRETCH;
-    const c = k * Math.tanh(this.crouch.x / k);
-    const l = MAX_LEAN * Math.tanh(this.lean.x / MAX_LEAN);
-    this.legs.scale.y = 1 - c;
-    this.upper.position.y = LEGS * (1 - c);
-    this.upper.rotation.x = c * 0.9;
-    this.pose.rotation.x = l;
+    const crouch = k * Math.tanh(this.crouch.x / k);
+    const lean = MAX_LEAN * Math.tanh(this.lean.x / MAX_LEAN);
+    // Hull-space points, in the figure's own (unscaled) space.
+    const s = this.figure.scale;
+    const local = (p: THREE.Vector3) => p.sub(DECK).divideScalar(s);
+    const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.bars.rotation.y);
+    const grip = (side: number) => local(new THREE.Vector3(side * GRIP, 0, 0).applyQuaternion(turn).add(BARS));
+    const foot = (side: number) => local(new THREE.Vector3(side * FOOTWELL, DECK.y, DECK.z));
+    this.figure.pose(
+      jetskiPose(body, { feet: [foot(1), foot(-1)], grips: [grip(1), grip(-1)], crouch, lean, steer: this.steer }),
+    );
+  }
+
+  dispose(): void {
+    this.figure.dispose();
+    this.hull.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      o.geometry.dispose();
+      const m: unknown = o.material;
+      if (m instanceof THREE.Material) m.dispose();
+    });
   }
 }

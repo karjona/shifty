@@ -40,6 +40,8 @@ export interface RiderView {
 export interface RiderModel {
   readonly mesh: THREE.Group;
   update(r: RiderView, dt: number): void;
+  /** Frees what the model made for itself, once it is no longer drawn. */
+  dispose?(): void;
 }
 
 /** How the chase camera sits behind a rider, per sport. Distances in metres. */
@@ -229,6 +231,7 @@ export class World {
     const r = this.riders.get(slot);
     if (r) {
       this.scene.remove(r.model.mesh);
+      r.model.dispose?.();
       r.label.remove();
       this.riders.delete(slot);
       this.models.delete(slot);
@@ -245,6 +248,7 @@ export class World {
     this.camera.updateProjectionMatrix();
     for (const r of this.riders.values()) {
       this.scene.remove(r.model.mesh);
+      r.model.dispose?.();
       r.label.remove();
     }
     this.riders.clear();
@@ -258,6 +262,7 @@ export class World {
     this.env = null;
     for (const r of this.riders.values()) {
       this.scene.remove(r.model.mesh);
+      r.model.dispose?.();
       r.label.remove();
     }
     this.riders.clear();
