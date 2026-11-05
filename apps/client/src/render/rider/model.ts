@@ -12,6 +12,7 @@ import {
   REQUIRED,
   SKIN_TONES,
   SLOTS,
+  type Slot,
   type Sport,
   defaultOutfits,
   item,
@@ -41,19 +42,30 @@ async function artBody(look: Look): Promise<Look["body"]> {
   return (await builtModels(look.body)).has("body") ? look.body : "male";
 }
 
+/** For a winter slot, the summer slot covering the same part of the body. */
+const SUMMER_FOR: Partial<Record<Slot, Slot>> = {
+  head: "head",
+  eyes: "eyes",
+  top: "vest",
+  bottom: "bottom",
+  feet: "feet",
+};
+
 /** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has.
- * A required slot whose model isn't built yet shows the starter model there, in the item's colours. */
+ * A required slot whose model isn't built yet shows the starter model there, in the item's colours; a winter
+ * item with no winter model built shows the summer starter's model for that part of the body. */
 async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
   const built = await builtModels(look.body);
-  const starter = defaultOutfits("male")[sport];
+  const starters = defaultOutfits("male");
   const items = SLOTS[sport].flatMap((slot) => {
     const id = kit[slot];
     const it = id ? item(id) : undefined;
     if (!it) return [];
-    if (built.has(it.model)) return [{ model: it.model, colours: it.colours }];
-    const stand = REQUIRED[sport].includes(slot) ? starter[slot] : undefined;
-    const alt = stand ? item(stand) : undefined;
-    return alt && built.has(alt.model) ? [{ model: alt.model, colours: it.colours }] : [];
+    const summer = sport === "winter" ? SUMMER_FOR[slot] : undefined;
+    const starter = REQUIRED[sport].includes(slot) ? starters[sport][slot] : undefined;
+    const models = [it.model, starter && item(starter)?.model, summer && item(starters.summer[summer] ?? "")?.model];
+    const model = models.find((m): m is string => m !== undefined && built.has(m));
+    return model ? [{ model, colours: it.colours }] : [];
   });
   const style = built.has(`hair.${look.hair}`) ? `hair.${look.hair}` : "hair.0";
   const hat = items.find((i) => i.model in HAIR_UNDER);
