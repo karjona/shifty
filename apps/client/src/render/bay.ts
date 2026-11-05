@@ -123,8 +123,8 @@ export class Bay implements Environment {
     return waveHeight(this.waveParams, x, z, t);
   }
 
-  makeRider(slot: number, _appearance: Appearance | null): RiderModel {
-    const model = new JetskiModel(slot);
+  makeRider(slot: number, appearance: Appearance | null): RiderModel {
+    const model = new JetskiModel(slot, appearance);
     celify(model.mesh, () => ({ spec: 0.5, specSize: 0.03 }));
     return model;
   }

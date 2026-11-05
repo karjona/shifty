@@ -2,16 +2,18 @@
 // URL options: shot (select, hero, lineup, face, back), sport (summer, winter),
 // seed (random looks; 0 = the default rider), skin, hairColor, eyeColor, height,
 // wear (item ids to put on), bare (slots to empty), pose (idle, crossed), t (freeze the
-// idle at a time), cx/cy/dist (camera), orbit. Keys: F next shot, R new
-// looks, arrows orbit.
+// idle at a time), cx/cy/dist (camera), orbit, ride (on a jetski: steer -1 to 1, bail). Keys: F next shot,
+// R new looks, arrows orbit.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Sport, botAppearance, defaultAppearance, item, model } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { CLUB, buildClub } from "../render/club.ts";
+import { JetskiModel } from "../render/rider.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, idlePose } from "../render/rider/poses.ts";
 import { parseCourse } from "../wasm-json.ts";
+import type { RiderView } from "../render/world.ts";
 import { Engine } from "./engine.ts";
 
 type Shot = "select" | "hero" | "lineup" | "face" | "back";
@@ -76,14 +78,26 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   });
   document.body.append(label);
 
+  const riding = params.has("ride");
+  let skis: JetskiModel[] = [];
   const build = () => {
     for (const r of riders) {
       r.group.removeFromParent();
       r.dispose();
     }
+    for (const j of skis) {
+      j.mesh.removeFromParent();
+      j.dispose();
+    }
     const count = shot === "lineup" ? 4 : 1;
-    riders = Array.from({ length: count }, (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport));
-    for (const r of riders) world.scene.add(r.group);
+    if (riding) {
+      riders = [];
+      skis = Array.from({ length: count }, (_, i) => new JetskiModel(i, appearanceFor(seed, i, params)));
+      for (const j of skis) world.scene.add(j.mesh);
+    } else {
+      riders = Array.from({ length: count }, (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport));
+      for (const r of riders) world.scene.add(r.group);
+    }
     label.textContent = `${shot} · ${sport} · seed ${seed} · keys: F shot, R new looks, ←→ orbit`;
   };
   build();
@@ -120,6 +134,32 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       r.group.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
       const pose = params.get("pose") ?? (shot === "select" ? "crossed" : "idle");
       if (r.body) r.pose((pose === "crossed" ? crossedPose : idlePose)(r.body, time + i * 3.1));
+    });
+    skis.forEach((j, i) => {
+      const x = (i - (skis.length - 1) / 2) * 1.6;
+      const view: RiderView = {
+        slot: i,
+        x: base.x - x,
+        y: base.y,
+        z: base.z,
+        yaw: facing + (shot === "back" ? Math.PI : 0),
+        pitch: 0,
+        roll: 0,
+        speed: 0,
+        grounded: true,
+        isMe: i === 0,
+        isBot: false,
+        bailing: params.has("bail"),
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        charge: 0,
+        grab: 0,
+        lean: 0,
+        steer: Number(params.get("steer") ?? 0),
+        wobble: 0,
+      };
+      j.update(view, 1 / 60);
     });
     const f = framing[shot];
     const look = base
