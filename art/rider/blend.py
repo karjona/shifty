@@ -5,10 +5,7 @@ import math
 import bmesh
 import bpy
 import numpy as np
-import openvdb as vdb
 from mathutils import Vector
-
-import sdf
 
 
 def clear_scene():
@@ -21,29 +18,6 @@ def clear_scene():
 def link(obj, collection=None):
     (collection or bpy.context.scene.collection).objects.link(obj)
     return obj
-
-
-def mesh_object(name, verts, faces):
-    me = bpy.data.meshes.new(name)
-    me.from_pydata([tuple(v) for v in verts], [], [tuple(f) for f in faces])
-    me.validate(clean_customdata=False)
-    me.update()
-    return link(bpy.data.objects.new(name, me))
-
-
-def sdf_mesh(shape, voxel, name, adaptivity=0.0):
-    """Meshes a shape's zero surface (quads, or quads and triangles when adaptive)."""
-    d, lo = sdf.sample(shape, voxel)
-    g = vdb.FloatGrid(background=float(np.abs(d).max()))
-    g.copyFromArray(d, ijk=(0, 0, 0), tolerance=0.0)
-    if adaptivity > 0:
-        pts, tris, quads = g.convertToPolygons(isovalue=0.0, adaptivity=adaptivity)
-        faces = [tuple(f) for f in quads] + [tuple(f) for f in tris]
-    else:
-        pts, quads = g.convertToQuads(isovalue=0.0)
-        faces = quads
-    verts = lo + np.asarray(pts, dtype=np.float64) * voxel
-    return mesh_object(name, verts, faces)
 
 
 def flip(obj):
@@ -155,11 +129,6 @@ def verts(obj):
     a = np.empty(n * 3)
     obj.data.vertices.foreach_get("co", a)
     return a.reshape(n, 3)
-
-
-def set_verts(obj, co):
-    obj.data.vertices.foreach_set("co", np.asarray(co, dtype=np.float64).ravel())
-    obj.data.update()
 
 
 def vertex_group(obj, name, weights):

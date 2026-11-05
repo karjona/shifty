@@ -9,8 +9,11 @@ import {
   HAIR_COLOURS,
   type Kit,
   type Look,
+  REQUIRED,
   SKIN_TONES,
+  SLOTS,
   type Sport,
+  defaultOutfits,
   item,
 } from "@shifty/rider";
 import { type ModelAsset, builtModels, loadModel } from "./assets.ts";
@@ -32,12 +35,24 @@ interface Worn {
 /** How each hat leaves the hair: the hair model's piece that shows under it. */
 const HAIR_UNDER: Record<string, string> = { "summer.head.cap": "cap" };
 
-/** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has. */
-async function worn(look: Look, kit: Kit): Promise<Worn[]> {
+/** The body whose art draws a look: its own, or the male art until a body's art is built. */
+async function artBody(look: Look): Promise<Look["body"]> {
+  return (await builtModels(look.body)).has("body") ? look.body : "male";
+}
+
+/** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has.
+ * A required slot whose model isn't built yet shows the starter model there, in the item's colours. */
+async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
   const built = await builtModels(look.body);
-  const items = Object.values(kit).flatMap((id) => {
+  const starter = defaultOutfits("male")[sport];
+  const items = SLOTS[sport].flatMap((slot) => {
+    const id = kit[slot];
     const it = id ? item(id) : undefined;
-    return it && built.has(it.model) ? [{ model: it.model, colours: it.colours }] : [];
+    if (!it) return [];
+    if (built.has(it.model)) return [{ model: it.model, colours: it.colours }];
+    const stand = REQUIRED[sport].includes(slot) ? starter[slot] : undefined;
+    const alt = stand ? item(stand) : undefined;
+    return alt && built.has(alt.model) ? [{ model: alt.model, colours: it.colours }] : [];
   });
   const style = built.has(`hair.${look.hair}`) ? `hair.${look.hair}` : "hair.0";
   const hat = items.find((i) => i.model in HAIR_UNDER);
@@ -71,9 +86,9 @@ export class RiderFigure {
     if (key === this.key) return;
     this.key = key;
     const version = ++this.version;
-    const look = appearance.look;
     void (async () => {
-      const items = await worn(look, appearance.outfits[sport]);
+      const look = { ...appearance.look, body: await artBody(appearance.look) };
+      const items = await worn(look, appearance.outfits[sport], sport);
       const assets = await Promise.all([
         loadModel(look.body, "body"),
         ...items.map((i) => loadModel(look.body, i.model)),

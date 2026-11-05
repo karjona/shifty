@@ -49,16 +49,6 @@ def armature(joints, tails, name="rig"):
     return obj
 
 
-def auto_weights(mesh, arm):
-    """Bone heat weights, at most four bones per vertex."""
-    blend.deselect()
-    mesh.select_set(True)
-    arm.select_set(True)
-    bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.parent_set(type="ARMATURE_AUTO")
-    limit(mesh)
-
-
 def bind(mesh, arm):
     """Parents a mesh that already has its vertex groups to the armature."""
     mesh.parent = arm
@@ -128,35 +118,3 @@ def transfer(src, dst, k=4, rigid=None):
     out /= np.maximum(out.sum(axis=1, keepdims=True), 1e-9)
     set_weights(dst, out)
     limit(dst)
-
-
-def sculpt_weights(mesh, chains, joints, tails, tau=0.01, reach=0.03, side=0.1):
-    """Weights from the sculpt: each vertex follows the chain of body parts it is nearest
-    (blended over `tau` where parts meet), and within a chain the bones it lies along
-    (blended over `reach` around the joints)."""
-    v = blend.verts(mesh)
-    names = list(chains)
-    D = np.stack([chains[c][0].eval(v) for c in names], axis=1)
-    rel = D - D.min(axis=1, keepdims=True)
-    cw = np.where(rel < 5 * tau, np.exp(-rel / tau), 0.0)
-    cw /= cw.sum(axis=1, keepdims=True)
-    W = np.zeros((len(v), len(BONES)))
-    for ci, c in enumerate(names):
-        bones = chains[c][1]
-        S = []
-        for b in bones:
-            a, t = np.asarray(joints[b]), np.asarray(tails[b])
-            L = np.linalg.norm(t - a)
-            u = (t - a) / L
-            s = (v - a) @ u
-            r = np.linalg.norm((v - a) - s[:, None] * u, axis=1)
-            first, last = b == bones[0], b == bones[-1]
-            before = 0 if first else np.maximum(0, -s)
-            after = 0 if last else np.maximum(0, s - L)
-            S.append(np.exp(-(before + after) / reach) * np.exp(-r / side))
-        S = np.stack(S, axis=1)
-        S /= np.maximum(S.sum(axis=1, keepdims=True), 1e-12)
-        for j, b in enumerate(bones):
-            W[:, BONES.index(b)] += cw[:, ci] * S[:, j]
-    set_weights(mesh, W)
-    limit(mesh)

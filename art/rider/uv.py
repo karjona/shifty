@@ -1,6 +1,4 @@
-"""Seams and unwraps, the way an artist would cut a mesh: along hidden lines."""
-
-import heapq
+"""UVs from a cage's seams: unwrapped, scaled per body part, packed per texture."""
 
 import bmesh
 import bpy
@@ -9,94 +7,83 @@ import numpy as np
 import blend
 
 
-def _edge_path(bm, start, goal, cost):
-    """The cheapest edge path from vertex `start` to any vertex in `goal` (edge indices)."""
-    dist = {start.index: 0.0}
-    prev = {}
-    heap = [(0.0, start.index)]
-    verts = bm.verts
-    while heap:
-        d, i = heapq.heappop(heap)
-        if i in goal:
-            path = []
-            while i in prev:
-                i, e = prev[i]
-                path.append(e)
-            return path
-        if d > dist.get(i, 1e18):
+def unwrap(obj, margin=0.004):
+    """Unwraps along the marked seams, every island at the same texel density."""
+    if not obj.data.uv_layers:
+        obj.data.uv_layers.new(name="uv")
+    blend.select_only(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.unwrap(method="ANGLE_BASED", margin=margin, correct_aspect=True)
+    bpy.ops.uv.select_all(action="SELECT")
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def islands(bm, uv, faces=None):
+    """Lists of faces joined by edges whose UVs match on both sides."""
+    pool = set(faces if faces is not None else bm.faces)
+    seen = set()
+    out = []
+    for f in pool:
+        if f in seen:
             continue
-        v = verts[i]
-        for e in v.link_edges:
-            o = e.other_vert(v)
-            nd = d + cost(e)
-            if nd < dist.get(o.index, 1e18):
-                dist[o.index] = nd
-                prev[o.index] = (i, e.index)
-                heapq.heappush(heap, (nd, o.index))
-    return []
+        stack, isl = [f], []
+        seen.add(f)
+        while stack:
+            g = stack.pop()
+            isl.append(g)
+            for loop in g.loops:
+                e = loop.edge
+                if e.seam:
+                    continue
+                for other in e.link_faces:
+                    if other in seen or other not in pool:
+                        continue
+                    la = [lo for lo in other.loops if lo.edge == e]
+                    if not la:
+                        continue
+                    la = la[0]
+                    same = (la[uv].uv - loop.link_loop_next[uv].uv).length < 1e-5 and (
+                        la.link_loop_next[uv].uv - loop[uv].uv).length < 1e-5
+                    if same:
+                        seen.add(other)
+                        stack.append(other)
+        out.append(isl)
+    return out
 
 
-def mark(obj, seams_fn):
-    """Marks seams: `seams_fn(bm)` returns the edges to cut."""
+def scale_islands(obj, factor):
+    """Scales each island about its middle by `factor(face)` of its first face (a bmesh face)."""
     bm = bmesh.new()
     bm.from_mesh(obj.data)
-    bm.verts.ensure_lookup_table()
-    bm.edges.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    for e in bm.edges:
-        e.seam = False
-    for i in seams_fn(bm):
-        bm.edges[i].seam = True
+    uv = bm.loops.layers.uv.active
+    for isl in islands(bm, uv):
+        s = float(np.mean([factor(bm, f) for f in isl]))
+        uvs = [lo[uv].uv for f in isl for lo in f.loops]
+        c = sum((u.copy() for u in uvs), uvs[0].copy() * 0) / len(uvs)
+        for f in isl:
+            for lo in f.loops:
+                lo[uv].uv = c + (lo[uv].uv - c) * s
     bm.to_mesh(obj.data)
     bm.free()
 
 
-def unwrap(obj, margin=0.01, method="CONFORMAL"):
+def pack(obj, material_index, margin=0.006):
+    """Packs the islands of one material's faces into the whole UV square."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    for f in bm.faces:
+        f.select = f.material_index == material_index
+    for e in bm.edges:
+        e.select = all(f.select for f in e.link_faces) and bool(e.link_faces)
+    for v in bm.verts:
+        v.select = any(f.select for f in v.link_faces)
+    bm.to_mesh(obj.data)
+    bm.free()
     blend.select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.unwrap(method=method, margin=margin)
+    bpy.context.scene.tool_settings.use_uv_select_sync = False
     bpy.ops.uv.select_all(action="SELECT")
-    bpy.ops.uv.pack_islands(rotate=True, margin=margin, scale=True)
+    bpy.ops.uv.pack_islands(rotate=True, scale=True, margin=margin, shape_method="CONCAVE")
     bpy.ops.object.mode_set(mode="OBJECT")
-
-
-def region_edges(bm, inside):
-    """Edges on the border of a set of faces (`inside(face_centre)` -> bool)."""
-    flag = {f.index: bool(inside(np.array(f.calc_center_median()))) for f in bm.faces}
-    out = []
-    for e in bm.edges:
-        fs = e.link_faces
-        if len(fs) == 2 and flag[fs[0].index] != flag[fs[1].index]:
-            out.append(e.index)
-    return out
-
-
-def boundary(bm):
-    return [v for v in bm.verts if v.is_boundary]
-
-
-def path_between(bm, start_pick, goal_pick, cost):
-    """A seam from the vertex `start_pick` chooses to the vertices `goal_pick` accepts."""
-    start = start_pick(bm)
-    goal = {v.index for v in bm.verts if goal_pick(np.array(v.co))}
-    return _edge_path(bm, start, goal, cost)
-
-
-def head(obj, ear):
-    """The head: one island peeled open up the back, the ears on their own."""
-
-    def seams(bm):
-        edges = region_edges(bm, ear)
-        nape = max(boundary(bm), key=lambda v: v.co.y - 4 * abs(v.co.x))
-        crown_z = max(v.co.z for v in bm.verts)
-
-        def cost(e):
-            m = (e.verts[0].co + e.verts[1].co) / 2
-            return e.calc_length() * (1 + 400 * abs(m.x) + 200 * max(0.0, 0.04 - m.y))
-
-        edges += _edge_path(bm, nape, {v.index for v in bm.verts if v.co.z > crown_z - 0.004}, cost)
-        return edges
-
-    mark(obj, seams)
-    unwrap(obj, margin=0.008)

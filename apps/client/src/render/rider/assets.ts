@@ -56,9 +56,11 @@ function finishOf(v: unknown): Finish {
     const r: unknown = Reflect.get(v, "roughness");
     const m: unknown = Reflect.get(v, "metalness");
     const rim: unknown = Reflect.get(v, "rim");
+    const flat: unknown = Reflect.get(v, "flat");
     if (typeof r === "number") f.roughness = r;
     if (typeof m === "number") f.metalness = m;
     if (typeof rim === "number") f.rim = rim;
+    if (typeof flat === "number") f.flat = flat;
   }
   return f;
 }

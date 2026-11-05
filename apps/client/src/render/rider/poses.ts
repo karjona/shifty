@@ -35,7 +35,7 @@ export function idlePose(a: Body, t: number): Pose {
       bend: v3(side * 0.3, 0, -1),
       fingers: v3(side * 0.08, -1, 0.12).normalize(),
       palm: v3(-side, 0, 0.1).normalize(),
-      curl: 0.6,
+      curl: 0.85,
     };
   });
   return {
@@ -59,7 +59,7 @@ export function crossedPose(a: Body, t: number): Pose {
   const arms = both((side): Reach => {
     const over = side > 0;
     return {
-      target: v3(-side * 0.12, chestY + 0.03 + (over ? 0.03 : -0.005) + breathe * 0.004, over ? 0.215 : 0.185),
+      target: v3(-side * 0.12, chestY + 0.03 + (over ? 0.035 : -0.005) + breathe * 0.004, over ? 0.265 : 0.235),
       bend: v3(side * 1, -0.55, 0.35),
       fingers: v3(-side * 0.35, over ? -0.2 : 0.25, -1).normalize(),
       palm: v3(0, over ? -1 : 0.2, over ? 0.1 : -1).normalize(),
@@ -73,12 +73,13 @@ export function crossedPose(a: Body, t: number): Pose {
   });
   return {
     ...base,
-    hips: base.hips.clone().add(v3(0.03, -0.01, 0)),
-    hipsTurn: euler(0, -0.12, -0.05),
-    spine: euler(-0.02, 0.06, 0.03),
-    chest: euler(-0.04 - breathe * 0.01, 0.04, 0.02),
-    neck: euler(-0.05, 0.04, 0),
-    head: euler(-0.06, 0.08 + Math.sin(t * 0.3) * 0.03, -0.06),
+    hips: base.hips.clone().add(v3(0.04, -0.012, 0)),
+    hipsTurn: euler(0, -0.14, -0.07),
+    spine: euler(-0.02, 0.07, 0.05),
+    chest: euler(-0.05 - breathe * 0.01, 0.05, 0.03),
+    // The head cocked and turned a little: confident.
+    neck: euler(0.02, 0.06, 0.02),
+    head: euler(0.03, 0.16 + Math.sin(t * 0.3) * 0.03, -0.1),
     arms,
     legs,
   };
