@@ -3,6 +3,24 @@ import { decodePng, distinctColours } from "./png.ts";
 
 const joined = (p: Page) => p.waitForFunction(() => window.__shifty?.phase() === 1, null, { timeout: 20_000 });
 
+/**
+ * How far Bea's view of Ana is from where Ana really is, in metres (on the
+ * ground plane). Two pages can't be read at the same instant, and at racing
+ * speed a few hundred milliseconds between reads is metres, so Ana is read
+ * before and after Bea, and Bea's view is measured to that stretch.
+ */
+async function seenGap(a: Page, b: Page, slot: number) {
+  const self = () => a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!);
+  const before = await self();
+  const seen = await b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, slot);
+  const after = await self();
+  const dx = after.x - before.x;
+  const dz = after.z - before.z;
+  const len2 = dx * dx + dz * dz;
+  const t = len2 > 0 ? Math.min(1, Math.max(0, ((seen.x - before.x) * dx + (seen.z - before.z) * dz) / len2)) : 0;
+  return { self: before, gap: Math.hypot(seen.x - (before.x + t * dx), seen.z - (before.z + t * dz)) };
+}
+
 async function openPlayer(page: Page, name: string, room: string) {
   page.on("pageerror", (e) => console.log(`[${name}] page error: ${e.message}`));
   // Netcode tests skip drawing: CI has no GPU, and software rendering two
@@ -34,12 +52,9 @@ test("two players race in one room", async ({ browser }) => {
   await a.evaluate(() => window.__shifty.setInput({ steer: 0.02, throttle: 1, buttons: 0 }));
   await a.waitForTimeout(3000);
   const aSlot = await a.evaluate(() => window.__shifty.slot());
-  const [aSelf, bSeesA] = await Promise.all([
-    a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
-    b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
-  ]);
+  const { self: aSelf, gap } = await seenGap(a, b, aSlot);
   expect(aSelf.speed).toBeGreaterThan(8);
-  expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
+  expect(gap).toBeLessThan(5);
 
   // Riders stay on (or just above) the water, even on big swells.
   expect(Math.abs(aSelf.y)).toBeLessThan(8);
@@ -78,14 +93,11 @@ test("two players ride the winter mountain", async ({ browser }) => {
   await a.evaluate(() => window.__shifty.setInput({ steer: 0, lean: 1, buttons: 0 }));
   await a.waitForTimeout(6000);
   const aSlot = await a.evaluate(() => window.__shifty.slot());
-  const [aSelf, bSeesA] = await Promise.all([
-    a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!),
-    b.evaluate((s) => window.__shifty.riders().find((r) => r.slot === s)!, aSlot),
-  ]);
+  const { self: aSelf, gap } = await seenGap(a, b, aSlot);
   expect(aSelf.z - top.z).toBeGreaterThan(30);
   expect(top.y - aSelf.y).toBeGreaterThan(10);
   expect(aSelf.speed).toBeGreaterThan(10);
-  expect(Math.hypot(aSelf.x - bSeesA.x, aSelf.z - bSeesA.z)).toBeLessThan(5);
+  expect(gap).toBeLessThan(5);
 
   const stats = await a.evaluate(() => window.__shifty.stats());
   expect(stats.mispredictions).toBeLessThan(stats.snapshots * 0.1);
