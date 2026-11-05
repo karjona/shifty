@@ -1,8 +1,10 @@
 // Starting races: pick a race server, record the match (online modes) and
 // sign each player's join ticket.
+import { and, eq } from "drizzle-orm";
 import { openDb } from "./db/client.ts";
 import { match, matchPlayer } from "./db/schema.ts";
 import { databaseUrl, type Env } from "./env.ts";
+import { type RiderClaims, loadRiderClaims } from "./riders.ts";
 import { type EventChoice, type JoinTicket, mintTicket, roomId } from "./tickets.ts";
 
 /** Riders in a race; bots fill the seats humans don't take. */
@@ -29,6 +31,13 @@ export async function pickServer(env: Env) {
 /** A private race against bots. Not recorded. */
 export async function startSingle(env: Env, racer: Racer, event: EventChoice): Promise<JoinTicket> {
   const server = await pickServer(env);
+  const { db, close } = openDb(databaseUrl(env));
+  let rider: RiderClaims | undefined;
+  try {
+    rider = (await loadRiderClaims(db, [racer.userId])).get(racer.userId);
+  } finally {
+    await close();
+  }
   return mintTicket(env.LOBBY_SIGNING_KEY, {
     server,
     room: roomId("s"),
@@ -36,6 +45,7 @@ export async function startSingle(env: Env, racer: Racer, event: EventChoice): P
     name: racer.handle,
     event,
     bots: FIELD - 1,
+    rider,
   });
 }
 
@@ -50,9 +60,22 @@ export async function startMatch(
   const server = await pickServer(env);
   const room = roomId("m");
   const { db, close } = openDb(databaseUrl(env));
+  let riders: Map<string, RiderClaims>;
   try {
+    // Riders and setups are locked for the whole match: rejoins get the same.
+    riders = await loadRiderClaims(
+      db,
+      racers.map((r) => r.userId),
+    );
     await db.insert(match).values({ id: room, mode, event, server: server.addr });
-    await db.insert(matchPlayer).values(racers.map((r) => ({ matchId: room, userId: r.userId })));
+    await db.insert(matchPlayer).values(
+      racers.map((r) => ({
+        matchId: room,
+        userId: r.userId,
+        look: riders.get(r.userId)?.look ?? null,
+        setups: riders.get(r.userId)?.setups ?? null,
+      })),
+    );
   } finally {
     await close();
   }
@@ -66,8 +89,24 @@ export async function startMatch(
       name: r.handle,
       event,
       bots: Math.max(0, Math.min(bots, FIELD - racers.length)),
+      rider: riders.get(r.userId),
     });
     tickets.set(r.userId, ticket);
   }
   return tickets;
+}
+
+/** The rider a player entered a match with (for rejoin tickets). */
+export async function matchRider(env: Env, matchId: string, userId: string) {
+  const { db, close } = openDb(databaseUrl(env));
+  try {
+    const [row] = await db
+      .select({ look: matchPlayer.look, setups: matchPlayer.setups })
+      .from(matchPlayer)
+      .where(and(eq(matchPlayer.matchId, matchId), eq(matchPlayer.userId, userId)))
+      .limit(1);
+    return row ? { look: row.look ?? "", setups: row.setups ?? [] } : undefined;
+  } finally {
+    await close();
+  }
 }

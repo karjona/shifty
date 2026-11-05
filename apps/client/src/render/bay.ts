@@ -2,6 +2,7 @@
 // ripples, wakes, foam and reflections, or the swells alone), the course
 // on it, the coast behind, and the spray the jetskis throw.
 import * as THREE from "three/webgpu";
+import type { Appearance } from "@shifty/rider";
 import {
   Fn,
   fract,
@@ -15,6 +16,10 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { CEL } from "./cel/look.ts";
+import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
+import { SKY, clouds, skyDome } from "./cel/sky.ts";
+import { Gulls } from "./cel/gulls.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
 import { buildScenery } from "./scenery.ts";
@@ -78,6 +83,7 @@ export class Bay implements Environment {
   private sea: SeaWater | null = null;
   private wakeSources = new Map<number, WakeSource>();
   private spray: Spray;
+  private gulls: Gulls | null = null;
 
   constructor(opts: BayOptions) {
     this.topSpeed = opts.topSpeed;
@@ -98,11 +104,21 @@ export class Bay implements Environment {
     this.group.add(this.course.group);
     this.sea?.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);
+    if (CEL) {
+      celify(this.group);
+      this.group.add(skyDome(), clouds(new THREE.Vector2(0, 300)));
+      this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
+      this.group.add(this.gulls.group);
+    }
   }
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     scene.background = this.sky;
     scene.fog = new THREE.Fog(this.sky, 90, 480);
+    if (CEL) {
+      scene.background = SKY.fog;
+      scene.fog = new THREE.Fog(SKY.fog, 140, 700);
+    }
     hemi.color.set(0xfff4e0);
     hemi.groundColor.set(0x2a6f8f);
     hemi.intensity = 1.2;
@@ -114,8 +130,10 @@ export class Bay implements Environment {
     return waveHeight(this.waveParams, x, z, t);
   }
 
-  makeRider(slot: number): RiderModel {
-    return new JetskiModel(slot);
+  makeRider(slot: number, _appearance: Appearance | null): RiderModel {
+    const model = new JetskiModel(slot);
+    if (CEL) celify(model.mesh, () => ({ spec: 0.5, specSize: 0.03 }));
+    return model;
   }
 
   private buildWater(): void {
@@ -141,6 +159,7 @@ export class Bay implements Environment {
     const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.38, metalness: 0.0 });
     mat.positionNode = displaced();
     mat.colorNode = colour();
+    if (CEL) inkOnlyInPass(mat, inkNode(0, 0, 0, 0));
     const water = new THREE.Mesh(waterGrid(WATER_SIZE, WATER_SEGMENTS), mat);
     water.receiveShadow = true;
     water.frustumCulled = false;
@@ -150,6 +169,7 @@ export class Bay implements Environment {
 
   update(f: Frame): void {
     this.time.value = f.t;
+    this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.nextBuoy);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {

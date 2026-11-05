@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkName, cleanName, formatHandle, nameKey } from "../src/handles.ts";
 
-test("names are 3-20 characters of letters, digits and a few separators", () => {
+void test("names are 3-20 characters of letters, digits and a few separators", () => {
   assert.equal(checkName("Lord Kylian"), null);
   assert.equal(checkName("__xXMyNicknameXx__"), null);
   assert.equal(checkName("Ñandú"), null);
@@ -14,7 +14,7 @@ test("names are 3-20 characters of letters, digits and a few separators", () => 
   assert.equal(checkName("😀😀😀"), "chars");
 });
 
-test("reserved and rude names are refused, innocent look-alikes are not", () => {
+void test("reserved and rude names are refused, innocent look-alikes are not", () => {
   assert.equal(checkName("Admin"), "reserved");
   assert.equal(checkName("4dm1n"), "reserved");
   assert.equal(checkName("SHIFTY"), "reserved");
@@ -25,7 +25,7 @@ test("reserved and rude names are refused, innocent look-alikes are not", () => 
   assert.equal(checkName("Scunthorpe"), null);
 });
 
-test("names compare without case, accents or separators", () => {
+void test("names compare without case, accents or separators", () => {
   assert.equal(nameKey("Lord Kylian"), nameKey("lord_kylian"));
   assert.equal(nameKey("Ñandú"), "nandu");
   assert.equal(cleanName("  Lord   Kylian "), "Lord Kylian");

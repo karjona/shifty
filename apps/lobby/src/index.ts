@@ -12,6 +12,16 @@ import { devMailbox } from "./mail.ts";
 import { NoRaceServer, startSingle } from "./matches.ts";
 import { claimHandle, getPlayer, isCard, isTitle, setCard, view } from "./players.ts";
 import { parseReport, storeReport } from "./results.ts";
+import {
+  buy,
+  ownedItems,
+  checkAppearance,
+  parseSetups,
+  recentEarnings,
+  riderView,
+  saveAppearance,
+  saveSetups,
+} from "./riders.ts";
 import { isRoomCode, newRoomCode } from "./rooms.ts";
 import type { ServerInfo } from "./servers.ts";
 import { isEventChoice } from "./tickets.ts";
@@ -105,12 +115,49 @@ async function requirePlayer(c: Ctx) {
 
 app.get("/api/me", async (c) => {
   const s = await session(c);
-  if (!s) return c.json({ user: null, player: null });
+  if (!s) return c.json({ user: null, player: null, rider: null });
   const row = await getPlayer(c.var.db, s.user.id);
   return c.json({
     user: { id: s.user.id, email: s.user.email, image: s.user.image ?? null, name: s.user.name },
     player: row ? view(row) : null,
+    rider: row ? await riderView(c.var.db, row) : null,
   });
+});
+
+app.put("/api/me/rider", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const owned = await ownedItems(c.var.db, p.user.id);
+  const appearance = checkAppearance(await jsonBody(c.req.raw), (id) => owned.has(id));
+  if (typeof appearance === "string") return c.json({ error: appearance }, 400);
+  const row = await saveAppearance(c.var.db, p.user.id, appearance);
+  return row ? c.json({ rider: await riderView(c.var.db, row) }) : c.json({ error: "no_handle" }, 409);
+});
+
+app.put("/api/me/setups", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const setups = parseSetups(await jsonBody(c.req.raw));
+  if (!setups) return c.json({ error: "bad_setup" }, 400);
+  const row = await saveSetups(c.var.db, p.user.id, setups);
+  return row ? c.json({ rider: await riderView(c.var.db, row) }) : c.json({ error: "no_handle" }, 409);
+});
+
+app.post("/api/shop/buy", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const { item } = await jsonBody(c.req.raw);
+  if (typeof item !== "string" || item.length > 80) return c.json({ error: "unknown" }, 400);
+  const res = await buy(c.var.db, p.user.id, item);
+  if (!res.ok) return c.json({ error: res.error }, res.error === "credits" ? 402 : 400);
+  const row = await getPlayer(c.var.db, p.user.id);
+  return c.json({ rider: row ? await riderView(c.var.db, row) : null });
+});
+
+app.get("/api/me/earnings", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  return c.json({ earnings: await recentEarnings(c.var.db, p.user.id) });
 });
 
 app.post("/api/me/handle", async (c) => {

@@ -2,6 +2,7 @@
 // (WASM), the world drawn from its prediction, and the HUD. A Grand Prix
 // moves from course to course in the same session, with a short season
 // change in between.
+import { type Appearance, botAppearance, decodeAppearance } from "@shifty/rider";
 import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
 import { messages } from "../i18n/index.ts";
 import { InputReader } from "../input.ts";
@@ -61,18 +62,31 @@ export interface RaceState {
 }
 
 /** Roster JSON comes from our own WASM, but parse it defensively anyway. */
-function parseRoster(json: string): Map<number, string> {
+function parseRoster(json: string, seed: number): { names: Map<number, string>; looks: Map<number, Appearance> } {
   const names = new Map<number, string>();
+  const looks = new Map<number, Appearance>();
   const data: unknown = JSON.parse(json);
-  if (!Array.isArray(data)) return names;
+  if (!Array.isArray(data)) return { names, looks };
   for (const e of data as unknown[]) {
     if (typeof e !== "object" || e === null) continue;
     const slot: unknown = Reflect.get(e, "slot");
     const name: unknown = Reflect.get(e, "name");
     const bot: unknown = Reflect.get(e, "bot");
-    if (typeof slot === "number" && typeof name === "string") names.set(slot, bot === true ? `🤖 ${name}` : name);
+    const look: unknown = Reflect.get(e, "look");
+    if (typeof slot !== "number" || typeof name !== "string") continue;
+    names.set(slot, bot === true ? `🤖 ${name}` : name);
+    const bytes = Array.isArray(look) && look.every((b) => typeof b === "number") ? Uint8Array.from(look) : null;
+    // Bots (and riders without a look) are dressed alike on every screen.
+    looks.set(slot, (bytes && decodeAppearance(bytes)) ?? botAppearance(seed, slot));
   }
-  return names;
+  return { names, looks };
+}
+
+/** A number from the room's code, so everyone in it sees the same bots. */
+function roomSeed(room: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < room.length; i++) h = Math.imul(h ^ room.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
 export class RaceSession implements Stage {
@@ -341,7 +355,9 @@ export class RaceSession implements Stage {
     }
     if (client.rosterVersion() !== this.rosterVersion) {
       this.rosterVersion = client.rosterVersion();
-      this.names = parseRoster(client.rosterJson());
+      const roster = parseRoster(client.rosterJson(), roomSeed(this.opts.ticket.room));
+      this.names = roster.names;
+      for (const [slot, look] of roster.looks) engine.world.setAppearance(slot, look);
     }
     if (race.gpVersion !== this.gpVersion) {
       this.gpVersion = race.gpVersion;

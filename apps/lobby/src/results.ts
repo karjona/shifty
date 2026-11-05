@@ -4,6 +4,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { match, matchPlayer, raceResult } from "./db/schema.ts";
 import { isRecord } from "./json.ts";
+import { pay, payouts } from "./rewards.ts";
+import { courses, isEventChoice } from "./tickets.ts";
 
 export interface ResultReport {
   room: string;
@@ -50,8 +52,13 @@ export function parseReport(v: unknown): ResultReport | null {
   return { room: o.room, round, event, course, entries };
 }
 
+/** Stores a race's results and pays its rewards; returns how many results were kept. */
 export async function storeReport(db: Db, report: ResultReport): Promise<number> {
-  const [m] = await db.select({ id: match.id }).from(match).where(eq(match.id, report.room)).limit(1);
+  const [m] = await db
+    .select({ id: match.id, mode: match.mode, event: match.event })
+    .from(match)
+    .where(eq(match.id, report.room))
+    .limit(1);
   if (!m) return 0;
   const pids = report.entries.flatMap((e) => (e.pid ? [e.pid] : []));
   if (pids.length === 0) return 0;
@@ -75,5 +82,7 @@ export async function storeReport(db: Db, report: ResultReport): Promise<number>
     }));
   if (rows.length === 0) return 0;
   await db.insert(raceResult).values(rows).onConflictDoNothing();
+  const planLength = isEventChoice(m.event) ? courses(m.event).length : 1;
+  await pay(db, payouts(report, m, known, planLength));
   return rows.length;
 }

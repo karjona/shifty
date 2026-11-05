@@ -116,6 +116,8 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
                 .map(str::parse)
                 .collect::<Result<Vec<u8>, _>>()
         })?,
+        look: String::new(),
+        setups: Vec::new(),
     })
 }
 

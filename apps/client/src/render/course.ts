@@ -4,6 +4,7 @@
 // you see is what you collide with.
 import * as THREE from "three/webgpu";
 import { buildLand } from "./land.ts";
+import { CEL } from "./cel/look.ts";
 import { waveHeight } from "./waves.ts";
 
 export interface CourseData {
@@ -123,6 +124,7 @@ export class CourseView {
     this.buildBuoys();
     this.buildRamps();
     this.boundary = this.buildBoundary();
+    if (CEL) this.buildBoats();
     this.ring = new THREE.Mesh(
       new THREE.TorusGeometry(2.6, 0.12, 6, 32),
       new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
@@ -151,6 +153,7 @@ export class CourseView {
     mound.castShadow = true;
     mound.receiveShadow = true;
     this.group.add(mound);
+    if (CEL) this.group.add(this.armourStones());
 
     // Lighthouse on the east tip.
     const lh = new THREE.Group();
@@ -171,6 +174,116 @@ export class CourseView {
     }
     lh.position.set(d.straightHalf + d.breakwaterRadius * 0.45, 1.6, 0);
     this.group.add(lh);
+  }
+
+  /** The cel look: fishing boats (llaüts) moored off the town quay, riding the swell. */
+  private buildBoats(): void {
+    const town = this.data.land.find((l) => l.kind === "town");
+    if (!town) return;
+    const dx = town.bx - town.ax;
+    const dz = town.bz - town.az;
+    const len = Math.hypot(dx, dz);
+    const ux = dx / len;
+    const uz = dz / len;
+    let nx = -uz;
+    let nz = ux;
+    if (nx * -town.ax + nz * -town.az < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    const hull = new THREE.BoxGeometry(5.2, 1, 1.9, 8, 2, 2);
+    const pos = hull.attributes.position!;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i) / 2.6;
+      const k = Math.abs(x);
+      // Pinched at bow and stern, rising toward them, a round bilge.
+      pos.setZ(i, pos.getZ(i) * (1 - Math.pow(k, 2.6)) * (pos.getY(i) < 0 ? 0.75 : 1));
+      pos.setY(i, pos.getY(i) + k * k * (x > 0 ? 0.55 : 0.3));
+    }
+    hull.computeVertexNormals();
+    const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
+    const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
+    let seed = 11;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let a = 8; a < len - 8; a += 9 + rnd() * 10) {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(hull, std(colours[Math.floor(rnd() * colours.length)]!));
+      body.position.y = 0.15;
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(4.2, 0.14, 1.95),
+        std(stripes[Math.floor(rnd() * stripes.length)]!),
+      );
+      rail.position.y = 0.62;
+      g.add(body, rail);
+      if (rnd() < 0.6) {
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea));
+        cabin.position.set(-0.6, 1.1, 0);
+        g.add(cabin);
+      }
+      if (rnd() < 0.5) {
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c));
+        mast.position.set(1, 2.4, 0);
+        g.add(mast);
+      }
+      for (const m of g.children) m.castShadow = true;
+      const d = town.radius + 5 + rnd() * 3;
+      const x = town.ax + ux * a + nx * d;
+      const z = town.az + uz * a + nz * d;
+      g.rotation.y = Math.atan2(-uz, ux) + (rnd() - 0.5) * 0.3;
+      g.position.set(x, 0, z);
+      this.group.add(g);
+      this.floating.push({ obj: g, x, z, lift: 0 });
+    }
+  }
+
+  /** The cel look: the mound faced with big squared stones, so it draws as a breakwater. */
+  private armourStones(): THREE.InstancedMesh {
+    const d = this.data;
+    const len = d.straightHalf * 2 + d.breakwaterRadius * 2;
+    const per = Math.floor(len / 2.4);
+    const items: THREE.Matrix4[] = [];
+    const colours: number[] = [];
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    const greys = [0xa49c8e, 0x958d80, 0xb3ab9c, 0x8c8578];
+    for (const side of [-1, 1]) {
+      for (const row of [0, 1]) {
+        for (let i = 0; i < per; i++) {
+          const x = -len / 2 + (i + 0.5 + (rnd() - 0.5) * 0.5) * (len / per);
+          // Round the ends of the capsule.
+          const end = Math.max(0, Math.abs(x) - d.straightHalf) / d.breakwaterRadius;
+          const reach = d.breakwaterRadius * (row === 0 ? 0.95 : 0.6) * Math.sqrt(Math.max(0, 1 - end * end));
+          const s = 1.5 + rnd() * 1.4;
+          const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * Math.PI, rnd() * 0.6));
+          items.push(
+            new THREE.Matrix4().compose(
+              new THREE.Vector3(x, row === 0 ? -0.3 : 0.9, side * reach),
+              q,
+              new THREE.Vector3(s, s * 0.8, s),
+            ),
+          );
+          colours.push(greys[Math.floor(rnd() * greys.length)]!);
+        }
+      }
+    }
+    const mesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      std(0xffffff, { roughness: 0.95, flatShading: true }),
+      items.length,
+    );
+    items.forEach((m, i) => {
+      mesh.setMatrixAt(i, m);
+      mesh.setColorAt(i, new THREE.Color(colours[i]));
+    });
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
   }
 
   private buildStartGate(): void {

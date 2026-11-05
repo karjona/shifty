@@ -17,6 +17,7 @@ use crate::math::{
     TAU, Vec3, angle_diff, atan2, clamp, cos, round, sin, sqrt, wrap_angle, wrap_pi,
 };
 use crate::race::{Landing, Trick};
+use crate::setup::Setup;
 use crate::surface::Surface;
 use crate::world::Rider;
 
@@ -199,7 +200,7 @@ fn turns(angle: f32) -> i8 {
 /// Judges a touchdown and settles the attitude back into normal ranges:
 /// upright and pointing where you're going, with full turns of spin, flip
 /// or roll, is a trick. Returns `None` for plain jumps and tiny hops.
-fn land(r: &mut Rider) -> Option<Landing> {
+fn land(r: &mut Rider, setup: Setup) -> Option<Landing> {
     let spin = -turns(r.air_spin);
     let flip = turns(r.pitch);
     let roll = turns(r.roll);
@@ -216,7 +217,11 @@ fn land(r: &mut Rider) -> Option<Landing> {
     } else {
         0.0
     };
-    if pitch.abs() > LAND_PITCH || roll_err.abs() > LAND_ROLL || heading.abs() > LAND_HEADING {
+    let tolerance = setup.stability();
+    if pitch.abs() > LAND_PITCH * tolerance
+        || roll_err.abs() > LAND_ROLL * tolerance
+        || heading.abs() > LAND_HEADING * tolerance
+    {
         r.bail_ticks = BAIL_TICKS;
         r.vel = r.vel * BAIL_IMPACT;
         r.yaw_rate = 0.0;
@@ -241,6 +246,7 @@ fn land(r: &mut Rider) -> Option<Landing> {
 pub fn integrate(
     r: &mut Rider,
     input: Input,
+    setup: Setup,
     surface: &Surface,
     course: &Course,
     tick: u32,
@@ -249,7 +255,9 @@ pub fn integrate(
     let throttle = input.throttle_f();
     let lean = input.lean_f();
     let was_grounded = r.grounded;
-    let top_speed = MAX_SPEED * r.race.speed_bonus();
+    let top_speed = MAX_SPEED * r.race.speed_bonus() * setup.speed();
+    let handling = setup.handling();
+    let tricks = setup.tricks();
     r.bail_ticks = r.bail_ticks.saturating_sub(1);
     let bailing = r.bailing();
 
@@ -257,7 +265,7 @@ pub fn integrate(
         && r.pos.y <= deck.top + RAMP_CATCH
         && r.pos.y >= deck.top - course::tuning::RAMP_STEP
     {
-        let landing = if was_grounded { None } else { land(r) };
+        let landing = if was_grounded { None } else { land(r, setup) };
         ride_ramp(r, input, &deck);
         return landing;
     }
@@ -265,7 +273,7 @@ pub fn integrate(
     let wet = water_forces(r, surface, tick);
     let grounded = wet.points > 0;
     let landing = if grounded && !was_grounded {
-        land(r)
+        land(r, setup)
     } else {
         None
     };
@@ -293,13 +301,13 @@ pub fn integrate(
         let speed_factor = clamp(speed_fwd.abs() / 6.0, 0.2, 1.0);
         let fade = 1.0 - TURN_FADE * clamp(speed_fwd.abs() / MAX_SPEED, 0.0, 1.0);
         let dir = if speed_fwd < -0.5 { -1.0 } else { 1.0 };
-        let target_rate = -steer * TURN_RATE * speed_factor * fade * dir;
+        let target_rate = -steer * TURN_RATE * handling * speed_factor * fade * dir;
         r.yaw_rate += (target_rate - r.yaw_rate) * clamp(TURN_RESPONSE * bite * DT, 0.0, 1.0);
 
         if wet.stern_wet {
             let thrust = if throttle >= 0.0 {
                 let v = clamp(speed_fwd / top_speed, 0.0, 1.0);
-                throttle * ACCEL * (1.0 - v * v)
+                throttle * ACCEL * setup.speed() * (1.0 - v * v)
             } else if speed_fwd > 0.5 {
                 throttle * BRAKE
             } else {
@@ -310,7 +318,7 @@ pub fn integrate(
 
         // Grip: bleed sideways velocity so the hull carves instead of sliding.
         let lateral = r.vel.dot(right);
-        r.vel -= right * (lateral * clamp(GRIP * bite * DT, 0.0, 1.0));
+        r.vel -= right * (lateral * clamp(GRIP * handling * bite * DT, 0.0, 1.0));
 
         let drag = DRAG * bite + DIG_DRAG * wet.excess_depth;
         accel.x -= r.vel.x * drag;
@@ -340,9 +348,17 @@ pub fn integrate(
         let roll_btn = input.pressed(buttons::ROLL);
         if (spin_btn || roll_btn) && !r.bailing() {
             // Tricks: hold a button and push the stick. Pull back = backflip.
-            let spin = if roll_btn { 0.0 } else { -steer * SPIN_RATE };
-            let barrel = if roll_btn { steer * ROLL_RATE } else { 0.0 };
-            let flip = -lean * FLIP_RATE;
+            let spin = if roll_btn {
+                0.0
+            } else {
+                -steer * SPIN_RATE * tricks
+            };
+            let barrel = if roll_btn {
+                steer * ROLL_RATE * tricks
+            } else {
+                0.0
+            };
+            let flip = -lean * FLIP_RATE * tricks;
             let k = clamp(TRICK_RESPONSE * DT, 0.0, 1.0);
             r.yaw_rate += (spin - r.yaw_rate) * k;
             pitch_acc = (flip - r.pitch_rate) * TRICK_RESPONSE;

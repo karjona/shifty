@@ -2,15 +2,16 @@
 // along the top; on Home your rider stands over the seasons' colours with
 // a banner, missions and news around.
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { showMenuRider } from "../../game/backdrops.ts";
+import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
+import { SEASONS, onSeasonShown, shownSeason } from "../../game/seasons.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useState, useSyncExternalStore } from "react";
 import { type Locale, LOCALES, setLocale, useLocale, useT } from "../../i18n/index.ts";
 import { auth, type Banner, fetchContent, meQuery, type NewsPost } from "../api.ts";
-import { DiamondIcon, GearIcon, HomeIcon } from "../icons.tsx";
 import { useAction, useAutoFocus, useBackdrop, useEngine } from "../hooks.ts";
-import { Button, Hints, Modal, Panel, Picker, TabBar } from "../ui.tsx";
+import { Button, Glyph, Hints, Modal, Panel, Picker, TabBar } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { Wardrobe } from "./wardrobe.tsx";
 
 export type MenuTab = "home" | "collection" | "settings";
 const route = getRouteApi("/");
@@ -20,7 +21,12 @@ export function MainMenu() {
   const t = useT();
   const navigate = useNavigate();
   const { tab = "home" } = route.useSearch();
-  useEffect(() => showMenuRider(tab === "home"), [tab]);
+  const { data: me } = useSuspenseQuery(meQuery);
+  const appearance = me?.rider?.appearance ?? null;
+  useEffect(() => showMenuRider(tab !== "settings"), [tab]);
+  useEffect(() => {
+    if (appearance && tab === "home") setMenuRider(appearance, "summer");
+  }, [appearance, tab]);
   const setTab = (next: MenuTab) => void navigate({ to: "/", search: { tab: next }, replace: true });
   const play = () => void navigate({ to: "/play" });
   useAction("play", play);
@@ -28,29 +34,24 @@ export function MainMenu() {
 
   return (
     <div className="screen main-menu">
-      <TopBar>
-        <Button kind="primary" glyph="play" className="play-button" onClick={play} autoFocus>
-          {t.common.play}
-        </Button>
-        <TabBar
-          iconsOnly
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { id: "home", label: t.menu.home, icon: <HomeIcon /> },
-            { id: "collection", label: t.menu.collection, icon: <DiamondIcon /> },
-            { id: "settings", label: t.menu.settings, icon: <GearIcon /> },
-          ]}
-        />
-      </TopBar>
+      <TopBar />
+      <TabBar
+        className="menu-tabs"
+        value={tab}
+        onChange={setTab}
+        lead={
+          <Button kind="primary" glyph="play" className="play-button" onClick={play} autoFocus>
+            {t.common.play}
+          </Button>
+        }
+        tabs={[
+          { id: "home", label: t.menu.home },
+          { id: "collection", label: t.menu.collection },
+          { id: "settings", label: t.menu.settings },
+        ]}
+      />
       {tab === "home" && <HomeTab />}
-      {tab === "collection" && (
-        <main className="menu-body centered">
-          <Panel title={t.menu.collection}>
-            <p>{t.menu.collectionEmpty}</p>
-          </Panel>
-        </main>
-      )}
+      {tab === "collection" && <Wardrobe />}
       {tab === "settings" && <SettingsTab />}
       <Hints
         items={[
@@ -59,6 +60,18 @@ export function MainMenu() {
           ["prev", t.common.tabs],
         ]}
       />
+    </div>
+  );
+}
+
+/** The season on the backdrop, as a poster word on the scene. */
+function SeasonWord() {
+  const t = useT();
+  const season = useSyncExternalStore(onSeasonShown, shownSeason);
+  return (
+    <div className="season-word" aria-hidden="true">
+      <b key={season}>{t.seasons[season]}</b>
+      <span>{String(SEASONS.indexOf(season) + 1).padStart(2, "0")} / 04</span>
     </div>
   );
 }
@@ -83,24 +96,25 @@ function HomeTab() {
     <main className="menu-body home">
       <div className="home-left">
         <div className="rider-space" aria-hidden="true" />
-        {data && data.banners.length > 0 && <HeroBanner banners={data.banners} onOpen={open} />}
+        <SeasonWord />
       </div>
       <div className="home-right">
-        <Panel title={t.home.missions} className="missions">
-          <p className="muted">{t.home.missionsEmpty}</p>
-        </Panel>
+        {data && data.banners.length > 0 && <HeroBanner banners={data.banners} onOpen={open} />}
         <Panel title={t.home.news} className="news">
           {data && data.news.length === 0 && <p className="muted">{t.home.newsEmpty}</p>}
           <ul>
-            {data?.news.slice(0, 4).map((n) => (
+            {data?.news.slice(0, 3).map((n) => (
               <li key={n.slug}>
                 <button type="button" data-nav="" className="news-item" onClick={() => setReading(n)}>
-                  <time>{new Date(n.publishedAt).toLocaleDateString(locale)}</time>
+                  <time>{new Date(n.publishedAt).toLocaleDateString(locale, { day: "numeric", month: "short" })}</time>
                   <b>{n.title}</b>
                 </button>
               </li>
             ))}
           </ul>
+        </Panel>
+        <Panel title={t.home.missions} className="missions">
+          <span className="badge">{t.common.soonTag}</span>
         </Panel>
       </div>
       {reading && (
@@ -131,23 +145,33 @@ function HeroBanner({ banners, onOpen }: { banners: Banner[]; onOpen: (b: Banner
   }, [banners.length]);
   const b = banners[i % banners.length]!;
   const season = b.theme.startsWith("season:") ? b.theme.slice(7) : "summer";
+  const t = useT();
   return (
     <button
       type="button"
       data-nav=""
-      className={`hero season-${season}`}
-      style={b.imageUrl ? { backgroundImage: `url("${encodeURI(b.imageUrl)}")` } : undefined}
+      className={`hero season-${season} ${b.imageUrl ? "with-image" : ""}`}
       onClick={() => onOpen(b)}
     >
-      <b>{b.title}</b>
-      {b.subtitle && <span>{b.subtitle}</span>}
-      {banners.length > 1 && (
-        <span className="dots" aria-hidden="true">
-          {banners.map((x, n) => (
-            <i key={x.id} className={n === i % banners.length ? "on" : ""} />
-          ))}
-        </span>
-      )}
+      <span className="hero-head">
+        <span className="label">{t.home.featured}</span>
+        {banners.length > 1 && (
+          <span className="dots" aria-hidden="true">
+            <span className="num">
+              {(i % banners.length) + 1} / {banners.length}
+            </span>
+            {banners.map((x, n) => (
+              <i key={x.id} className={n === i % banners.length ? "on" : ""} />
+            ))}
+          </span>
+        )}
+      </span>
+      {b.imageUrl && <span className="hero-image" style={{ backgroundImage: `url("${encodeURI(b.imageUrl)}")` }} />}
+      <span className="hero-block" key={b.id}>
+        <Glyph action="confirm" />
+        <b>{b.title}</b>
+        {b.subtitle && <span>{b.subtitle}</span>}
+      </span>
     </button>
   );
 }

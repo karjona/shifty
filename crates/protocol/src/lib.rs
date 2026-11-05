@@ -35,16 +35,20 @@ mod tests {
             course: world.course,
             event_index: 1,
             event_count: 2,
-            events: (0..MAX_EVENTS_PER_SNAPSHOT as u16)
-                .map(|i| Event {
-                    id: i,
-                    body: EventBody::RiderJoined {
-                        slot: i as u8,
-                        kind: RiderKind::Human,
-                        name: "Ñandú the Shifty Rider, Ñandú the Shift#1234".into(), // exactly NAME_MAX_BYTES
-                    },
-                })
-                .collect(),
+            events: events_for_snapshot(
+                &(0..MAX_EVENTS_PER_SNAPSHOT as u16)
+                    .map(|i| Event {
+                        id: i,
+                        body: EventBody::RiderJoined {
+                            slot: i as u8,
+                            kind: RiderKind::Human,
+                            name: "Ñandú the Shifty Rider, Ñandú the Shift#1234".into(), // exactly NAME_MAX_BYTES
+                            look: vec![0xAB; LOOK_MAX_BYTES],
+                            setups: vec![[6, 2, 1, 3]; MAX_SETUPS],
+                        },
+                    })
+                    .collect::<Vec<_>>(),
+            ),
             riders: world
                 .riders
                 .iter()
@@ -68,7 +72,7 @@ mod tests {
             bytes.len()
         );
         // Keep plenty of headroom for future fields.
-        assert!(bytes.len() < 700, "snapshot grew to {} bytes", bytes.len());
+        assert!(bytes.len() < 1000, "snapshot grew to {} bytes", bytes.len());
     }
 
     #[test]

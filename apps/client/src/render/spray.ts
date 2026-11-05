@@ -12,12 +12,15 @@
 // Render-only: driven by the drawn rider state, simulated on the CPU, each
 // layer drawn as one batch of camera-facing sprites.
 import * as THREE from "three/webgpu";
+import { CEL } from "./cel/look.ts";
+import { inkNode, inkOnlyInPass } from "./cel/material.ts";
 import {
   cameraPosition,
   float,
   hash,
   instanceIndex,
   instancedDynamicBufferAttribute,
+  mix,
   smoothstep,
   uv,
   vec3,
@@ -97,6 +100,17 @@ export class ParticlePool {
     mat.colorNode = vec3(cr, cg, cb).mul(shade);
     const lens = smoothstep(look.lensFrom, look.lensTo, ps.xyz.distance(cameraPosition));
     mat.opacityNode = smoothstep(0.5, look.rim, r).mul(a).mul(lens);
+    if (CEL) {
+      // Cut-out splashes: solid white puffs with a pale blue underside, shrinking as they fade.
+      mat.transparent = false;
+      mat.depthWrite = true;
+      mat.opacityNode = null;
+      // Droplets, not mist: smaller, and only while the particle is still dense.
+      mat.scaleNode = ps.w.mul(0.55);
+      mat.maskNode = r.lessThan(a.mul(lens).sub(0.15).max(0).mul(0.55));
+      mat.colorNode = mix(vec3(0.74, 0.88, 0.97), vec3(1), smoothstep(0.45, 0.6, uv().y));
+      inkOnlyInPass(mat, inkNode(1, 0, 0.77, 0.25));
+    }
     this.sprite = new THREE.Sprite(mat);
     this.sprite.count = n;
     this.sprite.frustumCulled = false;

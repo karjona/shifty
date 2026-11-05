@@ -211,6 +211,9 @@ importers:
       '@fontsource-variable/archivo':
         specifier: 5.3.0
         version: 5.3.0
+      '@shifty/rider':
+        specifier: workspace:*
+        version: link:../../packages/rider
       '@tanstack/react-query':
         specifier: 5.105.3
         version: 5.105.3(@types/react@19.3.0)(react@19.3.1)
@@ -254,6 +257,9 @@ importers:
 
   apps/lobby:
     dependencies:
+      '@shifty/rider':
+        specifier: workspace:*
+        version: link:../../packages/rider
       better-auth:
         specifier: 1.7.15
         version: 1.7.15(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261102.1)(@types/pg@8.23.1)(kysely@0.29.8)(pg@8.23.1))(pg@8.23.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -279,6 +285,8 @@ importers:
       wrangler:
         specifier: 4.156.2
         version: 4.156.2(@cloudflare/workers-types@5.20261102.1)(@types/node@26.6.6)
+
+  packages/rider: {}
 
 packages:
 

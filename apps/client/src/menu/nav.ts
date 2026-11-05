@@ -123,6 +123,7 @@ class Nav {
       if (this.device !== "mouse" || !this.enabled) return;
       const el = e.target instanceof Element ? e.target.closest<HTMLElement>(SELECTOR) : null;
       if (el && scope().contains(el) && document.activeElement !== el && !isTextInput(document.activeElement)) {
+        document.documentElement.dataset.navDir = "pointer";
         el.focus({ preventScroll: true });
       }
     });
@@ -188,6 +189,8 @@ class Nav {
       active.dispatchEvent(new CustomEvent("nav-lr", { detail: dir === "left" ? -1 : 1, bubbles: true }));
       return;
     }
+    // The focus styles read the way it came from (the fill wipes in from that side).
+    document.documentElement.dataset.navDir = dir;
     nearest(active, dir, list)?.focus({ preventScroll: false });
   }
 

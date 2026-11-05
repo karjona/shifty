@@ -89,6 +89,9 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         surface: surface as u8,
         course: course as u8,
         events: vec![],
+        look: String::new(),
+        // Lopsided setups, so prediction has to know each rider's.
+        setups: vec![[6, 2, 2, 2], [2, 3, 6, 1]],
     }
 }
 

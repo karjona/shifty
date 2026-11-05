@@ -13,6 +13,7 @@ pub mod math;
 pub mod mountain;
 pub mod quant;
 pub mod race;
+pub mod setup;
 pub mod snowboard;
 pub mod surface;
 pub mod world;
@@ -21,6 +22,7 @@ pub use course::{Course, CourseId, Sport};
 pub use input::{Input, buttons};
 pub use math::Vec3;
 pub use race::{Phase, SimEvent};
+pub use setup::Setup;
 pub use surface::{Surface, SurfaceKind};
 pub use world::{Inputs, Rider, World};
 

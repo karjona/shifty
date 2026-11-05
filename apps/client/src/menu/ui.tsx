@@ -13,33 +13,15 @@ import { createPortal } from "react-dom";
 import { labelOf, useT } from "../i18n/index.ts";
 import type { Player } from "./api.ts";
 import { useAction, useAutoFocus, useDevice } from "./hooks.ts";
-import type { Pad } from "./nav.ts";
-
-type GlyphAction = "confirm" | "back" | "play" | "prev" | "next" | "menu";
-
-const PAD_GLYPHS: Record<Pad, Record<GlyphAction, string>> = {
-  xbox: { confirm: "A", back: "B", play: "Y", prev: "LB", next: "RB", menu: "☰" },
-  playstation: { confirm: "✕", back: "○", play: "△", prev: "L1", next: "R1", menu: "☰" },
-  nintendo: { confirm: "B", back: "A", play: "X", prev: "L", next: "R", menu: "+" },
-};
-const KEY_GLYPHS: Record<GlyphAction, string> = {
-  confirm: "Enter",
-  back: "Esc",
-  play: "P",
-  prev: "Q",
-  next: "E",
-  menu: "Esc",
-};
+import { type GlyphAction, KeyGlyph, PadGlyph } from "./glyphs.tsx";
 
 /** The button that does `action` on the device in use (nothing for the mouse). */
 export function Glyph({ action }: { action: GlyphAction }) {
   const { device, pad } = useDevice();
   if (device === "mouse") return null;
-  const text = device === "gamepad" ? PAD_GLYPHS[pad][action] : KEY_GLYPHS[action];
-  const shape = device === "gamepad" && pad === "playstation" && ["confirm", "back", "play"].includes(action);
   return (
-    <span className={`glyph ${device} ${shape ? "round" : ""}`} aria-hidden="true">
-      {text}
+    <span className={`glyph ${device}`} aria-hidden="true">
+      {device === "gamepad" ? <PadGlyph pad={pad} action={action} /> : <KeyGlyph action={action} />}
     </span>
   );
 }
@@ -69,6 +51,8 @@ export interface Tab<T extends string> {
   id: T;
   label: string;
   icon?: ReactNode;
+  /** A tag after the label, for tabs that aren't there yet ("Soon"). */
+  tag?: string;
 }
 
 /** Tabs with their shoulder buttons on either side; LB / RB (Q / E) step through them. */
@@ -78,12 +62,15 @@ export function TabBar<T extends string>({
   onChange,
   className = "",
   iconsOnly = false,
+  lead,
 }: {
   tabs: Tab<T>[];
   value: T;
   onChange: (id: T) => void;
   className?: string;
   iconsOnly?: boolean;
+  /** Something that comes first in the strip, before the tabs (the Play button). */
+  lead?: ReactNode;
 }) {
   const i = Math.max(
     0,
@@ -95,6 +82,7 @@ export function TabBar<T extends string>({
   return (
     <div className={`tabbar ${className}`} role="tablist">
       <Glyph action="prev" />
+      {lead}
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -104,11 +92,12 @@ export function TabBar<T extends string>({
           aria-selected={t.id === value}
           aria-label={iconsOnly ? t.label : undefined}
           title={iconsOnly ? t.label : undefined}
-          className={`tab ${t.id === value ? "on" : ""}`}
+          className={`tab ${t.id === value ? "on" : ""} ${t.tag ? "tagged" : ""}`}
           onClick={() => onChange(t.id)}
         >
           {t.icon}
           {!iconsOnly && <span>{t.label}</span>}
+          {t.tag && <span className="badge">{t.tag}</span>}
         </button>
       ))}
       <Glyph action="next" />
@@ -139,11 +128,16 @@ export function Picker<T extends string | number>({
   options,
   value,
   onChange,
+  onFocus,
+  autoFocus,
 }: {
   label: string;
-  options: { value: T; label: string }[];
+  autoFocus?: boolean;
+  /** Options; a `swatch` (CSS colour) shows a dot of that colour by the label. */
+  options: { value: T; label: string; swatch?: string }[];
   value: T;
   onChange: (v: T) => void;
+  onFocus?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const i = Math.max(
@@ -165,6 +159,7 @@ export function Picker<T extends string | number>({
       ref={ref}
       className="picker"
       data-nav=""
+      data-nav-autofocus={autoFocus ? "" : undefined}
       data-nav-lr=""
       tabIndex={0}
       role="spinbutton"
@@ -174,6 +169,8 @@ export function Picker<T extends string | number>({
         if (e.key === "Enter" || e.key === " ") step(1);
       }}
       onClick={() => step(1)}
+      onFocus={onFocus}
+      onMouseEnter={onFocus}
     >
       <span className="picker-label">{label}</span>
       <span className="picker-value">
@@ -188,7 +185,10 @@ export function Picker<T extends string | number>({
         >
           ◀
         </button>
-        <b>{options[i]?.label}</b>
+        <b key={String(value)}>
+          {options[i]?.swatch && <i className="swatch" style={{ background: options[i].swatch }} />}
+          {options[i]?.label}
+        </b>
         <button
           type="button"
           tabIndex={-1}
@@ -249,14 +249,13 @@ export function Modal({
   );
 }
 
+/** 23.4°, the axis (a bar tilted 23.4° in the season's colour), SHIFTY. */
 export function Wordmark({ small = false }: { small?: boolean }) {
   return (
-    <div className={`wordmark ${small ? "small" : ""}`}>
-      <span className="mark" aria-hidden="true" />
-      <span className="words">
-        <b>23.4°</b>
-        <span>Shifty</span>
-      </span>
+    <div className={`wordmark ${small ? "small" : ""}`} aria-label="23.4° Shifty">
+      <span className="deg">23.4°</span>
+      <span className="axis" aria-hidden="true" />
+      <span className="name">SHIFTY</span>
     </div>
   );
 }
@@ -266,7 +265,13 @@ export function SocialCard({ player, onClick }: { player: Player; onClick?: () =
   const t = useT();
   const title = labelOf(t.card.titles, player.title) ?? player.title;
   return (
-    <button type="button" data-nav="" className={`social-card card-${player.card}`} onClick={onClick}>
+    <button
+      type="button"
+      data-nav={onClick ? "" : undefined}
+      tabIndex={onClick ? undefined : -1}
+      className={`social-card card-${player.card}`}
+      onClick={onClick}
+    >
       <span className="avatar" aria-hidden="true">
         {player.name.slice(0, 1).toUpperCase()}
       </span>
@@ -289,7 +294,14 @@ export function Hints({ items }: { items: [GlyphAction, string][] }) {
     <div className="hints">
       {items.map(([action, label]) => (
         <span key={action}>
-          <Glyph action={action} />
+          {action === "prev" ? (
+            <span className="pair">
+              <Glyph action="prev" />
+              <Glyph action="next" />
+            </span>
+          ) : (
+            <Glyph action={action} />
+          )}
           {label}
         </span>
       ))}
@@ -299,4 +311,14 @@ export function Hints({ items }: { items: [GlyphAction, string][] }) {
 
 export function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
+}
+
+/** Your credits, to spend in the pro shop. */
+export function Credits({ credits }: { credits: number }) {
+  const t = useT();
+  return (
+    <span className="credits" title={t.shop.credits}>
+      {t.shop.amount(credits)}
+    </span>
+  );
 }

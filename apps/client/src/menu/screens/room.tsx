@@ -130,84 +130,93 @@ export function RoomScreen() {
   const host = room !== null && me !== null && room.hostId === me;
   const mine = room?.members.find((m) => m.userId === me);
   const start = () => send({ t: "start" });
+  // The ready (or start) button waits for the room; it takes the focus once it's here.
+  const loaded = room !== null;
+  useEffect(() => {
+    if (loaded) document.querySelector<HTMLElement>(".room .actions .btn-primary")?.focus();
+  }, [loaded]);
   useAction("play", () => (host ? start() : send({ t: "ready", ready: !mine?.ready })), room !== null);
 
   return (
     <div className="screen room">
-      <TopBar>
-        <h1 className="screen-title">{t.room.title(code)}</h1>
-      </TopBar>
+      <TopBar title={t.room.title(code)} kicker={t.play.club} />
       <main className="mode-body">
         <div className="party" aria-hidden="true" />
-        <Panel className="mode-panel" title={t.room.title(code)}>
-          {!room ? (
-            <p className="muted">
-              <Spinner /> {t.room.connecting}
-            </p>
-          ) : (
-            <>
-              <p className="room-code">{code}</p>
-              <p className="muted small">{t.room.share}</p>
-              <ul className="members">
-                {room.members.map((m) => (
-                  <li key={m.userId}>
-                    <b>{m.handle}</b>
-                    {m.userId === room.hostId ? (
-                      <span className="badge">{t.room.host}</span>
-                    ) : (
-                      <span className={`badge ${m.ready ? "ok" : ""}`}>{m.ready ? t.room.ready : t.room.notReady}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {host ? (
-                <>
-                  <Picker<EventChoice>
-                    label={t.room.event}
-                    options={EVENTS.map((e) => ({ value: e, label: t.play.events[e] }))}
-                    value={room.event}
-                    onChange={(event) => send({ t: "settings", event, bots: room.bots })}
-                  />
-                  <Picker
-                    label={t.room.bots}
-                    options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
-                    value={room.bots}
-                    onChange={(bots) => send({ t: "settings", event: room.event, bots })}
-                  />
-                </>
-              ) : (
-                <p className="muted">
-                  {t.play.events[room.event]} · {t.room.bots}: {room.bots}
-                  <br />
-                  {t.room.waiting}
-                </p>
-              )}
-              {me && room.racing.includes(me) && <Button onClick={() => send({ t: "rejoin" })}>{t.room.rejoin}</Button>}
-            </>
-          )}
-        </Panel>
+        <div className="mode-side">
+          <Panel className="mode-panel" title={t.room.title(code)}>
+            {!room ? (
+              <p className="muted">
+                <Spinner /> {t.room.connecting}
+              </p>
+            ) : (
+              <>
+                <p className="room-code">{code}</p>
+                <p className="muted small">{t.room.share}</p>
+                <ul className="members">
+                  {room.members.map((m) => (
+                    <li key={m.userId}>
+                      <b>{m.handle}</b>
+                      {m.userId === room.hostId ? (
+                        <span className="badge">{t.room.host}</span>
+                      ) : (
+                        <span className={`badge ${m.ready ? "ok" : ""}`}>
+                          {m.ready ? t.room.ready : t.room.notReady}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {host ? (
+                  <>
+                    <Picker<EventChoice>
+                      label={t.room.event}
+                      options={EVENTS.map((e) => ({ value: e, label: t.play.events[e] }))}
+                      value={room.event}
+                      onChange={(event) => send({ t: "settings", event, bots: room.bots })}
+                    />
+                    <Picker
+                      label={t.room.bots}
+                      options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
+                      value={room.bots}
+                      onChange={(bots) => send({ t: "settings", event: room.event, bots })}
+                    />
+                  </>
+                ) : (
+                  <p className="muted">
+                    {t.play.events[room.event]} · {t.room.bots}: {room.bots}
+                    <br />
+                    {t.room.waiting}
+                  </p>
+                )}
+                {me && room.racing.includes(me) && (
+                  <Button onClick={() => send({ t: "rejoin" })}>{t.room.rejoin}</Button>
+                )}
+              </>
+            )}
+          </Panel>
+          <footer className="actions">
+            <Button kind="ghost" glyph="back" onClick={leave}>
+              {t.room.leave}
+            </Button>
+            {host ? (
+              <Button kind="primary" glyph="play" className="play-button big" onClick={start} autoFocus>
+                {t.room.start}
+              </Button>
+            ) : (
+              <Button
+                kind="primary"
+                glyph="play"
+                className="play-button big"
+                onClick={() => send({ t: "ready", ready: !mine?.ready })}
+                disabled={!room}
+                autoFocus
+              >
+                {mine?.ready ? t.room.notReady : t.room.imReady}
+              </Button>
+            )}
+          </footer>
+        </div>
       </main>
-      <footer className="mode-footer">
-        <Button kind="ghost" glyph="back" onClick={leave}>
-          {t.room.leave}
-        </Button>
-        {host ? (
-          <Button kind="primary" glyph="play" className="play-button big" onClick={start} autoFocus>
-            {t.room.start}
-          </Button>
-        ) : (
-          <Button
-            kind="primary"
-            glyph="play"
-            className="play-button big"
-            onClick={() => send({ t: "ready", ready: !mine?.ready })}
-            disabled={!room}
-            autoFocus
-          >
-            {mine?.ready ? t.room.notReady : t.room.imReady}
-          </Button>
-        )}
-      </footer>
       <Hints
         items={[
           ["confirm", t.common.select],

@@ -19,15 +19,23 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
 pub const MAX_INPUTS_PER_PACKET: usize = 32;
 /// Most reliable events packed in one snapshot.
 pub const MAX_EVENTS_PER_SNAPSHOT: usize = 4;
+/// Most bytes of events in one snapshot (riders joining carry their
+/// appearance): the rest wait for the next one.
+pub const EVENT_BUDGET_BYTES: usize = 400;
 /// Names are player handles (`Name#1234`): 40 bytes of name plus the tag.
 pub const NAME_MAX_BYTES: usize = 48;
+/// A rider's appearance (look and outfits), as the lobby encodes it. The
+/// race server passes it on without reading it.
+pub const LOOK_MAX_BYTES: usize = 64;
+/// Setups per rider: one per sport.
+pub const MAX_SETUPS: usize = 4;
 pub const TOKEN_MAX_BYTES: usize = 900;
 
 pub mod kind {
@@ -216,6 +224,10 @@ pub enum EventBody {
         slot: u8,
         kind: RiderKind,
         name: String,
+        /// Appearance bytes (empty for bots: clients dress them alike).
+        look: Vec<u8>,
+        /// Setup per sport (`sim::Setup` bytes), for predicting this rider.
+        setups: Vec<[u8; 4]>,
     },
     RiderLeft {
         slot: u8,
@@ -393,16 +405,56 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
     })
 }
 
+impl Event {
+    /// Bytes this event takes in a snapshot.
+    pub fn encoded_len(&self) -> usize {
+        let mut w = Writer::default();
+        write_event(&mut w, self);
+        w.len()
+    }
+}
+
+/// The events to send in the next snapshot: from the front of the queue,
+/// up to `MAX_EVENTS_PER_SNAPSHOT` and `EVENT_BUDGET_BYTES` (always at
+/// least one, so the queue keeps moving).
+pub fn events_for_snapshot<'a>(queue: impl IntoIterator<Item = &'a Event>) -> Vec<Event> {
+    let mut out = Vec::new();
+    let mut bytes = 0;
+    for e in queue.into_iter().take(MAX_EVENTS_PER_SNAPSHOT) {
+        let len = e.encoded_len();
+        if !out.is_empty() && bytes + len > EVENT_BUDGET_BYTES {
+            break;
+        }
+        bytes += len;
+        out.push(e.clone());
+    }
+    out
+}
+
 fn write_event(w: &mut Writer, e: &Event) {
     w.u16(e.id);
     match &e.body {
-        EventBody::RiderJoined { slot, kind, name } => {
+        EventBody::RiderJoined {
+            slot,
+            kind,
+            name,
+            look,
+            setups,
+        } => {
             w.u8(1);
             w.u8(*slot);
             w.u8(*kind as u8);
             let n = truncate_utf8(name, NAME_MAX_BYTES);
             w.u8(n.len() as u8);
             w.bytes(n.as_bytes());
+            let look = &look[..look.len().min(LOOK_MAX_BYTES)];
+            w.u8(look.len() as u8);
+            w.bytes(look);
+            let setups = &setups[..setups.len().min(MAX_SETUPS)];
+            w.u8(setups.len() as u8);
+            for s in setups {
+                w.bytes(s);
+            }
         }
         EventBody::RiderLeft { slot } => {
             w.u8(2);
@@ -435,11 +487,28 @@ fn read_event(r: &mut Reader<'_>) -> Result<Event, DecodeError> {
                 return Err(DecodeError::Invalid("name too long"));
             }
             let name = core::str::from_utf8(r.bytes(len)?)
-                .map_err(|_| DecodeError::Invalid("name not utf-8"))?;
+                .map_err(|_| DecodeError::Invalid("name not utf-8"))?
+                .to_owned();
+            let look_len = r.u8()? as usize;
+            if look_len > LOOK_MAX_BYTES {
+                return Err(DecodeError::Invalid("look too long"));
+            }
+            let look = r.bytes(look_len)?.to_vec();
+            let n_setups = r.u8()? as usize;
+            if n_setups > MAX_SETUPS {
+                return Err(DecodeError::Invalid("too many setups"));
+            }
+            let mut setups = Vec::with_capacity(n_setups);
+            for _ in 0..n_setups {
+                let b = r.bytes(4)?;
+                setups.push([b[0], b[1], b[2], b[3]]);
+            }
             EventBody::RiderJoined {
                 slot,
                 kind,
-                name: name.to_owned(),
+                name,
+                look,
+                setups,
             }
         }
         2 => EventBody::RiderLeft { slot: r.u8()? },

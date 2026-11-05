@@ -15,7 +15,9 @@ import { Login } from "./screens/login.tsx";
 import { MainMenu, type MenuTab } from "./screens/main-menu.tsx";
 import { ModeSelect, type Mode } from "./screens/play.tsx";
 import { RaceScreen } from "./screens/race.tsx";
+import { RiderScreen } from "./screens/rider.tsx";
 import { RoomScreen } from "./screens/room.tsx";
+import { ShopScreen } from "./screens/shop.tsx";
 import { Welcome } from "./screens/welcome.tsx";
 import { Toasts } from "./toast.tsx";
 
@@ -36,8 +38,16 @@ async function signedIn(ctx: Ctx) {
   return ctx.queryClient.ensureQueryData(meQuery);
 }
 
-/** Screens for players with a handle. */
+/** Screens for players with a handle and a rider. */
 async function requirePlayer({ context }: { context: Ctx }) {
+  const me = await signedIn(context);
+  if (!me) throw redirect({ to: "/login" });
+  if (!me.player) throw redirect({ to: "/welcome" });
+  if (!me.rider?.appearance) throw redirect({ to: "/rider" });
+}
+
+/** The creator: a handle is enough (it's where new players make their rider). */
+async function requireHandle({ context }: { context: Ctx }) {
   const me = await signedIn(context);
   if (!me) throw redirect({ to: "/login" });
   if (!me.player) throw redirect({ to: "/welcome" });
@@ -51,7 +61,7 @@ const loginRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): { error?: string } => ({ error: str(s.error) }),
   beforeLoad: async ({ context }) => {
     const me = await signedIn(context);
-    if (me) throw redirect({ to: me.player ? "/" : "/welcome" });
+    if (me) throw redirect({ to: me.player ? (me.rider?.appearance ? "/" : "/rider") : "/welcome" });
   },
   component: Login,
 });
@@ -62,7 +72,7 @@ const welcomeRoute = createRoute({
   beforeLoad: async ({ context }) => {
     const me = await signedIn(context);
     if (!me) throw redirect({ to: "/login" });
-    if (me.player) throw redirect({ to: "/" });
+    if (me.player) throw redirect({ to: me.rider?.appearance ? "/" : "/rider" });
   },
   component: Welcome,
 });
@@ -85,6 +95,20 @@ const playRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): { mode?: Mode } => ({ mode: MODES.find((m) => m === s.mode) }),
   beforeLoad: requirePlayer,
   component: ModeSelect,
+});
+
+const riderRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/rider",
+  beforeLoad: requireHandle,
+  component: RiderScreen,
+});
+
+const shopRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/shop",
+  beforeLoad: requirePlayer,
+  component: ShopScreen,
 });
 
 const roomRoute = createRoute({
@@ -117,6 +141,8 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   welcomeRoute,
   menuRoute,
+  riderRoute,
+  shopRoute,
   playRoute,
   roomRoute,
   raceRoute,

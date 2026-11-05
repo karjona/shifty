@@ -14,6 +14,8 @@
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
+import { CEL } from "./cel/look.ts";
+import { celWaterMaterial } from "./cel/water.ts";
 import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
@@ -232,6 +234,7 @@ export class SeaWater {
   private swells = new WaveUniforms(MAX_WAVES);
   private chop = new WaveUniforms(CHOP_WAVES);
   private origin = uniform(new THREE.Vector2());
+  private swellDir = uniform(new THREE.Vector2(1, 0));
   /** Land capsules: segment (ax, az, bx, bz) and radius; unused ones sit far away. */
   private landSeg = uniformArray<"vec4">(
     Array.from({ length: MAX_LAND }, () => new THREE.Vector4(1e6, 1e6, 1e6, 1e6)),
@@ -359,11 +362,26 @@ export class SeaWater {
     })();
 
     const geo = waterGrid(size, segments);
-    const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0 });
-    mat.positionNode = displaced();
-    mat.colorNode = surface.xyz.mul(float(1).sub(fresnel));
-    mat.emissiveNode = mirror.rgb.mul(fresnel);
-    mat.normalNode = transformNormalToView(surfaceNormal);
+    let mat: THREE.Material;
+    if (CEL) {
+      mat = celWaterMaterial({
+        position: displaced(),
+        surfaceNormal,
+        fine,
+        shore: shoreAt(),
+        wake: wakeAt(),
+        mirror,
+        time: t,
+        swellDir: this.swellDir,
+      });
+    } else {
+      const standard = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0 });
+      standard.positionNode = displaced();
+      standard.colorNode = surface.xyz.mul(float(1).sub(fresnel));
+      standard.emissiveNode = mirror.rgb.mul(fresnel);
+      standard.normalNode = transformNormalToView(surfaceNormal);
+      mat = standard;
+    }
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.receiveShadow = true;
     this.mesh.frustumCulled = false;
@@ -389,6 +407,7 @@ export class SeaWater {
   setWaves(params: Float32Array, seed: number): void {
     this.swells.setFromSim(params);
     const mainDir = Math.atan2(params[1] ?? 0, params[0] ?? 1);
+    this.swellDir.value.set(Math.cos(mainDir), Math.sin(mainDir));
     chopWaves(seed, mainDir).forEach((w, i) => this.chop.setSine(i, w.dx, w.dz, w.k, w.a, w.w, w.p));
   }
 

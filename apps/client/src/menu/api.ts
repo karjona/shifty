@@ -1,6 +1,7 @@
 // The lobby, from the menus: the account (Better Auth), the player's
 // profile, menu content, and getting into races.
-import { queryOptions } from "@tanstack/react-query";
+import { type Appearance, type Setups, defaultSetups, parseAppearance, parseSetup, SPORTS } from "@shifty/rider";
+import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import { createAuthClient } from "better-auth/react";
 import { emailOTPClient } from "better-auth/client/plugins";
 import { getLocale } from "../i18n/index.ts";
@@ -25,9 +26,19 @@ export interface Player {
   renameAt: number;
 }
 
+/** The player's rider, wardrobe and credits. */
+export interface Rider {
+  /** Null until the player has made their rider. */
+  appearance: Appearance | null;
+  setups: Setups;
+  credits: number;
+  owned: Set<string>;
+}
+
 export interface Me {
   user: { id: string; email: string; image: string | null; name: string };
   player: Player | null;
+  rider: Rider | null;
 }
 
 export class ApiError extends Error {
@@ -72,6 +83,34 @@ function parsePlayer(v: unknown): Player | null {
   };
 }
 
+/** The lobby's rider, checked rather than trusted. */
+function parseRider(v: unknown): Rider | null {
+  if (!isObj(v)) return null;
+  const appearance = parseAppearance(v.appearance);
+  const setups = defaultSetups();
+  if (isObj(v.setups)) for (const sport of SPORTS) setups[sport] = parseSetup(v.setups[sport]) ?? setups[sport];
+  const owned = Array.isArray(v.owned) ? (v.owned as unknown[]).filter((x): x is string => typeof x === "string") : [];
+  return { appearance, setups, credits: num(v, "credits"), owned: new Set(owned) };
+}
+
+function riderOf(o: Obj): Rider {
+  const r = parseRider(o.rider);
+  if (!r) throw new ApiError(500, "bad_response");
+  return r;
+}
+
+export async function saveRider(appearance: Appearance): Promise<Rider> {
+  return riderOf(await call("/api/me/rider", { method: "PUT", body: JSON.stringify(appearance) }));
+}
+
+export async function saveSetups(setups: Setups): Promise<Rider> {
+  return riderOf(await call("/api/me/setups", { method: "PUT", body: JSON.stringify(setups) }));
+}
+
+export async function buyItem(item: string): Promise<Rider> {
+  return riderOf(await call("/api/shop/buy", { method: "POST", body: JSON.stringify({ item }) }));
+}
+
 function playerOf(o: Obj): Player {
   const p = parsePlayer(o.player);
   if (!p) throw new ApiError(500, "bad_response");
@@ -86,10 +125,16 @@ export async function fetchMe(): Promise<Me | null> {
   return {
     user: { id: u.id, email: str(u, "email"), image: strOrNull(u, "image"), name: str(u, "name") },
     player: parsePlayer(me.player),
+    rider: parseRider(me.rider),
   };
 }
 
 export const meQuery = queryOptions({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
+
+/** Puts the lobby's latest view of your rider into the cached `me`. */
+export function storeRider(queryClient: QueryClient, rider: Rider): void {
+  queryClient.setQueryData(meQuery.queryKey, (m) => (m ? { ...m, rider } : m));
+}
 
 export async function claimHandle(name: string): Promise<Player> {
   return playerOf(await call("/api/me/handle", { method: "POST", body: JSON.stringify({ name }) }));

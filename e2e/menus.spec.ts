@@ -34,6 +34,9 @@ async function signUp(browser: Browser, name: string): Promise<{ page: Page; han
   await expect(title).toHaveText(new RegExp(`^${name}#\\d{4}$`, "u"));
   const handle = (await title.textContent()) ?? "";
   await page.getByRole("button", { name: /let's ride/iu }).click();
+  // First time in: make your rider (a random one is ready to go).
+  await page.waitForURL(/\/rider/u);
+  await page.getByRole("button", { name: /^done$/iu }).click();
   await page.waitForURL((u) => u.pathname === "/");
   return { page, handle };
 }
@@ -56,6 +59,60 @@ test("sign up, pick a handle and race the Grand Prix against bots", async ({ bro
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /leave the race/iu }).click();
   await page.waitForURL(/\/play/u);
+});
+
+test("make a rider, dress them, set them up and visit the pro shop", async ({ browser }) => {
+  const { page } = await signUp(browser, "Dani");
+  await page.goto("/rider?render=0");
+  // Female bodies have no beard row; switching keeps the outfit wearable.
+  const body = page.getByRole("spinbutton", { name: "Body" });
+  if ((await body.getAttribute("aria-valuetext")) !== "Female") await body.click();
+  await expect(body).toHaveAttribute("aria-valuetext", "Female");
+  await expect(page.getByRole("spinbutton", { name: "Beard" })).toHaveCount(0);
+  await page.getByRole("spinbutton", { name: "Nose" }).click();
+  await page.getByRole("button", { name: /^done$/iu }).click();
+  await expect(page.getByText("Rider saved.")).toBeVisible();
+
+  // The wardrobe: wear the other starter vest.
+  await page.goto("/?tab=collection&render=0");
+  await page.getByRole("spinbutton", { name: "Life vest" }).click();
+  await page.getByRole("button", { name: /save outfit/iu }).click();
+  await expect(page.getByText("Outfit saved.")).toBeVisible();
+
+  // A setup: a point from tricks into speed.
+  await page.goto("/play?render=0");
+  await page.getByRole("button", { name: /^setup$/iu }).click();
+  await page.getByRole("spinbutton", { name: "Tricks" }).getByRole("button", { name: "less" }).click();
+  await page.getByRole("spinbutton", { name: "Speed" }).getByRole("button", { name: "more" }).click();
+  await expect(page.getByRole("spinbutton", { name: "Speed" })).toHaveAttribute("aria-valuenow", "4");
+  await page.getByRole("button", { name: /save setup/iu }).click();
+  await expect(page.getByText("Setup saved.")).toBeVisible();
+
+  // The pro shop: a new rider has no credits yet.
+  await page.goto("/shop?render=0");
+  await expect(page.locator(".credits").first()).toContainText("0 cr");
+  await page.locator(".shop-item:not(.owned)").first().click();
+  await expect(page.getByText(/not enough credits/iu)).toBeVisible();
+  await expect(page.locator(".modal").getByRole("button", { name: /^buy$/iu })).toBeDisabled();
+
+  // The lobby checks too: no wearing what you don't own, no free credits.
+  const origin = { origin: new URL(page.url()).origin };
+  // Your own rider, with the vest swapped by hand for one from the shop.
+  const me = await (await page.request.get("/api/me")).text();
+  const appearance = JSON.stringify(JSON.parse(me).rider.appearance);
+  const stolen: unknown = JSON.parse(appearance.replace(/summer\.vest\.foam\.\w+/u, "summer.vest.race.orange"));
+  const put = await page.request.put("/api/me/rider", { data: stolen, headers: origin });
+  expect(put.status()).toBe(400);
+  const buy = await page.request.post("/api/shop/buy", { data: { item: "summer.vest.race.orange" }, headers: origin });
+  expect(buy.status()).toBe(402);
+  const setup = await page.request.put("/api/me/setups", {
+    data: {
+      summer: { speed: 6, handling: 6, stability: 6, tricks: 6 },
+      winter: { speed: 3, handling: 3, stability: 3, tricks: 3 },
+    },
+    headers: origin,
+  });
+  expect(setup.status()).toBe(400);
 });
 
 test("two friends race in a private room", async ({ browser }) => {

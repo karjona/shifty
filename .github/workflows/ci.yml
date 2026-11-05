@@ -73,8 +73,8 @@ jobs:
       - run: pnpm fmt:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Lobby unit tests
-        run: pnpm --filter lobby test
+      - name: Unit tests (lobby, rider catalog)
+        run: pnpm --filter lobby test && pnpm --filter @shifty/rider test
       - run: pnpm --filter client build
       - run: pnpm exec playwright install --with-deps --no-shell chromium
       - run: pnpm test:e2e

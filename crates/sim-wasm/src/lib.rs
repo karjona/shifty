@@ -216,7 +216,8 @@ impl WasmClient {
         self.inner.roster_version()
     }
 
-    /// Roster as JSON: `[{slot, name, bot}]`. Call only when `rosterVersion` changes.
+    /// Roster as JSON: `[{slot, name, bot, look}]` (`look`: appearance bytes,
+    /// empty for bots). Call only when `rosterVersion` changes.
     #[wasm_bindgen(js_name = rosterJson)]
     pub fn roster_json(&self) -> String {
         let entries: Vec<serde_json::Value> = self
@@ -225,7 +226,14 @@ impl WasmClient {
             .iter()
             .enumerate()
             .filter_map(|(slot, e)| {
-                e.as_ref().map(|e| serde_json::json!({ "slot": slot, "name": e.name, "bot": e.kind == protocol::RiderKind::Bot }))
+                e.as_ref().map(|e| {
+                    serde_json::json!({
+                        "slot": slot,
+                        "name": e.name,
+                        "bot": e.kind == protocol::RiderKind::Bot,
+                        "look": e.look,
+                    })
+                })
             })
             .collect();
         serde_json::Value::Array(entries).to_string()

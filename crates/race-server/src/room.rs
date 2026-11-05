@@ -10,13 +10,13 @@ use std::collections::VecDeque;
 
 use protocol::token::JoinClaims;
 use protocol::{
-    Event, EventBody, InputPacket, MAX_EVENTS_PER_SNAPSHOT, PROTOCOL_VERSION, RejectReason,
-    RiderKind, RiderState, ServerMsg, Snapshot, Welcome, truncate_utf8,
+    Event, EventBody, InputPacket, PROTOCOL_VERSION, RejectReason, RiderKind, RiderState,
+    ServerMsg, Snapshot, Welcome, truncate_utf8,
 };
 use serde::Serialize;
 use sim::bot::bot_input;
 use sim::race::{Phase, Race};
-use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, SurfaceKind, TICK_HZ, World};
+use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, World};
 
 pub type ConnId = u64;
 
@@ -36,6 +36,18 @@ const INPUT_RING: usize = 128;
 /// Grand Prix points by finishing place. Riders who don't finish get the
 /// last place's points.
 pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
+/// Bots' setups by seat (the same for every sport): a spread, so the field
+/// rides differently.
+const BOT_SETUPS: [[u8; 4]; 8] = [
+    [3, 3, 3, 3],
+    [4, 3, 3, 2],
+    [3, 4, 2, 3],
+    [2, 3, 4, 3],
+    [3, 3, 2, 4],
+    [4, 4, 2, 2],
+    [2, 4, 3, 3],
+    [3, 2, 4, 3],
+];
 
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
@@ -115,6 +127,9 @@ struct Player {
     conn: ConnId,
     pid: String,
     name: String,
+    /// Appearance bytes and setups from the join token, kept for the room's plan.
+    look: Vec<u8>,
+    setups: Vec<[u8; 4]>,
     /// Ring buffer of inputs keyed by tick.
     inputs: [Option<(u32, Input)>; INPUT_RING],
     highest_input_tick: u32,
@@ -214,6 +229,7 @@ impl Room {
             });
             room.world.spawn(slot);
         }
+        room.apply_setups();
         room
     }
 
@@ -271,16 +287,35 @@ impl Room {
             Seat::Human => RiderKind::Human,
             Seat::Bot => RiderKind::Bot,
         };
-        let name = match (&self.players[slot], kind) {
-            (Some(p), _) => p.name.clone(),
-            (None, RiderKind::Bot) => format!("Bot {}", slot + 1),
+        let (name, look) = match (&self.players[slot], kind) {
+            (Some(p), _) => (p.name.clone(), p.look.clone()),
+            (None, RiderKind::Bot) => (format!("Bot {}", slot + 1), Vec::new()),
             (None, RiderKind::Human) => return None,
         };
         Some(EventBody::RiderJoined {
             slot: slot as u8,
             kind,
             name,
+            look,
+            setups: self.setups_of(slot),
         })
+    }
+
+    /// A seat's setups (one per sport): the player's, or the bot's.
+    fn setups_of(&self, slot: usize) -> Vec<[u8; 4]> {
+        match (&self.players[slot], self.seats[slot]) {
+            (Some(p), _) => p.setups.clone(),
+            (None, Seat::Bot) => vec![BOT_SETUPS[slot % BOT_SETUPS.len()]; 2],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Every seat's setup for the course raced now.
+    fn apply_setups(&mut self) {
+        let sport = self.world.course().sport;
+        for slot in 0..MAX_RIDERS {
+            self.world.setups[slot] = Setup::for_sport(&self.setups_of(slot), sport);
+        }
     }
 
     /// Seat a verified player. Same `pid` again = reconnect: keeps the seat
@@ -339,10 +374,12 @@ impl Room {
                     points: 0,
                 });
                 self.world.spawn(slot);
-                let mut player = Player {
+                let player = Player {
                     conn,
                     pid: claims.pid.clone(),
                     name: truncate_utf8(claims.name.trim(), protocol::NAME_MAX_BYTES).to_owned(),
+                    look: claims.look_bytes(),
+                    setups: claims.setups.clone(),
                     inputs: [None; INPUT_RING],
                     highest_input_tick: self.world.tick,
                     lead_min_window: i32::MAX,
@@ -357,27 +394,22 @@ impl Room {
                 };
                 // The newcomer learns the whole roster, in slot order, and
                 // the Grand Prix table.
-                for s in 0..MAX_RIDERS {
-                    if s == slot {
-                        player.push_event(EventBody::RiderJoined {
-                            slot: slot as u8,
-                            kind: RiderKind::Human,
-                            name: player.name.clone(),
-                        });
-                    } else if let Some(e) = self.roster_event(s) {
-                        player.push_event(e);
-                    }
-                }
-                if self.config.grand_prix() {
-                    player.push_event(self.standings_event());
-                }
-                let joined = EventBody::RiderJoined {
-                    slot: slot as u8,
-                    kind: RiderKind::Human,
-                    name: player.name.clone(),
-                };
                 self.players[slot] = Some(player);
-                self.broadcast_event(&joined, Some(slot));
+                self.apply_setups();
+                let events: Vec<EventBody> = (0..MAX_RIDERS)
+                    .filter_map(|s| self.roster_event(s))
+                    .collect();
+                let standings = self.config.grand_prix().then(|| self.standings_event());
+                let player = self.players[slot].as_mut().expect("seated");
+                for e in events {
+                    player.push_event(e);
+                }
+                if let Some(t) = standings {
+                    player.push_event(t);
+                }
+                if let Some(joined) = self.roster_event(slot) {
+                    self.broadcast_event(&joined, Some(slot));
+                }
                 slot
             }
         };
@@ -416,6 +448,7 @@ impl Room {
             // The bot starts from the grid; it rides free until the next race.
             self.world.remove(slot);
             self.world.spawn(slot);
+            self.apply_setups();
             if let Some(e) = self.roster_event(slot) {
                 self.broadcast_event(&e, None);
             }
@@ -514,6 +547,7 @@ impl Room {
             }
         }
         self.world = world;
+        self.apply_setups();
     }
 
     /// Validate and buffer a packet of inputs. Never trusts the client: values
@@ -643,12 +677,7 @@ impl Room {
                     event_index: self.event_index as u8,
                     event_count: self.config.plan.len() as u8,
                     race: self.world.race,
-                    events: p
-                        .events
-                        .iter()
-                        .take(MAX_EVENTS_PER_SNAPSHOT)
-                        .cloned()
-                        .collect(),
+                    events: protocol::events_for_snapshot(&p.events),
                     riders: riders.clone(),
                 };
                 out.packets
@@ -675,6 +704,8 @@ mod tests {
             surface: SurfaceKind::Flat as u8,
             course: events[0],
             events,
+            look: String::new(),
+            setups: Vec::new(),
         }
     }
 
