@@ -29,8 +29,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import type { Finish } from "../rider/material.ts";
-import { STYLE } from "./look.ts";
+import type { Finish } from "../rider/assets.ts";
 import { CelMaterial, SUN_DIR, inkNode, inkOnlyInPass } from "./material.ts";
 
 export type TintKind = "kit" | "look" | "hair";
@@ -38,9 +37,9 @@ export type TintKind = "kit" | "look" | "hair";
 /** World size of one pixel of the drawing buffer at one metre away (set per frame). */
 export const PIXEL_AT_1M = uniform(0.001);
 /** How much darker than its surroundings a brush stroke must be to draw as an inner line. */
-const INNER_LINES = uniform(Number(new URLSearchParams(location.search).get("inner") ?? 0.1));
+const INNER_LINES = 0.1;
 /** Outline width of the riders, in pixels. */
-export const RIDER_LINE = uniform(STYLE === "comic" ? 4.4 : 3.2);
+export const RIDER_LINE = uniform(3.2);
 
 const WARM_SHADE = new THREE.Color(0.86, 0.62, 0.66);
 const COOL_SHADE = new THREE.Color(0.66, 0.62, 0.86);
@@ -102,8 +101,8 @@ export class CelTintMaterial extends CelMaterial {
       // the painter's dark strokes (folds, seams, muscle lines): darker than the paint around them.
       const around = dot(texture(detail).level(float(3)).rgb, vec3(0.299, 0.587, 0.114));
       // (Skin needs a bolder stroke than cloth before it draws: freckles of paint shouldn't.)
-      const inner = kind === "look" ? INNER_LINES.mul(1.5) : INNER_LINES;
-      const stroke = smoothstep(inner.mul(0.5), inner, around.sub(lum));
+      const inner = kind === "look" ? INNER_LINES * 1.5 : INNER_LINES;
+      const stroke = smoothstep(inner * 0.5, inner, around.sub(lum));
       const mark = max(smoothstep(0.2, 0.12, lum), stroke.mul(0.85));
       const tinted = tint.mul(mix(float(1), float(0.32), mark));
       // Untinted paint (eye whites, logos): its colour, lifted out of the baked light.
@@ -340,7 +339,7 @@ export function limbGeometry(geo: THREE.BufferGeometry, rest: THREE.Vector3[]): 
 export function outlineOf(
   mesh: THREE.SkinnedMesh,
   mat: CelTintMaterial,
-  ink = STYLE === "comic" ? new THREE.Color(0.02, 0.02, 0.03) : new THREE.Color(0.1, 0.06, 0.09),
+  ink = new THREE.Color(0.1, 0.06, 0.09),
 ): THREE.SkinnedMesh {
   let geo = hullGeometries.get(mesh.geometry);
   if (!geo) {

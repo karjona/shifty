@@ -4,7 +4,6 @@
 // flat-shaded; anything repeated is instanced.
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
-import { CEL } from "./cel/look.ts";
 import { Fn, float, fract, fwidth, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 
 /** Seeded noise in [0, 1). */
@@ -29,11 +28,10 @@ const PINE = 0x2f5e34;
 const TRUNK = 0x7a5a3c;
 const PALM = 0x4f8a3a;
 const ROOF = 0xc0623a;
-const WINDOW = 0x2c3a46;
 const WALLS = [0xf6f2ea, 0xf3ead8, 0xf2e2b6, 0xf0d5c4, 0xe8e4dc, 0xdfe8ea];
-/** The cel look's awnings over the waterfront. */
+/** Awnings over the waterfront. */
 const AWNINGS = [0x2a8fb0, 0xd94a3a, 0x3f8a4a, 0xf2c14e, 0xf6f2ea];
-/** The cel look's window shutters, Mediterranean greens and blues. */
+/** Window shutters, Mediterranean greens and blues. */
 const SHUTTERS = [0x2f7d6b, 0x3a6ea5, 0x2d8a9a, 0x4f7f3a, 0x6b8fb3, 0x2f7d6b];
 
 /** Outline of a capsule in world xz, counter-clockwise seen from above. */
@@ -189,8 +187,8 @@ function town(l: LandData, seed: number): THREE.Group {
       const p = at(a + w / 2, row.inland);
       walls.add(p.x, QUAY_TOP, p.z, w, h, row.depth, WALLS[Math.floor(r() * WALLS.length)]!, yaw);
       if (r() < 0.6) roofs.add(p.x, QUAY_TOP + h, p.z, w * 1.05, 1.6 + r(), row.depth * 1.05, ROOF, yaw);
-      // The cel look: an awning over the ground floor on the waterfront row.
-      if (CEL && row.inland === 14 && r() < 0.6) {
+      // An awning over the ground floor on the waterfront row.
+      if (row.inland === 14 && r() < 0.6) {
         const front0 = { x: p.x + nx * (row.depth / 2 + 0.9), z: p.z + nz * (row.depth / 2 + 0.9) };
         awnings.add(
           front0.x,
@@ -208,7 +206,7 @@ function town(l: LandData, seed: number): THREE.Group {
       const front = { x: p.x + nx * (row.depth / 2 + 0.05), z: p.z + nz * (row.depth / 2 + 0.05) };
       for (let y = 1.6; y < h - 1; y += 3) {
         for (let wx = -w / 2 + 1.5; wx < w / 2 - 1; wx += 2.4) {
-          windows.add(front.x + ux * wx, QUAY_TOP + y, front.z + uz * wx, 1.1, 1.4, 0.12, CEL ? shutter : WINDOW, yaw);
+          windows.add(front.x + ux * wx, QUAY_TOP + y, front.z + uz * wx, 1.1, 1.4, 0.12, shutter, yaw);
         }
       }
       a += w + 0.6 + r() * 1.5;
@@ -222,16 +220,16 @@ function town(l: LandData, seed: number): THREE.Group {
   const plain = mat(0xffffff);
   g.add(
     walls.build(unitBox(), plain),
-    roofs.build(unitRoof(), CEL ? tiledRoof() : plain),
+    roofs.build(unitRoof(), tiledRoof()),
     windows.build(unitBox(), mat(0xffffff, { roughness: 0.3 }), false),
     trunks.build(unitBox(), plain),
-    CEL ? crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide })) : crowns.build(unitCone(), plain),
+    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide })),
+    awnings.build(unitBox(), plain),
   );
-  if (CEL) g.add(awnings.build(unitBox(), plain));
   return g;
 }
 
-/** Terracotta roofs in rows of tiles (the cel look): darker lines every course. */
+/** Terracotta roofs in rows of tiles: darker lines every course. */
 function tiledRoof(): THREE.MeshStandardNodeMaterial {
   const m = mat(0xffffff);
   m.userData.colorNode = Fn(() => {

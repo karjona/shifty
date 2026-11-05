@@ -5,9 +5,8 @@ import * as THREE from "three/webgpu";
 import { type Appearance, type Sport, botAppearance } from "@shifty/rider";
 import { RiderFigure } from "./rider/model.ts";
 import { crossedPose, idlePose } from "./rider/poses.ts";
-import { CEL } from "./cel/look.ts";
 
-/** Anime motion: in the cel look, poses are held on twos (12 a second), not tweened. */
+/** Anime motion: poses are held on twos (12 a second), not tweened. */
 const ON_TWOS = 12;
 
 export class Avatar {
@@ -33,7 +32,7 @@ export class Avatar {
   /** Idle for `dt` seconds. */
   update(dt: number): void {
     this.t += dt;
-    const t = CEL ? Math.floor(this.t * ON_TWOS) / ON_TWOS : this.t;
+    const t = Math.floor(this.t * ON_TWOS) / ON_TWOS;
     if (this.figure.body) this.figure.pose((this.crossed ? crossedPose : idlePose)(this.figure.body, t));
   }
 

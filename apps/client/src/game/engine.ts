@@ -3,6 +3,7 @@
 // reloads between them, so going from a menu into a race is instant.
 import init, { type InitOutput } from "../wasm/sim.js";
 import { World } from "../render/world.ts";
+import { devParams } from "../dev-params.ts";
 
 /** Something on screen, drawn every frame. */
 export interface Stage {
@@ -10,8 +11,6 @@ export interface Stage {
   frame(now: number, dt: number): void;
   stop(): void;
 }
-
-const params = new URLSearchParams(location.search);
 
 /** Viewer settings that survive reloads. */
 export interface ViewSettings {
@@ -32,8 +31,11 @@ export function loadViewSettings(): ViewSettings {
   }
   const stored = (k: string): unknown =>
     typeof saved === "object" && saved !== null && k in saved ? Reflect.get(saved, k) : undefined;
-  const scale = Number(params.get("scale") ?? stored("scale") ?? 1);
-  const water = (params.get("water") ?? stored("water")) === "basic" ? "basic" : "sea";
+  // Dev: `?scale=` and `?water=` override the saved settings.
+  const devScale = import.meta.env.DEV ? devParams.get("scale") : null;
+  const devWater = import.meta.env.DEV ? devParams.get("water") : null;
+  const scale = Number(devScale ?? stored("scale") ?? 1);
+  const water = (devWater ?? stored("water")) === "basic" ? "basic" : "sea";
   return { scale: Number.isFinite(scale) ? Math.min(1, Math.max(0.25, scale)) : 1, water };
 }
 
@@ -44,8 +46,8 @@ export function saveViewSettings(s: ViewSettings): void {
 export class Engine {
   readonly world: World;
   readonly view: ViewSettings;
-  /** `?render=0`: run everything but draw nothing (tests on machines without a GPU). */
-  readonly render = params.get("render") !== "0";
+  /** Dev: `?render=0` runs everything but draws nothing (tests on machines without a GPU). */
+  readonly render = !(import.meta.env.DEV && devParams.get("render") === "0");
   private stage: Stage | null = null;
   private last = performance.now();
 

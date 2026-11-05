@@ -34,7 +34,6 @@ import {
 import { CarveTrails } from "./trails.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
-import { CEL } from "./cel/look.ts";
 import { celify } from "./cel/material.ts";
 import { skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
@@ -410,10 +409,8 @@ export class Mountain implements Environment {
   private probe = new Float32Array(2);
   private flakes = new ParticlePool({
     max: 2400,
-    color: [0.96, 0.97, 1.0],
     gravity: 0,
     drag: 1.5,
-    rim: 0.3,
     lensFrom: 0.15,
     lensTo: 0.6,
     peak: 0.9,
@@ -421,10 +418,8 @@ export class Mountain implements Environment {
   });
   private powder = new ParticlePool({
     max: 3072,
-    color: [0.93, 0.95, 1.0],
     gravity: 6,
     drag: 2.2,
-    rim: 0.15,
     lensFrom: 0.5,
     lensTo: 1.8,
     peak: 0.9,
@@ -432,10 +427,8 @@ export class Mountain implements Environment {
   });
   private mist = new ParticlePool({
     max: 640,
-    color: [0.92, 0.94, 0.99],
     gravity: 0.6,
     drag: 1.2,
-    rim: 0,
     lensFrom: 0.2,
     lensTo: 1.0,
     peak: 0.32,
@@ -458,17 +451,15 @@ export class Mountain implements Environment {
     this.buildLift();
     this.buildRocks();
     this.buildLodge();
-    this.group.add(peakRange(this.sky, run.path[0]!.y, run.path.at(-1)!.y, run.path));
+    this.group.add(peakRange(run.path[0]!.y, run.path.at(-1)!.y, run.path));
     this.group.add(this.trails.group, this.flakes.sprite, this.powder.sprite, this.mist.sprite);
-    if (CEL) {
-      // Snow shades to a cool lavender, as drawn; the rest takes the usual cel tones.
-      celify(
-        this.group,
-        (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
-        true,
-      );
-      this.group.add(skyDome());
-    }
+    // Snow shades to a cool lavender, as drawn; the rest takes the usual cel tones.
+    celify(
+      this.group,
+      (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
+      true,
+    );
+    this.group.add(skyDome());
   }
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
@@ -506,7 +497,7 @@ export class Mountain implements Environment {
 
   makeRider(slot: number, _appearance: Appearance | null): RiderModel {
     const model = new BoarderModel(slot);
-    if (CEL) celify(model.mesh);
+    celify(model.mesh);
     return model;
   }
 

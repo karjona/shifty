@@ -38,5 +38,24 @@
       }
     ],
     "react/react-in-jsx-scope": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["apps/client/src/**"],
+      "rules": {
+        "eslint/no-restricted-properties": [
+          "error",
+          {
+            "object": "location",
+            "property": "search",
+            "message": "URL switches are dev-only: read them from devParams (dev-params.ts)."
+          },
+          {
+            "property": "searchParams",
+            "message": "URL switches are dev-only: read them from devParams (dev-params.ts)."
+          }
+        ]
+      }
+    }
+  ]
 }

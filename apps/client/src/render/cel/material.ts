@@ -2,7 +2,6 @@
 // by the sun and the shadows it casts, with a crisp highlight and an
 // optional rim. Every lit surface of the cel look uses it.
 import * as THREE from "three/webgpu";
-import { STYLE } from "./look.ts";
 import {
   clamp,
   diffuseColor,
@@ -16,10 +15,8 @@ import {
   normalView,
   output,
   positionViewDirection,
-  screenCoordinate,
   smoothstep,
   uniform,
-  vec2,
   vec3,
   vec4,
 } from "three/tsl";
@@ -119,21 +116,7 @@ class CelLightingModel extends THREE.LightingModel {
     // Shade is darker and richer than the colour, as painters mix it (a power keeps it from going grey).
     const shaded = pow(albedo, vec3(m.richness)).mul(shade);
     // A second, deeper shade in the darkest folds (where the painter darkened most).
-    let deepShaded = m.deepNode ? mix(shaded, shaded.mul(0.72), m.deepNode) : shaded;
-    if (STYLE === "comic") {
-      // Comic shade: a halftone of dots, on a 45° screen, bigger where the shade is deeper.
-      const cell = 7;
-      const r2 = Math.SQRT1_2;
-      const p = vec2(
-        screenCoordinate.x.add(screenCoordinate.y).mul(r2),
-        screenCoordinate.y.sub(screenCoordinate.x).mul(r2),
-      ).div(cell);
-      const d = p.fract().sub(0.5).length();
-      const size = m.deepNode ? mix(float(0.3), float(0.42), m.deepNode) : float(0.3);
-      const aa = fwidth(d);
-      const halftone = smoothstep(size.add(aa), size.sub(aa), d);
-      deepShaded = mix(albedo.mul(m.lit).mul(0.92), shaded.mul(0.85), halftone);
-    }
+    const deepShaded = m.deepNode ? mix(shaded, shaded.mul(0.72), m.deepNode) : shaded;
     directDiffuse.addAssign(mix(deepShaded, albedo.mul(m.lit), band));
     if (m.specStrength > 0) {
       const h = lightDirection.add(positionViewDirection).normalize();

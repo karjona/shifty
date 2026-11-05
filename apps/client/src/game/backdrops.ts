@@ -25,11 +25,11 @@ import type { Appearance, Sport } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Avatar } from "../render/avatar.ts";
 import { Bay } from "../render/bay.ts";
-import { CLUB, CLUB_VIEW, buildClub, riderSpots } from "../render/club.ts";
-import { CEL } from "../render/cel/look.ts";
+import { CLUB, buildClub } from "../render/club.ts";
 import { SUN_DIR, SUN_STRENGTH, celify, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
 import { CelPost } from "../render/cel/post.ts";
 import { PIXEL_AT_1M } from "../render/cel/rider.ts";
+import { devParams } from "../dev-params.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { PALETTE, accentBetween, seasonAt, setAccent } from "./seasons.ts";
 import { parseCourse } from "../wasm-json.ts";
@@ -63,15 +63,13 @@ export function sharedBay(engine: Engine): Bay {
 const SUMMER_ACCENT = PALETTE.summer.accent;
 
 /** A slow loop over the bay, the town and the mountains behind. */
-const devParams = new URLSearchParams(location.search);
-
 class Flyover implements Stage {
   private engine: Engine | null = null;
   /** Dev: `?fly=0.3` starts that far round the loop, `&freeze` holds it there. */
-  private t = Number(devParams.get("fly") ?? 0) * 90;
-  private frozen = devParams.has("freeze") || devParams.has("capture");
+  private t = import.meta.env.DEV ? Number(devParams.get("fly") ?? 0) * 90 : 0;
+  private frozen = import.meta.env.DEV && (devParams.has("freeze") || devParams.has("capture"));
   /** Dev: `?capture` hands the clock to `window.__celFly(seconds)`, for frame-by-frame video. */
-  private capture = devParams.has("capture");
+  private capture = import.meta.env.DEV && devParams.has("capture");
   private eye = new THREE.CatmullRomCurve3(
     [
       new THREE.Vector3(-300, 16, -150),
@@ -104,7 +102,7 @@ class Flyover implements Stage {
   start(engine: Engine): void {
     this.engine = engine;
     setAccent(SUMMER_ACCENT);
-    if (this.capture) Reflect.set(window, "__celFly", (seconds: number) => (this.t = seconds));
+    if (import.meta.env.DEV && this.capture) Reflect.set(window, "__celFly", (seconds: number) => (this.t = seconds));
     if (!engine.render) return;
     engine.world.setEnvironment(bay(engine));
     engine.world.setSunOffset(30, 60, 15);
@@ -177,15 +175,10 @@ class SeasonField implements Stage {
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.6));
     const key = new THREE.DirectionalLight(0xfff2e0, 2.4);
-    // The cel look keys from the camera's left, so the rider turns half to shade.
-    if (CEL) key.position.set(-4, 4.5, 3.5);
-    else key.position.set(3, 5, 4);
+    // Keyed from the camera's left, so the rider turns half to shade (the rim light is the material's).
+    key.position.set(-4, 4.5, 3.5);
     key.castShadow = true;
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0xbfe3ff, 1.4);
-    rim.position.set(-4, 3, -3);
-    // Cel shading takes one key light; its rim comes from the material.
-    if (!CEL) this.scene.add(rim);
     this.key = key;
     // A soft shadow under the rider.
     const shadowMat = new THREE.MeshBasicNodeMaterial({
@@ -194,7 +187,7 @@ class SeasonField implements Stage {
       opacity: 0.28,
       depthWrite: false,
     });
-    if (CEL) inkOnlyInPass(shadowMat, inkNode(0, 0, 0, 0));
+    inkOnlyInPass(shadowMat, inkNode(0, 0, 0, 0));
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.7, 32), shadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.005;
@@ -256,14 +249,12 @@ class SeasonField implements Stage {
     const lookY = 0.85 + z * 0.62;
     this.camera.position.set(0, 0.95 + z * 0.52, distance);
     this.camera.lookAt(0, lookY, 0);
-    if (CEL) {
-      this.post ??= new CelPost(engine.world.renderer, this.scene, this.camera);
-      const k = this.key;
-      SUN_STRENGTH.value = (k.color.r + k.color.g + k.color.b) * k.intensity;
-      SUN_DIR.value.copy(k.position).normalize();
-      PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
-      this.post.render();
-    } else engine.world.renderer.render(this.scene, this.camera);
+    this.post ??= new CelPost(engine.world.renderer, this.scene, this.camera);
+    const k = this.key;
+    SUN_STRENGTH.value = (k.color.r + k.color.g + k.color.b) * k.intensity;
+    SUN_DIR.value.copy(k.position).normalize();
+    PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    this.post.render();
   }
 
   stop(): void {}
@@ -272,7 +263,7 @@ class SeasonField implements Stage {
 /** The club's terrace, with the riders gathered at the front of it. */
 class Club implements Stage {
   private engine: Engine | null = null;
-  private group = CEL ? celifyClub(buildClub()) : buildClub();
+  private group = celifyClub(buildClub());
   private avatars: Avatar[] = [];
   private t = 0;
   private count = 1;
@@ -299,7 +290,7 @@ class Club implements Stage {
   }
 
   private place(): void {
-    const spots = HERO ? heroSpots() : riderSpots();
+    const spots = heroSpots();
     while (this.avatars.length < this.count) {
       const you = this.avatars.length === 0 ? this.you : null;
       const a = new Avatar(you?.appearance ?? null, this.avatars.length, you?.sport ?? "summer");
@@ -307,7 +298,7 @@ class Club implements Stage {
     }
     this.avatars.forEach((a, i) => {
       const spot = spots[i]!;
-      a.crossed = HERO && i === 0;
+      a.crossed = i === 0;
       a.mesh.position.set(spot.x, CLUB.floor, spot.z);
       a.mesh.rotation.y = spot.yaw;
       if (i < this.count) this.group.add(a.mesh);
@@ -320,15 +311,12 @@ class Club implements Stage {
     setAccent(SUMMER_ACCENT);
     if (!engine.render) return;
     engine.world.setEnvironment(bay(engine));
-    // The cel look wants a key from the camera's left, so the riders turn half to shade.
-    if (HERO) {
-      const k = HERO_VIEW.key;
-      engine.world.setSunOffset(k.x, k.y, k.z);
-      const shadow = engine.world.sunLight.shadow.camera;
-      Object.assign(shadow, { left: -10, right: 10, top: 10, bottom: -10 });
-      shadow.updateProjectionMatrix();
-    } else if (CEL) engine.world.setSunOffset(36, 30, -4);
-    else engine.world.setSunOffset(-25, 55, -30);
+    // A key from the camera's left, so the riders turn half to shade.
+    const k = HERO_VIEW.key;
+    engine.world.setSunOffset(k.x, k.y, k.z);
+    const shadow = engine.world.sunLight.shadow.camera;
+    Object.assign(shadow, { left: -10, right: 10, top: 10, bottom: -10 });
+    shadow.updateProjectionMatrix();
     engine.world.scene.add(this.group);
     this.place();
   }
@@ -338,36 +326,9 @@ class Club implements Stage {
     if (!engine?.render) return;
     this.t += dt;
     for (const a of this.avatars) a.update(dt);
-    if (HERO) {
-      this.closeUp += ((this.wantCloseUp ? 1 : 0) - this.closeUp) * (1 - Math.exp(-dt * 3));
-      const h = heroView(this.t, this.closeUp * this.closeUp * (3 - 2 * this.closeUp));
-      engine.world.renderFrom(h.eye, h.look, now / 1000, dt, h.fov);
-      return;
-    }
-    // Swaying a little, like a handheld camera.
-    const sway = Math.sin(this.t * 0.3);
-    const { eye: e, look: l } = CLUB_VIEW;
-    const eye = new THREE.Vector3(e.x, e.y + Math.sin(this.t * 0.5) * 0.04, e.z + sway * 0.25);
-    const look = new THREE.Vector3(l.x, l.y, l.z);
-    // Up close: in front of your rider, who stands left of the shop's panel.
     this.closeUp += ((this.wantCloseUp ? 1 : 0) - this.closeUp) * (1 - Math.exp(-dt * 3));
-    if (this.closeUp > 1e-3) {
-      const spot = riderSpots()[0]!;
-      const k = this.closeUp * this.closeUp * (3 - 2 * this.closeUp);
-      const toward = new THREE.Vector3(Math.sin(spot.yaw), 0, Math.cos(spot.yaw));
-      const side = new THREE.Vector3(toward.z, 0, -toward.x);
-      const at = new THREE.Vector3(spot.x, CLUB.floor + 1.05, spot.z);
-      // Looking past the rider's shoulder puts them left of the panel.
-      eye.lerp(
-        at
-          .clone()
-          .addScaledVector(toward, 3.6)
-          .add(new THREE.Vector3(0, 0.25, 0)),
-        k,
-      );
-      look.lerp(at.clone().addScaledVector(side, 1.15), k);
-    }
-    engine.world.renderFrom(eye, look, now / 1000, dt, 50);
+    const h = heroView(this.t, this.closeUp * this.closeUp * (3 - 2 * this.closeUp));
+    engine.world.renderFrom(h.eye, h.look, now / 1000, dt, h.fov);
   }
 
   stop(): void {
@@ -377,12 +338,10 @@ class Club implements Stage {
 }
 
 /**
- * The cel look's mode select, framed like a character select: the camera
- * low on the terrace looking out to sea, your rider large on the left,
- * turned three-quarters, friends beside and behind. `?frame=classic`
- * keeps the usual view of the clubhouse.
+ * The mode select, framed like a character select: the camera low on the
+ * terrace looking out to sea, your rider large on the left, turned
+ * three-quarters, friends beside and behind.
  */
-const HERO = CEL && devParams.get("frame") !== "classic";
 const HERO_VIEW = (() => {
   const at = new THREE.Vector3(CLUB.x + 2.5, CLUB.floor, CLUB.z - 5.2);
   // The camera stands inland of the rider, looking out over the bay (−z), a little from the east.

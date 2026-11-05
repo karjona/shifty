@@ -156,7 +156,7 @@ export class RaceSession implements Stage {
       this.closedReason = reason;
     });
     this.opts.status(messages().race.joining);
-    if (this.opts.debug) {
+    if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.view.scale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
       this.debug.state.renderer = engine.world.backend;
@@ -416,8 +416,9 @@ export class RaceSession implements Stage {
     debug.refresh();
   }
 
-  /** Test hooks (used by the Playwright e2e tests). */
+  /** Test hooks for the Playwright e2e tests (dev server only). */
   private installHooks(engine: Engine, transport: Transport): void {
+    if (!import.meta.env.DEV) return;
     Object.assign(window, {
       __shifty: {
         phase: () => this.client?.phase() ?? 0,
@@ -455,6 +456,6 @@ export class RaceSession implements Stage {
     }
     this.env = null;
     this.input.dispose();
-    Reflect.deleteProperty(window, "__shifty");
+    if (import.meta.env.DEV) Reflect.deleteProperty(window, "__shifty");
   }
 }

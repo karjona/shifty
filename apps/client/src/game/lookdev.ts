@@ -1,7 +1,7 @@
 // Dev: `/?lookdev=1` shows riders on the club's terrace for look testing.
 // URL options: shot (select, hero, lineup, face, back), sport (summer, winter),
 // seed (random looks; 0 = the default rider), skin, hairColor, eyeColor, height,
-// wear (item ids to put on), bare (slots to empty), unlit (paint only), pose (idle, crossed), t (freeze the
+// wear (item ids to put on), bare (slots to empty), pose (idle, crossed), t (freeze the
 // idle at a time), cx/cy/dist (camera), orbit. Keys: F next shot, R new
 // looks, arrows orbit.
 import * as THREE from "three/webgpu";
@@ -9,7 +9,6 @@ import { type Appearance, type Sport, botAppearance, defaultAppearance, item, mo
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { CLUB, buildClub } from "../render/club.ts";
-import { TintMaterial } from "../render/rider/material.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, idlePose } from "../render/rider/poses.ts";
 import { parseCourse } from "../wasm-json.ts";
@@ -58,7 +57,6 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   else world.setSunOffset(-25, 55, -30);
   world.scene.add(buildClub());
 
-  TintMaterial.unlit = params.has("unlit");
   const shotParam = params.get("shot");
   let shot: Shot = isShot(shotParam) ? shotParam : "select";
   const sport: Sport = params.get("sport") === "winter" ? "winter" : "summer";
