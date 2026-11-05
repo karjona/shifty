@@ -1,40 +1,42 @@
 // Dev: `/?lookdev=1` shows riders on the club's terrace for look testing.
-// URL options: style (psx, n64, ps2), shot (lineup, face, back, row),
-// seed (random looks), t (freeze the idle at a time). Keys: 1-3 style,
-// F face / lineup / back / row, R new looks, arrows orbit.
+// URL options: shot (select, hero, lineup, face, back), sport (summer, winter),
+// seed (random looks; 0 = the default rider), skin, hairColor, eyeColor, height,
+// wear (item ids to put on), bare (slots to empty), unlit (paint only), pose (idle, crossed), t (freeze the
+// idle at a time), cx/cy/dist (camera), orbit. Keys: F next shot, R new
+// looks, arrows orbit.
 import * as THREE from "three/webgpu";
-import { type Look, randomLook, rng } from "@shifty/rider";
+import { type Appearance, type Sport, botAppearance, defaultAppearance, item, model } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { CLUB, buildClub } from "../render/club.ts";
-import * as clothes from "../render/rider/clothes.ts";
-import { RiderMesh, type RiderStyle, STYLES } from "../render/rider/model.ts";
-import { idlePose } from "../render/rider/poses.ts";
+import { TintMaterial } from "../render/rider/material.ts";
+import { RiderFigure } from "../render/rider/model.ts";
+import { crossedPose, idlePose } from "../render/rider/poses.ts";
 import { parseCourse } from "../wasm-json.ts";
 import { Engine } from "./engine.ts";
 
-type Shot = "lineup" | "face" | "back" | "row";
-const SHOTS: Shot[] = ["lineup", "face", "back", "row"];
+type Shot = "select" | "hero" | "lineup" | "face" | "back";
+const SHOTS: readonly Shot[] = ["select", "hero", "lineup", "face", "back"];
+const isShot = (s: string | null): s is Shot => SHOTS.some((x) => x === s);
 
-function summer(look: Look, i: number) {
-  const vest = [0xf2c14e, 0xe8553d, 0x2a8fb0, 0xf6f2ea][i % 4]!;
-  const base =
-    look.body === "male"
-      ? clothes.boardshorts([0x2a5d8f, 0xd94a3a, 0x2f7a52, 0x1d1f24][i % 4]!, 0xf6f2ea)
-      : clothes.swimsuit([0x1d1f24, 0x2a8fb0, 0xd94a3a, 0x7a3f8f][i % 4]!);
-  return [base, clothes.lifeVest(vest, 0x1d1f24), clothes.waterShoes(0x2d3138)];
-}
-
-function winter(i: number) {
-  const jacket = [0xd94a3a, 0x2a8fb0, 0xf2c14e, 0x3f6f4a][i % 4]!;
-  return [
-    clothes.jacket(jacket, 0x22252b),
-    clothes.snowPants([0x2d3a4f, 0x3b3f46, 0x1d1f24, 0x6a5a48][i % 4]!),
-    clothes.boots(0x3a3d44, 0x15171a),
-    clothes.gloves(0x1d1f24),
-    clothes.beanie([0xf6f2ea, 0x1d1f24, 0xd94a3a, 0x2a8fb0][i % 4]!, 0x2a2d33),
-    clothes.goggles(0x1d1f24, [0xe8a33d, 0x4fa3d9, 0xd94a7a, 0x9ad94a][i % 4]!),
-  ];
+function appearanceFor(seed: number, i: number, params: URLSearchParams): Appearance {
+  const a = seed === 0 && i === 0 ? defaultAppearance() : botAppearance(seed, i);
+  // `wear=summer.vest.foam.red,...`: put items on, each in its own slot.
+  for (const id of (params.get("wear") ?? "").split(",").filter(Boolean)) {
+    const it = item(id);
+    const m = it && model(it.model);
+    if (m) a.outfits[m.sport][m.slot] = id;
+  }
+  // `bare=head,eyes`: leave slots empty.
+  const bare = (params.get("bare") ?? "").split(",");
+  for (const kit of Object.values(a.outfits)) {
+    for (const slot of Object.keys(kit)) if (bare.includes(slot)) Reflect.deleteProperty(kit, slot);
+  }
+  for (const part of ["skin", "hairColor", "eyeColor", "height"] as const) {
+    const v = params.get(part);
+    if (v !== null) a.look[part] = Number(v);
+  }
+  return a;
 }
 
 export async function lookdev(params: URLSearchParams): Promise<void> {
@@ -52,16 +54,18 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
     }),
   );
   scenery.free();
-  world.setSunOffset(-25, 55, -30);
-  const club = buildClub();
-  world.scene.add(club);
+  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(18, 45, 40);
+  else world.setSunOffset(-25, 55, -30);
+  world.scene.add(buildClub());
 
-  let style: RiderStyle = STYLES[(params.get("style") as keyof typeof STYLES) ?? "ps2"] ?? STYLES.ps2;
-  let shot: Shot = SHOTS.includes(params.get("shot") as Shot) ? (params.get("shot") as Shot) : "lineup";
-  let seed = Number(params.get("seed") ?? 1);
+  TintMaterial.unlit = params.has("unlit");
+  const shotParam = params.get("shot");
+  let shot: Shot = isShot(shotParam) ? shotParam : "select";
+  const sport: Sport = params.get("sport") === "winter" ? "winter" : "summer";
+  let seed = Number(params.get("seed") ?? 0);
   const frozen = params.has("t") ? Number(params.get("t")) : null;
-  let orbit = 0;
-  let riders: RiderMesh[] = [];
+  let orbit = Number(params.get("orbit") ?? 0);
+  let riders: RiderFigure[] = [];
   const label = document.createElement("div");
   Object.assign(label.style, {
     position: "fixed",
@@ -79,44 +83,15 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       r.group.removeFromParent();
       r.dispose();
     }
-    const next = rng(seed);
-    const looks: Look[] = [];
-    // Two of each body, so both sets get looked at.
-    while (looks.length < 4) {
-      const l = randomLook(next);
-      const males = looks.filter((x) => x.body === "male").length;
-      if ((l.body === "male" && males < 2) || (l.body === "female" && looks.length - males < 2)) looks.push(l);
-    }
-    looks.sort((a, b) => (a.body === b.body ? 0 : a.body === "male" ? -1 : 1));
-    riders = looks.map((look, i) => new RiderMesh(look, i % 2 === 0 ? summer(look, i) : winter(i), style));
-    riders.forEach((r) => world.scene.add(r.group));
-    if (params.has("tex")) {
-      document.querySelectorAll(".lookdev-tex").forEach((e) => e.remove());
-      riders.forEach((r, i) => {
-        const img = r.faceTexture?.image as HTMLCanvasElement | undefined;
-        if (!img) return;
-        img.className = "lookdev-tex";
-        Object.assign(img.style, {
-          position: "fixed",
-          right: "8px",
-          top: `${8 + i * 132}px`,
-          width: "256px",
-          height: "128px",
-          zIndex: "10",
-          imageRendering: "pixelated",
-        });
-        document.body.append(img);
-      });
-    }
-    label.textContent = `${style.name} · ${shot} · seed ${seed} · keys: 1-3 style, F shot, R new looks, ←→ orbit`;
+    const count = shot === "lineup" ? 4 : 1;
+    riders = Array.from({ length: count }, (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport));
+    for (const r of riders) world.scene.add(r.group);
+    label.textContent = `${shot} · ${sport} · seed ${seed} · keys: F shot, R new looks, ←→ orbit`;
   };
   build();
 
   addEventListener("keydown", (e) => {
-    if (e.key === "1" || e.key === "2" || e.key === "3") {
-      style = [STYLES.psx, STYLES.n64, STYLES.ps2][Number(e.key) - 1]!;
-      build();
-    } else if (e.key === "f") {
+    if (e.key === "f") {
       shot = SHOTS[(SHOTS.indexOf(shot) + 1) % SHOTS.length]!;
       build();
     } else if (e.key === "r") {
@@ -130,28 +105,32 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   const base = new THREE.Vector3(CLUB.x + 3, CLUB.floor, CLUB.z - 4);
   // Facing the bay (−z), toward the camera.
   const facing = Math.PI;
-  void engine.world.renderer.setAnimationLoop((now: number) => {
+  const framing: Record<Shot, { cy: number; dist: number; fov: number }> = {
+    select: { cy: 0.98, dist: 4.6, fov: 26 },
+    hero: { cy: 0.92, dist: 5.2, fov: 24 },
+    lineup: { cy: 0.95, dist: 5.6, fov: 34 },
+    face: { cy: 1.64, dist: 1.1, fov: 24 },
+    back: { cy: 0.92, dist: 5.2, fov: 24 },
+  };
+  void world.renderer.setAnimationLoop((now: number) => {
     t += 1 / 60;
     const time = frozen ?? t;
     riders.forEach((r, i) => {
-      const x = shot === "face" ? (i - 1.5) * 0.36 : (i - 1.5) * 0.95;
+      const x = (i - (riders.length - 1) / 2) * 0.95;
       r.group.position.set(base.x - x, base.y, base.z);
-      r.group.rotation.y = facing + (shot === "back" ? Math.PI : 0) + (shot === "row" ? 0.6 : 0);
-      r.rig.apply(idlePose(r.anatomy, time + i * 3.1));
+      // The select shot looks out from the terrace's sea side, toward the sky, like a character select.
+      r.group.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
+      const pose = params.get("pose") ?? (shot === "select" ? "crossed" : "idle");
+      if (r.body) r.pose((pose === "crossed" ? crossedPose : idlePose)(r.body, time + i * 3.1));
     });
+    const f = framing[shot];
     const look = base
       .clone()
-      .add(
-        new THREE.Vector3(
-          Number(params.get("cx") ?? 0),
-          Number(params.get("cy") ?? (shot === "face" ? 1.62 : 0.95)),
-          0,
-        ),
-      );
-    const dist = Number(params.get("dist") ?? (shot === "face" ? 1.25 : 4.6));
-    const eye = look
-      .clone()
-      .add(new THREE.Vector3(Math.sin(orbit) * dist, shot === "face" ? 0.02 : 0.25, -Math.cos(orbit) * dist));
-    world.renderFrom(eye, look, now / 1000, 1 / 60, shot === "face" ? 30 : 38);
+      .add(new THREE.Vector3(Number(params.get("cx") ?? 0), Number(params.get("cy") ?? f.cy), 0));
+    const dist = Number(params.get("dist") ?? f.dist);
+    const lift = shot === "face" ? 0.02 : shot === "select" ? -0.25 : -0.1;
+    const turn = orbit + (shot === "select" ? Math.PI : 0);
+    const eye = look.clone().add(new THREE.Vector3(Math.sin(turn) * dist, lift, -Math.cos(turn) * dist));
+    world.renderFrom(eye, look, now / 1000, 1 / 60, Number(params.get("fov") ?? f.fov));
   });
 }
