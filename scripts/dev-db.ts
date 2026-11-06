@@ -47,18 +47,13 @@ async function waitReady(url: string, timeoutMs = 60_000): Promise<void> {
   for (;;) {
     const client = new Client({ connectionString: url });
     try {
-      // oxlint-disable-next-line eslint/no-await-in-loop
       await client.connect();
-      // oxlint-disable-next-line eslint/no-await-in-loop
       await client.query("select 1");
-      // oxlint-disable-next-line eslint/no-await-in-loop
       await client.end();
       return;
     } catch (e) {
-      // oxlint-disable-next-line eslint/no-await-in-loop
       await client.end().catch(() => {});
       if (Date.now() > until) throw new Error(`Postgres not ready at ${url}: ${String(e)}`, { cause: e });
-      // oxlint-disable-next-line eslint/no-await-in-loop
       await new Promise((r) => setTimeout(r, 500));
     }
   }
