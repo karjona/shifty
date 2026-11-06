@@ -12,14 +12,13 @@ import {
   REQUIRED,
   SKIN_TONES,
   SLOTS,
-  type Slot,
   type Sport,
   defaultOutfits,
   item,
 } from "@shifty/rider";
-import { type ModelAsset, builtModels, loadModel } from "./assets.ts";
+import { type ModelAsset, builtModels, loadModel, loadOverlay } from "./assets.ts";
 import { inkId } from "../cel/material.ts";
-import { CelTintMaterial, faceGeometry, limbGeometry, outlineOf } from "../cel/rider.ts";
+import { CelTintMaterial, type FaceOverlays, NO_OVERLAY, faceGeometry, limbGeometry, outlineOf } from "../cel/rider.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
 
@@ -35,25 +34,35 @@ interface Worn {
 }
 
 /** How each hat leaves the hair: the hair model's piece that shows under it. */
-const HAIR_UNDER: Record<string, string> = { "summer.head.cap": "cap" };
+const HAIR_UNDER: Record<string, string> = { "summer.head.cap": "cap", "winter.head.beanie": "beanie" };
+
+/** The look's parts that shape the face: each preset but the first is a morph target of the art, `<part>.<n>`. */
+const SHAPES = ["eyes", "nose", "mouth"] as const;
+
+/** What a look wears over its face: its eyes', nose's and mouth's paint (the first nose and mouth have none), its
+ * brows and beard. */
+async function overlaysFor(look: Look): Promise<FaceOverlays> {
+  const [brows, beard, ...features] = await Promise.all([
+    loadOverlay(look.body, `brows.${look.brows}`),
+    look.facialHair > 0 ? loadOverlay(look.body, `beard.${look.facialHair}`) : Promise.resolve(null),
+    loadOverlay(look.body, `eyes.${look.eyes}`),
+    look.nose > 0 ? loadOverlay(look.body, `nose.${look.nose}`) : Promise.resolve(null),
+    look.mouth > 0 ? loadOverlay(look.body, `mouth.${look.mouth}`) : Promise.resolve(null),
+  ]);
+  return {
+    brows: brows ?? NO_OVERLAY,
+    beard: beard ?? NO_OVERLAY,
+    features: features.filter((f): f is THREE.Texture => f !== null),
+  };
+}
 
 /** The body whose art draws a look: its own, or the male art until a body's art is built. */
 async function artBody(look: Look): Promise<Look["body"]> {
   return (await builtModels(look.body)).has("body") ? look.body : "male";
 }
 
-/** For a winter slot, the summer slot covering the same part of the body. */
-const SUMMER_FOR: Partial<Record<Slot, Slot>> = {
-  head: "head",
-  eyes: "eyes",
-  top: "vest",
-  bottom: "bottom",
-  feet: "feet",
-};
-
 /** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has.
- * A required slot whose model isn't built yet shows the starter model there, in the item's colours; a winter
- * item with no winter model built shows the summer starter's model for that part of the body. */
+ * A required slot whose model isn't built yet shows the starter model there, in the item's colours. */
 async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
   const built = await builtModels(look.body);
   const starters = defaultOutfits("male");
@@ -61,10 +70,8 @@ async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
     const id = kit[slot];
     const it = id ? item(id) : undefined;
     if (!it) return [];
-    const summer = sport === "winter" ? SUMMER_FOR[slot] : undefined;
     const starter = REQUIRED[sport].includes(slot) ? starters[sport][slot] : undefined;
-    const models = [it.model, starter && item(starter)?.model, summer && item(starters.summer[summer] ?? "")?.model];
-    const model = models.find((m): m is string => m !== undefined && built.has(m));
+    const model = [it.model, starter && item(starter)?.model].find((m): m is string => m !== undefined && built.has(m));
     return model ? [{ model, colours: it.colours }] : [];
   });
   const style = built.has(`hair.${look.hair}`) ? `hair.${look.hair}` : "hair.0";
@@ -102,11 +109,14 @@ export class RiderFigure {
     void (async () => {
       const look = { ...appearance.look, body: await artBody(appearance.look) };
       const items = await worn(look, appearance.outfits[sport], sport);
-      const assets = await Promise.all([
+      const [overlays, ...assets] = await Promise.all([
+        overlaysFor(look),
         loadModel(look.body, "body"),
         ...items.map((i) => loadModel(look.body, i.model)),
       ]);
-      if (version === this.version) this.build(look, assets, [{ model: "body", colours: null }, ...items]);
+      if (version === this.version) {
+        this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
+      }
     })();
   }
 
@@ -121,7 +131,7 @@ export class RiderFigure {
     return this.group.scale.x;
   }
 
-  private build(look: Look, assets: ModelAsset[], wearing: Worn[]): void {
+  private build(look: Look, assets: ModelAsset[], wearing: Worn[], overlays: FaceOverlays): void {
     this.clear();
     const [body] = assets;
     if (!body) return;
@@ -146,6 +156,7 @@ export class RiderFigure {
       for (const piece of asset.pieces) {
         if (w?.pieces && !w.pieces.includes(piece.name)) continue;
         const regions = piece.geometry.hasAttribute("_region");
+        const face = i === 0 && piece.name === "face";
         const mat = new CelTintMaterial(
           piece.detail,
           piece.mask,
@@ -154,20 +165,24 @@ export class RiderFigure {
           piece.tints,
           // The body's pieces are one skin: no line where they meet.
           inkId(i === 0 ? "body" : `${w?.model}.${piece.name}`),
-          i === 0 && piece.name === "face",
+          face,
           piece.flat,
+          face ? overlays : null,
         );
         if (regions) mat.hide(hidden);
         const tints: Colourway =
           piece.tints === "look" ? own : piece.tints === "hair" ? [hair, hair, hair] : (w?.colours ?? own);
         mat.setTints(...tints);
-        const geometry =
-          piece.name === "face" && i === 0
-            ? faceGeometry(piece.geometry)
-            : piece.tints === "hair"
-              ? piece.geometry
-              : limbGeometry(piece.geometry, body.rest);
+        const geometry = face
+          ? faceGeometry(piece.geometry)
+          : piece.tints === "hair"
+            ? piece.geometry
+            : limbGeometry(piece.geometry, body.rest);
         const mesh = new THREE.SkinnedMesh(geometry, mat);
+        for (const part of SHAPES) {
+          const target = piece.morphs[`${part}.${look[part]}`];
+          if (target !== undefined && mesh.morphTargetInfluences) mesh.morphTargetInfluences[target] = 1;
+        }
         mesh.castShadow = true;
         // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
         mesh.frustumCulled = false;

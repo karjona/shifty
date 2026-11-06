@@ -518,4 +518,7 @@ def build_cage(head_src):
     for s in (1, -1):
         build_arm(cage, s, loops[s])
         build_leg(cage, s, legs[s])
+    cage.bm.verts.index_update()
+    off.cage_index = [v.index for v in off.cage_verts]
+    off.caps = [(c.index, ring) for c, ring in off.caps]
     return cage.finish(), off

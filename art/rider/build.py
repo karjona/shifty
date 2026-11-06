@@ -4,9 +4,11 @@ painted and exported.
     /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \\
         --python art/rider/build.py -- [--out DIR] [--only NAME,...] [--fast] [--preview DIR] [--ref PNG]
 
-Writes one .glb per model (meshes, skin, no materials) and its textures
-(`<model>.<part>.detail.png`, `<model>.<part>.mask.png`, and the face's colour without its light,
-`body.face.flat.png`) into apps/client/public/riders/<body>/.
+Writes one .glb per model (meshes, skin, no materials; the face's presets as morph targets) and its textures
+(`<model>.<part>.detail.png` in grey, `<model>.<part>.mask.png`, the face's colour without its light,
+`body.face.flat.png`, the brows and beards it can wear, `body.face.brows.<n>.png` and
+`body.face.beard.<n>.png`, and the eye, nose and mouth presets' paint, `body.face.<part>.<n>.png`) into
+apps/client/public/riders/<body>/.
 """
 
 import argparse
@@ -32,6 +34,7 @@ import rig  # noqa: E402
 import rings  # noqa: E402
 import skin  # noqa: E402
 import uv  # noqa: E402
+import winter  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -117,6 +120,72 @@ def strip(obj, names):
             obj.data.attributes.remove(a)
 
 
+def coords(obj):
+    co = np.empty(len(obj.data.vertices) * 3)
+    obj.data.vertices.foreach_get("co", co)
+    return co.reshape(-1, 3)
+
+
+def preset_offsets(cage, low, off, src, levels=1):
+    """Stores each face preset's offsets of the game mesh's vertices on it (`_m.<preset>` attributes): the
+    cage moved by the preset and subdivided like the game mesh, less the game mesh."""
+    base = coords(low)
+    for name, d in mhhead.face_presets(cage, off, src).items():
+        c = rings.copy(cage, f"cage.{name}")
+        c.data.vertices.foreach_set("co", (coords(c) + d).ravel())
+        c.data.update()
+        rings.subdivide(c, levels)
+        moved = coords(c)
+        bpy.data.objects.remove(c)
+        if moved.shape != base.shape:
+            raise RuntimeError(f"face preset {name}: {len(moved)} vertices, the game mesh has {len(base)}")
+        a = low.data.attributes.new(f"_m.{name}", "FLOAT_VECTOR", "POINT")
+        a.data.foreach_set("vector", (moved - base).ravel())
+
+
+def preset_normals(obj, names):
+    """Stores the mesh's vertex normals (`_n`) and each face preset's (`_n.<preset>`, with the mesh moved by its
+    `_m.<preset>` offsets) on it."""
+    me = obj.data
+    base = coords(obj)
+
+    def store(name):
+        n = np.empty(len(me.vertices) * 3)
+        me.vertices.foreach_get("normal", n)
+        a = me.attributes.new(name, "FLOAT_VECTOR", "POINT")
+        a.data.foreach_set("vector", n)
+
+    store("_n")
+    for name in names:
+        d = np.empty(len(base) * 3)
+        me.attributes[name].data.foreach_get("vector", d)
+        me.vertices.foreach_set("co", (base + d.reshape(-1, 3)).ravel())
+        me.update()
+        store(f"_n.{name[3:]}")
+    me.vertices.foreach_set("co", base.ravel())
+    me.update()
+
+
+def morphs_from_offsets(obj, log):
+    """Turns the `_m.<preset>` attributes into shape keys (glTF morph targets), where they move anything."""
+    names = [a.name for a in obj.data.attributes if a.name.startswith("_m.")]
+    base = coords(obj)
+    keys = []
+    for n in names:
+        d = np.empty(len(base) * 3)
+        obj.data.attributes[n].data.foreach_get("vector", d)
+        d = d.reshape(-1, 3)
+        if np.abs(d).max() > 1e-6:
+            keys.append((n[3:], d))
+        obj.data.attributes.remove(obj.data.attributes[n])
+    if keys:
+        obj.shape_key_add(name="Basis", from_mix=False)
+        for n, d in keys:
+            k = obj.shape_key_add(name=n, from_mix=False)
+            k.data.foreach_set("co", (base + d).ravel())
+        log(obj.name, "morphs", ", ".join(n for n, _ in keys), f"(at most {np.abs([d for _, d in keys]).max() * 1000:.1f} mm)")
+
+
 def assign(obj, slots, idx):
     obj.data.materials.clear()
     for s in slots:
@@ -140,7 +209,11 @@ def export(path, objects, arm):
         export_normals=True,
         export_tangents=False,
         export_skins=True,
-        export_morph=False,
+        export_morph=True,
+        export_morph_normal=False,
+        export_morph_tangent=False,
+        export_morph_animation=False,
+        export_try_sparse_sk=True,
         export_animations=False,
         export_apply=False,
         export_yup=True,
@@ -154,20 +227,28 @@ DENSITY = {"head": 2.1, "eye": 3.0, "mouth": 1.0, "ear": 1.2, "neck": 1.0, "tors
 
 
 def face_textures(face_piece, src, size, cage):
-    """What MakeHuman's textures show on the face: the skin's colour and the brows."""
+    """What MakeHuman's textures show on the face: the skin's colour and each brow."""
     tex = os.path.join(mhhead.SOURCE, "")
     head = src["head.high"]
-    return {
-        "skin": bake.bake_textured(face_piece, [(head, tex + "skin.png", "rgb")], size, cage=cage),
-        "brow": bake.bake_textured(face_piece, [(head, None, None), (src["brows.0"], tex + "brow.0.png", "a")],
-                                   size, cage=cage),
-    }
+    out = {"skin": bake.bake_textured(face_piece, [(head, tex + "skin.png", "rgb")], size, cage=cage)}
+    for i in range(BROWS):
+        out[f"brow.{i}"] = bake.bake_textured(face_piece, [(head, None, None),
+                                                           (src[f"brows.{i}"], tex + f"brow.{i}.png", "a")],
+                                              size, cage=cage)
+    return out
+
+
+BROWS = 5
+BEARDS = 5
 
 
 def bake_cage(piece, parts, push=0.008, eye_push=0.0012):
     """A copy of the face pushed out along its normals, only a little over the eyes (the lids are in front)."""
     eye = parts.get("eye", -1)
     c = rings.copy(piece, f"{piece.name}.cage")
+    # (Without the presets' shape keys, which would keep the vertices where they were.)
+    if c.data.shape_keys:
+        c.shape_key_clear()
     part = rings.attribute(c, "part")
     me = c.data
     co = np.empty(len(me.vertices) * 3)
@@ -181,7 +262,9 @@ def bake_cage(piece, parts, push=0.008, eye_push=0.0012):
     return c
 
 
-def build_body(o, log):
+def build_body(o, log, bake_it=True):
+    """The body (rigged pieces, the armature and the detailed mesh), baked, painted and exported unless
+    `bake_it` is false (when only the garments fitted to it are wanted)."""
     size = 1024 if o.fast else 2048
     blend.clear_scene()
     arm = rig.armature(male.J, male.TAILS)
@@ -218,6 +301,7 @@ def build_body(o, log):
     log("cage", len(me.polygons), "faces, unwrapped")
     low = rings.copy(cage, "body")
     rings.subdivide(low, 1)
+    preset_offsets(cage, low, off, src)
     high = rings.copy(cage, "body.high")
     rings.subdivide(high, 3)
     blend.shade_smooth(high)
@@ -232,6 +316,10 @@ def build_body(o, log):
     for piece in parts.values():
         restore_normals(piece)
     log("low", sum(len(p.data.polygons) for p in parts.values()), "faces; high", len(high.data.polygons))
+    if not bake_it:
+        face_high.hide_render = high.hide_render = True
+        src.remove()
+        return parts, arm, {}, high
     textures = {}
     portrait = {"light_front": dict(key=(-0.75, -1.0, 0.8), key_power=3.0, softness=20.0, sky=(0.17, 0.18, 0.19),
                                     ground=(0.05, 0.045, 0.04))}
@@ -249,8 +337,17 @@ def build_body(o, log):
     face_high.hide_render = True
     head_tex = face_textures(parts["face"], src, size, face_cage)
     bpy.data.objects.remove(face_cage)
+    # Where each face preset moves the face's surface, and which way the surface faces then, per texel.
+    names = [a.name for a in parts["face"].data.attributes if a.name.startswith("_m.")]
+    preset_normals(parts["face"], names)
+    maps = bake.bake_attributes(parts["face"], names + ["_n"] + [f"_n.{n[3:]}" for n in names], size)
+    offsets = {k[3:]: v for k, v in maps.items() if k.startswith("_m.")}
+    normals = {k[3:] or "": v for k, v in maps.items() if k.startswith("_n")}
     log("baked")
     ref = skin.light_reference(baked["skin"])
+    overlays = {f"brows.{i}": mhface.brows(baked["face"], head_tex[f"brow.{i}"], i) for i in range(BROWS)}
+    overlays.update({f"beard.{k}": mhface.beard(baked["face"], head_tex, k) for k in range(1, BEARDS)})
+    features = mhface.features(baked["face"], offsets, normals, head_tex)
     flat = None
     for name, maps in baked.items():
         if name == "face":
@@ -269,38 +366,50 @@ def build_body(o, log):
         # The face keeps more of its painted light: a portrait reads from any side.
         piece["finish"] = {"roughness": 0.75, "rim": 0.5, "flat": 0.78 if name == "face" else 0.5}
         piece["tints"] = "look"
-        strip(piece, ["part", "region", "_nrm"])
+        strip(piece, ["part", "region", "_nrm", "_n"] + [a.name for a in piece.data.attributes
+                                                         if a.name.startswith("_n.")])
+        # (Only now: shape keys on the face change what Cycles bakes onto it.)
+        morphs_from_offsets(piece, log)
         rig.bind(piece, arm)
     out = os.path.join(o.out, "male")
     export(os.path.join(out, "body.glb"), list(parts.values()), arm)
     for name, (detail, mask) in textures.items():
-        bake.save_png(os.path.join(out, f"body.{name}.detail.png"), detail)
+        bake.save_png(os.path.join(out, f"body.{name}.detail.png"), detail, grey=True)
         bake.save_png(os.path.join(out, f"body.{name}.mask.png"), mask)
     # The face's colour without its light, for shaders that light it themselves (at half size: plain colour).
     bake.save_png(os.path.join(out, "body.face.flat.png"), bake.downsample(flat, 2))
+    # The brows and beards the face can wear: how much of each texel they cover, at the mask's size.
+    f = size // 1024
+    for name, a in overlays.items():
+        bake.save_png(os.path.join(out, f"body.face.{name}.png"), bake.downsample(a, f) if f > 1 else a)
+    # The eye and mouth presets' paint (ink, shade, iris and catchlight), at the mask's size too.
+    for name, a in features.items():
+        bake.save_png(os.path.join(out, f"body.face.{name}.png"), bake.downsample(a, f) if f > 1 else a)
     src.remove()
     log("exported", out)
     return parts, arm, textures, high
 
 
 def build_hair(o, log, high, arm):
-    """Hair 0, as it falls freely and as it shows under a cap."""
+    """Hair 0, as it falls freely and as it shows under a cap and under a beanie."""
     size = 1024 if o.fast else 2048
     high.hide_render = False
     head = hair.Head(high)
-    pieces = {"free": hair.helmet(head), "cap": hair.helmet(head, under_cap=True)}
+    pieces = {"free": hair.helmet(head), "cap": hair.helmet(head, under_cap=True),
+              "beanie": hair.helmet(head, under_beanie=True)}
+    # Under a hat only a band shows: half the texture.
+    small = ("cap", "beanie")
     textures = {}
     for name, piece in pieces.items():
         blend.shade_smooth(piece)
         others = [p for p in pieces.values() if p is not piece]
         for p in others:
             p.hide_render = True
-        # Under a cap only a band shows: half the texture.
-        maps = bake.bake_maps(piece, None, size // 2 if name == "cap" else size, ao_distance=0.05)
+        maps = bake.bake_maps(piece, None, size // 2 if name in small else size, ao_distance=0.05)
         for p in others:
             p.hide_render = False
         detail, mask = hair.paint_hair(maps)
-        f = detail.shape[0] // (512 if name == "cap" else 1024)
+        f = detail.shape[0] // (512 if name in small else 1024)
         if f > 1:
             detail, mask = bake.downsample(detail, f), bake.downsample(mask, f)
         textures[name] = (detail, mask)
@@ -312,7 +421,7 @@ def build_hair(o, log, high, arm):
     out = os.path.join(o.out, "male")
     export(os.path.join(out, "hair.0.glb"), list(pieces.values()), arm)
     for name, (detail, mask) in textures.items():
-        bake.save_png(os.path.join(out, f"hair.0.{name}.detail.png"), detail)
+        bake.save_png(os.path.join(out, f"hair.0.{name}.detail.png"), detail, grey=True)
         bake.save_png(os.path.join(out, f"hair.0.{name}.mask.png"), mask)
     # Piece names are only unique within a model: free them for the next ones.
     for name, piece in pieces.items():
@@ -320,14 +429,18 @@ def build_hair(o, log, high, arm):
     return pieces, textures
 
 
-def build_garment(o, log, model, pieces, painter, body, arm, hides=(), finish=None, size=1024, rigid=None):
-    """Exports a catalog model: its pieces fitted, weighted from the body (or all on one bone), baked and
-    painted. `painter` and `finish` may be per piece (dicts by piece name)."""
+def build_garment(o, log, model, pieces, painter, body, arm, hides=(), finish=None, size=1024, rigid=None,
+                  own_weights=False):
+    """Exports a catalog model: its pieces fitted, weighted from the body (or all on one bone, or as their
+    cages were weighted), baked and painted. `painter` and `finish` may be per piece (dicts by piece name)."""
     size = size // 2 if o.fast else size
     textures = {}
     for name, piece in pieces.items():
         blend.shade_smooth(piece)
-        rig.transfer(body, piece, rigid=rigid)
+        if own_weights:
+            rig.limit(piece)
+        else:
+            rig.transfer(body, piece, rigid=rigid)
         maps = bake.bake_maps(piece, None, size * 2, ao_distance=0.06)
         paint = painter[name] if isinstance(painter, dict) else painter
         detail, mask = paint(maps)
@@ -344,7 +457,7 @@ def build_garment(o, log, model, pieces, painter, body, arm, hides=(), finish=No
         raise RuntimeError(f"{model}: pieces named {names}, expected {list(pieces)}")
     export(os.path.join(out, f"{model}.glb"), list(pieces.values()), arm)
     for name, (detail, mask) in textures.items():
-        bake.save_png(os.path.join(out, f"{model}.{name}.detail.png"), detail)
+        bake.save_png(os.path.join(out, f"{model}.{name}.detail.png"), detail, grey=True)
         bake.save_png(os.path.join(out, f"{model}.{name}.mask.png"), mask)
     for name, piece in pieces.items():
         piece.name = piece.data.name = f"{model}.{name}"
@@ -368,30 +481,62 @@ def manifest(o):
 def main():
     o = args()
     log = Log()
-    parts, arm, textures, high = build_body(o, log)
-    hair_pieces, hair_tex = build_hair(o, log, high, arm)
+    only = set(o.only.split(",")) if o.only else None
+
+    def want(model):
+        return only is None or model in only
+
+    parts, arm, textures, high = build_body(o, log, bake_it=want("body"))
+    # Every garment bakes with only the body round it.
+    if want("hair.0"):
+        hair_pieces, hair_tex = build_hair(o, log, high, arm)
+        for p in hair_pieces.values():
+            p.hide_render = True
     body = kit.Body(high)
-    vest = {"vest": kit.vest(body)}
-    vest_tex = build_garment(o, log, "summer.vest.foam", vest, kit.paint_vest, parts["skin"], arm,
-                             hides=("torso",), finish={"roughness": 0.55, "rim": 0.35})
-    shorts = {"shorts": kit.shorts()}
-    shorts_tex = build_garment(o, log, "summer.bottom.boardshorts", shorts, kit.paint_shorts, parts["skin"], arm,
-                               hides=("hips", "thighs"), finish={"roughness": 0.75, "rim": 0.3})
-    shoes = {"shoes": kit.shoes()}
-    shoes_tex = build_garment(o, log, "summer.feet.watershoes", shoes, kit.paint_shoes, parts["skin"], arm,
-                              hides=("feet",), finish={"roughness": 0.65, "rim": 0.3}, size=512)
+    skin_ = parts["skin"]
+    built = {}
+
+    def garment(model, make, painter, **kw):
+        if want(model):
+            pieces = make()
+            built[model] = (pieces, build_garment(o, log, model, pieces, painter, skin_, arm, **kw))
+            for p in pieces.values():
+                p.hide_render = True
+
+    garment("summer.vest.foam", lambda: {"vest": kit.vest(body)}, kit.paint_vest, hides=("torso",),
+            finish={"roughness": 0.55, "rim": 0.35})
+    garment("summer.bottom.boardshorts", lambda: {"shorts": kit.shorts()}, kit.paint_shorts, hides=("hips", "thighs"),
+            finish={"roughness": 0.75, "rim": 0.3})
+    garment("summer.feet.watershoes", lambda: {"shoes": kit.shoes()}, kit.paint_shoes, hides=("feet",),
+            finish={"roughness": 0.65, "rim": 0.3}, size=512)
     head = hair.Head(high)
-    cap = {"cap": headwear.cap(head)}
-    build_garment(o, log, "summer.head.cap", cap, headwear.paint_cap, parts["skin"], arm,
-                  finish={"roughness": 0.8, "rim": 0.3}, size=512, rigid="head")
-    shades = headwear.shades(head)
-    build_garment(o, log, "summer.eyes.shades", shades, {"frame": headwear.paint_frame, "lens": headwear.paint_lens},
-                  parts["skin"], arm, size=256, rigid="head",
-                  finish={"frame": {"roughness": 0.35, "rim": 0.3}, "lens": {"roughness": 0.12, "metalness": 0.4,
-                                                                             "rim": 0.5}})
-    for o_ in list(cap.values()) + list(shades.values()):
-        o_.hide_render = True
-    if o.preview:
+    garment("summer.head.cap", lambda: {"cap": headwear.cap(head)}, headwear.paint_cap,
+            finish={"roughness": 0.8, "rim": 0.3}, size=512, rigid="head")
+    garment("summer.eyes.shades", lambda: headwear.shades(head),
+            {"frame": headwear.paint_frame, "lens": headwear.paint_lens}, size=256, rigid="head",
+            finish={"frame": {"roughness": 0.35, "rim": 0.3}, "lens": {"roughness": 0.12, "metalness": 0.4,
+                                                                       "rim": 0.5}})
+    garment("winter.top.puffer", lambda: {"puffer": winter.puffer()}, winter.paint_puffer,
+            hides=("torso", "flanks", "upperarms", "forearms"), finish={"roughness": 0.55, "rim": 0.35},
+            own_weights=True)
+    garment("winter.bottom.pants", lambda: {"pants": winter.pants()}, winter.paint_pants,
+            hides=("hips", "thighs", "shins"), finish={"roughness": 0.75, "rim": 0.3})
+    garment("winter.head.beanie", lambda: {"beanie": headwear.beanie(head)}, headwear.paint_beanie,
+            finish={"roughness": 0.9, "rim": 0.3}, size=512, rigid="head")
+    garment("winter.eyes.goggles", lambda: headwear.goggles(head),
+            {"frame": headwear.paint_goggle_frame, "lens": headwear.paint_goggle_lens}, size=512, rigid="head",
+            finish={"frame": {"roughness": 0.5, "rim": 0.3}, "lens": {"roughness": 0.12, "metalness": 0.4,
+                                                                      "rim": 0.5}})
+    garment("winter.hands.gloves", lambda: {"gloves": winter.gloves()}, winter.paint_gloves, hides=("hands",),
+            finish={"roughness": 0.7, "rim": 0.3}, size=512, own_weights=True)
+    garment("winter.feet.boots", lambda: {"boots": winter.boots()}, winter.paint_boots, hides=("feet",),
+            finish={"roughness": 0.65, "rim": 0.3}, size=512, own_weights=True)
+    if o.preview and only is None:
+        (vest, vest_tex), (shorts, shorts_tex), (shoes, shoes_tex) = (
+            built[m] for m in ("summer.vest.foam", "summer.bottom.boardshorts", "summer.feet.watershoes"))
+        for p in (vest, shorts, shoes, {"hair": hair_pieces["free"]}):
+            for piece in p.values():
+                piece.hide_render = False
         import lookdev
 
         RED = (0xD9382E, 0x1C1D21, 0xF2F0EA)

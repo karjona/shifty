@@ -27,6 +27,8 @@ export interface Piece {
   tints: TintSource;
   /** Body regions this piece covers (bits of REGIONS), hidden while it is worn. */
   hides: number;
+  /** Its morph targets by name (the face's presets, e.g. `nose.2`). */
+  morphs: Readonly<Record<string, number>>;
 }
 
 export interface ModelAsset {
@@ -74,6 +76,11 @@ function tintsOf(v: unknown): TintSource {
   return v === "look" || v === "hair" ? v : "kit";
 }
 const textures = new Map<string, Promise<THREE.Texture>>();
+
+/** A face overlay of the art (e.g. `brows.2`, `beard.1`): how much of each texel of the face it covers. */
+export function loadOverlay(body: BodyKind, name: string): Promise<THREE.Texture | null> {
+  return loadTexture(`${BASE}/${body}/body.face.${name}.png`).catch(() => null);
+}
 
 function loadTexture(url: string): Promise<THREE.Texture> {
   let t = textures.get(url);
@@ -139,6 +146,7 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
           const tints: unknown = Reflect.get(m.userData, "tints");
           const hides: unknown = Reflect.get(m.userData, "hides");
           return {
+            morphs: { ...m.morphTargetDictionary },
             name,
             geometry: remapJoints(m),
             detail,

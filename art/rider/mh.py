@@ -38,7 +38,68 @@ MALE = {
                 "chin-height-decr": 0.2},
     "proxy": "proxymeshes/male1591/male1591.proxy",
     "skin": "skins/young_caucasian_male/young_lightskinned_male_diffuse.png",
-    "brows": ["eyebrow008", "eyebrow004", "eyebrow001", "eyebrow005", "eyebrow012"],
+    "brows": ["eyebrow008", "eyebrow009", "eyebrow003", "eyebrow005", "eyebrow007"],
+}
+
+def _both(**kw):
+    """The same targets on both eyes (`eye-scale-incr=0.5` → l- and r-)."""
+    return {f"{side}-{k.replace('_', '-')}": v for k, v in kw.items() for side in ("l", "r")}
+
+
+# The face presets the creator offers, as targets over the body's own (0 is the body as designed). A target
+# the body already has is replaced. `gain` scales the preset's whole change (Blender caps a target at 1):
+# features have to read apart at portrait distance, on a face drawn in a few flat tones.
+FACES = {
+    "eyes": [
+        {},
+        # Narrow and keen: the upper lid low, the outer corners up.
+        {"gain": 1.3, **_both(eye_height2_incr=0.0, eye_height1_decr=1.0, eye_height2_decr=0.5, eye_corner2_up=1.0,
+                              eye_corner1_down=0.7)},
+        # Big and round, a little wider apart.
+        {"gain": 1.15, **_both(eye_height1_incr=1.0, eye_height2_incr=1.0, eye_height3_incr=0.7, eye_scale_incr=0.4,
+                              eye_trans_out=0.4)},
+        # Heavy lids, a calm look: the upper lid low and level over the eye, a fold above it.
+        {"gain": 1.3, **_both(eye_height2_incr=0.0, eye_eyefold_down=1.0, eye_height1_decr=0.7, eye_bag_incr=0.6,
+                              eye_eyefold_convex=0.6, eye_trans_in=0.3)},
+        # Gentle: the outer corners well down, the inner up.
+        {"gain": 1.9, **_both(eye_corner2_down=1.0, eye_corner1_up=1.0, eye_eyefold_angle_down=1.0,
+                              eye_height2_incr=0.5)},
+    ],
+    "nose": [
+        {},
+        # Long and straight.
+        {"gain": 1.3, "nose-scale-vert-incr": 1.0, "nose-scale-horiz-decr": 0.6, "nose-greek-incr": 1.0,
+         "nose-point-down": 0.3, "nose-width1-decr": 0.5},
+        # Broad.
+        {"gain": 1.15, "nose-scale-horiz-incr": 1.0, "nose-nostrils-width-incr": 1.0, "nose-flaring-incr": 0.8,
+         "nose-point-width-decr": 0.0, "nose-point-width-incr": 0.8, "nose-scale-depth-incr": 0.0,
+         "nose-scale-depth-decr": 0.3},
+        # Hooked.
+        {"gain": 1.1, "nose-hump-incr": 1.0, "nose-point-down": 0.5, "nose-scale-vert-incr": 0.3,
+         "nose-curve-convex": 0.6, "nose-scale-depth-incr": 0.3},
+        # Small and upturned.
+        {"gain": 1.4, "nose-point-up": 1.0, "nose-scale-vert-decr": 0.8, "nose-scale-depth-incr": 0.0,
+         "nose-scale-depth-decr": 0.5, "nose-volume-decr": 0.6, "nose-nostrils-angle-up": 0.6},
+    ],
+    "mouth": [
+        {},
+        # Wide, thin lips, a grin.
+        {"gain": 1.4, "mouth-scale-horiz-incr": 1.0, "mouth-upperlip-volume-decr": 0.8,
+         "mouth-lowerlip-volume-decr": 0.4, "mouth-angles-up": 1.0, "asym-mouth-1-r": 0.0,
+         "mouth-laugh-lines-out": 1.0},
+        # Full lips.
+        {"gain": 1.4, "mouth-upperlip-volume-incr": 1.0, "mouth-lowerlip-volume-incr": 1.0,
+         "mouth-cupidsbow-incr": 1.0, "mouth-upperlip-height-incr": 0.8, "mouth-lowerlip-height-incr": 0.6,
+         "mouth-scale-horiz-incr": 0.35},
+        # Stern: level and thin, a little down at the corners.
+        {"gain": 1.3, "mouth-angles-up": 0.0, "mouth-angles-down": 0.6, "asym-mouth-1-r": 0.0,
+         "mouth-scale-horiz-incr": 0.3, "mouth-upperlip-volume-decr": 0.8, "mouth-upperlip-height-decr": 0.4,
+         "mouth-lowerlip-volume-decr": 0.3},
+        # Small, a pout.
+        {"gain": 1.3, "mouth-scale-horiz-incr": 0.0, "mouth-scale-horiz-decr": 1.0,
+         "mouth-lowerlip-volume-incr": 1.0, "mouth-upperlip-volume-incr": 0.6, "mouth-trans-forward": 0.3,
+         "mouth-lowerlip-middle-down": 0.5, "asym-mouth-1-r": 0.0},
+    ],
 }
 
 BODIES = {"male": MALE}
@@ -49,6 +110,7 @@ def args():
     p = argparse.ArgumentParser()
     p.add_argument("--assets", required=True, help="the MakeHuman system asset pack, unzipped")
     p.add_argument("--out", default=os.path.join(HERE, "mh"))
+    p.add_argument("--faces", action="store_true", help="only the face presets (<body>.faces.json)")
     return p.parse_args(argv)
 
 
@@ -147,31 +209,75 @@ def to_object(bm, name):
     return obj
 
 
-def build(body, spec, assets, out):
+def human_with(spec, assets, targets):
+    """A new scene with the body's human (its targets replaced or added to by `targets`) and its proxy:
+    (human, proxy, add) where `add(kind, path)` adds another asset."""
     from bl_ext.blender_org.mpfb.services.humanservice import HumanService
     from bl_ext.blender_org.mpfb.services.targetservice import TargetService
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     human = HumanService.create_human(macro_detail_dict=spec["macro"], scale=0.1)
-    targets = os.path.join(os.path.dirname(sys.modules[HumanService.__module__].__file__), "..", "data", "targets")
-    files = {f[: -len(".target.gz")]: os.path.join(d, f) for d, _, fs in os.walk(targets) for f in fs
+    folder = os.path.join(os.path.dirname(sys.modules[HumanService.__module__].__file__), "..", "data", "targets")
+    files = {f[: -len(".target.gz")]: os.path.join(d, f) for d, _, fs in os.walk(folder) for f in fs
              if f.endswith(".target.gz")}
-    for name, value in spec["targets"].items():
-        TargetService.load_target(human, files[name], weight=value)
+    for name, value in {**spec["targets"], **targets}.items():
+        if value:
+            TargetService.load_target(human, files[name], weight=value)
 
     def add(kind, path):
         return HumanService.add_mhclo_asset(os.path.join(assets, path), human, asset_type=kind, subdiv_levels=0,
                                             set_up_rigging=False)
 
-    proxy = add("Proxymeshes", spec["proxy"])
+    return human, add("Proxymeshes", spec["proxy"]), add
+
+
+def head_of(proxy):
+    """The proxy's head (a bmesh, world space) and the loop round its neck."""
+    low = evaluated(proxy)
+    loop = neck_loop(low)
+    return low, loop, head_faces(low, loop)
+
+
+def faces(body, spec, assets, out):
+    """Each face preset's head as offsets from the designed one (`<body>.faces.json`): per preset, the
+    vertices of the `head` mesh it moves and by how much (MakeHuman's space, metres), and under "check" a few
+    vertices of the designed head."""
+    _, proxy, _ = human_with(spec, assets, {})
+    low, _, head = head_of(proxy)
+    keep_faces(low, head)
+    base = np.array([v.co[:] for v in low.verts])
+    low.free()
+    # A few of the designed head's vertices, so a build can tell the presets still match its head.
+    result = {"check": [[i, *(round(float(x), 6) for x in base[i])] for i in range(0, len(base), 61)]}
+    for part, presets in FACES.items():
+        for n, preset in enumerate(presets):
+            if not preset:
+                continue
+            targets = {k: v for k, v in preset.items() if k != "gain"}
+            _, proxy, _ = human_with(spec, assets, targets)
+            low, _, head = head_of(proxy)
+            keep_faces(low, head)
+            co = np.array([v.co[:] for v in low.verts])
+            low.free()
+            if co.shape != base.shape:
+                raise RuntimeError(f"{part} {n}: the head has {len(co)} vertices, not {len(base)}")
+            d = (co - base) * preset.get("gain", 1.0)
+            moved = np.nonzero(np.linalg.norm(d, axis=1) > 2e-6)[0]
+            result[f"{part}.{n}"] = [[int(i), *(round(float(x), 6) for x in d[i])] for i in moved]
+            print(body, part, n, len(moved), "vertices moved, at most", f"{np.abs(d).max() * 1000:.1f} mm")
+    with open(os.path.join(out, f"{body}.faces.json"), "w") as f:
+        f.write("{\n" + ",\n".join(f"  {json.dumps(k)}: {json.dumps(v, separators=(',', ':'))}"
+                                    for k, v in result.items()) + "\n}\n")
+
+
+def build(body, spec, assets, out):
+    human, proxy, add = human_with(spec, assets, {})
     eyes = add("Eyes", "eyes/low-poly/low-poly.mhclo")
     brows = {}
     for i, b in enumerate(spec["brows"]):
         brows[i] = add("Eyebrows", f"eyebrows/{b}/{b}.mhclo")
 
-    low = evaluated(proxy)
-    loop = neck_loop(low)
-    head = head_faces(low, loop)
+    low, loop, head = head_of(proxy)
     # One more row of faces under the neck loop, so the detailed head reaches past the seam.
     below = {f for v in {x for e in loop for x in e.verts} for f in v.link_faces} - head
     tree = BVHTree.FromBMesh(low)
@@ -230,7 +336,7 @@ def keep_high_face(f, tree, face_of, keep):
 def main():
     o = args()
     for body, spec in BODIES.items():
-        build(body, spec, o.assets, o.out)
+        (faces if o.faces else build)(body, spec, o.assets, o.out)
 
 
 main()

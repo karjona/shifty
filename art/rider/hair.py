@@ -69,6 +69,15 @@ def hairline_elev(head, az):
     return (lo + hi) / 2
 
 
+def beanie_band(head, az):
+    """Where a beanie's edge sits (elevation): low on the forehead, over the tops of the ears, low round the
+    back of the head."""
+    a = abs(az)
+    if a < 60:
+        return hairline_elev(head, az) - 5.0 + 3.0 * (a / 60) ** 2
+    return float(np.interp(a, [60, 75, 95, 115, 140, 180], [hairline_elev(head, 60) - 1.0, 9, 11, 7, -1, -4]))
+
+
 class Mesh:
     def __init__(self, name):
         self.name = name
@@ -242,26 +251,31 @@ def _jitter(spikes, seed=7):
 SPIKES = _jitter(_spikes())
 
 
-def helmet(head, under_cap=False, cols=80, rows=None):
-    """Hair 0: a shell over the scalp pushed out into spikes; under a cap, only what shows below it."""
-    name = "cap" if under_cap else "free"
-    rows = rows or (10 if under_cap else 28)
+def helmet(head, under_cap=False, cols=80, rows=None, under_beanie=False):
+    """Hair 0: a shell over the scalp pushed out into spikes; under a cap or a beanie, only what shows below
+    it (under a beanie, the fringe too)."""
+    name = "cap" if under_cap else "beanie" if under_beanie else "free"
+    under = under_cap or under_beanie
+    rows = rows or (10 if under else 28)
     m = Mesh(name)
     azs = [360 * i / cols - 180 for i in range(cols)]
     lines = [hairline_elev(head, a) for a in azs]
+    band = {a: beanie_band(head, a) for a in azs} if under_beanie else {}
     spikes = []
     for az, above, h, w, flow in SPIKES:
         e0 = hairline_elev(head, az)
         el = min(e0 + above, 84)
         if under_cap and (el > 28 or abs(az) < 60):
             continue
-        spikes.append((direction(az, el), h * (0.5 if under_cap else 0.74), math.radians(w), np.array(flow, float)))
-    top = 28.0 if under_cap else 88.0
+        if under_beanie and el > beanie_band(head, az) - 2:
+            continue
+        spikes.append((direction(az, el), h * (0.5 if under else 0.74), math.radians(w), np.array(flow, float)))
     grid = []
     for k in range(rows + 1):
         row, uvs = [], []
         for i, a in enumerate(azs):
             # The fringe hangs onto the forehead; elsewhere the edge tucks in at the hairline.
+            top = band[a] + 3.0 if under_beanie else 28.0 if under_cap else 88.0
             fringe = smoothstep(62, 40, abs(a))
             # The fringe comes down over the forehead in pointed locks.
             # Irregular locks: each its own width and length.
@@ -272,6 +286,7 @@ def helmet(head, under_cap=False, cols=80, rows=None):
             length, sharp = rng.uniform(5.0, 12.0), rng.uniform(1.2, 2.2)
             saw = abs(f - 0.5) * 2
             e0 = lines[i] - 1.5 - fringe * (9.0 + length * (1 - saw) ** sharp)
+            top = max(top, e0 + 2.0)
             t = k / rows
             e = e0 + (top - e0) * t
             u = direction(a, e)
@@ -309,7 +324,7 @@ def helmet(head, under_cap=False, cols=80, rows=None):
             if max(us) - min(us) > 0.5:
                 uvq = [(uv[0] + 1 if uv[0] < 0.5 else uv[0], uv[1]) for uv in uvq]
             m.quad(vs, uvq)
-    if not under_cap:
+    if not under:
         cap = m.verts([np.mean([np.array(v.co[:]) for v in grid[rows]], axis=0)], [(0.5, 1.0)])[0]
         for i in range(cols):
             j = (i + 1) % cols
