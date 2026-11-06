@@ -4,7 +4,7 @@
 import { Hono, type Context } from "hono";
 import { type Auth, createAuth } from "./auth.ts";
 import { menuContent } from "./content.ts";
-import { type Db, openDb } from "./db/client.ts";
+import { type Db, openRequestDb } from "./db/client.ts";
 import { databaseUrl, type Env } from "./env.ts";
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
@@ -69,16 +69,13 @@ app.post("/api/servers/heartbeat", async (c) => {
 
 // Everything below talks to Postgres: one pool per request.
 app.use("/api/*", async (c, next) => {
-  const { db, close } = openDb(databaseUrl(c.env));
+  const { db, background, finish } = openRequestDb(databaseUrl(c.env), (p) => c.executionCtx.waitUntil(p));
   c.set("db", db);
-  c.set(
-    "auth",
-    createAuth(c.env, db, (p) => c.executionCtx.waitUntil(p)),
-  );
+  c.set("auth", createAuth(c.env, db, background));
   try {
     await next();
   } finally {
-    c.executionCtx.waitUntil(close());
+    finish();
   }
 });
 
