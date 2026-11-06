@@ -10,7 +10,7 @@
 //     dev-only quick join tickets for tests
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureDatabase } from "./dev-db.ts";
 import { ensureDevKey, repoRoot } from "./dev-lobby.ts";
@@ -134,6 +134,9 @@ const run = (
   children.push(child);
 };
 
+// The Worker serves the client's build in production; here Vite serves the
+// client, but wrangler still wants the assets directory to exist.
+mkdirSync(join(repoRoot, "apps/client/dist"), { recursive: true });
 run(
   "lobby",
   33,

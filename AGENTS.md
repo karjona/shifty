@@ -179,10 +179,10 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 
 | Piece | Our official hosting | Self-hosted |
 |---|---|---|
-| Client | Cloudflare | workerd |
+| Client | Cloudflare (the lobby Worker's static assets) | workerd |
 | Lobby | Cloudflare (Workers + Durable Objects) | workerd in Docker |
 | Race server | VPS with UDP (provider TBD) | Docker anywhere |
-| Postgres | TBD, reached through Hyperdrive | Docker |
+| Postgres | Neon (Frankfurt), reached through Hyperdrive | Docker |
 
 Self-hosting target: `docker compose up` runs workerd + race-server + postgres.
 
@@ -244,6 +244,7 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, `pnpm audit`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm --filter lobby test`, `pnpm --filter @shifty/rider test`, `pnpm test:e2e` (menus against the real lobby, and the netcode). CI runs all of them on every PR. The race server image (`.github/workflows/image.yml`) builds on every push to `main`, and on PRs only when packaging changes (Dockerfile, Cargo manifests and lockfile, toolchain, notices config). CI actions are pinned by commit SHA (with the version in a comment).
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.
+- **Deploy (lobby + client):** the game lives at `https://23.4shifty.gg` (`4shifty.gg` and `www` redirect there). From Kilian's machine for now: `pnpm build`, then `pnpm --filter lobby exec wrangler deploy --secrets-file ../../.dev/prod.env` (the Worker serves `apps/client/dist`; production secrets live in `.dev/prod.env`, the race server's settings in `.dev/prod-race-server.env`, both gitignored). Migrate Neon first when the schema changed: `pnpm --filter lobby db:migrate` with `.dev/neon.env` loaded.
 - **Containers:** Kilian's Mac has no Docker; use Apple's `container` CLI (Docker-compatible): `container build -f crates/race-server/Dockerfile -t shifty-race-server .`. For UDP from the host use `127.0.0.1`, not `::1`.
 - **Git:** never push to `main`. Work on a branch per piece of work and open a PR; PRs are squash-merged, so the PR title becomes the commit on `main`.
   - **PR titles are Conventional Commits** (`feat: …`, `fix(netcode): …`), checked in CI by commitlint. Scopes (optional): `sim`, `protocol`, `netcode`, `server`, `client`, `lobby`, `devkit`, `art`, `audio`, `ci`, `deps`. Local commits are checked too, by a lefthook `commit-msg` hook that `pnpm install` sets up.
