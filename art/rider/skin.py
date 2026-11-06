@@ -91,17 +91,18 @@ def _ang(x, centre, width):
     return np.exp(-((d / width) ** 2))
 
 
-def anatomy(pos):
-    """Painted definition: a multiplier on the shading (below 1 darkens, above lights)."""
-    import male
+def anatomy(pos, fig):
+    """Painted definition on a body (a figure.Figure): a multiplier on the shading (below 1 darkens, above
+    lights)."""
+    from figure import arm_up
 
-    J = male.J
+    J = fig.J
     m = np.ones(pos.shape[:2])
     # Round limbs: lit down their front and outer side, shaded behind and inside, whatever the pose.
     for sgn, L in ((1, "L"), (-1, "R")):
         side = pos[..., 0] * sgn > 0.12
         for a, b in (("upperarm", "forearm"), ("forearm", "hand")):
-            t, ang, rad = limb(pos, J[f"{a}.{L}"], J[f"{b}.{L}"], male.arm_up(sgn))
+            t, ang, rad = limb(pos, J[f"{a}.{L}"], J[f"{b}.{L}"], arm_up(sgn))
             on = side & (rad < 0.09) & (t > 0.05) & (t < 1.0)
             m = np.where(on, m * (1 + 0.28 * np.tanh(2.2 * np.cos(np.radians(ang - 40)))), m)
         legside = pos[..., 0] * sgn > -0.005
@@ -111,7 +112,7 @@ def anatomy(pos):
             m = np.where(on, m * (1 + 0.22 * np.tanh(2.2 * np.cos(np.radians(ang - 60)))), m)
     for sgn, L in ((1, "L"), (-1, "R")):
         side = smoothstep(0.1 * -sgn, 0.14 * sgn, pos[..., 0] * 1.0) if False else (pos[..., 0] * sgn > 0.12)
-        up = male.arm_up(sgn)
+        up = arm_up(sgn)
         t, ang, rad = limb(pos, J[f"upperarm.{L}"], J[f"forearm.{L}"], up)
         on = side & (rad < 0.1) & (t > -0.15) & (t < 1.1)
         # Deltoid: lit cap, a shadowed edge where it meets the arm (lower in front, higher behind).
@@ -185,6 +186,9 @@ def anatomy(pos):
 
     # Chest and belly (under the vest most of the time): the pecs' lower edge, the middle line, the abs.
     front = y < -0.04
+    if fig.MUSCLE < 1:
+        # Less muscle painted on, softly: the limbs' and the neck's definition at its share, no pecs or abs.
+        return 1 + (m - 1) * fig.MUSCLE
     pec = np.exp(-(((z - (1.28 + 0.035 * (np.abs(x) / 0.15) ** 2)) / 0.012) ** 2)) * smoothstep(0.0, 0.03, np.abs(x))
     pec = pec * smoothstep(0.17, 0.13, np.abs(x)) * front
     m = m * (1 - 0.342 * pec)
@@ -213,7 +217,7 @@ def paint_skin(maps, ref):
     cast = smoothstep(jaw_line - 0.028, jaw_line - 0.004, zn) * neck * smoothstep(0.05, -0.02, yn)
     s = s * (1 - 0.45 * cast)
     # Painted definition as value laid over the light, so it shows the same in the light and in the shade.
-    s = s + (anatomy(pos) - 1) * 0.85
+    s = s + (anatomy(pos, maps["fig"]) - 1) * 0.85
     # Brush work: soft vertical strokes of value, the way skin was hand-painted.
     strokes = fbm(pos * np.array([60.0, 60.0, 9.0]), 1.0, octaves=2, seed=31) - 0.5
     s = s * (1 + 0.07 * strokes)

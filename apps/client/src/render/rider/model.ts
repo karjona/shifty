@@ -22,9 +22,9 @@ import { CelTintMaterial, type FaceOverlays, NO_OVERLAY, faceGeometry, limbGeome
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
 
-/** Standing heights per height preset (m); the art is built at the middle one. */
+/** Standing heights per height preset (m). Both bodies' art is built 1.78 m tall (the male's middle preset). */
 const HEIGHTS = { male: [1.68, 1.73, 1.78, 1.83, 1.88], female: [1.58, 1.63, 1.68, 1.73, 1.78] };
-const ART_HEIGHT = { male: 1.78, female: 1.68 };
+const ART_HEIGHT = 1.78;
 
 interface Worn {
   model: string;
@@ -65,7 +65,7 @@ async function artBody(look: Look): Promise<Look["body"]> {
  * A required slot whose model isn't built yet shows the starter model there, in the item's colours. */
 async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
   const built = await builtModels(look.body);
-  const starters = defaultOutfits("male");
+  const starters = defaultOutfits(look.body);
   const items = SLOTS[sport].flatMap((slot) => {
     const id = kit[slot];
     const it = id ? item(id) : undefined;
@@ -137,12 +137,12 @@ export class RiderFigure {
     if (!body) return;
     if (!this.rig || this.rigFor !== look.body) {
       this.rig?.root.removeFromParent();
-      this.body = bodyFromRest(body.rest, ART_HEIGHT[look.body]);
+      this.body = bodyFromRest(body.rest, ART_HEIGHT);
       this.rig = new Rig(this.body);
       this.rigFor = look.body;
       this.group.add(this.rig.root);
     }
-    const s = (HEIGHTS[look.body][look.height] ?? ART_HEIGHT[look.body]) / ART_HEIGHT[look.body];
+    const s = (HEIGHTS[look.body][look.height] ?? ART_HEIGHT) / ART_HEIGHT;
     this.group.scale.setScalar(s);
     const hair = HAIR_COLOURS[look.hairColor] ?? HAIR_COLOURS[1]!;
     const own: Colourway = [

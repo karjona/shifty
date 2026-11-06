@@ -1,6 +1,8 @@
 """The riders' heads from MakeHuman (exported by mh.py): placed on the body and stitched to the top ring of the
 neck, with the eyes in their sockets and the mouth closed."""
 
+import functools
+import json
 import math
 import os
 
@@ -13,33 +15,41 @@ from mathutils.interpolate import poly_3d_calc
 
 SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mh")
 
-# MakeHuman's head onto the body: a little broader than life, back and up to sit over the neck.
-SCALE = np.array([1.025, 1.0, 1.0])
-OFFSET = np.array([0.0, 0.065, 0.025])
+# Each body's MakeHuman head onto the body: `scale` (a little broader than life) and `offset` (back and up to
+# sit over the neck), and the nape (y, z): behind it, the neck turns with the neck up to the skull.
+PLACE = {
+    "male": {"scale": np.array([1.025, 1.0, 1.0]), "offset": np.array([0.0, 0.065, 0.025]), "nape": (0.075, 1.555)},
+    "female": {"scale": np.array([1.04, 1.04, 1.04]), "offset": np.array([0.0, 0.0584, 0.0856]),
+               "nape": (0.065, 1.555)},
+}
 
 # How much of the neck ring's offset each row of vertices above it follows (row 0 is the ring itself).
 FOLLOW = [1.0, 0.6, 0.25]
 
 
-def _place(co):
-    return co * SCALE + OFFSET
+def _place(co, body):
+    return co * PLACE[body]["scale"] + PLACE[body]["offset"]
 
 
-def landmark(name, body="male"):
-    """A landmark of the placed head (see mh.landmarks): a point, or a height for "crown"."""
-    import json
-
+@functools.cache
+def _landmarks(body):
     with open(os.path.join(SOURCE, f"{body}.json")) as f:
-        v = json.load(f)[name]
+        return json.load(f)
+
+
+def landmark(name, body):
+    """A landmark of a body's placed head (see mh.landmarks): a point, or a height for "crown"."""
+    v = _landmarks(body)[name]
     if isinstance(v, list):
-        return _place(np.array(v, dtype=np.float64))
-    return float(v * SCALE[2] + OFFSET[2])
+        return _place(np.array(v, dtype=np.float64), body)
+    return float(v * PLACE[body]["scale"][2] + PLACE[body]["offset"][2])
 
 
 class Source:
-    """The exported meshes, placed on the body."""
+    """A body's exported meshes, placed on the body."""
 
     def __init__(self, body):
+        self.body = body
         before = set(bpy.data.objects)
         bpy.ops.wm.obj_import(filepath=os.path.join(SOURCE, f"{body}.obj"))
         self.objects = {o.name: o for o in bpy.data.objects if o not in before}
@@ -49,7 +59,7 @@ class Source:
             me = o.data
             co = np.empty(len(me.vertices) * 3)
             me.vertices.foreach_get("co", co)
-            me.vertices.foreach_set("co", _place(co.reshape(-1, 3)).ravel())
+            me.vertices.foreach_set("co", _place(co.reshape(-1, 3), body).ravel())
             me.update()
             o.hide_render = True
         self.offset = None
@@ -222,19 +232,20 @@ def _ear_side(bm):
     return side
 
 
-def head_weights(row, z, y):
+def head_weights(row, z, y, body):
     """Neck and head weights for a head vertex `row` edges above the neck ring."""
     w = 0.0 if row <= 1 else (0.65 if row == 2 else 1.0)
     # The back of the neck turns with the neck up to the skull.
-    if y > 0.075:
-        w = min(w, max(0.0, min(1.0, (z - 1.555) / 0.05)))
+    nape_y, nape_z = PLACE[body]["nape"]
+    if y > nape_y:
+        w = min(w, max(0.0, min(1.0, (z - nape_z) / 0.05)))
     return {"neck": 1.0 - w, "head": w} if w < 1.0 else {"head": 1.0}
 
 
-def face_region(bm, off):
+def face_region(bm, off, body):
     """The faces of the face: in front of the ears, from under the chin to the top of the forehead."""
-    eye_z = landmark("eye_l")[2]
-    centre_y = landmark("centre")[1]
+    eye_z = landmark("eye_l", body)[2]
+    centre_y = landmark("centre", body)[1]
     out = set()
     for f in bm.faces:
         c = np.mean([off.moved[v.index] for v in f.verts], axis=0)
@@ -268,7 +279,7 @@ def attach(cage, neck, src, region):
         p = off.moved[v.index]
         side = ears.get(v, 0)
         part = f"ear.{side}" if side else "head"
-        vmap[v] = cage.vert(p, head_weights(rows[v], p[2], p[1]), part=part)
+        vmap[v] = cage.vert(p, head_weights(rows[v], p[2], p[1], src.body), part=part)
     skin_faces = set()
     for f in bm.faces:
         cf = cage.face([vmap[v] for v in f.verts], region)
@@ -278,7 +289,7 @@ def attach(cage, neck, src, region):
     # texture meets the body's.
     for e in _uv_seams(bm):
         cage.seam([vmap[e.verts[0]], vmap[e.verts[1]]])
-    front = face_region(bm, off)
+    front = face_region(bm, off, src.body)
     for e in bm.edges:
         fs = e.link_faces
         if len(fs) == 2 and ((fs[0] in front) != (fs[1] in front)):
@@ -369,23 +380,22 @@ def tag_parts(obj, low, parts):
     a.data.foreach_set("value", cur.astype(np.int32))
 
 
-def face_presets(cage, off, src, body="male"):
+def face_presets(cage, off, src):
     """The face presets (mh.FACES, exported by `mh.py --faces`) as offsets of the cage's vertices: {name:
     (n, 3) array}, for a cage `finish`ed from the one `attach` built into (indices as `off.cage_index`)."""
-    import json
-
+    body = src.body
     with open(os.path.join(SOURCE, f"{body}.faces.json")) as f:
         presets = json.load(f)
     head = src["head"].data.vertices
     for i, *p in presets.pop("check"):
-        if np.linalg.norm(_place(np.array(p)) - np.array(head[i].co[:])) > 1e-4:
+        if np.linalg.norm(_place(np.array(p), body) - np.array(head[i].co[:])) > 1e-4:
             raise RuntimeError(f"{body}.faces.json was made for another head: export it again (mh.py --faces)")
     n = len(cage.data.vertices)
     out = {}
     for name, moves in presets.items():
         head = np.zeros((len(off.cage_index), 3))
         for i, dx, dy, dz in moves:
-            head[i] = np.array([dx, dy, dz]) * SCALE
+            head[i] = np.array([dx, dy, dz]) * PLACE[body]["scale"]
         d = np.zeros((n, 3))
         d[off.cage_index] = head
         for centre, ring in off.caps:

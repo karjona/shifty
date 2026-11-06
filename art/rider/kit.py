@@ -1,4 +1,4 @@
-"""The summer kit, box-modelled around the male body.
+"""The summer kit, box-modelled around a body (figure.py).
 
 Garments are grids or cages fitted to the body by casting rays at it, given
 thickness, unwrapped by construction, baked on themselves (with the body
@@ -15,17 +15,18 @@ from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
 import blend
-import male
+import figure
 import rings
 from paint import fbm, smoothstep
 from skin import blur
 
 
 class Body:
-    """Ray casts against the body, for fitting garments to it."""
+    """Ray casts against a body (`fig`, a figure.Figure; `obj`, its detailed mesh), for fitting garments to it."""
 
-    def __init__(self, obj):
+    def __init__(self, obj, fig):
         self.tree = BVHTree.FromObject(obj, bpy.context.evaluated_depsgraph_get())
+        self.fig = fig
 
     def out(self, origin, d, reach=0.4):
         """The first surface met going out from inside the body along `d` (origin and direction in metres)."""
@@ -36,11 +37,20 @@ class Body:
             return np.array(origin) + np.array(dv) * 0.05
         return np.array(hit)
 
+    def clear(self, p, off):
+        """`p` moved out to at least `off` from the body's surface (along the surface's normal)."""
+        loc, nrm, _, _ = self.tree.find_nearest(Vector(tuple(float(c) for c in p)))
+        if loc is None:
+            return p
+        loc, nrm = np.array(loc), np.array(nrm)
+        d = float(np.dot(p - loc, nrm))
+        return p if d >= off else p + nrm * (off - d)
 
-def _axis_y(z):
+
+def _axis_y(fig, z):
     """The torso's middle (y) at height z, from the body's table."""
-    zs = [r[0] for r in male.TORSO]
-    ys = [r[4] for r in male.TORSO]
+    zs = [r[0] for r in fig.TORSO]
+    ys = [r[4] for r in fig.TORSO]
     return float(np.interp(z, zs, ys))
 
 
@@ -73,12 +83,13 @@ def grid_mesh(name, P, UV, keep):
     return blend.link(bpy.data.objects.new(name, me))
 
 
-def thicken(obj, thickness, inner_uv=(0.0, 0.0, 1.0, 0.05), rim_uv=(0.0, 0.055, 1.0, 0.075)):
-    """Gives a sheet thickness inward; the inside and the rims get their own strips of the texture."""
+def thicken(obj, thickness, inner_uv=(0.0, 0.0, 1.0, 0.05), rim_uv=(0.0, 0.055, 1.0, 0.075), even=True):
+    """Gives a sheet thickness inward; the inside and the rims get their own strips of the texture. (Without
+    `even` it is thinner where the sheet bends sharply, instead of shooting out spikes there.)"""
     m = obj.modifiers.new("solid", "SOLIDIFY")
     m.thickness = thickness
     m.offset = -1
-    m.use_even_offset = True
+    m.use_even_offset = even
     m.use_rim = True
     m.material_offset = 1
     m.material_offset_rim = 2
@@ -193,7 +204,7 @@ def vest(body):
     def surface(th, z):
         key = (round(th, 3), round(z, 4))
         if key not in radius:
-            yc = _axis_y(z)
+            yc = _axis_y(body.fig, z)
             a = math.radians(th)
             hit = body.out((0, yc, z), (math.sin(a), -math.cos(a), 0.0))
             r = math.hypot(hit[0], hit[1] - yc)
@@ -208,7 +219,7 @@ def vest(body):
     for i in range(rows + 1):
         for j in range(cols):
             th, z = T[i, j], Z[i, j]
-            yc = _axis_y(z)
+            yc = _axis_y(body.fig, z)
             a = math.radians(th)
             d = np.array([math.sin(a), -math.cos(a), 0.0])
             r = surface(th, z)
@@ -312,25 +323,25 @@ def lift_uvs(obj, v0=0.08):
 HEM = 0.5
 
 
-def shorts():
+def shorts(fig):
     """Loose boardshorts: a waistband at the hips, legs wide to just below the knee."""
     import uv as uvs
 
     cage = rings.Cage("shorts")
-    R = male.R
+    R = figure.R
     waist = []
     for z, grow in ((1.085, 0.012), (1.04, 0.015), (0.98, 0.018), (0.93, 0.021), (0.885, 0.024)):
-        W, F, B, yc, n = male.torso_params(z)
+        W, F, B, yc, n = fig.torso_params(z)
         pts = []
-        for i in range(male.N_TORSO):
-            t = 2 * math.pi * i / male.N_TORSO
+        for i in range(figure.N_TORSO):
+            t = 2 * math.pi * i / figure.N_TORSO
             s_, c_ = math.sin(t), math.cos(t)
             ex = 2.0 / n
             x = (W + grow) * math.copysign(abs(s_) ** ex, s_)
             d = (F + grow) if c_ >= 0 else (B + grow)
             y = yc - d * math.copysign(abs(c_) ** ex, c_)
             pts.append(np.array([x, y, z]))
-        waist.append(cage.ring(pts, male.torso_weights(0, 0) if z < 1.0 else male.blend_w("hips", "spine", 0.4),
+        waist.append(cage.ring(pts, fig.torso_weights(0, 0) if z < 1.0 else figure.blend_w("hips", "spine", 0.4),
                                part="shorts"))
     for a, b in zip(waist, waist[1:]):
         cage.bridge(a, b, R["hips"])
@@ -339,22 +350,20 @@ def shorts():
     loops = {1: bottom[0:9] + [crotch], -1: bottom[8:16] + [bottom[0], crotch]}
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        hip, knee = male.J[f"thigh.{L}"], male.J[f"shin.{L}"]
+        hip, knee = fig.J[f"thigh.{L}"], fig.J[f"shin.{L}"]
         specs = []
         thigh_len = float(np.linalg.norm(knee - hip))
         for dist, grow in ((0.15, 0.026), (0.25, 0.032), (0.33, 0.039), (0.4, 0.046), (0.432, 0.05), (0.442, 0.05)):
-            o, i_, f, b = [float(np.interp(dist, [r[0] for r in male.THIGH] + [thigh_len, thigh_len + 0.1],
-                                           [r[k] for r in male.THIGH] + [male.SHIN[0][k], male.SHIN[2][k]]))
-                           for k in (1, 2, 3, 4)]
-            pts = male.leg_ring(s, hip, knee, dist, o + grow, i_ + grow * 0.45, f + grow, b + grow * 1.1)
-            w = male.blend_w(f"thigh.{L}", f"shin.{L}", (dist - 0.36) / 0.16) if dist > 0.36 else {f"thigh.{L}": 1.0}
+            o, i_, f, b = fig.leg_at(dist, thigh_len)
+            pts = fig.leg_ring(s, hip, knee, dist, o + grow, i_ + grow * 0.45, f + grow, b + grow * 1.1)
+            w = figure.blend_w(f"thigh.{L}", f"shin.{L}", (dist - 0.36) / 0.16) if dist > 0.36 else {f"thigh.{L}": 1.0}
             specs.append((pts, w))
         ring_vs = [cage.ring(p, w, part="shorts") for p, w in specs]
         ring_vs[0] = cage.bridge_aligned(loops[s], ring_vs[0], R["thighs"])
         for k in range(1, len(ring_vs)):
-            ring_vs[k] = male._align(ring_vs[k - 1], ring_vs[k])
+            ring_vs[k] = figure._align(ring_vs[k - 1], ring_vs[k])
             cage.bridge(ring_vs[k - 1], ring_vs[k], R["thighs"])
-        inner = male._index_toward(ring_vs[1], (-s, 0, 0))
+        inner = figure._index_toward(ring_vs[1], (-s, 0, 0))
         cage.seam([loops[s][inner]] + [r[inner] for r in ring_vs])
     back = [w[8] for w in waist]
     cage.seam(back + [crotch])
@@ -455,32 +464,248 @@ def paint_shorts(maps):
     return np.clip(detail, 0, 1), np.clip(mask, 0, 1)
 
 
+# ---------------------------------------------------------------- swimsuit
+
+SUIT_BOTTOM, SUIT_TOP = 0.82, 1.52
+SUIT_ROWS, SUIT_COLS = 52, 48
+# Its edges by angle from the front (degrees, either side): the leg line (a moderate cut, up to the top of the
+# thighs: the body shows its hips' sides below that), the top (a scoop at the front, deep under the arms, low
+# across the back).
+LEG_LINE = ([0, 14, 30, 45, 60, 75, 90, 105, 120, 135, 150, 166, 180],
+            [0.835, 0.848, 0.886, 0.926, 0.944, 0.951, 0.952, 0.951, 0.944, 0.924, 0.884, 0.852, 0.84])
+SUIT_LINE = ([0, 15, 30, 42, 48, 54, 62, 72, 90, 110, 130, 150, 180],
+             [1.378, 1.381, 1.392, 1.404, 1.398, 1.372, 1.346, 1.33, 1.318, 1.296, 1.272, 1.262, 1.262])
+# The straps: up from the front over the top of each shoulder, down the back to meet between the shoulder blades.
+STRAP_LINE = ([40, 50, 65, 80, 95, 110, 125, 140, 155, 170, 180],
+              [1.39, 1.42, 1.46, 1.494, 1.505, 1.494, 1.468, 1.43, 1.392, 1.356, 1.342])
+STRAP_HALF = 0.013
+
+
+def suit_field(th, z, straps=True):
+    """How far inside the swimsuit a point (angle from the front in degrees, height) is, roughly in metres:
+    positive inside, 0 on its edges."""
+    a = np.abs((np.asarray(th) + 180) % 360 - 180)
+    z = np.asarray(z, dtype=np.float64)
+    panel = np.minimum(z - np.interp(a, *LEG_LINE), np.interp(a, *SUIT_LINE) - z)
+    # Down the middle of the back from where the straps meet: a band widening into the back panel.
+    back = (180 - a) * 0.0018
+    half = 0.024 + 0.05 * smoothstep(1.34, 1.25, z)
+    spine = np.where(z < 1.35, half - back, np.minimum(half - back, 1.35 - z))
+    body = _soft_max(panel, spine, 0.005)
+    if not straps:
+        return body
+    strap = STRAP_HALF - np.abs(z - np.interp(a, *STRAP_LINE))
+    strap = np.where((a > 36) & (a <= 180), strap, -1.0)
+    return np.maximum(body, strap)
+
+
+def _soft_max(a, b, k):
+    m = np.maximum(a, b)
+    return m + k * np.log(np.exp((a - m) / k) + np.exp((b - m) / k)) - k * math.log(2) * np.exp(-np.abs(a - b) / k)
+
+
+def swimsuit(body):
+    """A sporty one-piece: a moderate leg, a scoop neck, a racer back; tight to the body."""
+    fig = body.fig
+    rows, cols = SUIT_ROWS, SUIT_COLS
+    T = np.array([[360.0 * j / cols for j in range(cols)] for _ in range(rows + 1)])
+    Z = np.array([[SUIT_BOTTOM + (SUIT_TOP - SUIT_BOTTOM) * i / rows] * cols for i in range(rows + 1)])
+    keep = np.zeros((rows, cols), dtype=bool)
+    for i in range(rows):
+        for j in range(cols):
+            keep[i, j] = suit_field(360.0 * (j + 0.5) / cols, (Z[i, 0] + Z[i + 1, 0]) / 2, False) > 0
+    # Edge vertices go onto the edge (a few steps down the field's slope), so the edges run smooth.
+    used = np.zeros((rows + 1, cols), dtype=bool)
+    for i in range(rows):
+        for j in range(cols):
+            if keep[i, j]:
+                used[i, j] = used[i + 1, j] = used[i, (j + 1) % cols] = used[i + 1, (j + 1) % cols] = True
+    deg = 0.0025
+    for i in range(rows + 1):
+        for j in range(cols):
+            if not used[i, j]:
+                continue
+            near = [keep[ii, jj % cols] for ii in (i - 1, i) for jj in (j - 1, j) if 0 <= ii < rows]
+            if all(near) and len(near) == 4:
+                continue
+            th, z = T[i, j], Z[i, j]
+            for _ in range(6):
+                f = float(suit_field(th, z, False))
+                g_t = (float(suit_field(th + 0.5, z, False)) - float(suit_field(th - 0.5, z, False))) / (1.0 * deg)
+                g_z = (float(suit_field(th, z + 0.001, False)) - float(suit_field(th, z - 0.001, False))) / 0.002
+                gg = g_t * g_t + g_z * g_z
+                if gg < 1e-9:
+                    break
+                th, z = th - f * g_t / gg / deg, z - f * g_z / gg
+            T[i, j], Z[i, j] = th, z
+    P = np.zeros((rows + 1, cols, 3))
+    UV = np.zeros((rows + 1, cols, 2))
+    for i in range(rows + 1):
+        for j in range(cols):
+            th, z = T[i, j], Z[i, j]
+            P[i, j] = _suit_point(body, th, z, 0.0028)
+            UV[i, j] = ((th / 360) % 1.0, 0.25 + 0.75 * (z - SUIT_BOTTOM) / (SUIT_TOP - SUIT_BOTTOM))
+    # Stretched fabric: smooth (the edges stay where they are), bridging hollows (between the legs at the back),
+    # never closer to the skin than it was fitted.
+    inner = np.zeros((rows + 1, cols), dtype=bool)
+    for i in range(1, rows):
+        for j in range(cols):
+            inner[i, j] = all(keep[ii, jj % cols] for ii in (i - 1, i) for jj in (j - 1, j))
+    for _ in range(10):
+        Q = P.copy()
+        for i in range(rows + 1):
+            for j in range(cols):
+                if not used[i, j]:
+                    continue
+                if inner[i, j]:
+                    avg = (P[i - 1, j] + P[i + 1, j] + P[i, j - 1] + P[i, (j + 1) % cols]) / 4
+                    Q[i, j] = P[i, j] * 0.4 + avg * 0.6
+                Q[i, j] = body.clear(Q[i, j], 0.0028)
+        P = Q
+    obj = grid_mesh("swimsuit", P, UV, keep)
+    # The straps: ribbons along their own lines from the front panel over the shoulders to the back.
+    for s in (1, -1):
+        obj = _join(obj, _strap(body, s))
+    # One sheet, no inside: it is skin tight (an inner layer this close would shadow the outside in stripes).
+    # Every face looks away from the body.
+    me = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    inward = [f for f in bm.faces
+              if f.normal.dot(f.calc_center_median() - Vector((0, _axis_y(fig, f.calc_center_median().z),
+                                                                 f.calc_center_median().z))) < 0]
+    bmesh.ops.reverse_faces(bm, faces=inward)
+    bm.to_mesh(me)
+    bm.free()
+    return obj
+
+
+def _suit_point(body, th, z, off):
+    """The point `off` out from the body at (angle from the front in degrees, height), for the swimsuit."""
+    fig = body.fig
+    yc = _axis_y(fig, z)
+    a = math.radians(th)
+    d = np.array([math.sin(a), -math.cos(a), 0.0])
+    # Over the top of the shoulders the rays look a little up, onto the slope; between the legs they come down
+    # from inside the hips.
+    origin = np.array([0, yc, min(z, 1.5)])
+    if z > 1.44:
+        d = d + np.array([0, 0, (z - 1.44) * 6])
+    hit = body.out(origin, d)
+    # Near the middle line low down (between the legs), rays from inside the hips aimed down, blended in.
+    t = th % 360
+    mid = min(t, 360 - t, abs(t - 180))
+    w = smoothstep(42.0, 20.0, mid) * smoothstep(0.94, 0.88, z)
+    if w > 0:
+        low = body.out(np.array([0, yc, 0.95]), d * 0.09 + np.array([0, 0, z - 0.95]))
+        hit = hit * (1 - w) + low * w
+    return body.clear(hit, off)
+
+
+def _strap(body, s, n=28):
+    """One strap (side `s`): a ribbon along STRAP_LINE, a little proud of the panels it runs into."""
+    a0, a1 = STRAP_LINE[0][0] - 2, STRAP_LINE[0][-1]
+    P = np.zeros((3, n + 1, 3))
+    UV = np.zeros((3, n + 1, 2))
+    for k in range(n + 1):
+        a = a0 + (a1 - a0) * k / n
+        zc = float(np.interp(a, *STRAP_LINE))
+        # Across the line (in angle-metres): its slope makes the strap's width hold where the line climbs.
+        dz = (float(np.interp(a + 1, *STRAP_LINE)) - float(np.interp(a - 1, *STRAP_LINE))) / (2 * 0.0025)
+        across = np.array([-dz, 1.0]) / math.hypot(dz, 1.0)
+        for e, sgn in enumerate((-1, 0, 1)):
+            aa = a + sgn * across[0] * STRAP_HALF / 0.0025
+            zz = zc + sgn * across[1] * STRAP_HALF
+            P[e, k] = _suit_point(body, s * aa, zz, 0.0036)
+            UV[e, k] = (0.05 + 0.9 * k / n, (0.02 + 0.045 * e) + (0.11 if s < 0 else 0.0))
+    keep = np.ones((2, n + 1), dtype=bool)
+    keep[:, n] = False
+    return grid_mesh("strap", P, UV, keep)
+
+
+def _join(a, b):
+    blend.deselect()
+    a.select_set(True)
+    b.select_set(True)
+    bpy.context.view_layer.objects.active = a
+    bpy.ops.object.join()
+    return a
+
+
+def paint_swimsuit(maps):
+    """The main colour, a curving side panel in the second colour, piping round every edge and the brand's mark
+    on the left hip in the accent."""
+    inside = maps["inside"]
+    pos = maps["pos"]
+    fig = maps["fig"]
+    x, y, z = pos[..., 0], pos[..., 1], pos[..., 2]
+    yc = np.interp(z, [r[0] for r in fig.TORSO], [r[4] for r in fig.TORSO])
+    th = np.degrees(np.arctan2(x, -(y - yc))) % 360
+    a = np.abs((th + 180) % 360 - 180)
+    L = blur(maps["light"], inside, 2)
+    ref = np.percentile(L[inside], 85) if inside.any() else 1.0
+    s = np.clip(L / ref, 0, 1.45)
+    ao = np.clip(blur(maps["ao"], inside, 2), 0, 1)
+    s = s * (0.45 + 0.55 * ao)
+    # Lycra: a sheen where it stretches over curves, a few fine creases at the hips.
+    curv = np.clip((maps["curv"] - 0.5) * 6, -1, 1)
+    s = s * (1 + 0.12 * np.maximum(curv, 0))
+    detail = np.repeat((0.5 * s)[..., None], 3, axis=2)
+    mask = np.zeros_like(detail)
+    mask[..., 0] = 1
+
+    def put(area, which, shade=None):
+        nonlocal detail, mask
+        area = np.clip(area, 0, 1)[..., None]
+        col = np.zeros(3)
+        col[which] = 1
+        mask = mask * (1 - area) + col * area
+        if shade is not None:
+            detail = detail * (1 - area) + shade[..., None] * area
+
+    # A side panel from under each arm sweeping forward to the hip.
+    sweep = 92 - (1.32 - z) * 95
+    panel = smoothstep(9, 6, np.abs(a - sweep)) * smoothstep(0.96, 1.0, z) * smoothstep(1.33, 1.29, z)
+    put(panel, 1)
+    # Piping along every edge.
+    edge = suit_field(th, z)
+    put(smoothstep(0.0045, 0.003, edge), 2, 0.55 * np.clip(s, 0.4, 1.3))
+    # The brand's mark on the left hip.
+    mark = (x > 0) * smoothstep(0.012, 0.009, np.abs(a - 52)) * smoothstep(0.009, 0.006, np.abs(z - 1.02))
+    put(mark, 2)
+    return np.clip(detail, 0, 1), np.clip(mask, 0, 1)
+
+
 # ---------------------------------------------------------------- water shoes
 
 
-def shoes():
+# The left shoe's rings, from the collar round the shin down to the toe, on the male-sized foot (see
+# figure.foot_point): centre, axis, outer, inner, top, bottom.
+SHOE_PATH = [
+    ((0.104, 0.006, 0.29), (0, 0, -1), 0.054, 0.052, 0.056, 0.054),
+    ((0.104, 0.01, 0.235), (0, 0, -1), 0.058, 0.056, 0.06, 0.058),
+    ((0.104, 0.016, 0.17), (0, 0, -1), 0.066, 0.062, 0.068, 0.064),
+    ((0.104, 0.022, 0.105), (0, 0, -1), 0.074, 0.068, 0.078, 0.074),
+    ((0.104, 0.024, 0.066), (0, -0.25, -0.97), 0.077, 0.07, 0.092, 0.074),
+    ((0.107, -0.026, 0.054), (0, -0.9, -0.43), 0.077, 0.07, 0.076, 0.064),
+    ((0.109, -0.078, 0.048), (0, -1, -0.12), 0.079, 0.072, 0.062, 0.054),
+    ((0.111, -0.13, 0.044), (0, -1, -0.04), 0.081, 0.072, 0.05, 0.048),
+    ((0.111, -0.176, 0.04), (0, -1, 0.02), 0.075, 0.066, 0.044, 0.044),
+    ((0.11, -0.208, 0.038), (0, -1, 0.1), 0.06, 0.053, 0.035, 0.04),
+]
+
+
+def shoes(fig):
     """Chunky high-top water shoes: a thick sole, a toe bumper, two straps."""
     import uv as uvs
 
     cage = rings.Cage("shoes")
-    R = male.R
+    R = figure.R
+    size = fig.FOOT_SIZE
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        x = s * 0.104
         n = 12
-        # (centre, axis, outer, inner, top, bottom) from the collar round the shin down to the toe.
-        path = [
-            ((x, 0.006, 0.29), (0, 0, -1), 0.054, 0.052, 0.056, 0.054),
-            ((x, 0.01, 0.235), (0, 0, -1), 0.058, 0.056, 0.06, 0.058),
-            ((x, 0.016, 0.17), (0, 0, -1), 0.066, 0.062, 0.068, 0.064),
-            ((x, 0.022, 0.105), (0, 0, -1), 0.074, 0.068, 0.078, 0.074),
-            ((x, 0.024, 0.066), (0, -0.25, -0.97), 0.077, 0.07, 0.092, 0.074),
-            ((x + s * 0.003, -0.026, 0.054), (0, -0.9, -0.43), 0.077, 0.07, 0.076, 0.064),
-            ((x + s * 0.005, -0.078, 0.048), (0, -1, -0.12), 0.079, 0.072, 0.062, 0.054),
-            ((x + s * 0.007, -0.13, 0.044), (0, -1, -0.04), 0.081, 0.072, 0.05, 0.048),
-            ((x + s * 0.007, -0.176, 0.04), (0, -1, 0.02), 0.075, 0.066, 0.044, 0.044),
-            ((x + s * 0.006, -0.208, 0.038), (0, -1, 0.1), 0.06, 0.053, 0.035, 0.04),
-        ]
+        path = [(fig.foot_point(s, c), *rest) for c, *rest in SHOE_PATH]
         prev = None
         made = []
         for k, (c, axis, o, i_, top, bottom) in enumerate(path):
@@ -489,28 +714,28 @@ def shoes():
             e1, e2, _ = rings.frame_of(axis, (0, -1, 0) if vertical else (0, 0, 1))
             if np.dot(e1, (s, 0, 0)) < 0:
                 e1 = -e1
-            o, i_, top, bottom = o * 1.1, i_ * 1.1, top * 1.08, bottom * 1.08
+            o, i_, top, bottom = o * 1.1 * size, i_ * 1.1 * size, top * 1.08 * size, bottom * 1.08 * size
             pts = rings.place(c, e1, e2, rings.outline(n, o, i_, top, bottom, power=2.1 if vertical else 2.4,
                                                        start=math.pi / n))
             # A flat sole: nothing below the ground, a little out at the sole's edge.
             pts = [np.array([p[0], p[1], max(p[2], 0.0)]) for p in pts]
             if k == 4:
                 # The heel: out behind.
-                pts = [p + np.array([0, 0.02, 0]) * max(0.0, (p[1] - c[1]) / 0.06) for p in pts]
-            w = {f"foot.{L}": 1.0} if k > 2 else male.blend_w(f"shin.{L}", f"foot.{L}", 0.1 + 0.3 * k)
+                pts = [p + np.array([0, 0.02, 0]) * size * max(0.0, (p[1] - c[1]) / (0.06 * size)) for p in pts]
+            w = {f"foot.{L}": 1.0} if k > 2 else figure.blend_w(f"shin.{L}", f"foot.{L}", 0.1 + 0.3 * k)
             if k >= 8:
-                w = male.blend_w(f"foot.{L}", f"toes.{L}", 0.7)
+                w = figure.blend_w(f"foot.{L}", f"toes.{L}", 0.7)
             ring = cage.ring(pts, w, part=f"shoe.{L}")
             if prev is not None:
-                ring = male._align(prev, ring)
+                ring = figure._align(prev, ring)
                 cage.bridge(prev, ring, R["feet"])
             made.append(ring)
             prev = ring
-        tip = np.array(path[-1][0]) + np.array([0, -0.016, -0.004])
-        cage.cap(prev, tip, male.blend_w(f"foot.{L}", f"toes.{L}", 0.8), R["feet"], part=f"shoe.{L}")
-        sole = male._index_toward(made[6], (0, 0, -1))
+        tip = fig.foot_point(s, np.array(SHOE_PATH[-1][0]) + np.array([0, -0.016, -0.004]))
+        cage.cap(prev, tip, figure.blend_w(f"foot.{L}", f"toes.{L}", 0.8), R["feet"], part=f"shoe.{L}")
+        sole = figure._index_toward(made[6], (0, 0, -1))
         cage.seam([r[sole] for r in made[3:]])
-        back = male._index_toward(made[0], (0, 1, 0))
+        back = figure._index_toward(made[0], (0, 1, 0))
         cage.seam([made[0][back], made[1][back], made[2][back], made[3][back]])
         cage.seam(made[3], closed=True)
     obj = cage.finish()
@@ -538,7 +763,7 @@ def shoes():
 
 def paint_shoes(maps):
     inside = maps["inside"]
-    pos = maps["pos"]
+    pos = maps["fig"].foot_design(maps["pos"])
     x, y, z = pos[..., 0], pos[..., 1], pos[..., 2]
     L = blur(maps["light"], inside, 2)
     ref = np.percentile(L[inside], 85) if inside.any() else 1.0

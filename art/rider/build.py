@@ -2,7 +2,8 @@
 painted and exported.
 
     /Applications/Blender.app/Contents/MacOS/Blender --background --factory-startup \\
-        --python art/rider/build.py -- [--out DIR] [--only NAME,...] [--fast] [--preview DIR] [--ref PNG]
+        --python art/rider/build.py -- [--out DIR] [--body male,female] [--only NAME,...] [--fast] \\
+        [--preview DIR] [--ref PNG]
 
 Writes one .glb per model (meshes, skin, no materials; the face's presets as morph targets) and its textures
 (`<model>.<part>.detail.png` in grey, `<model>.<part>.mask.png`, the face's colour without its light,
@@ -24,10 +25,13 @@ import numpy as np  # noqa: E402
 
 import bake  # noqa: E402
 import blend  # noqa: E402
+import figure  # noqa: E402
 import hair  # noqa: E402
+import hairdo  # noqa: E402
 import headwear  # noqa: E402
 import kit  # noqa: E402
-import male  # noqa: E402
+from female import FEMALE  # noqa: E402
+from male import MALE  # noqa: E402
 import mhface  # noqa: E402
 import mhhead  # noqa: E402
 import rig  # noqa: E402
@@ -43,6 +47,7 @@ def args():
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     p = argparse.ArgumentParser()
     p.add_argument("--out", default=os.path.join(ROOT, "apps", "client", "public", "riders"))
+    p.add_argument("--body", default=None, help="only these bodies (male, female)")
     p.add_argument("--only", default=None)
     p.add_argument("--fast", action="store_true", help="smaller bakes, for quick looks")
     p.add_argument("--preview", default=None, help="also render look-test sheets into this folder")
@@ -92,6 +97,24 @@ def split_by_material(obj):
         o.name = o.data.name = name
         out[name] = o
     return out
+
+
+def suit_regions(obj, fig, margin=0.003):
+    """Moves the faces wholly under the swimsuit (kit.suit_field, `margin` inside its edges) into the `suit.`
+    regions of the regions they were in."""
+    reg = rings.attribute(obj, "region")
+    me = obj.data
+    co = np.empty(len(me.vertices) * 3)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    yc = np.interp(co[:, 2], [r[0] for r in fig.TORSO], [r[4] for r in fig.TORSO])
+    th = np.degrees(np.arctan2(co[:, 0], -(co[:, 1] - yc))) % 360
+    inside = kit.suit_field(th, co[:, 2], straps=False) > margin
+    moved = {figure.R[n]: figure.R[f"suit.{n}"] for n in ("torso", "hips", "flanks")}
+    for p in me.polygons:
+        if reg[p.index] in moved and all(inside[v] for v in p.vertices):
+            reg[p.index] = moved[reg[p.index]]
+    me.attributes["region"].data.foreach_set("value", reg.astype(np.int32))
 
 
 def tag_regions(obj):
@@ -228,7 +251,7 @@ DENSITY = {"head": 2.1, "eye": 3.0, "mouth": 1.0, "ear": 1.2, "neck": 1.0, "tors
 
 def face_textures(face_piece, src, size, cage):
     """What MakeHuman's textures show on the face: the skin's colour and each brow."""
-    tex = os.path.join(mhhead.SOURCE, "")
+    tex = os.path.join(mhhead.SOURCE, f"{src.body}.")
     head = src["head.high"]
     out = {"skin": bake.bake_textured(face_piece, [(head, tex + "skin.png", "rgb")], size, cage=cage)}
     for i in range(BROWS):
@@ -239,7 +262,8 @@ def face_textures(face_piece, src, size, cage):
 
 
 BROWS = 5
-BEARDS = 5
+# Beards (presets 1-4; 0 is none) are for male bodies only.
+BEARDS = {"male": 5, "female": 1}
 
 
 def bake_cage(piece, parts, push=0.008, eye_push=0.0012):
@@ -262,14 +286,14 @@ def bake_cage(piece, parts, push=0.008, eye_push=0.0012):
     return c
 
 
-def build_body(o, log, bake_it=True):
-    """The body (rigged pieces, the armature and the detailed mesh), baked, painted and exported unless
+def build_body(o, log, fig, bake_it=True):
+    """A body (rigged pieces, the armature and the detailed mesh), baked, painted and exported unless
     `bake_it` is false (when only the garments fitted to it are wanted)."""
     size = 1024 if o.fast else 2048
     blend.clear_scene()
-    arm = rig.armature(male.J, male.TAILS)
-    src = mhhead.Source("male")
-    cage, off = male.build_cage(src)
+    arm = rig.armature(fig.J, fig.TAILS)
+    src = mhhead.Source(fig.name)
+    cage, off = fig.build_cage(src)
     cage.name = "cage"
     names = {v: k for k, v in cage["parts"].items()}
     part = rings.attribute(cage, "part")
@@ -289,7 +313,7 @@ def build_body(o, log, bake_it=True):
         d = float(np.mean(base))
         c = f.calc_center_median()
         if all(n in ("head", "mouth") for n in ps):
-            d = 3.2 if c.y < mhhead.landmark("centre")[1] - 0.045 else 0.7
+            d = 3.2 if c.y < mhhead.landmark("centre", fig.name)[1] - 0.045 else 0.7
         # Feet: below the ankles.
         if np.mean([v.co.z for v in f.verts]) < 0.075:
             d *= 0.35
@@ -312,6 +336,8 @@ def build_body(o, log, bake_it=True):
     keep_normals(low)
     rig.limit(low)
     parts = split_by_material(low)
+    if fig.SWIMSUIT:
+        suit_regions(parts["skin"], fig)
     tag_regions(parts["skin"])
     for piece in parts.values():
         restore_normals(piece)
@@ -334,6 +360,7 @@ def build_body(o, log, bake_it=True):
         other.hide_render = False
     for maps in baked.values():
         maps["parts"] = dict(names)
+        maps["fig"] = fig
     face_high.hide_render = True
     head_tex = face_textures(parts["face"], src, size, face_cage)
     bpy.data.objects.remove(face_cage)
@@ -346,7 +373,7 @@ def build_body(o, log, bake_it=True):
     log("baked")
     ref = skin.light_reference(baked["skin"])
     overlays = {f"brows.{i}": mhface.brows(baked["face"], head_tex[f"brow.{i}"], i) for i in range(BROWS)}
-    overlays.update({f"beard.{k}": mhface.beard(baked["face"], head_tex, k) for k in range(1, BEARDS)})
+    overlays.update({f"beard.{k}": mhface.beard(baked["face"], head_tex, k) for k in range(1, BEARDS[fig.name])})
     features = mhface.features(baked["face"], offsets, normals, head_tex)
     flat = None
     for name, maps in baked.items():
@@ -371,7 +398,7 @@ def build_body(o, log, bake_it=True):
         # (Only now: shape keys on the face change what Cycles bakes onto it.)
         morphs_from_offsets(piece, log)
         rig.bind(piece, arm)
-    out = os.path.join(o.out, "male")
+    out = os.path.join(o.out, fig.name)
     export(os.path.join(out, "body.glb"), list(parts.values()), arm)
     for name, (detail, mask) in textures.items():
         bake.save_png(os.path.join(out, f"body.{name}.detail.png"), detail, grey=True)
@@ -390,15 +417,17 @@ def build_body(o, log, bake_it=True):
     return parts, arm, textures, high
 
 
-def build_hair(o, log, high, arm):
-    """Hair 0, as it falls freely and as it shows under a cap and under a beanie."""
+def build_hair(o, log, high, arm, fig, n):
+    """A body's hair style `n` (hair.STYLES), as it falls freely and as it shows under a cap and under a
+    beanie."""
     size = 1024 if o.fast else 2048
+    model = f"hair.{n}"
     high.hide_render = False
-    head = hair.Head(high)
-    pieces = {"free": hair.helmet(head), "cap": hair.helmet(head, under_cap=True),
-              "beanie": hair.helmet(head, under_beanie=True)}
-    # Under a hat only a band shows: half the texture.
-    small = ("cap", "beanie")
+    head = hair.Head(high, fig)
+    make = hairdo.STYLES[fig.name][n]
+    pieces = {kind: make(head, kind) for kind in ("free", "cap", "beanie")}
+    # Where only a band shows under a hat: half the texture.
+    small = [kind for kind, p in pieces.items() if p.get("half")]
     textures = {}
     for name, piece in pieces.items():
         blend.shade_smooth(piece)
@@ -409,6 +438,14 @@ def build_hair(o, log, high, arm):
         for p in others:
             p.hide_render = False
         detail, mask = hair.paint_hair(maps)
+        # A tie's band, darker.
+        h, w = detail.shape[:2]
+        for b in piece.get("bands", ()):
+            u0, v0, u1, v1 = (float(x) for x in b)
+            detail[int((1 - v1) * h):int((1 - v0) * h), int(u0 * w):int(u1 * w)] *= 0.4
+        for k in ("bands", "half"):
+            if k in piece:
+                del piece[k]
         f = detail.shape[0] // (512 if name in small else 1024)
         if f > 1:
             detail, mask = bake.downsample(detail, f), bake.downsample(mask, f)
@@ -418,21 +455,22 @@ def build_hair(o, log, high, arm):
         rig.bind(piece, arm)
         log("hair", name, len(piece.data.polygons), "faces")
     high.hide_render = True
-    out = os.path.join(o.out, "male")
-    export(os.path.join(out, "hair.0.glb"), list(pieces.values()), arm)
+    out = os.path.join(o.out, fig.name)
+    export(os.path.join(out, f"{model}.glb"), list(pieces.values()), arm)
     for name, (detail, mask) in textures.items():
-        bake.save_png(os.path.join(out, f"hair.0.{name}.detail.png"), detail, grey=True)
-        bake.save_png(os.path.join(out, f"hair.0.{name}.mask.png"), mask)
+        bake.save_png(os.path.join(out, f"{model}.{name}.detail.png"), detail, grey=True)
+        bake.save_png(os.path.join(out, f"{model}.{name}.mask.png"), mask)
     # Piece names are only unique within a model: free them for the next ones.
     for name, piece in pieces.items():
-        piece.name = piece.data.name = f"hair.0.{name}"
+        piece.name = piece.data.name = f"{model}.{name}"
     return pieces, textures
 
 
-def build_garment(o, log, model, pieces, painter, body, arm, hides=(), finish=None, size=1024, rigid=None,
+def build_garment(o, log, fig, model, pieces, painter, body, arm, hides=(), finish=None, size=1024, rigid=None,
                   own_weights=False):
-    """Exports a catalog model: its pieces fitted, weighted from the body (or all on one bone, or as their
-    cages were weighted), baked and painted. `painter` and `finish` may be per piece (dicts by piece name)."""
+    """Exports a catalog model for a body: its pieces fitted, weighted from the body (or all on one bone, or as
+    their cages were weighted), baked and painted. `painter` and `finish` may be per piece (dicts by piece
+    name)."""
     size = size // 2 if o.fast else size
     textures = {}
     for name, piece in pieces.items():
@@ -442,16 +480,19 @@ def build_garment(o, log, model, pieces, painter, body, arm, hides=(), finish=No
         else:
             rig.transfer(body, piece, rigid=rigid)
         maps = bake.bake_maps(piece, None, size * 2, ao_distance=0.06)
+        maps["fig"] = fig
         paint = painter[name] if isinstance(painter, dict) else painter
         detail, mask = paint(maps)
         textures[name] = (bake.downsample(detail, 2), bake.downsample(mask, 2))
         fin = finish.get(name) if isinstance(finish, dict) and name in finish else finish
         piece["finish"] = fin if isinstance(fin, dict) and "roughness" in fin else {"roughness": 0.7, "rim": 0.35}
         piece["tints"] = "kit"
-        piece["hides"] = [male.REGIONS.index(r) for r in hides]
+        # Hiding a region hides its part under a swimsuit too.
+        hides = list(hides) + [f"suit.{r}" for r in hides if f"suit.{r}" in figure.REGIONS]
+        piece["hides"] = [figure.REGIONS.index(r) for r in hides]
         rig.bind(piece, arm)
-        log(model, name, len(piece.data.polygons), "faces")
-    out = os.path.join(o.out, "male")
+        log(fig.name, model, name, len(piece.data.polygons), "faces")
+    out = os.path.join(o.out, fig.name)
     names = [p.name for p in pieces.values()]
     if names != list(pieces):
         raise RuntimeError(f"{model}: pieces named {names}, expected {list(pieces)}")
@@ -478,48 +519,54 @@ def manifest(o):
         f.write("\n")
 
 
-def main():
-    o = args()
-    log = Log()
-    only = set(o.only.split(",")) if o.only else None
+BODIES = {"male": MALE, "female": FEMALE}
+
+
+def build(o, log, fig, only):
+    """Everything for one body: the body, its hair styles and the kit fitted to it."""
 
     def want(model):
         return only is None or model in only
 
-    parts, arm, textures, high = build_body(o, log, bake_it=want("body"))
+    parts, arm, textures, high = build_body(o, log, fig, bake_it=want("body"))
+    styles = {}
+    for n in sorted(hairdo.STYLES[fig.name]):
+        if want(f"hair.{n}"):
+            styles[n] = build_hair(o, log, high, arm, fig, n)
+            for p in styles[n][0].values():
+                p.hide_render = True
     # Every garment bakes with only the body round it.
-    if want("hair.0"):
-        hair_pieces, hair_tex = build_hair(o, log, high, arm)
-        for p in hair_pieces.values():
-            p.hide_render = True
-    body = kit.Body(high)
+    body = kit.Body(high, fig)
     skin_ = parts["skin"]
     built = {}
 
-    def garment(model, make, painter, **kw):
-        if want(model):
+    def garment(model, make, painter, bodies=("male", "female"), **kw):
+        if want(model) and fig.name in bodies:
             pieces = make()
-            built[model] = (pieces, build_garment(o, log, model, pieces, painter, skin_, arm, **kw))
+            built[model] = (pieces, build_garment(o, log, fig, model, pieces, painter, skin_, arm, **kw))
             for p in pieces.values():
                 p.hide_render = True
 
     garment("summer.vest.foam", lambda: {"vest": kit.vest(body)}, kit.paint_vest, hides=("torso",),
             finish={"roughness": 0.55, "rim": 0.35})
-    garment("summer.bottom.boardshorts", lambda: {"shorts": kit.shorts()}, kit.paint_shorts, hides=("hips", "thighs"),
-            finish={"roughness": 0.75, "rim": 0.3})
-    garment("summer.feet.watershoes", lambda: {"shoes": kit.shoes()}, kit.paint_shoes, hides=("feet",),
+    garment("summer.bottom.boardshorts", lambda: {"shorts": kit.shorts(fig)}, kit.paint_shorts,
+            hides=("hips", "thighs"), finish={"roughness": 0.75, "rim": 0.3})
+    garment("summer.bottom.swimsuit", lambda: {"swimsuit": kit.swimsuit(body)}, kit.paint_swimsuit,
+            bodies=("female",), hides=("suit.torso", "suit.hips", "suit.flanks"),
+            finish={"roughness": 0.45, "rim": 0.35})
+    garment("summer.feet.watershoes", lambda: {"shoes": kit.shoes(fig)}, kit.paint_shoes, hides=("feet",),
             finish={"roughness": 0.65, "rim": 0.3}, size=512)
-    head = hair.Head(high)
+    head = hair.Head(high, fig)
     garment("summer.head.cap", lambda: {"cap": headwear.cap(head)}, headwear.paint_cap,
             finish={"roughness": 0.8, "rim": 0.3}, size=512, rigid="head")
     garment("summer.eyes.shades", lambda: headwear.shades(head),
             {"frame": headwear.paint_frame, "lens": headwear.paint_lens}, size=256, rigid="head",
             finish={"frame": {"roughness": 0.35, "rim": 0.3}, "lens": {"roughness": 0.12, "metalness": 0.4,
                                                                        "rim": 0.5}})
-    garment("winter.top.puffer", lambda: {"puffer": winter.puffer()}, winter.paint_puffer,
-            hides=("torso", "flanks", "upperarms", "forearms"), finish={"roughness": 0.55, "rim": 0.35},
+    garment("winter.top.puffer", lambda: {"puffer": winter.puffer(fig)}, winter.paint_puffer,
+            hides=("torso", "flanks", "yoke", "upperarms", "forearms"), finish={"roughness": 0.55, "rim": 0.35},
             own_weights=True)
-    garment("winter.bottom.pants", lambda: {"pants": winter.pants()}, winter.paint_pants,
+    garment("winter.bottom.pants", lambda: {"pants": winter.pants(fig)}, winter.paint_pants,
             hides=("hips", "thighs", "shins"), finish={"roughness": 0.75, "rim": 0.3})
     garment("winter.head.beanie", lambda: {"beanie": headwear.beanie(head)}, headwear.paint_beanie,
             finish={"roughness": 0.9, "rim": 0.3}, size=512, rigid="head")
@@ -527,13 +574,14 @@ def main():
             {"frame": headwear.paint_goggle_frame, "lens": headwear.paint_goggle_lens}, size=512, rigid="head",
             finish={"frame": {"roughness": 0.5, "rim": 0.3}, "lens": {"roughness": 0.12, "metalness": 0.4,
                                                                       "rim": 0.5}})
-    garment("winter.hands.gloves", lambda: {"gloves": winter.gloves()}, winter.paint_gloves, hides=("hands",),
+    garment("winter.hands.gloves", lambda: {"gloves": winter.gloves(fig)}, winter.paint_gloves, hides=("hands",),
             finish={"roughness": 0.7, "rim": 0.3}, size=512, own_weights=True)
-    garment("winter.feet.boots", lambda: {"boots": winter.boots()}, winter.paint_boots, hides=("feet",),
+    garment("winter.feet.boots", lambda: {"boots": winter.boots(fig)}, winter.paint_boots, hides=("feet",),
             finish={"roughness": 0.65, "rim": 0.3}, size=512, own_weights=True)
     if o.preview and only is None:
         (vest, vest_tex), (shorts, shorts_tex), (shoes, shoes_tex) = (
             built[m] for m in ("summer.vest.foam", "summer.bottom.boardshorts", "summer.feet.watershoes"))
+        hair_pieces, hair_tex = styles[0]
         for p in (vest, shorts, shoes, {"hair": hair_pieces["free"]}):
             for piece in p.values():
                 piece.hide_render = False
@@ -547,9 +595,17 @@ def main():
                   "shoes": shoes["shoes"]}
         tex = {**textures, "hair": hair_tex["free"], "vest": vest_tex["vest"], "shorts": shorts_tex["shorts"],
                "shoes": shoes_tex["shoes"]}
-        lookdev.textured_sheet(o.preview, pieces, tex, ref=o.ref,
+        lookdev.textured_sheet(os.path.join(o.preview, fig.name), pieces, tex, ref=o.ref,
                                tints={"hair": (lookdev.HAIR,) * 3, "vest": RED, "shorts": BLACK, "shoes": GREY})
         log("preview", o.preview)
+
+
+def main():
+    o = args()
+    log = Log()
+    only = set(o.only.split(",")) if o.only else None
+    for name in o.body.split(",") if o.body else BODIES:
+        build(o, log, BODIES[name], only)
     manifest(o)
 
 

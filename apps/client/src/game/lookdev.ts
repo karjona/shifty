@@ -1,11 +1,20 @@
 // Dev: `/?lookdev=1` shows riders on the club's terrace for look testing.
 // URL options: shot (select, hero, lineup, face, back), sport (summer, winter), seed (random
-// looks; 0 = the default rider), skin, hair, hairColor, eyes, eyeColor, brows, nose, mouth,
-// facialHair, height, wear (item ids to put on), bare (slots to empty), pose (idle, crossed),
-// t (freeze the idle at a time), cx/cy/dist (camera), orbit, ride (on the sport's ride: steer
-// -1 to 1, bail, lean -1 to 1, grab 1-5, air). Keys: F next shot, R new looks, arrows orbit.
+// looks; 0 = the default rider), body (male, female: everyone's, in its starter kit), skin, hair,
+// hairColor, eyes, eyeColor, brows, nose, mouth, facialHair, height, wear (item ids to put on),
+// bare (slots to empty), pose (idle, crossed), t (freeze the idle at a time), cx/cy/dist (camera),
+// orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air). Keys: F next
+// shot, R new looks, arrows orbit.
 import * as THREE from "three/webgpu";
-import { type Appearance, type Sport, botAppearance, defaultAppearance, item, model } from "@shifty/rider";
+import {
+  type Appearance,
+  type Sport,
+  botAppearance,
+  defaultAppearance,
+  defaultOutfits,
+  item,
+  model,
+} from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { CLUB, buildClub } from "../render/club.ts";
@@ -24,6 +33,12 @@ const isShot = (s: string | null): s is Shot => SHOTS.some((x) => x === s);
 
 function appearanceFor(seed: number, i: number, params: URLSearchParams): Appearance {
   const a = seed === 0 && i === 0 ? defaultAppearance() : botAppearance(seed, i);
+  const body = params.get("body");
+  if (body === "male" || body === "female") {
+    a.look.body = body;
+    a.outfits = defaultOutfits(body);
+    if (body === "female") a.look.facialHair = 0;
+  }
   // `wear=summer.vest.foam.red,...`: put items on, each in its own slot.
   for (const id of (params.get("wear") ?? "").split(",").filter(Boolean)) {
     const it = item(id);
