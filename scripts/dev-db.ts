@@ -1,12 +1,13 @@
 // Dev Postgres: DATABASE_URL if set (CI), otherwise a container named
 // `shifty-postgres` (Apple `container` or Docker) with its data in the
-// `shifty-pgdata` volume. It keeps running after `pnpm dev` stops.
+// `shifty-postgres` volume. It keeps running after `pnpm dev` stops.
+// Production runs on Neon, so the major version follows Neon's.
 import { execFileSync, spawnSync } from "node:child_process";
 import { Client } from "pg";
 
 const NAME = "shifty-postgres";
-const VOLUME = "shifty-pgdata";
-const IMAGE = "docker.io/library/postgres:17-alpine";
+const VOLUME = "shifty-postgres";
+const IMAGE = "docker.io/library/postgres:18-alpine";
 const PORT = 54329;
 export const DEV_DATABASE_URL = `postgres://shifty:shifty@127.0.0.1:${PORT}/shifty`;
 
@@ -24,6 +25,21 @@ function state(rt: string): "running" | "stopped" | "missing" {
   return /"(status|Status)"\s*:\s*"running"/u.test(out.stdout) || /"Running"\s*:\s*true/u.test(out.stdout)
     ? "running"
     : "stopped";
+}
+
+/** The image the existing container was made from (Apple `container` or Docker). */
+function imageOf(rt: string): string | undefined {
+  const out = spawnSync(rt, ["inspect", NAME], { encoding: "utf8" });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(out.stdout);
+  } catch {
+    return undefined;
+  }
+  const at = (...path: (string | number)[]): unknown =>
+    path.reduce<unknown>((v, key) => (typeof v === "object" && v !== null ? Reflect.get(v, key) : undefined), parsed);
+  const image = at(0, "configuration", "image", "reference") ?? at(0, "Config", "Image");
+  return typeof image === "string" ? image : undefined;
 }
 
 async function waitReady(url: string, timeoutMs = 60_000): Promise<void> {
@@ -59,6 +75,15 @@ export async function ensureDatabase(): Promise<string> {
     execFileSync("container", ["system", "start", "--enable-kernel-install"], { stdio: "inherit" });
   }
   const s = state(rt);
+  const image = s === "missing" ? IMAGE : imageOf(rt);
+  if (image && image !== IMAGE) {
+    throw new Error(
+      `${NAME} runs ${image}, but dev wants ${IMAGE}. ` +
+        `Keep its data with \`${rt} exec ${NAME} pg_dump -U shifty -d shifty -Fc > shifty.dump\`, ` +
+        `remove it with \`${rt} rm -f ${NAME}\` and start dev again, then restore with ` +
+        `\`${rt} exec -i ${NAME} pg_restore -U shifty -d shifty --clean --if-exists < shifty.dump\`.`,
+    );
+  }
   if (s === "stopped") execFileSync(rt, ["start", NAME], { stdio: "ignore" });
   if (s === "missing") {
     spawnSync(rt, ["volume", "create", VOLUME], { stdio: "ignore" });
@@ -75,12 +100,10 @@ export async function ensureDatabase(): Promise<string> {
         "POSTGRES_PASSWORD=shifty",
         "-e",
         "POSTGRES_DB=shifty",
-        "-e",
-        "PGDATA=/var/lib/postgresql/data/pgdata",
         "-p",
         `127.0.0.1:${PORT}:5432`,
         "-v",
-        `${VOLUME}:/var/lib/postgresql/data`,
+        `${VOLUME}:/var/lib/postgresql`,
         IMAGE,
       ],
       { stdio: "ignore" },
