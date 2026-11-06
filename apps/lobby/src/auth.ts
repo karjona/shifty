@@ -1,22 +1,25 @@
 // Better Auth: GitHub sign-in and one-time codes by email, sessions in
-// Postgres. Built per request, around that request's database pool.
+// Postgres, new accounts behind invite codes (invites.ts). Built per request,
+// around that request's database pool.
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins/admin";
 import { emailOTP } from "better-auth/plugins/email-otp";
 import type { Db } from "./db/client.ts";
 import * as schema from "./db/schema.ts";
-import type { Env } from "./env.ts";
+import type { AuthEnv } from "./env.ts";
+import { invites, invitesOptions } from "./invites.ts";
 import { pickLocale } from "./locale.ts";
 import { sendSignInCode } from "./mail.ts";
 
 const DAY = 60 * 60 * 24;
 
-export function authOptions(env: Env, db: Db, waitUntil: (p: Promise<unknown>) => void) {
+export function authOptions(env: AuthEnv, db: Db, waitUntil: (p: Promise<unknown>) => void) {
   const github =
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
       ? { github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET } }
       : {};
+  const gate = invitesOptions(env, db);
   return {
     appName: "23.4° Shifty",
     baseURL: env.BETTER_AUTH_URL,
@@ -33,7 +36,8 @@ export function authOptions(env: Env, db: Db, waitUntil: (p: Promise<unknown>) =
       updateAge: DAY,
       cookieCache: { enabled: true, maxAge: 5 * 60 },
     },
-    user: { deleteUser: { enabled: true } },
+    user: { deleteUser: { enabled: true }, validateUserInfo: gate.validate },
+    databaseHooks: { user: { create: { after: (u, ctx) => gate.created(u.id, ctx) } } },
     rateLimit: { enabled: true, storage: "database" },
     plugins: [
       emailOTP({
@@ -45,11 +49,16 @@ export function authOptions(env: Env, db: Db, waitUntil: (p: Promise<unknown>) =
         // players up from one machine.
         rateLimit: env.DEV_MAILBOX === "1" ? { window: 60, max: 200 } : { window: 60, max: 3 },
         sendVerificationOTP: async ({ email, otp }, ctx) => {
+          if (!(await gate.mayEmail(email, ctx))) {
+            console.log("sign-in code not sent: no account and no invite");
+            return;
+          }
           const locale = pickLocale(ctx?.headers?.get("x-shifty-locale") ?? ctx?.headers?.get("accept-language"));
           waitUntil(sendSignInCode(env, email, otp, locale));
         },
       }),
       admin(),
+      invites(env, db),
     ],
     advanced: {
       cookiePrefix: "shifty",
@@ -60,7 +69,7 @@ export function authOptions(env: Env, db: Db, waitUntil: (p: Promise<unknown>) =
   } satisfies BetterAuthOptions;
 }
 
-export function createAuth(env: Env, db: Db, waitUntil: (p: Promise<unknown>) => void) {
+export function createAuth(env: AuthEnv, db: Db, waitUntil: (p: Promise<unknown>) => void) {
   return betterAuth(authOptions(env, db, waitUntil));
 }
 

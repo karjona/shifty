@@ -1,7 +1,7 @@
 // Sign-in codes by email. `MAIL_MODE=console` prints them to the log (and
 // with `DEV_MAILBOX=1` keeps the last one per address, for tests). There is
 // no mail transport otherwise yet: the code is logged as an error.
-import type { Env } from "./env.ts";
+import type { AuthEnv } from "./env.ts";
 import type { Locale } from "./locale.ts";
 
 const TEXT: Record<Locale, { subject: (code: string) => string; body: (code: string) => string }> = {
@@ -29,7 +29,7 @@ export function devMailbox(email: string): string | null {
   return mailbox.get(email.trim().toLowerCase())?.code ?? null;
 }
 
-export async function sendSignInCode(env: Env, email: string, code: string, locale: Locale): Promise<void> {
+export async function sendSignInCode(env: AuthEnv, email: string, code: string, locale: Locale): Promise<void> {
   const text = TEXT[locale];
   if (env.DEV_MAILBOX === "1") mailbox.set(email.trim().toLowerCase(), { code, at: Date.now() });
   if (env.MAIL_MODE === "console") {

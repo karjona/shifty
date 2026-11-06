@@ -9,7 +9,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "test": "node --test 'test/**/*.test.ts'"
+    "invite": "node scripts/invite.ts",
+    "test": "node --test --test-timeout=30000 'test/**/*.test.ts'"
   },
   "dependencies": {
     "@shifty/rider": "workspace:*",

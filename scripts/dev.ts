@@ -64,6 +64,7 @@ writeFileSync(
     RACE_SERVER_SECRET: secrets.raceServer,
     MAIL_MODE: "console",
     DEV_MAILBOX: "1",
+    SIGNUPS: process.env.SIGNUPS ?? "open",
     MATCH_WAIT_SECS: process.env.MATCH_WAIT_SECS ?? "10",
   })
     .map(([k, v]) => `${k}=${v}\n`)

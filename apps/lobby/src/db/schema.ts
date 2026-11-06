@@ -100,6 +100,36 @@ export const rateLimit = pgTable("rate_limit", {
 });
 
 /**
+ * Invite codes. While sign-ups are invite-only, a new account takes one use
+ * of a code (see invites.ts).
+ */
+export const invite = pgTable("invite", {
+  /** Eight characters of `INVITE_ALPHABET`, shown as `XXXX-XXXX`. */
+  code: text("code").primaryKey(),
+  /** Who it is for. */
+  note: text("note"),
+  maxUses: integer("max_uses").notNull().default(1),
+  uses: integer("uses").notNull().default(0),
+  expiresAt: timestamp("expires_at"),
+  createdAt: createdAt(),
+});
+
+/** The invite code each account signed up with. */
+export const inviteUse = pgTable(
+  "invite_use",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => user.id, { onDelete: "cascade" }),
+    code: text("code")
+      .notNull()
+      .references(() => invite.code),
+    usedAt: timestamp("used_at").notNull().defaultNow(),
+  },
+  (t) => [index("invite_use_code_idx").on(t.code)],
+);
+
+/**
  * A player's game profile. The handle is `name#tag` (e.g. `Lord Kylian#1234`):
  * names repeat, the pair does not (compared by `nameKey`, the name folded to
  * lower case without accents).
