@@ -21,6 +21,10 @@ export interface Env {
   RACE_SERVER_SECRET: string;
   /** `console` prints sign-in codes to the log instead of sending mail. */
   MAIL_MODE?: string;
+  /** Cloudflare Email Service. Sign-in codes go out through it. */
+  EMAIL?: SendEmail;
+  /** The address sign-in codes come from, on a domain onboarded for sending. */
+  MAIL_FROM?: string;
   /** `1`: keep the last code per address readable at /api/dev/mailbox (tests). */
   DEV_MAILBOX?: string;
   /** `open`: anyone can make an account. Otherwise (the default) a new account needs an invite code. */
@@ -40,6 +44,8 @@ export type AuthEnv = Pick<
   | "GITHUB_CLIENT_ID"
   | "GITHUB_CLIENT_SECRET"
   | "MAIL_MODE"
+  | "EMAIL"
+  | "MAIL_FROM"
   | "DEV_MAILBOX"
   | "SIGNUPS"
 >;

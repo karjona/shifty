@@ -15,5 +15,10 @@
   // Postgres on Neon, query caching off. In dev, scripts/dev.ts points it at
   // the local database.
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "1cc45cb6c69c4f05990259a41de7d676" }],
+  // Sign-in codes through Cloudflare Email Service (4shifty.gg is onboarded
+  // for sending). `wrangler dev` only simulates it, and pnpm dev prints the
+  // codes instead (MAIL_MODE=console).
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@4shifty.gg"] }],
+  "vars": { "MAIL_FROM": "noreply@4shifty.gg" },
   "observability": { "enabled": true },
 }
