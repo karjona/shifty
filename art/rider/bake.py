@@ -244,18 +244,82 @@ def bake_maps(low, high, size, ao_distance=0.1, extrusion=0.008, ray=0.03, margi
     return maps
 
 
-def save_png(path, rgb, alpha=None):
-    """Writes an image (rows from the top, values 0-1) as an 8-bit PNG."""
-    h, w = rgb.shape[:2]
-    a = np.ones((h, w), np.float32) if alpha is None else alpha
-    px = np.concatenate([np.clip(rgb, 0, 1), np.clip(a, 0, 1)[..., None]], axis=2)[::-1].astype(np.float32)
-    img = bpy.data.images.new(os.path.basename(path), w, h, alpha=True)
-    img.colorspace_settings.name = "Non-Color"
-    img.pixels.foreach_set(px.ravel())
-    img.filepath_raw = path
-    img.file_format = "PNG"
-    img.save()
-    bpy.data.images.remove(img)
+def bake_attributes(obj, names, size, margin=16):
+    """Bakes vector attributes of `obj`'s points onto its own texture: {name: (size, size, 3) map}."""
+    setup(1)
+    scene = bpy.context.scene
+    bk = scene.render.bake
+    bk.use_selected_to_active = False
+    bk.use_cage = False
+    bk.margin = margin
+    saved = list(obj.data.materials)
+    out = {}
+    for name in names:
+        def colour(n, _l, name=name):
+            a = n.new("ShaderNodeAttribute")
+            a.attribute_name = name
+            return a.outputs["Vector"]
+
+        _emit(obj, colour)
+        img = _image(f"bake.{name}", size)
+        _target(obj, img)
+        blend.deselect()
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.bake(type="EMIT")
+        out[name] = _pixels(img)[..., :3]
+        bpy.data.images.remove(img)
+    obj.data.materials.clear()
+    for m in saved:
+        obj.data.materials.append(m)
+    m = bpy.data.materials.get(f"{obj.name}.emit")
+    if m:
+        bpy.data.materials.remove(m)
+    return out
+
+
+def _encode_png(px):
+    """An 8-bit PNG of `px` (h, w, channels: 1 grey, 3 RGB or 4 RGBA; rows from the top), each row with the
+    filter that leaves the smallest differences, at zlib's best compression."""
+    import struct
+    import zlib
+
+    h, w, c = px.shape
+    raw = px.reshape(h, w * c).astype(np.int16)
+    zero_row = np.zeros((1, w * c), np.int16)
+    zero_px = np.zeros((h, c), np.int16)
+    up = np.vstack([zero_row, raw[:-1]])
+    left = np.hstack([zero_px, raw[:, :-c]])
+    corner = np.hstack([zero_px, up[:, :-c]])
+    p = left + up - corner
+    pa, pb, pc = np.abs(p - left), np.abs(p - up), np.abs(p - corner)
+    paeth = np.where((pa <= pb) & (pa <= pc), left, np.where(pb <= pc, up, corner))
+    filtered = np.stack([raw, raw - left, raw - up, raw - ((left + up) >> 1), raw - paeth]) & 0xFF
+    cost = np.abs(filtered.astype(np.uint8).astype(np.int8).astype(np.int32)).sum(axis=2)
+    best = np.argmin(cost, axis=0)
+    rows = filtered[best, np.arange(h)].astype(np.uint8)
+    data = np.hstack([best[:, None].astype(np.uint8), rows]).tobytes()
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    head = struct.pack(">IIBBBBB", w, h, 8, {1: 0, 3: 2, 4: 6}[c], 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(data, 9)) + chunk(b"IEND", b"")
+
+
+def save_png(path, rgb, alpha=None, grey=False):
+    """Writes an image (rows from the top, values 0-1) as an 8-bit PNG: RGB, RGBA with `alpha`, or with `grey`
+    one channel of its luminance (what the game reads from detail maps)."""
+    img = np.clip(np.asarray(rgb, dtype=np.float64), 0, 1)
+    if img.ndim == 2:
+        img = img[..., None]
+    if grey and img.shape[2] == 3:
+        img = (img @ np.array([0.299, 0.587, 0.114]))[..., None]
+    if alpha is not None:
+        img = np.concatenate([img, np.clip(alpha, 0, 1)[..., None]], axis=2)
+    px = np.round(img * 255).astype(np.uint8)
+    with open(path, "wb") as f:
+        f.write(_encode_png(px))
 
 
 def downsample(img, f=2):

@@ -290,7 +290,10 @@ def attach(cage, neck, src, region):
     # The mouth: lips meeting at a line a little behind them.
     m = [vmap[v] for v in mouth]
     centre = np.mean([off.moved[v.index] for v in mouth], axis=0) + np.array([0, 0.004, 0])
-    cage.cap(m, centre, {"head": 1.0}, region, part="mouth")
+    # Which cage vertex each head vertex became, and the caps' centres with the head vertices round them
+    # (a face preset moves a centre as the mean of its ring).
+    off.cage_verts = [vmap[v] for v in bm.verts]
+    off.caps = [(cage.cap(m, centre, {"head": 1.0}, region, part="mouth"), [v.index for v in mouth])]
     cage.seam(m, closed=True)
     sockets = [[vmap[v] for v in L] for L in eyes]
     # The eyes: each socket closed a little behind the lids, the eyeball painted onto it by the bake. The lids
@@ -298,7 +301,7 @@ def attach(cage, neck, src, region):
     for L, sock in zip(eyes, sockets):
         cage.crease(sock, 1.0)
         c = np.mean([off.moved[v.index] for v in L], axis=0) + np.array([0, 0.0025, 0])
-        cage.cap(sock, c, {"head": 1.0}, region, part="head")
+        off.caps.append((cage.cap(sock, c, {"head": 1.0}, region, part="head"), [v.index for v in L]))
     # The eyes' part names the detailed eyeballs the bake paints onto the sockets.
     cage.part_id("eye")
     off.mouth = centre
@@ -364,3 +367,28 @@ def tag_parts(obj, low, parts):
         _, i, _ = kd.find(v.co)
         cur[v.index] = lpart[i]
     a.data.foreach_set("value", cur.astype(np.int32))
+
+
+def face_presets(cage, off, src, body="male"):
+    """The face presets (mh.FACES, exported by `mh.py --faces`) as offsets of the cage's vertices: {name:
+    (n, 3) array}, for a cage `finish`ed from the one `attach` built into (indices as `off.cage_index`)."""
+    import json
+
+    with open(os.path.join(SOURCE, f"{body}.faces.json")) as f:
+        presets = json.load(f)
+    head = src["head"].data.vertices
+    for i, *p in presets.pop("check"):
+        if np.linalg.norm(_place(np.array(p)) - np.array(head[i].co[:])) > 1e-4:
+            raise RuntimeError(f"{body}.faces.json was made for another head: export it again (mh.py --faces)")
+    n = len(cage.data.vertices)
+    out = {}
+    for name, moves in presets.items():
+        head = np.zeros((len(off.cage_index), 3))
+        for i, dx, dy, dz in moves:
+            head[i] = np.array([dx, dy, dz]) * SCALE
+        d = np.zeros((n, 3))
+        d[off.cage_index] = head
+        for centre, ring in off.caps:
+            d[centre] = head[ring].mean(axis=0)
+        out[name] = d
+    return out

@@ -12,6 +12,7 @@
     ".agents/**",
     ".claude/**",
     "skills-lock.json",
-    "apps/lobby/drizzle/**"
+    "apps/lobby/drizzle/**",
+    "art/rider/mh/*.faces.json"
   ]
 }

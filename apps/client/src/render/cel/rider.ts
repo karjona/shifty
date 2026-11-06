@@ -44,6 +44,29 @@ export const RIDER_LINE = uniform(3.2);
 const WARM_SHADE = new THREE.Color(0.86, 0.62, 0.66);
 const COOL_SHADE = new THREE.Color(0.66, 0.62, 0.86);
 
+/** What a face wears over its paint. */
+export interface FaceOverlays {
+  /** How much of each texel the brows and the beard cover, in the hair's colour. */
+  brows: THREE.Texture;
+  beard: THREE.Texture;
+  /** The eye, nose and mouth presets' paint: ink lines, how the preset's shape moves the shade line (0.5 not at
+   * all), and the iris (in the eye's colour) up to 0.5 then its catchlight. */
+  features: readonly THREE.Texture[];
+}
+
+/** How the overlays paint (tint factors, as the art paints them: art/rider/mhface.py). */
+const BROW_TONE = 0.15;
+const BEARD_TONE = 0.4;
+const INK_TONE = 0.03;
+const IRIS_TONE = 0.41;
+const GLINT_TONE = 0.95;
+/** How far a face preset's shape can move the shade line. */
+const SHAPE_SHADE = 1.2;
+
+/** An overlay that covers nothing. */
+export const NO_OVERLAY = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+NO_OVERLAY.needsUpdate = true;
+
 export class CelTintMaterial extends CelMaterial {
   private main = uniform(new THREE.Color());
   private second = uniform(new THREE.Color());
@@ -64,6 +87,8 @@ export class CelTintMaterial extends CelMaterial {
     face = false,
     /** The paint without baked light, if the art has it: the albedo comes from it. */
     flat: THREE.Texture | null = null,
+    /** The brows and beard over the flat paint. */
+    overlays: FaceOverlays | null = null,
   ) {
     const glossy = finish.roughness < 0.45;
     super({
@@ -84,14 +109,43 @@ export class CelTintMaterial extends CelMaterial {
     }
     const [t0, t1, t2] = [this.main, this.second, this.accent];
     const g = texture(detail).rgb;
-    const w = texture(mask).rgb;
+    // The face's overlays, in order: the presets' features, the beard, the brows. Each moves the mask (which
+    // colour tints a texel) and the flat paint (by how much).
+    let w: THREE.Node<"vec3"> = texture(mask).rgb;
+    let paint: THREE.Node<"vec3"> | null = flat ? texture(flat).rgb : null;
+    const over = (cover: THREE.Node<"float">, tint: THREE.Node<"vec3">, tone: THREE.Node<"vec3">) => {
+      w = mix(w, tint, cover);
+      if (paint) paint = mix(paint, tone, cover);
+    };
+    const none = vec3(0, 0, 0);
+    let shapeShade: THREE.Node<"float"> = float(0);
+    for (const t of overlays?.features ?? []) {
+      const o = texture(t).rgb;
+      const iris = clamp(o.z.mul(2), 0, 1);
+      over(iris, vec3(0, 1, 0), vec3(IRIS_TONE));
+      // (From a softer level, so the shade line runs in clean shapes; the art stores "no change" as 128.)
+      shapeShade = shapeShade.add(
+        texture(t)
+          .level(float(2))
+          .g.sub(128 / 255)
+          .mul(2),
+      );
+      over(o.x, none, vec3(INK_TONE));
+      over(clamp(o.z.mul(2).sub(1), 0, 1), none, vec3(GLINT_TONE));
+    }
+    // The brows and the beard take the hair's colour (the mask's third channel) where they cover the face.
+    if (overlays) {
+      const hairMask = vec3(0, 0, 1);
+      over(texture(overlays.beard).r, hairMask, vec3(BEARD_TONE));
+      over(texture(overlays.brows).r, hairMask, vec3(BROW_TONE));
+    }
     const sum = w.x.add(w.y).add(w.z);
     const lum = dot(g, vec3(0.299, 0.587, 0.114));
     this.albedo = Fn(() => {
       const tint = t0.mul(w.x).add(t1.mul(w.y)).add(t2.mul(w.z)).div(max(sum, 1e-4));
       if (flat) {
         // Unlit paint: the tint scaled by its factor (0.5 = the tint itself), hue kept past full brightness.
-        const f = texture(flat).rgb;
+        const f = paint ?? texture(flat).rgb;
         const lit = tint.mul(f.mul(2));
         const top = max(max(lit.x, lit.y), lit.z);
         const tinted = min(lit.div(max(top, 1)).add(clamp(top.sub(1), 0, 1).mul(0.5)), vec3(1));
@@ -113,7 +167,9 @@ export class CelTintMaterial extends CelMaterial {
     // The painter's light nudges the shade line.
     // (From a blurred level of the paint, so the shade line runs in clean shapes.)
     const soft = dot(texture(detail).level(float(kind === "look" ? 5.5 : 4)).rgb, vec3(0.299, 0.587, 0.114));
-    this.biasNode = clamp(soft.sub(0.5).mul(face ? 0.25 : kind === "look" ? 0.55 : 1.2), -0.45, 0.35);
+    this.biasNode = clamp(soft.sub(0.5).mul(face ? 0.25 : kind === "look" ? 0.55 : 1.2), -0.45, 0.35).sub(
+      shapeShade.mul(SHAPE_SHADE),
+    );
     if (!face) this.deepNode = smoothstep(0.3, 0.22, soft);
     if (kind === "hair") {
       // The sheen on anime hair: a broad, lighter band of the hair's own colour.
@@ -214,6 +270,23 @@ function weldedNormals(geo: THREE.BufferGeometry): THREE.BufferAttribute {
   return new THREE.BufferAttribute(out, 3);
 }
 
+/** A geometry sharing `geo`'s attributes, index and morph targets, with other normals (and attributes). */
+function derived(
+  geo: THREE.BufferGeometry,
+  normal: THREE.BufferAttribute,
+  extra: Record<string, THREE.BufferAttribute> = {},
+): THREE.BufferGeometry {
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
+  out.setAttribute("normal", normal);
+  for (const [name, attr] of Object.entries(extra)) out.setAttribute(name, attr);
+  out.morphAttributes = geo.morphAttributes;
+  out.morphTargetsRelative = geo.morphTargetsRelative;
+  out.setIndex(geo.index);
+  for (const g of geo.groups) out.addGroup(g.start, g.count, g.materialIndex);
+  return out;
+}
+
 const hullGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
 const faceGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
 
@@ -228,12 +301,13 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.12): THREE.Buff
   if (out) return out;
   const pos = geo.getAttribute("position");
   const nor = geo.getAttribute("normal");
-  geo.computeBoundingBox();
-  const all = geo.boundingBox!;
+  // (The rest shape's box: the geometry's own would grow to hold every face preset.)
+  const all = new THREE.Box3();
+  const p = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) all.expandByPoint(p.fromBufferAttribute(pos, i));
   // The piece runs down into the neck: fit the ellipsoid to the head above the jaw.
   const jaw = all.min.y + (all.max.y - all.min.y) * 0.28;
   const box = new THREE.Box3();
-  const p = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     p.fromBufferAttribute(pos, i);
     if (p.y > jaw) box.expandByPoint(p);
@@ -257,11 +331,7 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.12): THREE.Buff
       .normalize();
     n.set([e.x, e.y, e.z], i * 3);
   }
-  out = new THREE.BufferGeometry();
-  for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
-  out.setAttribute("normal", new THREE.BufferAttribute(n, 3));
-  out.setIndex(geo.index);
-  for (const g of geo.groups) out.addGroup(g.start, g.count, g.materialIndex);
+  out = derived(geo, new THREE.BufferAttribute(n, 3));
   faceGeometries.set(geo, out);
   return out;
 }
@@ -326,11 +396,7 @@ export function limbGeometry(geo: THREE.BufferGeometry, rest: THREE.Vector3[]): 
     acc.normalize();
     n.set([acc.x, acc.y, acc.z], i * 3);
   }
-  out = new THREE.BufferGeometry();
-  for (const [name, attr] of Object.entries(geo.attributes)) out.setAttribute(name, attr);
-  out.setAttribute("normal", new THREE.BufferAttribute(n, 3));
-  out.setIndex(geo.index);
-  for (const g of geo.groups) out.addGroup(g.start, g.count, g.materialIndex);
+  out = derived(geo, new THREE.BufferAttribute(n, 3));
   limbGeometries.set(geo, out);
   return out;
 }
@@ -343,11 +409,7 @@ export function outlineOf(
 ): THREE.SkinnedMesh {
   let geo = hullGeometries.get(mesh.geometry);
   if (!geo) {
-    geo = new THREE.BufferGeometry();
-    for (const [name, attr] of Object.entries(mesh.geometry.attributes)) geo.setAttribute(name, attr);
-    geo.setAttribute("normal", weldedNormals(mesh.geometry));
-    geo.setAttribute("hullWidth", edgeWeights(mesh.geometry));
-    geo.setIndex(mesh.geometry.index);
+    geo = derived(mesh.geometry, weldedNormals(mesh.geometry), { hullWidth: edgeWeights(mesh.geometry) });
     hullGeometries.set(mesh.geometry, geo);
   }
   const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
@@ -370,6 +432,8 @@ export function outlineOf(
   if (mat.regionMask) m.maskNode = mat.regionMask;
   inkOnlyInPass(m, inkNode(0, 0, 0, 0));
   const hull = new THREE.SkinnedMesh(geo, m);
+  // The shell takes the same shape (the face's presets) as the piece.
+  if (mesh.morphTargetInfluences) hull.morphTargetInfluences = mesh.morphTargetInfluences;
   hull.frustumCulled = false;
   hull.castShadow = false;
   return hull;

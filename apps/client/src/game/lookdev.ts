@@ -1,10 +1,9 @@
 // Dev: `/?lookdev=1` shows riders on the club's terrace for look testing.
-// URL options: shot (select, hero, lineup, face, back), sport (summer, winter),
-// seed (random looks; 0 = the default rider), skin, hairColor, eyeColor, height,
-// wear (item ids to put on), bare (slots to empty), pose (idle, crossed), t (freeze the
-// idle at a time), cx/cy/dist (camera), orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1,
-// grab 1-5, air). Keys: F next shot,
-// R new looks, arrows orbit.
+// URL options: shot (select, hero, lineup, face, back), sport (summer, winter), seed (random
+// looks; 0 = the default rider), skin, hair, hairColor, eyes, eyeColor, brows, nose, mouth,
+// facialHair, height, wear (item ids to put on), bare (slots to empty), pose (idle, crossed),
+// t (freeze the idle at a time), cx/cy/dist (camera), orbit, ride (on the sport's ride: steer
+// -1 to 1, bail, lean -1 to 1, grab 1-5, air). Keys: F next shot, R new looks, arrows orbit.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Sport, botAppearance, defaultAppearance, item, model } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
@@ -36,7 +35,18 @@ function appearanceFor(seed: number, i: number, params: URLSearchParams): Appear
   for (const kit of Object.values(a.outfits)) {
     for (const slot of Object.keys(kit)) if (bare.includes(slot)) Reflect.deleteProperty(kit, slot);
   }
-  for (const part of ["skin", "hairColor", "eyeColor", "height"] as const) {
+  for (const part of [
+    "skin",
+    "hair",
+    "hairColor",
+    "eyes",
+    "eyeColor",
+    "brows",
+    "nose",
+    "mouth",
+    "facialHair",
+    "height",
+  ] as const) {
     const v = params.get(part);
     if (v !== null) a.look[part] = Number(v);
   }

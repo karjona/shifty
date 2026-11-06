@@ -6,6 +6,12 @@
     "summer.eyes.shades",
     "summer.feet.watershoes",
     "summer.head.cap",
-    "summer.vest.foam"
+    "summer.vest.foam",
+    "winter.bottom.pants",
+    "winter.eyes.goggles",
+    "winter.feet.boots",
+    "winter.hands.gloves",
+    "winter.head.beanie",
+    "winter.top.puffer"
   ]
 }
