@@ -131,6 +131,26 @@ export async function fetchMe(): Promise<Me | null> {
 
 export const meQuery = queryOptions({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
 
+/** Whether new accounts need an invite code, and whether this browser carries a usable one. */
+export const inviteQuery = queryOptions({
+  queryKey: ["invite"],
+  queryFn: async () => {
+    const o = await call("/api/auth/invite/status");
+    return { required: o.required === true, redeemed: o.redeemed === true };
+  },
+});
+
+/** Redeems an invite code for this browser; false if it is unknown, used up or expired. */
+export async function redeemInvite(code: string): Promise<boolean> {
+  try {
+    await call("/api/auth/invite/redeem", { method: "POST", body: JSON.stringify({ code }) });
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 400) return false;
+    throw e;
+  }
+}
+
 /** Puts the lobby's latest view of your rider into the cached `me`. */
 export function storeRider(queryClient: QueryClient, rider: Rider): void {
   queryClient.setQueryData(meQuery.queryKey, (m) => (m ? { ...m, rider } : m));

@@ -9,7 +9,7 @@ import {
   createRouter,
   redirect,
 } from "@tanstack/react-router";
-import { meQuery } from "./api.ts";
+import { inviteQuery, meQuery, redeemInvite } from "./api.ts";
 import { InfoPage } from "./screens/info.tsx";
 import { Login } from "./screens/login.tsx";
 import { MainMenu, type MenuTab } from "./screens/main-menu.tsx";
@@ -62,8 +62,26 @@ const loginRoute = createRoute({
   beforeLoad: async ({ context }) => {
     const me = await signedIn(context);
     if (me) throw redirect({ to: me.player ? (me.rider?.appearance ? "/" : "/rider") : "/welcome" });
+    await context.queryClient.ensureQueryData(inviteQuery);
   },
   component: Login,
+});
+
+/** An invite link: redeems the code for this browser, then the login screen takes over. */
+const inviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invite/$code",
+  beforeLoad: async ({ context, params }) => {
+    if (await signedIn(context)) throw redirect({ to: "/" });
+    let error: string | undefined;
+    try {
+      if (!(await redeemInvite(params.code))) error = "invalid_invite";
+    } catch {
+      error = "too_many";
+    }
+    await context.queryClient.fetchQuery(inviteQuery);
+    throw redirect({ to: "/login", search: { error } });
+  },
 });
 
 const welcomeRoute = createRoute({
@@ -139,6 +157,7 @@ const privacyRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
+  inviteRoute,
   welcomeRoute,
   menuRoute,
   riderRoute,
