@@ -16,6 +16,14 @@ from skin import blur, masses, skin_factors
 # The iris's radius (m): a little under half the eye's opening, so the lids cut its top.
 IRIS = 0.0052
 
+# Each body's own paint on the face: how wide the upper lash line is (m), how much redder the lips are (a tint
+# factor change, RGB) and how far they reach (where MakeHuman's skin is this much redder), and a warmth over
+# the cheekbones.
+LOOKS = {
+    "male": {"lash": 0.0016, "lips": (-0.04, -0.12, -0.1), "lips_from": 0.05, "blush": 0.0},
+    "female": {"lash": 0.0023, "lips": (0.04, -0.3, -0.2), "lips_from": 0.03, "blush": 1.0},
+}
+
 
 def _ids(maps):
     return {n: i for i, n in maps["parts"].items()}
@@ -136,8 +144,14 @@ def paint_face(maps, ref, tex, flat=False):
     detail = detail * (1 + 0.7 * (rel - 1))
     # The lips: where MakeHuman's skin turns red, a touch more of it, and darker at the line between them.
     red = rel[..., 0] - 0.5 * (rel[..., 1] + rel[..., 2])
-    lips = smoothstep(0.05, 0.16, red) * face
-    detail = detail * (1 + lips[..., None] * np.array([-0.04, -0.12, -0.1]))
+    look = LOOKS[maps["fig"].name]
+    lips = smoothstep(look["lips_from"], look["lips_from"] + 0.11, red) * face
+    detail = detail * (1 + lips[..., None] * np.array(look["lips"]))
+    if look["blush"]:
+        eye_z = mhhead.landmark("eye_l", maps["fig"].name)[2]
+        for sgn in (1, -1):
+            cheek = np.exp(-(((x - sgn * 0.043) / 0.014) ** 2) - ((z - (eye_z - 0.03)) / 0.011) ** 2)
+            detail = detail * (1 + (cheek * face * look["blush"])[..., None] * np.array([0.03, -0.05, -0.04]))
     mask = np.zeros_like(detail)
     mask[..., 0] = 1
 
@@ -169,14 +183,16 @@ def paint_face(maps, ref, tex, flat=False):
 
     # ---- lashes: a dark line along the upper lid, heavier toward the outer corner, a faint one under the eye.
     upper, lower, outer = lid_lines(pos, eye, skin_area)
-    paint(smoothstep(0.0016, 0.0008, upper) * (0.75 + 0.25 * outer), np.array([0.05, 0.04, 0.04]))
+    w = look["lash"]
+    paint(smoothstep(w, w / 2, upper) * (0.75 + 0.25 * outer), np.array([0.05, 0.04, 0.04]))
     detail = detail * (1 - 0.25 * smoothstep(0.0011, 0.0004, lower))[..., None]
 
     # ---- the scalp under the hair, in the hair's colour, so the roots never show skin.
-    cx, cy = hair.CENTRE[0], hair.CENTRE[1]
+    centre = mhhead.landmark("centre", maps["fig"].name)
+    cx, cy = centre[0], centre[1]
     az = np.degrees(np.arctan2(np.abs(x - cx), -(y - cy)))
     keys = np.arange(0, 181)
-    line = np.interp(az, keys, [hair.hairline_z(a) for a in keys])
+    line = np.interp(az, keys, [hair.hairline_z(maps["fig"], a) for a in keys])
     scalp = smoothstep(line - 0.002, line + 0.006, z) * skin_area
     paint(scalp, np.ones(3) * 0.3 * np.clip(s, 0.5, 1.1)[..., None], tint=2)
     return np.clip(detail, 0, 1), np.clip(mask, 0, 1)
@@ -190,7 +206,8 @@ BEARD_TONE = 0.4
 
 # How much of each brow preset's hairs fill into its solid shape (where the coverage starts and is full): the
 # bushy brow fills out, the thin one stays a line.
-BROW_FILL = [(0.06, 0.45), (0.035, 0.28), (0.04, 0.32), (0.05, 0.36), (0.06, 0.36)]
+BROW_FILL = {"male": [(0.06, 0.45), (0.035, 0.28), (0.04, 0.32), (0.05, 0.36), (0.06, 0.36)],
+             "female": [(0.12, 0.5), (0.1, 0.46), (0.08, 0.42), (0.1, 0.46), (0.1, 0.46)]}
 
 
 def brows(maps, brow_tex, n=0):
@@ -204,7 +221,7 @@ def brows(maps, brow_tex, n=0):
     b = np.clip(brow_tex[..., 0], 0, 1)
     b = np.maximum(b, blur(b, msk, 2))
     # (Past the islands' edges too, so the texels just outside them don't draw a line.)
-    lo, hi = BROW_FILL[n]
+    lo, hi = BROW_FILL[maps["fig"].name][n]
     return smoothstep(lo, hi, b) * ~eye * ~mouth * 0.97
 
 
@@ -220,7 +237,7 @@ def _landmarks(maps):
     mouth = (maps.get("low_part", part) == ids.get("mouth", -1)) & msk
     mp = pos[mouth]
     mx, mz = float(np.abs(mp[:, 0]).max()), float(np.median(mp[:, 2]))
-    eye_z = mhhead.landmark("eye_l")[2]
+    eye_z = mhhead.landmark("eye_l", maps["fig"].name)[2]
     mid = msk & (np.abs(x) < 0.004)
     # The nose's tip is the face's most forward point between the mouth and the eyes; its base, the deepest
     # point between the tip and the lips.
@@ -257,7 +274,7 @@ def beard(maps, tex, kind):
     red = rel[..., 0] - 0.5 * (rel[..., 1] + rel[..., 2])
     lips = blur(smoothstep(0.03, 0.12, red) * smoothstep(0.014, 0.008, np.abs(z - m["mz"])), msk, 2)
     mx, mz = m["mx"], m["mz"]
-    ear = mhhead.landmark("ear")
+    ear = mhhead.landmark("ear", maps["fig"].name)
     # Hair grows in tufts: the edges break up.
     rough = (fbm(pos, 260, octaves=2, seed=21) - 0.5) * 0.0024
 
@@ -319,15 +336,25 @@ SHAPE_SHADE = 3.0
 SHAPE_DEAD = 0.25
 
 # What each eye preset draws over the face's own lash line: the iris's size, how heavy the upper lash is
-# (toward the outer corner), a flick past the outer corner (and its angle up), a lower lash line (all along it, or toward the
-# outer corner), the lid's crease (how far above the lid, how dark) and a shade under the eye.
-EYE_STYLES = [
-    {},
-    {"lash": 1.7, "flick": 1.0, "lower_outer": 0.7},
-    {"iris": 1.28, "lower": 0.55, "crease": (0.0042, 0.5)},
-    {"lash": 2.0, "crease": (0.0024, 0.85), "bag": 0.7},
-    {"lash": 1.3, "flick": 0.8, "flick_angle": -24, "crease": (0.0034, 0.6), "lower_outer": 0.6},
-]
+# (toward the outer corner), a flick past the outer corner (and its angle up), a lower lash line (all along it,
+# or toward the outer corner), the lid's crease (how far above the lid, how dark) and a shade under the eye.
+# Per body: the female's all have a heavier lash with a flick, and a bigger iris.
+EYE_STYLES = {
+    "male": [
+        {},
+        {"lash": 1.7, "flick": 1.0, "lower_outer": 0.7},
+        {"iris": 1.28, "lower": 0.55, "crease": (0.0042, 0.5)},
+        {"lash": 2.0, "crease": (0.0024, 0.85), "bag": 0.7},
+        {"lash": 1.3, "flick": 0.8, "flick_angle": -24, "crease": (0.0034, 0.6), "lower_outer": 0.6},
+    ],
+    "female": [
+        {"lash": 1.6, "flick": 0.9, "iris": 1.12, "lower_outer": 0.35},
+        {"lash": 2.0, "flick": 1.0, "iris": 1.06, "lower_outer": 0.6},
+        {"lash": 1.6, "flick": 0.6, "iris": 1.32, "lower": 0.45, "crease": (0.0042, 0.45)},
+        {"lash": 2.2, "flick": 0.8, "iris": 1.1, "crease": (0.0026, 0.7)},
+        {"lash": 1.6, "flick": 0.7, "flick_angle": -18, "iris": 1.16, "crease": (0.0034, 0.5), "lower_outer": 0.5},
+    ],
+}
 # And each mouth preset: creases round the corners of a grin, a shade under the lower lip, the edge of the
 # upper lip, a heavier line where the lips meet, the corners turned down, the crease above the chin, the
 # corners tucked in. Noses draw only by their shape's light.
@@ -477,7 +504,8 @@ def features(maps, offsets, normals, tex):
     zero = np.zeros_like(lp0)
     light0 = _portrait(normals[""])
     out = {}
-    for name, styles in (("eyes", EYE_STYLES), ("nose", NOSE_STYLES), ("mouth", MOUTH_STYLES)):
+    body = maps["fig"].name
+    for name, styles in (("eyes", EYE_STYLES[body]), ("nose", NOSE_STYLES), ("mouth", MOUTH_STYLES)):
         for n, style in enumerate(styles):
             if name != "eyes" and n == 0:
                 continue

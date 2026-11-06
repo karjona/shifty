@@ -7,7 +7,8 @@ Needs the MPFB extension and the MakeHuman system asset pack, unzipped (see art/
         --assets <asset pack folder> [--out art/rider/mh]
 
 Writes `<body>.obj` (meshes `head`, `head.high`, `eyes`, `brows.<n>`, in MakeHuman's space and UVs, no
-materials), its landmarks (`<body>.json`) and the textures the bakes use (`brow.<n>.png`, `skin.png`).
+materials), its landmarks (`<body>.json`) and the textures the bakes use (`<body>.brow.<n>.png`,
+`<body>.skin.png`).
 """
 
 import argparse
@@ -40,6 +41,27 @@ MALE = {
     "skin": "skins/young_caucasian_male/young_lightskinned_male_diffuse.png",
     "brows": ["eyebrow008", "eyebrow009", "eyebrow003", "eyebrow005", "eyebrow007"],
 }
+
+# An athletic young woman, idealised proportions.
+FEMALE = {
+    "macro": {"gender": 0.0, "age": 0.5, "muscle": 0.62, "weight": 0.42, "height": 0.5, "proportions": 0.8,
+              "cupsize": 0.5, "firmness": 0.6, "race": {"african": 0.15, "asian": 0.1, "caucasian": 0.75}},
+    # An oval face with high cheekbones over lean cheeks and a defined (not square) jaw, a small straight nose,
+    # eyes a little bigger and more open with the outer corners lifted, full lips with a clear cupid's bow and a
+    # slight smile, brows a little raised.
+    "targets": {"head-oval": 0.45, "l-cheek-bones-incr": 0.6, "r-cheek-bones-incr": 0.6, "l-cheek-volume-decr": 0.4,
+                "r-cheek-volume-decr": 0.4, "chin-bones-incr": 0.25, "chin-prominent-incr": 0.2,
+                "chin-width-decr": 0.15, "neck-double-decr": 0.8, "l-eye-scale-incr": 0.42, "r-eye-scale-incr": 0.42,
+                "l-eye-height2-incr": 0.35, "r-eye-height2-incr": 0.35, "l-eye-corner2-up": 0.3,
+                "r-eye-corner2-up": 0.3, "nose-scale-horiz-decr": 0.25, "nose-point-width-decr": 0.35,
+                "nose-scale-vert-decr": 0.1, "nose-point-up": 0.15, "mouth-upperlip-volume-incr": 0.35,
+                "mouth-lowerlip-volume-incr": 0.35, "mouth-cupidsbow-incr": 0.5, "mouth-angles-up": 0.3,
+                "eyebrows-trans-up": 0.25, "eyebrows-angle-up": 0.2},
+    "proxy": "proxymeshes/female1605/female1605.proxy",
+    "skin": "skins/young_caucasian_female/young_lightskinned_female_diffuse.png",
+    "brows": ["eyebrow002", "eyebrow001", "eyebrow011", "eyebrow010", "eyebrow004"],
+}
+
 
 def _both(**kw):
     """The same targets on both eyes (`eye-scale-incr=0.5` → l- and r-)."""
@@ -102,7 +124,7 @@ FACES = {
     ],
 }
 
-BODIES = {"male": MALE}
+BODIES = {"male": MALE, "female": FEMALE}
 
 
 def args():
@@ -111,6 +133,7 @@ def args():
     p.add_argument("--assets", required=True, help="the MakeHuman system asset pack, unzipped")
     p.add_argument("--out", default=os.path.join(HERE, "mh"))
     p.add_argument("--faces", action="store_true", help="only the face presets (<body>.faces.json)")
+    p.add_argument("--body", default=None, help="only these bodies (male, female)")
     return p.parse_args(argv)
 
 
@@ -301,11 +324,11 @@ def build(body, spec, assets, out):
     bpy.ops.wm.obj_export(filepath=os.path.join(out, f"{body}.obj"), export_selected_objects=True,
                           export_materials=False, export_uv=True, export_normals=False, apply_modifiers=False)
     for i, b in enumerate(spec["brows"]):
-        shutil.copy(os.path.join(assets, f"eyebrows/{b}/{b}.png"), os.path.join(out, f"brow.{i}.png"))
+        shutil.copy(os.path.join(assets, f"eyebrows/{b}/{b}.png"), os.path.join(out, f"{body}.brow.{i}.png"))
     # The skin's colour (where the lips, the stubble and the warm cheeks are), at the size the bakes need.
     img = bpy.data.images.load(os.path.join(assets, spec["skin"]))
     img.scale(1024, 1024)
-    img.filepath_raw = os.path.join(out, "skin.png")
+    img.filepath_raw = os.path.join(out, f"{body}.skin.png")
     img.file_format = "PNG"
     img.save()
     with open(os.path.join(out, f"{body}.json"), "w") as f:
@@ -335,8 +358,8 @@ def keep_high_face(f, tree, face_of, keep):
 
 def main():
     o = args()
-    for body, spec in BODIES.items():
-        (faces if o.faces else build)(body, spec, o.assets, o.out)
+    for body in o.body.split(",") if o.body else BODIES:
+        (faces if o.faces else build)(body, BODIES[body], o.assets, o.out)
 
 
 main()

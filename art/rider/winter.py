@@ -1,4 +1,4 @@
-"""The winter kit, box-modelled around the male body like the summer kit (see kit.py): cages of rings
+"""The winter kit, box-modelled around a body like the summer kit (see kit.py): cages of rings
 round the body's own measures, subdivided, baked on themselves and painted into colourway masks.
 """
 
@@ -8,7 +8,7 @@ import bpy
 import numpy as np
 
 import blend
-import male
+import figure
 import rings
 import uv as uvs
 from paint import fbm, smoothstep
@@ -57,12 +57,13 @@ HEM_BAND = 0.95
 CUFF = 0.49
 
 
-def _torso_shape(z):
+def _torso_shape(fig, z):
     """The jacket's base outline at height z: the body's, hanging straight down from the chest."""
-    W, F, B, yc, n = male.torso_params(z)
-    if z < 1.25:
-        cw, cf, cb, _, _ = male.torso_params(1.25)
-        k = (1.25 - z) / 0.33
+    W, F, B, yc, n = fig.torso_params(z)
+    cz = fig.CHEST_Z
+    if z < cz:
+        cw, cf, cb, _, _ = fig.torso_params(cz)
+        k = (cz - z) / 0.33
         W = max(W, cw - 0.004 - 0.012 * k)
         F = max(F, cf - 0.004 - 0.012 * k)
         B = max(B, cb - 0.002 - 0.006 * k)
@@ -70,11 +71,11 @@ def _torso_shape(z):
     return W, F, B, yc, n
 
 
-def _torso_ring(z, grow, kind):
-    W, F, B, yc, n = _torso_shape(z)
+def _torso_ring(fig, z, grow, kind):
+    W, F, B, yc, n = _torso_shape(fig, z)
     pts = []
-    for i in range(male.N_TORSO):
-        t = 2 * math.pi * i / male.N_TORSO
+    for i in range(figure.N_TORSO):
+        t = 2 * math.pi * i / figure.N_TORSO
         s, c = math.sin(t), math.cos(t)
         ex = 2.0 / n
         x = (W + grow) * math.copysign(abs(s) ** ex, s)
@@ -84,7 +85,7 @@ def _torso_ring(z, grow, kind):
         side = abs(s)
         if kind == "seam" and abs(z - 1.452) < 1e-6:
             # Over the shoulders: up onto them, a dip at the collarbones' middle.
-            zz += (0.022 + grow * 0.8) * side**3 - 0.006 * max(0.0, c) ** 4
+            zz += (fig.SHOULDER_RISE + grow * 0.8) * side**3 - 0.006 * max(0.0, c) ** 4
         if kind == "neck":
             zz += 0.014 * max(0.0, -c) - 0.004 * max(0.0, c) ** 3 + 0.012 * side**2
         pts.append(np.array([x, y, zz]))
@@ -95,35 +96,36 @@ def _torso_weights(z, k, i):
     if z < 1.0:
         w = {"hips": 1.0}
     elif z < 1.16:
-        w = male.blend_w("hips", "spine", (z - 1.0) / 0.16)
+        w = figure.blend_w("hips", "spine", (z - 1.0) / 0.16)
     elif z < 1.32:
-        w = male.blend_w("spine", "chest", (z - 1.16) / 0.16)
+        w = figure.blend_w("spine", "chest", (z - 1.16) / 0.16)
     else:
         w = {"chest": 1.0}
     for s, L in ((1, "L"), (-1, "R")):
-        if k in ARM_RINGS and i in male.HOLE[s]:
-            share = {9: 0.25, 10: 0.35, 11: 0.4}[k] * (1.0 if i == male.HOLE[s][1] else 0.7)
+        if k in ARM_RINGS and i in figure.HOLE[s]:
+            share = {9: 0.25, 10: 0.35, 11: 0.4}[k] * (1.0 if i == figure.HOLE[s][1] else 0.7)
             w = {b: v * (1 - share) for b, v in w.items()}
             w[f"upperarm.{L}"] = share
     return w
 
 
-def _sleeve_radius(d):
+def _sleeve_radius(fig, d):
     """The arm's rough radius `d` along it from the shoulder (the sleeve doesn't follow the muscles)."""
-    return float(np.interp(d, [0.0, 0.12, 0.285, 0.42, 0.55], [0.078, 0.066, 0.05, 0.043, 0.033]))
+    r = float(np.interp(d, [0.0, 0.12, 0.285, 0.42, 0.55], [0.078, 0.066, 0.05, 0.043, 0.033]))
+    return r * fig.ARM_GIRTH
 
 
-def _sleeve_weights(s, d):
+def _sleeve_weights(fig, s, d):
     L = "L" if s > 0 else "R"
-    elbow, wrist = male.UPPER_ARM, male.UPPER_ARM + male.FOREARM
+    elbow, wrist = fig.UPPER_ARM, fig.UPPER_ARM + fig.FOREARM
     if d < 0.05:
         return {f"upperarm.{L}": 0.75, "chest": 0.25}
     if abs(d - elbow) < 0.07:
-        return male.blend_w(f"upperarm.{L}", f"forearm.{L}", (d - (elbow - 0.07)) / 0.14)
+        return figure.blend_w(f"upperarm.{L}", f"forearm.{L}", (d - (elbow - 0.07)) / 0.14)
     if d < elbow:
         return {f"upperarm.{L}": 1.0}
     if d > wrist - 0.05:
-        return male.blend_w(f"forearm.{L}", f"hand.{L}", (d - (wrist - 0.05)) / 0.1)
+        return figure.blend_w(f"forearm.{L}", f"hand.{L}", (d - (wrist - 0.05)) / 0.1)
     return {f"forearm.{L}": 1.0}
 
 
@@ -133,84 +135,85 @@ def _ring_round(cage, centre, axis, e2_hint, rx, ry, weights, n, part):
     return cage.ring(pts, weights, part=part)
 
 
-def puffer():
+def puffer(fig):
     """A quilted down jacket: baffles round the body and down the sleeves, a stand-up collar, closed."""
     cage = rings.Cage("puffer")
     region = 0
     tr = []
     for k, (z, grow, kind) in enumerate(PUFFER_TORSO):
-        pts = _torso_ring(z, grow, kind)
+        pts = _torso_ring(fig, z, grow, kind)
         tr.append([cage.vert(p, _torso_weights(z, k, i), part="torso") for i, p in enumerate(pts)])
     a_, b_, c_ = ARM_RINGS
     for k in range(len(tr) - 1):
         skip = {3, 4, 11, 12} if k in (a_, b_) else set()
-        for i in range(male.N_TORSO):
+        for i in range(figure.N_TORSO):
             if i in skip:
                 continue
-            j = (i + 1) % male.N_TORSO
+            j = (i + 1) % figure.N_TORSO
             cage.face([tr[k][i], tr[k][j], tr[k + 1][j], tr[k + 1][i]], region)
     for s in (1, -1):
-        cage.bm.verts.remove(tr[b_][male.HOLE[s][1]])
+        cage.bm.verts.remove(tr[b_][figure.HOLE[s][1]])
     holes = {}
     for s in (1, -1):
-        a, b, c = male.HOLE[s]
+        a, b, c = figure.HOLE[s]
         holes[s] = [tr[a_][a], tr[a_][b], tr[a_][c], tr[b_][c], tr[c_][c], tr[c_][b], tr[c_][a], tr[b_][a]]
     # The hem folds inside.
-    hem_in = cage.ring(_torso_ring(0.935, 0.008, "hem"), [_torso_weights(0.93, 0, i) for i in range(16)],
+    hem_in = cage.ring(_torso_ring(fig, 0.935, 0.008, "hem"), [_torso_weights(0.93, 0, i) for i in range(16)],
                        part="torso")
     cage.bridge(tr[0], hem_in, region)
     # The collar: in from the top of the shoulders, then up round the neck, lower in front, folded inside.
     collar = []
+    (_, ny, _), nw, nf, nb, _ = fig.NECK
     for z, gx, gy, front in ((1.537, 0.044, 0.04, 0.0), (1.568, 0.039, 0.036, 0.028), (1.598, 0.036, 0.034, 0.05)):
-        pts = rings.place((0, 0.026, z), np.array([1.0, 0, 0]), np.array([0, -1.0, 0]),
-                          rings.outline(male.N_TORSO, 0.072 + gx, 0.072 + gx, 0.056 + gy, 0.064 + gy, power=2.0,
+        pts = rings.place((0, ny, z), np.array([1.0, 0, 0]), np.array([0, -1.0, 0]),
+                          rings.outline(figure.N_TORSO, nw + gx, nw + gx, nf + gy, nb + gy, power=2.0,
                                         start=math.pi / 2))
-        pts = [p - np.array([0, 0, front * max(0.0, -(p[1] - 0.026) / (0.056 + gy)) ** 2]) for p in pts]
-        ring = cage.ring(pts, male.blend_w("chest", "neck", 0.35 if z < 1.55 else 0.5), part="collar")
-        collar.append(male._align(collar[-1] if collar else tr[-1], ring))
+        pts = [p - np.array([0, 0, front * max(0.0, -(p[1] - ny) / (nf + gy)) ** 2]) for p in pts]
+        ring = cage.ring(pts, figure.blend_w("chest", "neck", 0.35 if z < 1.55 else 0.5), part="collar")
+        collar.append(figure._align(collar[-1] if collar else tr[-1], ring))
     cage.bridge(tr[-1], collar[0], region)
     cage.bridge(collar[0], collar[1], region)
     cage.bridge(collar[1], collar[2], region)
     top = collar[-1]
-    lip = male._align(top, cage.ring([np.array(v.co[:]) * np.array([0.9, 1.0, 1.0]) + np.array([0, 0.0025, -0.012])
-                                      for v in top], male.blend_w("chest", "neck", 0.5), part="collar"))
+    lip = figure._align(top, cage.ring([np.array(v.co[:]) * np.array([0.9, 1.0, 1.0]) + np.array([0, 0.0025, -0.012])
+                                      for v in top], figure.blend_w("chest", "neck", 0.5), part="collar"))
     cage.bridge(top, lip, region)
     # The sleeves.
     sleeves = {}
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        sh = male.J[f"upperarm.{L}"]
-        d = male.arm_dir(s)
-        up = male.arm_up(s)
+        sh = fig.J[f"upperarm.{L}"]
+        d = figure.arm_dir(s)
+        up = figure.arm_up(s)
         made = []
         for dist, grow, kind in PUFFER_SLEEVE:
-            r = _sleeve_radius(dist) + grow
+            r = _sleeve_radius(fig, dist) + grow
             # A little flatter front to back than across, the way a sleeve hangs.
-            ring = _ring_round(cage, sh + d * dist, d, (0, -1, 0), r * 1.04, r * 0.97, _sleeve_weights(s, dist), 8,
+            ring = _ring_round(cage, sh + d * dist, d, (0, -1, 0), r * 1.04, r * 0.97, _sleeve_weights(fig, s, dist), 8,
                                f"sleeve.{L}")
             if made:
-                ring = male._align(made[-1], ring)
+                ring = figure._align(made[-1], ring)
                 cage.bridge(made[-1], ring, region)
             else:
                 ring = cage.bridge_aligned(holes[s], ring, region)
             made.append(ring)
         end = PUFFER_SLEEVE[-1][0] - 0.016
-        inner = _ring_round(cage, sh + d * end, d, (0, -1, 0), _sleeve_radius(end) + 0.003,
-                            _sleeve_radius(end) + 0.002, _sleeve_weights(s, end), 8, f"sleeve.{L}")
-        inner = male._align(made[-1], inner)
+        inner = _ring_round(cage, sh + d * end, d, (0, -1, 0), _sleeve_radius(fig, end) + 0.003,
+                            _sleeve_radius(fig, end) + 0.002, _sleeve_weights(fig, s, end), 8, f"sleeve.{L}")
+        inner = figure._align(made[-1], inner)
         cage.bridge(made[-1], inner, region)
         sleeves[s] = made
         # Seams: round the arm hole, under the arm to the cuff.
         cage.seam(holes[s], closed=True)
-        under = male._index_toward(made[1], -up)
+        under = figure._index_toward(made[1], -up)
         cage.seam([holes[s][under]] + [r_[under] for r_ in made] + [inner[under]])
     # Seams: down the back to the top of the collar, round the collar's base.
     back = 8
-    cage.seam([hem_in[back]] + [r_[back] for r_ in tr] + [ring[male._index_toward(ring, (0, 1, 0))]
+    cage.seam([hem_in[back]] + [r_[back] for r_ in tr] + [ring[figure._index_toward(ring, (0, 1, 0))]
                                                           for ring in collar + [lip]])
     cage.seam(collar[0], closed=True)
     obj = cage.finish()
-    _face_out(obj)
+    _face_out(fig, obj)
     uvs.unwrap(obj)
     blend.select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -226,32 +229,32 @@ def puffer():
     return obj
 
 
-def _outward(c):
+def _outward(fig, c):
     """Away from the body's middle at point c: from the arm's axis on a sleeve, from the torso's otherwise."""
     s = 1 if c[0] > 0 else -1
-    sh = male.J["upperarm.L" if s > 0 else "upperarm.R"]
-    d = male.arm_dir(s)
+    sh = fig.J["upperarm.L" if s > 0 else "upperarm.R"]
+    d = figure.arm_dir(s)
     t = float(np.dot(c - sh, d))
     if abs(c[0]) > 0.24 and t > 0.05:
         return c - sh - t * d
     return c - np.array([0.0, 0.02, c[2]])
 
 
-def _face_out(obj):
+def _face_out(fig, obj):
     """Turns the mesh's faces to look away from the body (an open mesh can come out of the cage inside out)."""
     me = obj.data
-    inward = sum(np.dot(_outward(np.array(p.center[:])), p.normal[:]) < 0 for p in me.polygons)
+    inward = sum(np.dot(_outward(fig, np.array(p.center[:])), p.normal[:]) < 0 for p in me.polygons)
     if inward > len(me.polygons) / 2:
         blend.flip(obj)
 
 
-def _arm_coords(pos):
+def _arm_coords(fig, pos):
     """For each texel: whether it is on a sleeve, and how far down the arm it is from the shoulder joint."""
     sleeve = np.zeros(pos.shape[:2], dtype=bool)
     dist = np.zeros(pos.shape[:2])
     for s, L in ((1, "L"), (-1, "R")):
-        sh = male.J[f"upperarm.{L}"]
-        d = male.arm_dir(s)
+        sh = fig.J[f"upperarm.{L}"]
+        d = figure.arm_dir(s)
         rel = pos - sh
         t = rel @ d
         radial = np.linalg.norm(rel - t[..., None] * d, axis=-1)
@@ -274,7 +277,8 @@ def paint_puffer(maps):
     ao = np.clip(blur(maps["ao"], inside, 2), 0, 1)
     s = s * (0.4 + 0.6 * ao)
     s = masses(s, centre=0.85, sharp=3.2, amount=0.45)
-    sleeve, dist = _arm_coords(pos)
+    fig = maps["fig"]
+    sleeve, dist = _arm_coords(fig, pos)
     collar = (z > 1.525) & ~sleeve
     # Stitched seams between the baffles: a dark line, the fabric drawn in toward it.
     seam_t = np.min([np.abs(z - zs) for zs in TORSO_SEAMS], axis=0)
@@ -287,7 +291,7 @@ def paint_puffer(maps):
     # Nylon creases: soft wrinkles across the puffs, and where the sleeves bend.
     crumple = (fbm(pos * np.array([1.0, 1.0, 2.2]), 34, octaves=3, seed=9) - 0.5) * 2
     s = s * (1 + 0.07 * crumple * quilted)
-    elbow = smoothstep(0.05, 0.0, np.abs(dist - male.UPPER_ARM)) * sleeve
+    elbow = smoothstep(0.05, 0.0, np.abs(dist - fig.UPPER_ARM)) * sleeve
     s = s * (1 - 0.12 * elbow * (0.5 + 0.5 * np.sin(dist * 900)))
     detail = np.repeat((0.5 * s)[..., None], 3, axis=2)
     mask = np.zeros_like(detail)
@@ -343,23 +347,23 @@ PANTS_HEM = 0.37
 KNEE = (0.465, 0.6)
 
 
-def pants():
+def pants(fig):
     """Loose snowboard pants: a waistband at the hips, straight legs falling over the boots."""
     cage = rings.Cage("pants")
-    R = male.R
+    R = figure.R
     waist = []
     for z, grow in ((1.085, 0.016), (1.04, 0.019), (0.98, 0.022), (0.93, 0.026), (0.885, 0.03)):
-        W, F, B, yc, n = male.torso_params(z)
+        W, F, B, yc, n = fig.torso_params(z)
         pts = []
-        for i in range(male.N_TORSO):
-            t = 2 * math.pi * i / male.N_TORSO
+        for i in range(figure.N_TORSO):
+            t = 2 * math.pi * i / figure.N_TORSO
             s_, c_ = math.sin(t), math.cos(t)
             ex = 2.0 / n
             x = (W + grow) * math.copysign(abs(s_) ** ex, s_)
             d = (F + grow) if c_ >= 0 else (B + grow)
             y = yc - d * math.copysign(abs(c_) ** ex, c_)
             pts.append(np.array([x, y, z]))
-        waist.append(cage.ring(pts, male.torso_weights(0, 0) if z < 1.0 else male.blend_w("hips", "spine", 0.4),
+        waist.append(cage.ring(pts, fig.torso_weights(0, 0) if z < 1.0 else figure.blend_w("hips", "spine", 0.4),
                                part="pants"))
     for a, b in zip(waist, waist[1:]):
         cage.bridge(a, b, R["hips"])
@@ -368,32 +372,30 @@ def pants():
     loops = {1: bottom[0:9] + [crotch], -1: bottom[8:16] + [bottom[0], crotch]}
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        hip, knee, ankle = male.J[f"thigh.{L}"], male.J[f"shin.{L}"], male.J[f"foot.{L}"]
+        hip, knee, ankle = fig.J[f"thigh.{L}"], fig.J[f"shin.{L}"], fig.J[f"foot.{L}"]
         thigh_len = float(np.linalg.norm(knee - hip))
         specs = []
         for dist, grow in PANTS_THIGH:
-            o, i_, f, b = [float(np.interp(dist, [r[0] for r in male.THIGH] + [thigh_len, thigh_len + 0.1],
-                                           [r[k] for r in male.THIGH] + [male.SHIN[0][k], male.SHIN[2][k]]))
-                           for k in (1, 2, 3, 4)]
-            specs.append(male.leg_ring(s, hip, knee, dist, o + grow, i_ + grow * 0.5, f + grow, b + grow))
+            o, i_, f, b = fig.leg_at(dist, thigh_len)
+            specs.append(fig.leg_ring(s, hip, knee, dist, o + grow, i_ + grow * 0.5, f + grow, b + grow))
         for dist, grow in PANTS_SHIN:
             # The shin's own shape, smoothed out under loose cloth.
-            o, i_, f, b = [float(np.interp(dist, [r[0] for r in male.SHIN], [r[k] for r in male.SHIN]))
+            o, i_, f, b = [float(np.interp(dist, [r[0] for r in fig.SHIN], [r[k] for r in fig.SHIN]))
                            for k in (1, 2, 3, 4)]
             r = max((o + i_ + f + b) / 4, 0.048)
-            specs.append(male.leg_ring(s, knee, ankle, dist, r + grow, r + grow * 0.8, r + grow, r + grow))
+            specs.append(fig.leg_ring(s, knee, ankle, dist, r + grow, r + grow * 0.8, r + grow, r + grow))
         ring_vs = [cage.ring(p, {f"thigh.{L}": 1.0}, part="pants") for p in specs]
         ring_vs[0] = cage.bridge_aligned(loops[s], ring_vs[0], R["thighs"])
         for k in range(1, len(ring_vs)):
-            ring_vs[k] = male._align(ring_vs[k - 1], ring_vs[k])
+            ring_vs[k] = figure._align(ring_vs[k - 1], ring_vs[k])
             cage.bridge(ring_vs[k - 1], ring_vs[k], R["thighs"])
         # The hem turns in.
-        o, i_, f, b = (male.SHIN[-2][k] for k in (1, 2, 3, 4))
+        o, i_, f, b = (fig.SHIN[-2][k] for k in (1, 2, 3, 4))
         r = max((o + i_ + f + b) / 4, 0.048)
-        lip = male._align(ring_vs[-1], cage.ring(male.leg_ring(s, knee, ankle, PANTS_HEM - 0.018, r + 0.05, r + 0.04,
+        lip = figure._align(ring_vs[-1], cage.ring(fig.leg_ring(s, knee, ankle, PANTS_HEM - 0.018, r + 0.05, r + 0.04,
                                                                 r + 0.05, r + 0.05), {f"shin.{L}": 1.0}, part="pants"))
         cage.bridge(ring_vs[-1], lip, R["thighs"])
-        inner = male._index_toward(ring_vs[1], (-s, 0, 0))
+        inner = figure._index_toward(ring_vs[1], (-s, 0, 0))
         cage.seam([loops[s][inner]] + [r_[inner] for r_ in ring_vs] + [lip[inner]])
     cage.seam([w[8] for w in waist] + [crotch])
     obj = cage.finish()
@@ -493,18 +495,19 @@ BOOT_SOLE = 0.042
 BOOT_COLLAR = 0.29
 
 
-def boots():
+def boots(fig):
     """Chunky snowboard boots: a padded collar high up the shin, a thick sole, a rounded toe box."""
     cage = rings.Cage("boots")
-    R = male.R
+    R = figure.R
+    size = fig.FOOT_SIZE
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        x = s * BOOT_X
         n = 12
         prev = None
         made = []
         for k, (c, axis, o, i_, top, bottom) in enumerate(BOOT_PATH):
-            c = np.array([x + s * c[0], c[1], c[2]])
+            c = fig.foot_point(s, (BOOT_X + c[0], c[1], c[2]))
+            o, i_, top, bottom = o * size, i_ * size, top * size, bottom * size
             axis = np.asarray(axis, dtype=np.float64)
             vertical = abs(axis[2]) > 0.9
             e1, e2, _ = rings.frame_of(axis, (0, -1, 0) if vertical else (0, 0, 1))
@@ -515,43 +518,45 @@ def boots():
             # A flat sole: nothing below the ground, and the outsole standing out a little round the foot.
             pts = [np.array([p[0], p[1], max(p[2], 0.0)]) for p in pts]
             if k >= 4:
-                pts = [p + np.append((p[:2] - c[:2]) / (np.linalg.norm(p[:2] - c[:2]) + 1e-9), 0) * 0.006
-                       * smoothstep(0.05, 0.02, p[2]) for p in pts]
+                pts = [p + np.append((p[:2] - c[:2]) / (np.linalg.norm(p[:2] - c[:2]) + 1e-9), 0) * (0.006 * size)
+                       * smoothstep(0.05 * size, 0.02 * size, p[2]) for p in pts]
             if k == 5:
                 # The heel: out behind.
-                pts = [p + np.array([0, 0.022, 0]) * max(0.0, (p[1] - c[1]) / 0.06) for p in pts]
+                pts = [p + np.array([0, 0.022, 0]) * size * max(0.0, (p[1] - c[1]) / (0.06 * size)) for p in pts]
             # The shaft goes with the shin, the foot with the foot.
             if k <= 2:
-                w = male.blend_w(f"shin.{L}", f"foot.{L}", 0.15 + 0.12 * k)
+                w = figure.blend_w(f"shin.{L}", f"foot.{L}", 0.15 + 0.12 * k)
             elif k == 3:
-                w = male.blend_w(f"shin.{L}", f"foot.{L}", 0.65)
+                w = figure.blend_w(f"shin.{L}", f"foot.{L}", 0.65)
             elif k >= 9:
-                w = male.blend_w(f"foot.{L}", f"toes.{L}", 0.6)
+                w = figure.blend_w(f"foot.{L}", f"toes.{L}", 0.6)
             else:
                 w = {f"foot.{L}": 1.0}
             ring = cage.ring(pts, w, part=f"boot.{L}")
             if prev is not None:
-                ring = male._align(prev, ring)
+                ring = figure._align(prev, ring)
                 cage.bridge(prev, ring, R["feet"])
             made.append(ring)
             prev = ring
-        tip = np.array([x + s * BOOT_PATH[-1][0][0], BOOT_PATH[-1][0][1] - 0.013, BOOT_PATH[-1][0][2] - 0.002])
-        cage.cap(prev, tip, male.blend_w(f"foot.{L}", f"toes.{L}", 0.75), R["feet"], part=f"boot.{L}")
+        end = BOOT_PATH[-1][0]
+        tip = fig.foot_point(s, (BOOT_X + end[0], end[1] - 0.013, end[2] - 0.002))
+        cage.cap(prev, tip, figure.blend_w(f"foot.{L}", f"toes.{L}", 0.75), R["feet"], part=f"boot.{L}")
         # The collar turns in, padded.
         top = made[0]
-        lip = cage.ring([(np.array(v.co[:]) - np.array([x, 0.008, 0])) * np.array([0.82, 0.82, 1.0]) +
-                         np.array([x, 0.008, -0.012]) for v in top],
-                        male.blend_w(f"shin.{L}", f"foot.{L}", 0.1), part=f"boot.{L}")
-        lip = male._align(top, lip)
+        axis = fig.foot_point(s, (BOOT_X, 0.008, 0.0))
+        lip = cage.ring([(np.array(v.co[:]) - axis) * np.array([0.82, 0.82, 1.0]) + axis + (0, 0, -0.012 * size)
+                         for v in top],
+                        figure.blend_w(f"shin.{L}", f"foot.{L}", 0.1), part=f"boot.{L}")
+        lip = figure._align(top, lip)
         cage.bridge(lip, top, R["feet"])
-        sole = male._index_toward(made[7], (0, 0, -1))
+        sole = figure._index_toward(made[7], (0, 0, -1))
         cage.seam([r[sole] for r in made[4:]])
-        back = male._index_toward(made[0], (0, 1, 0))
+        back = figure._index_toward(made[0], (0, 1, 0))
         cage.seam([lip[back]] + [made[k][back] for k in range(5)])
         cage.seam(made[4], closed=True)
     obj = cage.finish()
-    if sum(np.dot(np.array(p.center[:]) - np.array([np.sign(p.center[0]) * BOOT_X, -0.07, 0.12]), p.normal[:]) < 0
-           for p in obj.data.polygons) > len(obj.data.polygons) / 2:
+    if sum(np.dot(np.array(p.center[:]) - fig.foot_point(np.sign(p.center[0]), (BOOT_X, -0.07, 0.12)), p.normal[:])
+           < 0 for p in obj.data.polygons) > len(obj.data.polygons) / 2:
         blend.flip(obj)
     uvs.unwrap(obj)
     blend.select_only(obj)
@@ -577,7 +582,7 @@ def boots():
 
 def paint_boots(maps):
     inside = maps["inside"]
-    pos = maps["pos"]
+    pos = maps["fig"].foot_design(maps["pos"])
     x, y, z = pos[..., 0], pos[..., 1], pos[..., 2]
     fx = np.abs(x) - BOOT_X
     L = blur(maps["light"], inside, 2)
@@ -652,17 +657,17 @@ FINGER_PAD = (0.0045, 0.0013)
 GLOVE_CUFF = [(-0.036, 0.031, 0.03, 0.038, 0.036), (-0.012, 0.032, 0.031, 0.04, 0.038)]
 
 
-def _glove_fingers(cage, s):
-    """The body's fingers (male._fingers) padded: thicker over the knuckles than across, a little longer."""
+def _glove_fingers(fig, cage, s):
+    """The body's fingers (Figure._fingers) padded: thicker over the knuckles than across, a little longer."""
     L = "L" if s > 0 else "R"
-    wr = male.J[f"hand.{L}"]
-    d = male.arm_dir(s)
-    up = male.arm_up(s)
+    wr = fig.J[f"hand.{L}"]
+    d = figure.arm_dir(s)
+    up = figure.arm_up(s)
     front = np.array([0, -1.0, 0])
     tall, wide = FINGER_PAD
-    for across, length, r in male.FINGERS:
+    for across, length, r in fig.FINGERS:
         length += 0.007
-        base = wr + d * (male.PALM - 0.004) + front * across + up * 0.002
+        base = wr + d * (fig.PALM - 0.004) + front * across + up * 0.002
         spread = front * across * 0.18
         made = []
         for i, t in enumerate((0.0, 0.33, 0.66, 1.0)):
@@ -671,83 +676,85 @@ def _glove_fingers(cage, s):
             c = base + (d + spread * 0.5 - up * 0.08 * t) * length * t
             e1, e2, _ = rings.frame_of(axis, front)
             rr = r * (1 - 0.14 * t)
-            w = (male.blend_w(f"hand.{L}", f"fingers.{L}", 0.5 + 0.5 * t) if i
-                 else male.blend_w(f"hand.{L}", f"fingers.{L}", 0.35))
+            w = (figure.blend_w(f"hand.{L}", f"fingers.{L}", 0.5 + 0.5 * t) if i
+                 else figure.blend_w(f"hand.{L}", f"fingers.{L}", 0.35))
             ring = cage.ring(rings.place(c, e1, e2, rings.outline(6, rr + tall, rr * 0.95 + tall, rr * 1.05 + wide,
                                                                   rr + wide, power=2.2)), w, part=f"glove.{L}")
             if made:
-                ring = male._align(made[-1], ring)
-                cage.bridge(made[-1], ring, male.R["hands"])
+                ring = figure._align(made[-1], ring)
+                cage.bridge(made[-1], ring, figure.R["hands"])
             made.append(ring)
-        cage.cap(made[0], base - d * 0.008, male.blend_w(f"hand.{L}", f"fingers.{L}", 0.3), male.R["hands"],
+        cage.cap(made[0], base - d * 0.008, figure.blend_w(f"hand.{L}", f"fingers.{L}", 0.3), figure.R["hands"],
                  part=f"glove.{L}")
         end = np.mean([np.array(v.co[:]) for v in made[-1]], axis=0)
-        cage.cap(made[-1], end + d * (r + tall) * 0.85, {f"fingers.{L}": 1.0}, male.R["hands"], part=f"glove.{L}")
+        cage.cap(made[-1], end + d * (r + tall) * 0.85, {f"fingers.{L}": 1.0}, figure.R["hands"], part=f"glove.{L}")
         cage.seam([r_[0] for r_ in made])
 
 
-def _glove_thumb(cage, s):
+def _glove_thumb(fig, cage, s):
     L = "L" if s > 0 else "R"
-    wr = male.J[f"hand.{L}"]
-    d = male.arm_dir(s)
-    up = male.arm_up(s)
+    wr = fig.J[f"hand.{L}"]
+    d = figure.arm_dir(s)
+    up = figure.arm_up(s)
     front = np.array([0, -1.0, 0])
-    base = wr + d * 0.022 + front * 0.03 - up * 0.008
+    k = fig.HAND_SIZE
+    base = wr + d * (0.022 * k) + front * (0.03 * k) - up * (0.008 * k)
     axis = d * 0.55 + front * 0.55 - up * 0.45
     axis /= np.linalg.norm(axis)
     e1, e2, _ = rings.frame_of(axis, up)
     made = []
     for t, r1, r2 in ((0.0, 0.021, 0.019), (0.027, 0.0185, 0.0165), (0.049, 0.0155, 0.0145), (0.066, 0.013, 0.0125)):
-        ring = cage.ring(rings.place(base + axis * t, e1, e2, rings.outline(6, r1, r1, r2, r2)), {f"hand.{L}": 1.0},
-                         part=f"glove.{L}")
+        ring = cage.ring(rings.place(base + axis * (t * k), e1, e2, rings.outline(6, r1 * k, r1 * k, r2 * k, r2 * k)),
+                         {f"hand.{L}": 1.0}, part=f"glove.{L}")
         if made:
-            ring = male._align(made[-1], ring)
-            cage.bridge(made[-1], ring, male.R["hands"])
+            ring = figure._align(made[-1], ring)
+            cage.bridge(made[-1], ring, figure.R["hands"])
         made.append(ring)
-    back = cage.cap(made[0], base - axis * 0.012, {f"hand.{L}": 1.0}, male.R["hands"], part=f"glove.{L}")
-    cage.cap(made[-1], base + axis * 0.078, {f"hand.{L}": 1.0}, male.R["hands"], part=f"glove.{L}")
+    back = cage.cap(made[0], base - axis * (0.012 * k), {f"hand.{L}": 1.0}, figure.R["hands"], part=f"glove.{L}")
+    cage.cap(made[-1], base + axis * (0.078 * k), {f"hand.{L}": 1.0}, figure.R["hands"], part=f"glove.{L}")
     cage.seam([back] + [r[0] for r in made])
 
 
-def gloves():
+def gloves(fig):
     """Padded snowboard gloves: the hand's own shape a size up, the fingers thick over the knuckles, a short cuff
     under the sleeve."""
     cage = rings.Cage("gloves")
     top, bot, fr, bk = GLOVE_PAD
     for s in (1, -1):
         L = "L" if s > 0 else "R"
-        wr = male.J[f"hand.{L}"]
-        specs = [(dist, a, b, f, k) for dist, a, b, f, k in GLOVE_CUFF]
-        specs += [(dist, a + top, b + bot, f + fr, k + bk) for dist, a, b, f, k in male.HAND]
+        wr = fig.J[f"hand.{L}"]
+        h = fig.HAND_SIZE
+        specs = [(dist, a * h, b * h, f * h, k * h) for dist, a, b, f, k in GLOVE_CUFF]
+        specs += [(dist, a + top, b + bot, f + fr, k + bk) for dist, a, b, f, k in fig.HAND]
         made = []
         for dist, a, b, f, k in specs:
             if dist < 0:
-                w = male.blend_w(f"forearm.{L}", f"hand.{L}", 0.3 + 0.25 * (1 + dist / 0.036))
+                w = figure.blend_w(f"forearm.{L}", f"hand.{L}", 0.3 + 0.25 * (1 + dist / 0.036))
             elif dist <= 0.0:
-                w = male.blend_w(f"forearm.{L}", f"hand.{L}", 0.55)
-            elif dist < male.PALM - 0.01:
+                w = figure.blend_w(f"forearm.{L}", f"hand.{L}", 0.55)
+            elif dist < fig.PALM - 0.01:
                 w = {f"hand.{L}": 1.0}
             else:
-                w = male.blend_w(f"hand.{L}", f"fingers.{L}", (dist - (male.PALM - 0.01)) / 0.03)
-            ring = cage.ring(male.arm_ring(s, wr, dist, a, b, f, k), w, part=f"glove.{L}")
+                w = figure.blend_w(f"hand.{L}", f"fingers.{L}", (dist - (fig.PALM - 0.01)) / 0.03)
+            ring = cage.ring(fig.arm_ring(s, wr, dist, a, b, f, k), w, part=f"glove.{L}")
             if made:
-                ring = male._align(made[-1], ring)
-                cage.bridge(made[-1], ring, male.R["hands"])
+                ring = figure._align(made[-1], ring)
+                cage.bridge(made[-1], ring, figure.R["hands"])
             made.append(ring)
         # The cuff's open end turns in.
         d0 = GLOVE_CUFF[0][0] + 0.008
-        lip = male._align(made[0], cage.ring(male.arm_ring(s, wr, d0, 0.026, 0.025, 0.033, 0.031),
-                                             male.blend_w(f"forearm.{L}", f"hand.{L}", 0.3), part=f"glove.{L}"))
-        cage.bridge(lip, made[0], male.R["hands"])
-        tip = np.mean([np.array(v.co[:]) for v in made[-1]], axis=0) + male.arm_dir(s) * 0.007
-        cage.cap(made[-1], tip, male.blend_w(f"hand.{L}", f"fingers.{L}", 0.6), male.R["hands"], part=f"glove.{L}")
-        _glove_fingers(cage, s)
-        _glove_thumb(cage, s)
+        lip = figure._align(made[0], cage.ring(fig.arm_ring(s, wr, d0, 0.026 * h, 0.025 * h, 0.033 * h, 0.031 * h),
+                                             figure.blend_w(f"forearm.{L}", f"hand.{L}", 0.3), part=f"glove.{L}"))
+        cage.bridge(lip, made[0], figure.R["hands"])
+        tip = np.mean([np.array(v.co[:]) for v in made[-1]], axis=0) + figure.arm_dir(s) * 0.007
+        cage.cap(made[-1], tip, figure.blend_w(f"hand.{L}", f"fingers.{L}", 0.6), figure.R["hands"], part=f"glove.{L}")
+        _glove_fingers(fig, cage, s)
+        _glove_thumb(fig, cage, s)
         cage.seam(made[len(GLOVE_CUFF)], closed=True)
-        back = male._index_toward(made[len(GLOVE_CUFF) + 1], (0, 1, 0))
+        back = figure._index_toward(made[len(GLOVE_CUFF) + 1], (0, 1, 0))
         cage.seam([lip[back]] + [r_[back] for r_ in made])
     obj = cage.finish()
-    _glove_out(obj)
+    _glove_out(fig, obj)
     uvs.unwrap(obj)
     blend.select_only(obj)
     bpy.ops.object.mode_set(mode="EDIT")
@@ -763,18 +770,18 @@ def gloves():
     return obj
 
 
-def _hand_coords(pos):
+def _hand_coords(fig, pos):
     """For each texel: the hand's side (+1 left, -1 right), how far along the arm from the wrist joint, and
     its direction up (the back of the hand) and front (toward the thumb) at the wrist."""
     side = np.where(pos[..., 0] >= 0, 1, -1)
     along = np.zeros(pos.shape[:2])
     for s, L in ((1, "L"), (-1, "R")):
-        rel = pos - male.J[f"hand.{L}"]
-        along = np.where(side == s, rel @ male.arm_dir(s), along)
+        rel = pos - fig.J[f"hand.{L}"]
+        along = np.where(side == s, rel @ figure.arm_dir(s), along)
     return side, along
 
 
-def _glove_out(obj):
+def _glove_out(fig, obj):
     """Faces away from the hand's bones (a cage of caps and tubes can come out inside out)."""
     me = obj.data
     inward = 0
@@ -782,8 +789,8 @@ def _glove_out(obj):
         c = np.array(p.center[:])
         s = 1 if c[0] > 0 else -1
         L = "L" if s > 0 else "R"
-        wr = male.J[f"hand.{L}"]
-        d = male.arm_dir(s)
+        wr = fig.J[f"hand.{L}"]
+        d = figure.arm_dir(s)
         t = float(np.dot(c - wr, d))
         inward += np.dot(c - (wr + d * np.clip(t, -0.04, 0.16)), p.normal[:]) < 0
     if inward > len(me.polygons) / 2:
@@ -799,10 +806,11 @@ def paint_gloves(maps):
     s = np.clip(L / ref, 0, 1.4)
     ao = np.clip(blur(maps["ao"], inside, 2), 0, 1)
     s = s * (0.42 + 0.58 * ao)
-    side, along = _hand_coords(pos)
-    up = np.where(side[..., None] > 0, male.arm_up(1), male.arm_up(-1))
+    fig = maps["fig"]
+    side, along = _hand_coords(fig, pos)
+    up = np.where(side[..., None] > 0, figure.arm_up(1), figure.arm_up(-1))
     upness = np.sum(nrm * up, axis=-1)
-    knuckles = male.PALM - 0.006
+    knuckles = fig.PALM - 0.006
     # Padding: quilted rows across the back of the fingers and a padded panel over the knuckles.
     back = smoothstep(-0.1, 0.15, upness)
     rows = smoothstep(0.0022, 0.0008, np.abs(((along - knuckles) / 0.022) % 1 - 0.5) * 0.022) * (along > knuckles)
@@ -838,7 +846,7 @@ def paint_gloves(maps):
     tab = strap * smoothstep(0.0, 0.25, np.sum(nrm * front, axis=-1)) * smoothstep(0.003, 0.002, np.abs(along - 0.013))
     put(tab, 2)
     # The brand's mark on the back of the hand.
-    rel = np.where(side[..., None] > 0, pos - male.J["hand.L"], pos - male.J["hand.R"])
+    rel = np.where(side[..., None] > 0, pos - fig.J["hand.L"], pos - fig.J["hand.R"])
     across = np.sum(rel * front, axis=-1)
     mark = smoothstep(0.008, 0.006, np.abs(along - 0.052)) * smoothstep(0.011, 0.009, np.abs(across - 0.004))
     put(mark * smoothstep(0.3, 0.6, upness), 2)
