@@ -5,8 +5,9 @@
 //  4. runs the lobby Worker (wrangler dev, http://127.0.0.1:8787)
 //  5. builds and runs the race server (WebTransport on UDP :4433), which
 //     reports to the lobby
-//  6. runs the Vite dev server (http://localhost:5173): the game, with /api
-//     proxied to the lobby, and dev-only quick join tickets for tests
+//  6. once the race server has registered, runs the Vite dev server
+//     (http://localhost:5173): the game, with /api proxied to the lobby, and
+//     dev-only quick join tickets for tests
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -96,19 +97,33 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal
 interface RunOptions {
   cwd?: string;
   env?: Record<string, string>;
+  /** Sees every whole line the process prints. */
+  onLine?: (line: string) => void;
 }
 
-const run = (name: string, color: number, cmd: string, args: string[], { cwd = repoRoot, env = {} }: RunOptions) => {
+const run = (
+  name: string,
+  color: number,
+  cmd: string,
+  args: string[],
+  { cwd = repoRoot, env = {}, onLine }: RunOptions,
+) => {
   const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
   const prefix = `\x1b[${color}m${name.padEnd(6)}\x1b[0m│ `;
-  const pipe = (data: Buffer) => {
-    for (const line of data.toString().split("\n")) {
-      // Race servers check in every few seconds; that's noise in dev.
-      if (line.trim() && !line.includes("POST /api/servers/heartbeat 200")) console.log(prefix + line);
-    }
+  const pipe = () => {
+    let partial = "";
+    return (data: Buffer) => {
+      const lines = (partial + data.toString()).split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) {
+        onLine?.(line);
+        // Race servers check in every few seconds; that's noise in dev.
+        if (line.trim() && !line.includes("POST /api/servers/heartbeat 200")) console.log(prefix + line);
+      }
+    };
   };
-  child.stdout?.on("data", pipe);
-  child.stderr?.on("data", pipe);
+  child.stdout?.on("data", pipe());
+  child.stderr?.on("data", pipe());
   child.on("exit", (code, signal) => {
     const stopped = shuttingDown || signal === "SIGINT" || signal === "SIGTERM";
     if (!stopped) console.log(`${prefix}exited (${code ?? signal})`);
@@ -136,8 +151,27 @@ run(
     lobbyEnv,
     ...(existsSync(userEnv) ? ["--env-file", userEnv] : []),
   ],
-  { cwd: lobbyDir },
+  { cwd: lobbyDir, env: { CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: databaseUrl } },
 );
+// The game only opens once the race server has registered: until then the
+// lobby may still hand out tickets for the race server of an earlier run,
+// whose certificate is gone.
+let viteStarted = false;
+function startVite() {
+  viteStarted = true;
+  run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js"], {
+    cwd: join(repoRoot, "apps/client"),
+    env: { RACE_SERVER: `localhost:${RACE_PORT}`, LOBBY: `http://127.0.0.1:${LOBBY_PORT}` },
+  });
+  console.log(`
+  ▸ open http://localhost:5173 (sign-in codes show up in the lobby log)
+    quick race without the menus: http://localhost:5173/?name=YourName
+    URL options: name, room, bots (0-7), event (snow), surface (0-3),
+                 scale (0.25-1), water=basic (plain swells, for slow machines)
+`);
+}
+
+console.log("▸ waiting for the race server to register with the lobby…");
 run("race", 36, "target/debug/race-server", [], {
   env: {
     LOBBY_PUBLIC_KEY: key.publicKey,
@@ -149,15 +183,7 @@ run("race", 36, "target/debug/race-server", [], {
     DRAIN_TIMEOUT_SECS: "1",
     RUST_LOG: process.env.RUST_LOG ?? "info",
   },
+  onLine: (line) => {
+    if (!viteStarted && line.includes("registered with the lobby")) startVite();
+  },
 });
-run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js"], {
-  cwd: join(repoRoot, "apps/client"),
-  env: { RACE_SERVER: `localhost:${RACE_PORT}`, LOBBY: `http://127.0.0.1:${LOBBY_PORT}` },
-});
-
-console.log(`
-  ▸ open http://localhost:5173 (sign-in codes show up in the lobby log)
-    quick race without the menus: http://localhost:5173/?name=YourName
-    URL options: name, room, bots (0-7), event (snow), surface (0-3),
-                 scale (0.25-1), water=basic (plain swells, for slow machines)
-`);
