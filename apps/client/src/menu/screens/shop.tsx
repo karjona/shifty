@@ -5,7 +5,7 @@ import { type Appearance, ITEMS, type Item, SLOTS, type Slot, type Sport, fits, 
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { setClubCloseUp, setClubRider, setClubRiders } from "../../game/backdrops.ts";
+import { setClubCloseUp, setClubRider, setClubRiders, showClubRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { ApiError, buyItem, meQuery, storeRider } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
@@ -36,9 +36,17 @@ export function ShopScreen() {
   useAction("back", () => void navigate({ to: "/", search: { tab: "collection" } }), !buying);
   useEffect(() => {
     setClubRiders(1);
-    setClubCloseUp(true);
-    return () => setClubCloseUp(false);
+    return () => {
+      setClubCloseUp(false);
+      showClubRide(false);
+    };
   }, []);
+  // Up close on your rider, or further back with your ride beside them while you shop for rides.
+  const onRides = slot === "ride";
+  useEffect(() => {
+    setClubCloseUp(!onRides);
+    showClubRide(onRides);
+  }, [onRides]);
 
   const appearance = rider?.appearance ?? null;
   // Your rider on the terrace, wearing what you point at.

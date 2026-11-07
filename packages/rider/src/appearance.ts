@@ -2,6 +2,7 @@
 // sport), and its compact bytes: the lobby signs them into join tokens, the
 // race server passes them on to everyone in the room without reading them.
 import {
+  ITEMS,
   type Kit,
   type Outfits,
   SLOTS,
@@ -113,16 +114,19 @@ export function fromBase64Url(s: string): Uint8Array | null {
   }
 }
 
+/** Every ride of a sport, in every colourway. */
+const rides = (sport: keyof Outfits) => ITEMS.filter((i) => i.model.startsWith(`${sport}.ride.`)).map((i) => i.id);
+
 /**
  * A bot's appearance, the same on every client: a random look in starter
- * clothes, from the room's seed and the bot's seat.
+ * clothes on any of the rides, from the room's seed and the bot's seat.
  */
 export function botAppearance(seed: number, slot: number): Appearance {
   const next = rng((seed * 31 + slot * 7919 + 17) >>> 0);
   const look = randomLook(next);
   const outfits = defaultOutfits(look.body);
   const pick = <T>(xs: readonly T[]) => xs[Math.min(xs.length - 1, Math.floor(next() * xs.length))]!;
-  // Starter colours vary per bot, so the field isn't all one kit.
+  // Starter colours vary per bot, so the field isn't all one kit; bots ride any ride, so a race shows them all.
   const swap: [keyof Outfits, Slot, string[]][] = [
     ["summer", "vest", ["summer.vest.foam.yellow", "summer.vest.foam.red"]],
     [
@@ -132,11 +136,11 @@ export function botAppearance(seed: number, slot: number): Appearance {
         ? ["summer.bottom.swimsuit.black", "summer.bottom.swimsuit.red"]
         : ["summer.bottom.boardshorts.navy", "summer.bottom.boardshorts.teal"],
     ],
-    ["summer", "ride", ["summer.ride.runabout.yellow", "summer.ride.runabout.blue"]],
+    ["summer", "ride", rides("summer")],
     ["winter", "top", ["winter.top.puffer.red", "winter.top.puffer.blue"]],
     ["winter", "head", ["winter.head.beanie.white", "winter.head.beanie.red"]],
     ["winter", "bottom", ["winter.bottom.pants.navy", "winter.bottom.pants.grey"]],
-    ["winter", "ride", ["winter.ride.freestyle.lime", "winter.ride.freestyle.pink"]],
+    ["winter", "ride", rides("winter")],
   ];
   for (const [sport, where, ids] of swap) outfits[sport][where] = pick(ids);
   return { look, outfits };

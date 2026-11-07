@@ -201,6 +201,21 @@ const ROWS: readonly (readonly [number, string, keyof typeof COLOURWAYS, number]
   [76, "winter.ride.freeride", "white", 2400],
   [77, "winter.ride.carver", "red", 2600],
   [78, "winter.ride.carver", "teal", 2600],
+  [79, "summer.ride.runabout", "teal", 2000],
+  [80, "summer.ride.runabout", "white", 2000],
+  [81, "summer.ride.runabout", "black", 2000],
+  [82, "summer.ride.racer", "red", 2600],
+  [83, "summer.ride.racer", "lime", 2600],
+  [84, "summer.ride.racer", "white", 2600],
+  [85, "summer.ride.cruiser", "navy", 2400],
+  [86, "summer.ride.cruiser", "sand", 2400],
+  [87, "winter.ride.freestyle", "teal", 2000],
+  [88, "winter.ride.freestyle", "orange", 2000],
+  [89, "winter.ride.freestyle", "white", 2000],
+  [90, "winter.ride.freeride", "red", 2400],
+  [91, "winter.ride.freeride", "yellow", 2400],
+  [92, "winter.ride.carver", "black", 2600],
+  [93, "winter.ride.carver", "blue", 2600],
 ];
 
 export const ITEMS: readonly Item[] = ROWS.map(([n, model, colourway, price]) => ({

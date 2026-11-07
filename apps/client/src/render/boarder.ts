@@ -1,20 +1,19 @@
-// A snowboarder. The board follows the sim exactly and wears the colours of
-// the rider's board; the rider on it is render-only and posed every frame:
+// A snowboarder. The board follows the sim exactly and is the rider's board
+// in its colourway; the rider on it is render-only and posed every frame:
 // knees that load for a pop and soak up landings, a low tuck, sitting back
 // into a skid, arms out for balance in the air, a hand on the board for
 // grabs, rocking heel to toe with arms windmilling after a sketchy landing,
 // and a tumble when bailing.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Colourway, botAppearance, item } from "@shifty/rider";
-import { Parts } from "./parts.ts";
+import { Ride } from "./ride/ride.ts";
 import { SLOT_COLORS } from "./rider.ts";
 import { RiderFigure } from "./rider/model.ts";
 import { snowboardPose } from "./rider/ride.ts";
 import type { RiderModel, RiderView } from "./world.ts";
 
-/** Board size (m) and stance: feet this far either side of the middle. */
+/** Board size (m) and stance: feet this far either side of the middle (every model's bindings are there). */
 const BOARD_LENGTH = 1.55;
-const BOARD_WIDTH = 0.27;
 const STANCE = 0.27;
 /** The deck's top, where the soles stand (m). */
 const DECK = 0.03;
@@ -38,7 +37,7 @@ class Spring {
   }
 }
 
-/** The board's colours (deck, bindings, stripe), or the seat's colour with dark bindings. */
+/** The board's colourway, or the seat's colour with dark graphics and bindings. */
 function boardColours(appearance: Appearance, slot: number): Colourway {
   const board = appearance.outfits.winter.ride;
   const it = board ? item(board) : undefined;
@@ -52,11 +51,10 @@ export class BoarderModel implements RiderModel {
   /** The rider, in "body space": chest toward +Z, left toward +X, from the board's middle. */
   private body = new THREE.Group();
   private board = new THREE.Group();
+  private ride: Ride;
   private figure: RiderFigure;
-
-  get ready(): Promise<void> {
-    return this.figure.ready;
-  }
+  /** Resolves once the rider's and the board's art are in. */
+  readonly ready: Promise<void>;
 
   private crouch = new Spring(90, 12);
   private lean = new Spring(60, 10);
@@ -71,25 +69,8 @@ export class BoarderModel implements RiderModel {
   /** Without an appearance, a rider made up for the seat. */
   constructor(slot: number, appearance: Appearance | null) {
     const look = appearance ?? botAppearance(1, slot);
-    const [main, second, accent] = boardColours(look, slot);
-    // The board: a deck with kicked-up nose and tail, a stripe, and two bindings.
-    const board = new Parts();
-    board.add(new THREE.BoxGeometry(BOARD_WIDTH, 0.025, BOARD_LENGTH - 0.3), main, 0, 0.0125);
-    board.add(new THREE.BoxGeometry(0.06, 0.004, BOARD_LENGTH - 0.4), accent, 0, 0.027);
-    for (const end of [1, -1]) {
-      board.add(
-        new THREE.BoxGeometry(BOARD_WIDTH * 0.96, 0.025, 0.2),
-        main,
-        0,
-        0.04,
-        end * (BOARD_LENGTH / 2 - 0.1),
-        -end * 0.35,
-      );
-      board.add(new THREE.BoxGeometry(0.24, 0.05, 0.16), second, 0, 0.04, end * STANCE);
-    }
-    const boardMesh = board.build({ flatShading: true });
-    boardMesh.castShadow = true;
-    this.board.add(boardMesh);
+    this.ride = new Ride("winter", look.outfits.winter.ride, boardColours(look, slot));
+    this.board.add(this.ride.group);
     this.rig.add(this.board);
 
     // The rider stands sideways: body space +Z (chest) is the board's -X
@@ -100,6 +81,7 @@ export class BoarderModel implements RiderModel {
     this.rig.add(this.body);
     this.mesh.add(this.rig);
     this.mesh.rotation.order = "YXZ";
+    this.ready = Promise.all([this.figure.ready, this.ride.ready]).then(() => {});
   }
 
   update(r: RiderView, dt: number): void {
@@ -167,11 +149,6 @@ export class BoarderModel implements RiderModel {
 
   dispose(): void {
     this.figure.dispose();
-    this.board.traverse((o) => {
-      if (!(o instanceof THREE.Mesh)) return;
-      o.geometry.dispose();
-      const m: unknown = o.material;
-      if (m instanceof THREE.Material) m.dispose();
-    });
+    this.ride.dispose();
   }
 }
