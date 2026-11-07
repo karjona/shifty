@@ -14,6 +14,7 @@ import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
 import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
+import { WrongWay } from "../ui/wrong-way.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
@@ -124,6 +125,7 @@ export class RaceSession implements Stage {
   private input = new InputReader();
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
   private hud: Hud;
+  private wrongWay = new WrongWay();
   private mapRoot: HTMLDivElement;
   private minimap: CourseMap | null = null;
   private env: Environment | null = null;
@@ -468,6 +470,7 @@ export class RaceSession implements Stage {
       if (this.seasonChange && !this.seasonChange.active) this.seasonChange = null;
     }
     const me = riders.find((r) => r.isMe);
+    race.wrongWay = this.wrongWay.update(race, me);
     this.hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
     this.hud.update(

@@ -400,11 +400,6 @@ body {
   opacity: 0.85;
   text-shadow: 0 1px 4px rgb(0 0 0 / 0.5);
 }
-#banner.wrong {
-  top: 22vh;
-  font-size: 64px;
-  color: #ff6b5a;
-}
 #minimap {
   position: fixed;
   right: 72px;
