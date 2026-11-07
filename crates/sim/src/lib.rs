@@ -54,7 +54,8 @@ pub const MAX_HUMANS: usize = 4;
 /// A fixed scenario used to compare native and WASM builds bit for bit:
 /// a full room of riders on every course (swells, then snow), driven by
 /// seeded pseudo-random inputs and bots through the intro, the countdown
-/// and the race.
+/// and the race, where one rider leaves and comes back mid-race (on
+/// autopilot from then on).
 pub fn determinism_scenario(ticks: u32) -> u64 {
     let mut hash: u64 = 0;
     for course in [CourseId::Oval, CourseId::Mountain] {
@@ -65,7 +66,11 @@ pub fn determinism_scenario(ticks: u32) -> u64 {
         world.start_intro();
         let mut rng = math::Pcg32::new(42);
         let mut inputs: Inputs = [None; MAX_RIDERS];
-        for _ in 0..ticks {
+        for t in 0..ticks {
+            if t == race::tuning::INTRO_TICKS + race::tuning::COUNTDOWN_TICKS + 300 {
+                world.remove(5);
+                world.spawn(5);
+            }
             for (slot, input) in inputs.iter_mut().enumerate() {
                 *input = Some(if slot >= 6 {
                     bot::bot_input(&world, slot)
