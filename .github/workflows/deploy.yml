@@ -193,8 +193,10 @@ jobs:
           COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
           COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
         run: |
-          curl --fail-with-body -sS -H "Authorization: Bearer $COOLIFY_TOKEN" \
-            "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
+          curl --fail-with-body -sS -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"uuid\":\"$COOLIFY_APP_UUID\",\"force\":false}" \
+            "$COOLIFY_URL/api/v1/deploy"
           echo
       # Coolify lets the old server finish its races (up to 20 min) before the new one starts.
       - name: Wait for the lobby to see it
