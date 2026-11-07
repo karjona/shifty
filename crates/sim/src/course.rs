@@ -583,11 +583,31 @@ pub static CAPE: Course = Course {
             radius: 25.2,
             kind: LandKind::Headland,
         },
-        // The mainland: the coast behind the arch, the harbour town on the west, the beach on the east.
+        // The mainland round the bay: the coast behind the arch and the
+        // hills behind it, the harbour town and the coast past it on the
+        // west, the beach and the coast past it on the east.
         LandDef {
-            a: (-360.0, -180.0),
-            b: (360.0, -180.0),
+            a: (-700.0, -180.0),
+            b: (700.0, -180.0),
             radius: 54.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (-800.0, -420.0),
+            b: (800.0, -420.0),
+            radius: 200.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (-420.0, -180.0),
+            b: (-420.0, 300.0),
+            radius: 150.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (430.0, -180.0),
+            b: (430.0, 300.0),
+            radius: 120.0,
             kind: LandKind::Coast,
         },
         LandDef {

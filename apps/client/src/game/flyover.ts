@@ -111,6 +111,43 @@ function bayShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env: 
   ];
 }
 
+/**
+ * The cape: the whole headland from the open sea with the sierra behind,
+ * low through the arch, weaving down past the stacks, then the grid off
+ * the beach.
+ */
+function capeShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env: Environment): Shot[] {
+  const s = course.start;
+  const back = 14;
+  const grid: Grid = {
+    centre: v(s.x - Math.sin(s.yaw) * back, 0.6, s.z - Math.cos(s.yaw) * back),
+    yaw: s.yaw,
+  };
+  const legs = course.land.filter((l) => l.kind === "arch");
+  const archX = legs.length > 0 ? legs.reduce((sum, l) => sum + l.ax + l.bx, 0) / (legs.length * 2) : 0;
+  const archZ = legs.length > 0 ? legs.reduce((sum, l) => sum + l.az, 0) / legs.length : -90;
+  const stacks = course.land.filter((l) => l.kind === "stack").toSorted((a, b) => a.az - b.az);
+  const stack = stacks[1] ?? { ax: -117, az: 119 };
+  return [
+    dolly(
+      2.2,
+      { eye: v(-300, 70, 360), look: v(0, 14, -20), fov: 44 },
+      { eye: v(-190, 52, 330), look: v(20, 12, -40), fov: 44 },
+    ),
+    dolly(
+      1.6,
+      { eye: v(archX - 95, 4.5, archZ + 2), look: v(archX + 20, 8, archZ), fov: 52 },
+      { eye: v(archX - 45, 3.6, archZ + 1), look: v(archX + 40, 7, archZ), fov: 52 },
+    ),
+    dolly(
+      1.6,
+      { eye: v(stack.ax + 70, 9, stack.az + 75), look: v(stack.ax - 5, 7, stack.az - 10), fov: 50 },
+      { eye: v(stack.ax + 40, 7, stack.az + 40), look: v(stack.ax - 20, 6, stack.az - 40), fov: 50 },
+    ),
+    round(2.0, grid, (x, z) => env.ground(x, z, 0), env.camera.fov),
+  ];
+}
+
 /** The centre line of a run at `s` (from its points every few metres; straight on behind the top). */
 function runAt(path: RunPoint[], s: number): RunPoint {
   const first = path[0]!;
@@ -166,7 +203,9 @@ export class Flyover {
   private shot: CameraShot = { eye: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, chase: 0 };
 
   constructor(course: CourseInfo, env: Environment) {
-    this.shots = course.sport === "snow" ? mountainShots(course.run, env) : bayShots(course.bay, env);
+    if (course.sport === "snow") this.shots = mountainShots(course.run, env);
+    else if (course.bay.place === "cape") this.shots = capeShots(course.bay, env);
+    else this.shots = bayShots(course.bay, env);
   }
 
   /** Seconds the shots last, before they are fitted to the intro. */

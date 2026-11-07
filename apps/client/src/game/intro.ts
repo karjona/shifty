@@ -94,7 +94,7 @@ export class RaceIntro {
     }
     this.card.set({
       kicker: race.eventCount > 1 ? i.tilt(race.eventIndex + 1, race.eventCount) : m.place,
-      title: info.sport === "snow" ? i.courses.mountain : i.courses.bay,
+      title: info.sport === "snow" ? i.courses.mountain : i.courses[info.bay.place],
       subtitle: race.eventCount > 1 ? `${i.sports[info.sport]} · ${m.place}` : i.sports[info.sport],
       rows,
       accent: `#${PALETTE[season].accent.toString(16).padStart(6, "0")}`,

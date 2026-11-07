@@ -1,11 +1,11 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
-import type { CourseData } from "./render/course.ts";
+import type { CourseData, LandKind } from "./render/course.ts";
 import type { GateData, ObstacleData, RunData, RunPoint, TableData } from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
 import type { RosterName } from "./ui/results.ts";
 
-/** A course: the summer bay (jetski) or the winter mountain run (snowboard). */
+/** A course: on the water (jetski: the bay or the cape) or the mountain run (snowboard). */
 export type CourseInfo = { sport: "jetski"; bay: CourseData } | { sport: "snow"; run: RunData };
 
 type Obj = Record<string, unknown>;
@@ -133,9 +133,13 @@ function parseRun(o: Obj): RunData {
   };
 }
 
+const LAND_KINDS: readonly LandKind[] = ["town", "island", "rock", "headland", "coast", "beach", "mole", "stack", "arch"];
+const landKind = (v: unknown): LandKind => LAND_KINDS.find((k) => k === v) ?? "rock";
+
 function parseBay(o: Obj): CourseData {
   const start = isObj(o.start) ? o.start : {};
   return {
+    place: o.place === "cape" ? "cape" : "bay",
     length: num(o, "length"),
     laps: num(o, "laps"),
     straightHalf: num(o, "straightHalf"),
@@ -151,6 +155,7 @@ function parseBay(o: Obj): CourseData {
     buoys: list(o.buoys).map((b) => ({
       x: num(b, "x"),
       z: num(b, "z"),
+      s: num(b, "s"),
       yaw: num(b, "yaw"),
       keep: b.keep === "left" ? "left" : "right",
     })),
@@ -168,7 +173,14 @@ function parseBay(o: Obj): CourseData {
       bx: num(l, "bx"),
       bz: num(l, "bz"),
       radius: num(l, "radius"),
-      kind: l.kind === "town" ? "town" : l.kind === "island" ? "island" : "rock",
+      kind: landKind(l.kind),
+    })),
+    path: list(o.path).map((p) => ({
+      s: num(p, "s"),
+      x: num(p, "x"),
+      z: num(p, "z"),
+      yaw: num(p, "yaw"),
+      curve: num(p, "curve"),
     })),
   };
 }

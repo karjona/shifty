@@ -1,6 +1,8 @@
-// Summer: the bay. Sky and sun, the sea (the sim's swells plus GPU chop,
-// ripples, wakes, foam and reflections, or the swells alone), the course
-// on it, the coast behind, and the spray the jetskis throw.
+// The water courses' environment, and the bay's. Sky and sun, the sea (the
+// sim's swells plus GPU chop, ripples, wakes, foam and reflections, or the
+// swells alone), the course on it, the coast behind, and the spray the
+// jetskis throw. Other places on the water bring their own land and
+// backdrop (see cape.ts).
 import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import {
@@ -25,7 +27,7 @@ import { JetskiModel } from "./rider.ts";
 import { buildScenery } from "./scenery.ts";
 import { Spray } from "./spray.ts";
 import { SeaWater, type WakeSource } from "./water.ts";
-import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
+import { MAX_SHELTERS, MAX_WAVES, PARAMS_LEN, WATER_SNAP, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
 import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
@@ -64,6 +66,19 @@ export interface BayOptions {
   /** The sim's swells (`waveParams`). */
   waves: Float32Array;
   course: CourseData;
+  /** The land and backdrop round the course (the bay's coast if none). */
+  scenery?: WaterScenery;
+}
+
+/** What stands round a water course besides the course itself: land, towns, the backdrop. */
+export interface WaterScenery {
+  readonly group: THREE.Group;
+  /** Where the gulls circle. */
+  readonly gulls: THREE.Vector3;
+  /** The sea is hidden this far inside the land (m), where swells would show through low shores. */
+  readonly inland: number;
+  /** Per frame: what floats rides the swell. */
+  update(waves: Float32Array, t: number): void;
 }
 
 export class Bay implements Environment {
@@ -74,8 +89,8 @@ export class Bay implements Environment {
 
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
-  private swells = new WaveUniforms(MAX_WAVES);
-  private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  private swells = new WaveUniforms(MAX_WAVES, MAX_SHELTERS);
+  private waveParams = new Float32Array(PARAMS_LEN);
   private course: CourseView;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
@@ -85,22 +100,24 @@ export class Bay implements Environment {
   private wakeSources = new Map<number, WakeSource>();
   private spray: Spray;
   private gulls: Gulls | null = null;
+  private scenery: WaterScenery | null;
 
   constructor(opts: BayOptions) {
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
+    this.scenery = opts.scenery ?? null;
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
-    this.group.add(buildScenery(this.sky));
+    this.group.add(this.scenery?.group ?? buildScenery(this.sky));
     if (opts.water === "sea") {
-      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS);
+      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS, this.scenery?.inland ?? null);
       this.group.add(this.sea.mesh);
     } else {
       this.buildWater();
     }
     // Chop seed only needs to be stable per room: derive it from the swells.
     this.sea?.setWaves(opts.waves, Math.round(Math.abs(opts.waves[5] ?? 1) * 1e6));
-    this.waveParams.set(opts.waves.subarray(0, MAX_WAVES * WAVE_FIELDS));
+    this.waveParams.set(opts.waves.subarray(0, PARAMS_LEN));
     this.swells.setFromSim(this.waveParams);
     this.course = new CourseView(opts.course);
     this.group.add(this.course.group);
@@ -111,7 +128,7 @@ export class Bay implements Environment {
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), clouds(new THREE.Vector2(0, 300)));
-    this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
+    this.gulls = new Gulls(this.scenery?.gulls ?? new THREE.Vector3(40, 0, 40));
     this.group.add(this.gulls.group);
   }
 
@@ -172,6 +189,7 @@ export class Bay implements Environment {
     this.time.value = f.t;
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
+    this.scenery?.update(this.waveParams, f.t);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {
       const model = f.models.get(r.slot);

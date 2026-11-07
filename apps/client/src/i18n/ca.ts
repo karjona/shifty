@@ -389,7 +389,7 @@ export const ca: Messages = {
     ordinal: (n: number) => `${n}${n === 1 || n === 3 ? "r" : n === 2 ? "n" : n === 4 ? "t" : "è"}`,
   },
   intro: {
-    courses: { bay: "La Badia", mountain: "La Baixada de la Muntanya" },
+    courses: { bay: "La Badia", mountain: "La Baixada de la Muntanya", cape: "El Cap" },
     sports: { jetski: "Moto d'aigua", snow: "Snowboard" },
     tilt: (i: number, n: number) => `El Tilt · cursa ${i} de ${n}`,
     season: "Estació",

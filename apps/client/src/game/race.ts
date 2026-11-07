@@ -12,6 +12,7 @@ import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
+import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
@@ -235,7 +236,8 @@ export class RaceSession implements Stage {
     }
     this.sleep = keepAwake();
     if (this.opts.render ?? engine.render) {
-      this.card = new SeasonCard(seasonOf(ticketCourse(this.opts.ticket.token)), false);
+      const first = ticketCourse(this.opts.ticket.token);
+      this.card = new SeasonCard(seasonOf(first), false, first);
       this.card.loading = true;
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
@@ -415,12 +417,13 @@ export class RaceSession implements Stage {
       engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {
-      this.env = new Bay({
+      const water = {
         water: engine.view.water,
         topSpeed: client.topSpeed(),
         waves: client.waveParams(),
         course: course.bay,
-      });
+      };
+      this.env = course.bay.place === "cape" ? new Cape({ ...water, season: seasonOf(this.course) }) : new Bay(water);
       engine.world.setSunOffset(30, 60, 15);
       this.minimap = new Minimap(this.mapRoot, course.bay);
     }
@@ -508,7 +511,10 @@ export class RaceSession implements Stage {
       this.course = race.course;
       if (first || !render) {
         const card = this.card;
-        if (card) card.season = seasonOf(race.course);
+        if (card) {
+          card.season = seasonOf(race.course);
+          card.course = race.course;
+        }
         void this.setCourse(engine, client, render).finally(() => {
           if (this.card === card) this.card = null;
           void (card?.hide() ?? Promise.resolve()).then(() => {
@@ -527,6 +533,7 @@ export class RaceSession implements Stage {
           () => {
             this.covered = false;
           },
+          race.course,
         );
       }
     }
