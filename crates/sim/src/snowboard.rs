@@ -1121,4 +1121,81 @@ mod tests {
         ride(&mut w, race::tuning::INTRO_TICKS + 30);
         assert_eq!(w.race.phase, Phase::Countdown);
     }
+
+    #[test]
+    fn finishers_pull_up_in_the_finish_area_whatever_their_players_do() {
+        let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+        for slot in 0..MAX_RIDERS {
+            w.spawn(slot);
+        }
+        w.start_intro();
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        for _ in 0..race::tuning::INTRO_TICKS + race::tuning::COUNTDOWN_TICKS {
+            w.step(&inputs);
+        }
+        assert_eq!(w.race.phase, Phase::Racing);
+        // Everyone on the final pitch, the last of them far enough back to
+        // keep the race on while the others stand in the finish area.
+        let finish_gate = (w.course().gate_count() - 1) as u8;
+        for slot in 0..MAX_RIDERS {
+            let back = if slot == 7 {
+                600.0
+            } else {
+                30.0 + slot as f32 * 7.0
+            };
+            let lane = ((slot % 4) as f32 - 1.5) * 4.0;
+            place(&mut w, slot, RUN.finish_s - back, lane, 14.0 + slot as f32);
+            let r = w.riders[slot].as_mut().unwrap();
+            r.race.lap = 1;
+            r.race.next_gate = finish_gate;
+        }
+        let mut rng = crate::math::Pcg32::new(11);
+        let mut hopped = [false; MAX_RIDERS];
+        for _ in 0..60 * 15 {
+            for (slot, i) in inputs.iter_mut().enumerate() {
+                // Through the finish, players mash the stick and buttons.
+                *i = Some(if w.riders[slot].unwrap().race.finished() {
+                    Input::from_analog(
+                        rng.range(-1.0, 1.0),
+                        0.0,
+                        rng.range(-1.0, 1.0),
+                        (rng.next_u32() & 0xFF) as u8,
+                    )
+                } else {
+                    bot_input(&w, slot)
+                });
+            }
+            w.step(&inputs);
+            for (slot, r) in w.riders.iter().enumerate() {
+                let r = r.unwrap();
+                let (s, _) = RUN.project(r.pos.x, r.pos.z);
+                if !r.grounded && s > RUN.finish_s + 12.0 {
+                    hopped[slot] = true;
+                }
+            }
+        }
+        assert_eq!(
+            w.race.phase,
+            Phase::Racing,
+            "the last rider is still on the way"
+        );
+        let mut spots: Vec<(f32, f32)> = Vec::new();
+        for slot in 0..7 {
+            let r = w.riders[slot].unwrap();
+            let (s, offset) = RUN.project(r.pos.x, r.pos.z);
+            assert!(r.race.finished(), "{slot}: {r:?}");
+            assert!(r.grounded && !r.bailing(), "{slot}: {r:?}");
+            assert!(r.speed() < 0.5, "{slot} still moving: {r:?}");
+            assert!(
+                (RUN.finish_s + 12.0..RUN.finish_s + 60.0).contains(&s),
+                "{slot} pulled up at {s}"
+            );
+            assert!(hopped[slot], "{slot} never hopped");
+            for (s2, o2) in &spots {
+                let apart = (s - s2).abs().max((offset - o2).abs());
+                assert!(apart > 2.0, "{slot} stopped on top of another rider");
+            }
+            spots.push((s, offset));
+        }
+    }
 }

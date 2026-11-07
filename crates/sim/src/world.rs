@@ -6,7 +6,7 @@ use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
 use crate::surface::{Surface, SurfaceKind};
-use crate::{buoy, jetski, snowboard};
+use crate::{bot, buoy, jetski, snowboard};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
@@ -214,18 +214,45 @@ impl World {
         }
     }
 
-    /// Advance one fixed tick. Riders without an input repeat their last one.
-    /// Returns what happened worth telling players about (buoys, laps...).
+    /// Whether a seat's rider rides on autopilot: out of the race, its
+    /// inputs come from `bot` instead of its player, and it passes through
+    /// riders still racing. That is a rider through the finish (for the
+    /// rest of the race), one who joined mid-race (until the next one), and
+    /// everyone on the results.
+    pub fn on_autopilot(&self, slot: usize) -> bool {
+        let Some(r) = &self.riders[slot] else {
+            return false;
+        };
+        match self.race.phase {
+            Phase::Racing => r.race.finished() || !r.race.racing,
+            Phase::Results => true,
+            Phase::Grid | Phase::Intro | Phase::Countdown => false,
+        }
+    }
+
+    /// Advance one fixed tick. Riders without an input repeat their last
+    /// one; riders on autopilot ignore theirs. Returns what happened worth
+    /// telling players about (buoys, laps...).
     pub fn step(&mut self, inputs: &Inputs) -> Vec<SimEvent> {
         let tick = self.tick;
         let next = tick.wrapping_add(1);
         let course = self.course();
         let mut events = Vec::new();
         let mut s_prev = [0.0f32; MAX_RIDERS];
+        let mut auto = [false; MAX_RIDERS];
+        let mut auto_inputs: Inputs = [None; MAX_RIDERS];
+        for slot in 0..MAX_RIDERS {
+            if self.on_autopilot(slot) {
+                auto[slot] = true;
+                auto_inputs[slot] = Some(bot::bot_input(self, slot));
+            }
+        }
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             if let Some(r) = rider {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
-                let input = inputs[slot].map_or(r.last_input, Input::sanitized);
+                let input = auto_inputs[slot]
+                    .or(inputs[slot])
+                    .map_or(r.last_input, Input::sanitized);
                 let setup = self.setups[slot].sanitized();
                 let landing = match course.line {
                     Line::Stadium(_) => {
@@ -238,7 +265,7 @@ impl World {
                 }
             }
         }
-        self.resolve_collisions();
+        self.resolve_collisions(&auto);
         let holding = self.race.phase.before_start();
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
@@ -392,11 +419,15 @@ impl World {
     }
 
     /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
-    /// slot order so every machine gets the same result.
-    fn resolve_collisions(&mut self) {
+    /// slot order so every machine gets the same result. Riders on autopilot
+    /// (`auto`) only bump each other.
+    fn resolve_collisions(&mut self, auto: &[bool; MAX_RIDERS]) {
         let radius = self.course().sport.rider_radius();
         for i in 0..MAX_RIDERS {
             for j in (i + 1)..MAX_RIDERS {
+                if auto[i] != auto[j] {
+                    continue;
+                }
                 let (Some(a), Some(b)) = (self.riders[i], self.riders[j]) else {
                     continue;
                 };

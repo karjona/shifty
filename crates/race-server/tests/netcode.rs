@@ -5,9 +5,10 @@ use client_core::{Client, Phase};
 use protocol::token::JoinClaims;
 use protocol::{ClientMsg, InputPacket, ServerMsg};
 use race_server::room::{ConnId, Room, RoomConfig};
+use sim::bot::bot_input;
 use sim::math::Pcg32;
 use sim::race::Phase as RacePhase;
-use sim::{CourseId, Input, SurfaceKind, TICK_HZ};
+use sim::{CourseId, Input, MAX_RIDERS, Rider, SurfaceKind, TICK_HZ};
 
 #[derive(Clone, Copy)]
 struct NetConditions {
@@ -78,6 +79,8 @@ struct Harness {
     peers: Vec<Peer>,
     now: f64,
     next_tick_at: f64,
+    /// When set, every rider as the server has them after each tick.
+    server_log: Option<Vec<(u32, [Option<Rider>; MAX_RIDERS])>>,
 }
 
 fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinClaims {
@@ -114,6 +117,7 @@ impl Harness {
             peers: Vec::new(),
             now: 1000.0,
             next_tick_at: 1000.0,
+            server_log: None,
         }
     }
 
@@ -144,6 +148,11 @@ impl Harness {
 
     /// Run for `ms` milliseconds; clients render at ~120 fps.
     fn run(&mut self, ms: f64, mut input_for: impl FnMut(usize, f64) -> Input) {
+        self.drive(ms, |i, _, now| input_for(i, now));
+    }
+
+    /// `run`, with each peer's input picked from what its client sees.
+    fn drive(&mut self, ms: f64, mut input_for: impl FnMut(usize, &Client, f64) -> Input) {
         let end = self.now + ms;
         let tick_ms = 1000.0 / f64::from(TICK_HZ);
         while self.now < end {
@@ -172,6 +181,9 @@ impl Harness {
             while now >= self.next_tick_at {
                 self.next_tick_at += tick_ms;
                 let out = self.room.step(now as u64);
+                if let Some(log) = &mut self.server_log {
+                    log.push((self.room.tick(), self.room.world().riders));
+                }
                 for (conn, bytes) in out.packets {
                     if let Some(p) = self.peers.iter_mut().find(|p| p.conn == conn) {
                         p.down.send(now, bytes);
@@ -189,7 +201,8 @@ impl Harness {
                 if !stalled && (now as u64 + i as u64 * 3).is_multiple_of(self.frame_ms) {
                     let ready = p.loaded.then(|| p.client.event_index());
                     p.client.set_ready(ready);
-                    p.client.update(now, input_for(i, now));
+                    let input = input_for(i, &p.client, now);
+                    p.client.update(now, input);
                     for bytes in p.client.take_outgoing() {
                         p.up.send(now, bytes);
                     }
@@ -618,4 +631,83 @@ fn the_race_starts_once_every_screen_is_ready_and_everyone_sees_the_same_start()
         sim::race::tuning::INTRO_TICKS + sim::race::tuning::COUNTDOWN_TICKS
     );
     assert_eq!(h.room.stats.grid_timeouts, 0);
+}
+
+#[test]
+fn finished_riders_are_predicted_exactly_whatever_their_players_press() {
+    let cond = NetConditions {
+        latency_ms: 80.0,
+        jitter_ms: 10.0,
+        loss: 0.02,
+    };
+    // Player b stays at the top (so the race goes on) and watches a.
+    let mut h = Harness::on(CourseId::Mountain, 0, SurfaceKind::Flat);
+    h.add_peer("a", cond);
+    h.add_peer("b", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    // Down the run on the bot's line, through the finish.
+    let a = h.peers[0].client.slot().expect("joined");
+    let finished = |h: &Harness| h.room.world().riders[a].is_some_and(|r| r.race.finished());
+    for _ in 0..300 {
+        if finished(&h) {
+            break;
+        }
+        h.drive(500.0, |i, c, _| {
+            if i == 0 {
+                bot_input(c.predicted_world(), a)
+            } else {
+                Input::default()
+            }
+        });
+    }
+    assert!(
+        finished(&h),
+        "never finished: {:?}",
+        h.room.world().riders[a]
+    );
+    // Past the finish, a mashes everything while both screens predict a.
+    h.run(500.0, |_, _| Input::default());
+    h.server_log = Some(Vec::new());
+    let before = h.peers[0].client.stats();
+    let mut rng = Pcg32::new(17);
+    // How b first predicted a at each tick.
+    let mut seen: Vec<(u32, Rider)> = Vec::new();
+    h.drive(8000.0, |i, c, _| {
+        if i == 1 {
+            let w = c.predicted_world();
+            if seen.last().is_none_or(|(t, _)| *t < w.tick) {
+                seen.push((w.tick, w.riders[a].expect("a")));
+            }
+            return Input::default();
+        }
+        Input::from_analog(
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            (rng.next_u32() & 0xFF) as u8,
+        )
+    });
+    assert_eq!(h.room.world().race.phase, RacePhase::Racing);
+    // On autopilot the sim ignores a's inputs: a's own screen and b's
+    // (which only ever guesses a's inputs) both predict the server exactly.
+    let s = h.peers[0].client.stats();
+    assert!(s.snapshots - before.snapshots > 200, "{s:?}");
+    assert_eq!(s.mispredictions - before.mispredictions, 0, "{s:?}");
+    let log = h.server_log.take().unwrap();
+    let mut compared = 0;
+    for (tick, predicted) in &seen {
+        if let Some((_, riders)) = log.iter().find(|(t, _)| t == tick) {
+            let server = riders[a].unwrap();
+            assert_eq!(server.pos, predicted.pos, "tick {tick}");
+            compared += 1;
+        }
+    }
+    assert!(compared > 400, "only {compared} ticks compared");
+    let r = h.room.world().riders[a].unwrap();
+    let (along, _) = sim::mountain::RUN.project(r.pos.x, r.pos.z);
+    assert!(
+        along > sim::mountain::RUN.finish_s && r.speed() < 0.5,
+        "pulled up past the finish: {r:?}"
+    );
 }

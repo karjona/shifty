@@ -6,7 +6,8 @@
 //! `World::start_intro`). Then an intro shows the course, a countdown runs,
 //! the race, and a results screen. All of it is sim state, so clients
 //! predict it like everything else and the server's copy is the official
-//! one.
+//! one. Through the finish a rider's race is over: it rides on autopilot
+//! (see `World::on_autopilot`) and scores nothing more.
 //!
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
 //! order (on a loop the start line is also the finish). In summer, passing a

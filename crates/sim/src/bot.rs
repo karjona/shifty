@@ -10,7 +10,7 @@ use crate::jetski as jet;
 use crate::math::{TAU, angle_diff, atan2, clamp, sqrt};
 use crate::mountain::{Feature, Run};
 use crate::snowboard::tuning as snow;
-use crate::world::World;
+use crate::world::{Rider, World};
 
 /// What a bot does this tick, for whatever sport the course is.
 pub fn bot_input(world: &World, slot: usize) -> Input {
@@ -201,11 +201,15 @@ fn stunt_stick(id: u8) -> (f32, f32) {
 /// too tight to carve at full speed and tuck where it is open. Tricksters
 /// line up with every table they meet, load a pop and let go at the lip; in
 /// the air they spin a 360 when there is time for it, and grab otherwise.
+/// Past the finish they pull up in the finish area (see `finish_area_input`).
 fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
     };
     let (s, _) = run.project(r.pos.x, r.pos.z);
+    if s > run.finish_s {
+        return finish_area_input(world, run, slot, &r, s);
+    }
     let speed = r.speed();
     let half = run.width_at(s).half;
     let pace = 0.86 + (slot % 3) as f32 * 0.05;
@@ -310,4 +314,84 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
         return Input::from_analog(0.0, 0.0, 0.0, buttons::GRAB);
     }
     Input::from_analog(0.0, 0.0, 0.0, 0)
+}
+
+/// Where riders pull up past the finish: each seat its own spot, in two
+/// rows of four across the run (metres past the line, and apart).
+const STOP_PAST_FINISH: f32 = 28.0;
+const STOP_ROW: f32 = 9.0;
+const STOP_LANE: f32 = 6.0;
+/// Within this of its spot (m) a rider pulls up; twice as far short, it skates on.
+const STOP_NEAR: f32 = 4.0;
+/// Braking is planned at this deceleration (m/s²); a skid does better.
+const STOP_DECEL: f32 = 7.0;
+/// Standing still after the finish, a rider hops now and then: the time is
+/// cut into spells this long (ticks), and from `HOP_FROM` on it hops in the
+/// first spell and in some of the later ones.
+const HOP_SPELL: u32 = crate::TICK_HZ * 5 / 2;
+const HOP_FROM: u32 = 2;
+
+/// Past the finish: on to this seat's spot in the finish area, a skid to a
+/// stop there (the board swung across, sitting back), then standing still.
+/// A rider who stopped short skates on. Finishers standing still hop now
+/// and then (loading a pop, grabbing in the air) while the race goes on.
+fn finish_area_input(world: &World, run: &Run, slot: usize, r: &Rider, s: f32) -> Input {
+    let speed = r.speed();
+    let spot = run.finish_s + STOP_PAST_FINISH + (slot / 4) as f32 * STOP_ROW;
+    let lane = ((slot % 4) as f32 - 1.5) * STOP_LANE;
+    let to_go = spot - s;
+    if !r.grounded {
+        let g = snow::GRAVITY;
+        let above = (r.pos.y - run.height(r.pos.x, r.pos.z)).max(0.0);
+        let air_left = (r.vel.y + sqrt(r.vel.y * r.vel.y + 2.0 * g * above)) / g;
+        let grab = if air_left > 0.25 { buttons::GRAB } else { 0 };
+        return Input::from_analog(0.0, 0.0, 0.0, grab);
+    }
+    let short = to_go > 2.0 * STOP_NEAR;
+    if speed > 0.4 && !short && to_go < speed * speed / (2.0 * STOP_DECEL) + STOP_NEAR {
+        // A hockey stop, swinging toward this seat's side of the run
+        // (gently once nearly still, or it would spin on the spot).
+        let away = if lane < 0.0 { -1.0 } else { 1.0 };
+        return Input::from_analog(away * (speed / 4.0).min(1.0), 0.0, -1.0, 0);
+    }
+    if speed <= 0.4 && !short {
+        let jump = if hops(world, slot, r) {
+            buttons::JUMP
+        } else {
+            0
+        };
+        return Input::from_analog(0.0, 0.0, 0.0, jump);
+    }
+    let look = 6.0 + speed * 0.5;
+    let (tx, tz) = run.centerline(s + look).at_offset(lane);
+    let desired = atan2(tx - r.pos.x, tz - r.pos.z);
+    let heading = if speed > 3.0 {
+        atan2(r.vel.x, r.vel.z)
+    } else {
+        r.yaw
+    };
+    let steer = clamp(-angle_diff(heading, desired) * 2.0, -1.0, 1.0);
+    // Stopped short: skate on.
+    let skate = if short && speed < 3.0 { 1.0 } else { 0.0 };
+    Input::from_analog(steer, 0.0, skate, 0)
+}
+
+/// Whether a finisher standing still loads a hop now: through the start
+/// of its first spell from `HOP_FROM` on, and of a third of the later ones.
+fn hops(world: &World, slot: usize, r: &Rider) -> bool {
+    let race = &world.race;
+    if race.phase != crate::race::Phase::Racing || !r.race.finished() {
+        return false;
+    }
+    let since = race.elapsed(world.tick).wrapping_sub(r.race.finish_ticks);
+    let spell = since / HOP_SPELL;
+    let lucky = spell == HOP_FROM
+        || (spell > HOP_FROM
+            && (spell
+                .wrapping_add(slot as u32 * 7)
+                .wrapping_mul(0x9E37_79B9)
+                >> 16)
+                % 3
+                == 0);
+    lucky && since % HOP_SPELL < u32::from(snow::CHARGE_TICKS)
 }

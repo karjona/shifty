@@ -819,6 +819,112 @@ mod tests {
         }
     }
 
+    /// An oval with riders in `slots`, through the intro and the countdown.
+    fn racing_world(slots: &[usize]) -> World {
+        let mut w = World::on_course(CourseId::Oval, SurfaceKind::Swells, 9);
+        for &slot in slots {
+            w.spawn(slot);
+        }
+        w.start_intro();
+        run(
+            &mut w,
+            Input::default(),
+            race::tuning::INTRO_TICKS + race::tuning::COUNTDOWN_TICKS,
+        );
+        assert_eq!(w.race.phase, Phase::Racing);
+        w
+    }
+
+    #[test]
+    fn finished_riders_ride_on_autopilot_whatever_their_players_do() {
+        // Riders 0 and 1 have finished; rider 2 still races (far away).
+        let mut a = racing_world(&[0, 1, 2]);
+        place(&mut a, 0, 300.0, 0.0, 20.0);
+        place(&mut a, 1, 600.0, 0.0, 20.0);
+        place(&mut a, 2, 100.0, 0.0, 0.0);
+        let mut r2 = a.riders[2].unwrap();
+        r2.race.racing = true;
+        a.riders[2] = Some(r2);
+        for slot in [0, 1] {
+            let mut r = a.riders[slot].unwrap();
+            r.race = race::Progress {
+                finish_ticks: 3000,
+                lap: OVAL.laps,
+                next_gate: 6,
+                ..race::Progress::lined_up()
+            };
+            a.riders[slot] = Some(r);
+        }
+        let mut b = a.clone();
+        let mut rng = math::Pcg32::new(3);
+        for _ in 0..60 * 10 {
+            let mut noise: Inputs = [None; MAX_RIDERS];
+            let mut bots: Inputs = [None; MAX_RIDERS];
+            for slot in [0, 1] {
+                noise[slot] = Some(Input::from_analog(
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                    rng.range(-1.0, 1.0),
+                    (rng.next_u32() & 0xFF) as u8,
+                ));
+                bots[slot] = Some(bot::bot_input(&b, slot));
+                assert!(a.on_autopilot(slot));
+            }
+            let ev = a.step(&noise);
+            b.step(&bots);
+            assert!(ev.iter().all(|e| !matches!(e.kind, EventKind::Lap { .. })));
+        }
+        // Whatever the players pressed, they rode the bot's line and kept going.
+        assert_eq!(a.race.phase, Phase::Racing);
+        assert_eq!(a, b);
+        let r = a.riders[0].unwrap();
+        assert!(r.speed() > 10.0, "{r:?}");
+        let p = r.race;
+        assert_eq!(
+            (p.finish_ticks, p.tricks, p.points, p.misses),
+            (3000, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn riders_on_autopilot_pass_through_riders_still_racing() {
+        // Rider 0 has finished; rider 1 still races, right on top of it.
+        let mut w = racing_world(&[0, 1, 2]);
+        place(&mut w, 0, 200.0, 0.0, 15.0);
+        place(&mut w, 1, 200.0, 0.4, 15.0);
+        place(&mut w, 2, 500.0, 0.0, 15.0);
+        for slot in [1, 2] {
+            let mut r = w.riders[slot].unwrap();
+            r.race.racing = true;
+            w.riders[slot] = Some(r);
+        }
+        let mut r0 = w.riders[0].unwrap();
+        r0.race = race::Progress {
+            finish_ticks: 3000,
+            ..race::Progress::lined_up()
+        };
+        w.riders[0] = Some(r0);
+        let mut alone = w.clone();
+        alone.remove(1);
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        for _ in 0..30 {
+            inputs[1] = Some(Input::from_analog(0.0, 1.0, 0.0, 0));
+            w.step(&inputs);
+            alone.step(&inputs);
+        }
+        assert_eq!(w.riders[0], alone.riders[0], "the finisher was bumped");
+        // Two riders on autopilot do bump each other.
+        let mut w = racing_world(&[0, 1]);
+        place(&mut w, 0, 200.0, 0.0, 15.0);
+        place(&mut w, 1, 200.0, 0.4, 15.0);
+        let mut alone = w.clone();
+        alone.remove(1);
+        run(&mut w, Input::default(), 30);
+        run(&mut alone, Input::default(), 30);
+        assert!(w.on_autopilot(0) && w.on_autopilot(1));
+        assert_ne!(w.riders[0], alone.riders[0], "riders on autopilot bump");
+    }
+
     #[test]
     fn random_riding_stays_stable() {
         for seed in 0..10 {
