@@ -4,6 +4,7 @@
 import * as THREE from "three/webgpu";
 import {
   Fn,
+  attribute,
   float,
   fwidth,
   max,
@@ -11,7 +12,6 @@ import {
   mix,
   mx_noise_float,
   normalLocal,
-  positionLocal,
   pow,
   smoothstep,
   uniform,
@@ -106,6 +106,32 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
   }
   geo.computeVertexNormals();
   geo.deleteAttribute("uv");
+  // What the shader needs of this peak rides on its vertices, so peaks
+  // share one material and can be drawn as one batch.
+  const n = pos.count;
+  const local = new Float32Array(n * 3);
+  const shape = new Float32Array(n * 4);
+  const foot = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    local.set([pos.getX(i), pos.getY(i), pos.getZ(i)], i * 3);
+    shape.set([height, seed, s.snowline, s.haze], i * 4);
+    foot[i] = s.footHaze;
+  }
+  geo.setAttribute("peakLocal", new THREE.BufferAttribute(local, 3));
+  geo.setAttribute("peakShape", new THREE.BufferAttribute(shape, 4));
+  geo.setAttribute("peakFoot", new THREE.BufferAttribute(foot, 1));
+  const mat = peakMaterial(rock, snow, s.sky);
+  const mesh = new THREE.Mesh(geo, mat);
+  return mesh;
+}
+
+const peakMaterials = new Map<string, CelMaterial>();
+
+/** The peaks' material for one set of colours (shared: each peak's numbers are on its vertices). */
+function peakMaterial(rock: THREE.Color, snow: THREE.Color, sky: THREE.Color): CelMaterial {
+  const key = `${rock.getHex()} ${snow.getHex()} ${sky.getHex()}`;
+  const cached = peakMaterials.get(key);
+  if (cached) return cached;
   const mat = new CelMaterial({
     fog: false,
     threshold: 0.1,
@@ -116,20 +142,21 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
     darkness: 0.4,
   });
   // Snow per pixel, so its edge is crisp: above a ragged line, and off the steepest faces.
-  // (Its numbers are uniforms, so every peak shares one shader.)
   const rockC = uniform(rock);
   const snowC = uniform(snow);
-  const skyC = uniform(s.sky.clone());
-  const top = uniform(height);
-  const offset = uniform(seed);
-  const snowline = uniform(s.snowline);
-  const haze = uniform(s.haze);
-  const footHaze = uniform(s.footHaze);
+  const skyC = uniform(sky.clone());
   mat.colorNode = Fn(() => {
-    const t = positionLocal.y.div(top);
-    const n = mx_noise_float(positionLocal.mul(0.012).add(offset))
+    const p = attribute<"vec3">("peakLocal", "vec3");
+    const shape = attribute<"vec4">("peakShape", "vec4");
+    const footHaze = attribute<"float">("peakFoot", "float");
+    const top = shape.x;
+    const offset = shape.y;
+    const snowline = shape.z;
+    const haze = shape.w;
+    const t = p.y.div(top);
+    const n = mx_noise_float(p.mul(0.012).add(offset))
       .mul(0.1)
-      .add(mx_noise_float(positionLocal.mul(0.05).add(offset.mul(3))).mul(0.04));
+      .add(mx_noise_float(p.mul(0.05).add(offset.mul(3))).mul(0.04));
     const up = normalLocal.y;
     const line = t.sub(snowline).add(n).add(up.sub(0.45).mul(0.18));
     const w = max(fwidth(line), float(1e-4));
@@ -137,6 +164,6 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
     const base = mix(rockC, snowC, snowy);
     return mix(base, skyC, min(float(1), haze.add(footHaze.mul(pow(float(1).sub(t), 2)))));
   })();
-  const mesh = new THREE.Mesh(geo, mat);
-  return mesh;
+  peakMaterials.set(key, mat);
+  return mat;
 }

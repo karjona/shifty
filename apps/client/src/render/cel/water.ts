@@ -23,8 +23,10 @@ import {
   smoothstep,
   vec2,
   vec3,
+  vertexStage,
 } from "three/tsl";
 import { SUN_DIR, inkNode, inkOnlyInPass } from "./material.ts";
+import { flowNoise, noise4 } from "./noise.ts";
 import { SKY } from "./sky.ts";
 
 export interface CelWaterInputs {
@@ -63,9 +65,15 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
     const ng = normalWorldGeometry.normalize();
     const facing = clamp(dot(v, ng), 0, 1);
     const h = p.y;
-    // Large, slow patches: the painter's darker and lighter washes.
-    const wash = mx_noise_float(vec3(xz.mul(0.006), i.time.mul(0.01)));
-    const wash2 = mx_noise_float(vec3(xz.mul(0.021).add(7.3), i.time.mul(0.02)));
+    // Large, slow patches: the painter's darker and lighter washes (tens of metres across: per vertex).
+    const washes = vertexStage(
+      vec2(
+        mx_noise_float(vec3(xz.mul(0.006), i.time.mul(0.01))),
+        mx_noise_float(vec3(xz.mul(0.021).add(7.3), i.time.mul(0.02))),
+      ),
+    );
+    const wash = washes.x;
+    const wash2 = washes.y;
     // Depth: turquoise shelves round every shore, cerulean, then cobalt out in the bay.
     const shelf = i.shore.add(wash2.mul(9)).add(wash.mul(14));
     let c: THREE.Node<"vec3"> = mix(shallow, light, cut(9, shelf));
@@ -88,7 +96,7 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
     const n = mx_noise_float(vec3(along.mul(0.3), across.mul(0.05), i.time.mul(0.12)));
     const lineW = max(fwidth(n), float(1e-4)).mul(1.0);
     const lineN = float(1).sub(smoothstep(lineW.mul(0.5), lineW, n.abs()));
-    const dashes = cut(0.32, mx_noise_float(vec3(along.mul(0.07), across.mul(0.09), 3.3)));
+    const dashes = cut(0.32, noise4(vec2(along.mul(0.07), across.mul(0.09))).w);
     const near = smoothstep(140, 30, dist);
     c = mix(c, mix(c, white, 0.6), lineN.mul(dashes).mul(near));
     // Glints of sun.
@@ -99,15 +107,9 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
     // Whitecaps: small, only on the highest crests.
     const crest = smoothstep(1.5, 1.85, h)
       .mul(0.7)
-      .mul(cut(0.35, mx_noise_float(vec3(xz.mul(0.25), i.time.mul(0.2)))));
+      .mul(cut(0.35, flowNoise(xz.mul(0.25), i.time, 0.2)));
     const wake = smoothstep(0.04, 0.7, i.wake).mul(
-      mix(
-        float(0.55),
-        float(1),
-        mx_noise_float(vec3(xz.mul(0.7), i.time))
-          .mul(0.5)
-          .add(0.5),
-      ),
+      mix(float(0.55), float(1), flowNoise(xz.mul(0.7), i.time, 1).mul(0.5).add(0.5)),
     );
     const bands = sin(i.shore.mul(1.3).sub(i.time.mul(1.6)).add(wash2.mul(4)));
     const surf = smoothstep(1.8, 0.6, i.shore).add(cut(0.82, bands).mul(smoothstep(7, 3, i.shore)));

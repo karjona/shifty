@@ -1,7 +1,7 @@
 // Gulls wheeling over the harbour: two wings and a body each, flapping now
 // and then and gliding between, drawn in ink like everything else.
 import * as THREE from "three/webgpu";
-import { CelMaterial, inkId } from "./material.ts";
+import { CelMaterial, UNREFLECTED, inkId } from "./material.ts";
 
 interface Gull {
   group: THREE.Group;
@@ -64,6 +64,7 @@ export class Gulls {
       const left = new THREE.Mesh(wing(-1), i % 3 === 0 ? tips : white);
       const right = new THREE.Mesh(wing(1), i % 3 === 0 ? tips : white);
       g.add(body, left, right);
+      for (const m of g.children) m.layers.set(UNREFLECTED);
       g.scale.setScalar(2.2);
       this.group.add(g);
       const r = (n: number) => {

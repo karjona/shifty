@@ -16,6 +16,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { SKY, clouds, skyDome } from "./cel/sky.ts";
 import { Gulls } from "./cel/gulls.ts";
@@ -106,6 +107,9 @@ export class Bay implements Environment {
     this.sea?.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);
     celify(this.group);
+    if (this.sea) this.sea.mesh.userData.noMerge = true;
+    if (this.water) this.water.userData.noMerge = true;
+    mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), clouds(new THREE.Vector2(0, 300)));
     this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
     this.group.add(this.gulls.group);

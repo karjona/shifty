@@ -12,7 +12,7 @@
 // Render-only: driven by the drawn rider state, simulated on the CPU, each
 // layer drawn as one batch of camera-facing sprites.
 import * as THREE from "three/webgpu";
-import { inkNode, inkOnlyInPass } from "./cel/material.ts";
+import { UNREFLECTED, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { cameraPosition, instancedDynamicBufferAttribute, mix, smoothstep, uv, vec3 } from "three/tsl";
 import type { LandData } from "./course.ts";
 import type { RiderView } from "./world.ts";
@@ -101,6 +101,7 @@ export class ParticlePool {
     this.sprite.count = n;
     this.sprite.frustumCulled = false;
     this.sprite.renderOrder = 1;
+    this.sprite.layers.set(UNREFLECTED);
   }
 
   spawn(

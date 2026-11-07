@@ -71,8 +71,17 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       if (w === "noshadow") world.sunLight.castShadow = false;
       if (w === "noinstanced") hide((o) => o instanceof THREE.InstancedMesh);
       if (w === "noskinned") hide((o) => o instanceof THREE.SkinnedMesh);
+      if (w === "nohulls") hide((o) => o.userData.outline === true);
       if (w === "nosprites") hide((o) => o instanceof THREE.Sprite);
       if (w === "noribbon") hide((o) => o instanceof THREE.Mesh && o.geometry.hasAttribute("dye"));
+      if (w === "nobig") {
+        hide(
+          (o) =>
+            o instanceof THREE.Mesh &&
+            !(o instanceof THREE.InstancedMesh) &&
+            (o.geometry.attributes.position?.count ?? 0) > 20000,
+        );
+      }
       if (w.startsWith("scale")) world.setRenderScale(Number(w.slice(5)));
       if (w.startsWith("hide:")) hide((o) => o.name === w.slice(5));
     }
@@ -88,11 +97,38 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     out.triangles = renderer.info.render.triangles;
     return out;
   };
+  /** Meshes under each child of the scene (and of the environment): how many, how many materials, triangles. */
+  const census = () => {
+    const rows: Record<string, { meshes: number; materials: number; tris: number; shadow: number }> = {};
+    const tally = (root: THREE.Object3D, key: string) => {
+      const mats = new Set<unknown>();
+      const row = { meshes: 0, materials: 0, tris: 0, shadow: 0 };
+      root.traverseVisible((o) => {
+        if (!(o instanceof THREE.Mesh)) return;
+        row.meshes++;
+        if (o.castShadow) row.shadow++;
+        mats.add(o.material);
+        const g = o.geometry;
+        const n = g.index ? g.index.count : (g.attributes.position?.count ?? 0);
+        row.tris += (n / 3) * (o instanceof THREE.InstancedMesh ? o.count : 1);
+      });
+      row.materials = mats.size;
+      rows[key] = row;
+    };
+    world.scene.children.forEach((c, i) => {
+      if (c === world.environment?.group) c.children.forEach((e, j) => tally(e, `env.${j} ${e.type} ${e.name}`));
+      else tally(c, `${i} ${c.type} ${c.name}`);
+    });
+    return rows;
+  };
   Object.assign(window, {
     __shiftyBench: {
       bench,
       ablate,
+      /** The fraction of the screen's pixels drawn now. */
+      scale: () => world.renderScale,
       scene,
+      census,
       /** Holds the frame on screen (drawn again, all at once), or lets it go. */
       hold: (on: boolean) => {
         pause(on);

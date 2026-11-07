@@ -223,6 +223,7 @@ export const es: Messages = {
   settings: {
     language: "Idioma",
     scale: "Resolución",
+    scaleAuto: "Automática",
     water: "Agua",
     waterSea: "Completa",
     waterBasic: "Básica (más rápida)",

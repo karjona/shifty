@@ -52,24 +52,17 @@ function peak(
   return m;
 }
 
-/** Round crowns of trees dotted over a hill. */
+/** Round crowns of trees dotted over a hill: added to `out` (matrices and colours). */
 function hillTrees(
   at: THREE.Vector3,
   radius: number,
   squash: number,
   seed: number,
   sky: THREE.Color,
-): THREE.InstancedMesh {
+  out: { matrices: THREE.Matrix4[]; colours: THREE.Color[] },
+): void {
   const count = 46;
-  const geo = new THREE.IcosahedronGeometry(1, 1);
-  const mesh = new THREE.InstancedMesh(
-    geo,
-    new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1, fog: false }),
-    count,
-  );
-  const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
-  const c = new THREE.Color();
   for (let i = 0; i < count; i++) {
     const a = hash(seed * 97 + i) * Math.PI * 2;
     const d = Math.sqrt(hash(seed * 53 + i * 7)) * 0.85;
@@ -77,11 +70,15 @@ function hillTrees(
     const z = Math.sin(a) * d * radius;
     const y = Math.sqrt(Math.max(0, 1 - d * d)) * radius * squash;
     const s = 7 + hash(seed + i * 13) * 7;
-    m.compose(new THREE.Vector3(at.x + x, y + s * 0.4, at.z + z), q, new THREE.Vector3(s, s * 1.1, s));
-    mesh.setMatrixAt(i, m);
-    mesh.setColorAt(i, c.setHex(hash(i + seed) < 0.3 ? 0x3f6e32 : 0x335f2c).lerp(sky, 0.35));
+    out.matrices.push(
+      new THREE.Matrix4().compose(
+        new THREE.Vector3(at.x + x, y + s * 0.4, at.z + z),
+        q,
+        new THREE.Vector3(s, s * 1.1, s),
+      ),
+    );
+    out.colours.push(new THREE.Color(hash(i + seed) < 0.3 ? 0x3f6e32 : 0x335f2c).lerp(sky, 0.35));
   }
-  return mesh;
 }
 
 /** A colour as a shader constant. */
@@ -205,14 +202,26 @@ export function buildScenery(sky: THREE.Color): THREE.Group {
     flatShading: true,
     fog: false,
   });
+  const trees = { matrices: [] as THREE.Matrix4[], colours: [] as THREE.Color[] };
   for (let i = 0; i < 18; i++) {
     const r = 70 + hash(i) * 90;
     const hill = new THREE.Mesh(new THREE.SphereGeometry(r, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2), green);
     hill.scale.y = 0.12 + hash(i + 50) * 0.12;
     hill.position.set(-1150 + i * 135 + hash(i + 9) * 60, 0, 380 + hash(i + 3) * 90);
     g.add(hill);
-    g.add(hillTrees(hill.position, r, hill.scale.y, i, sky));
+    hillTrees(hill.position, r, hill.scale.y, i, sky, trees);
   }
+  const crowns = new THREE.InstancedMesh(
+    new THREE.IcosahedronGeometry(1, 1),
+    new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1, fog: false }),
+    trees.matrices.length,
+  );
+  trees.matrices.forEach((m, i) => {
+    crowns.setMatrixAt(i, m);
+    crowns.setColorAt(i, trees.colours[i]!);
+  });
+  crowns.computeBoundingSphere();
+  g.add(crowns);
 
   // The sierra behind: two ranges, the far one taller and hazier.
   for (let i = 0; i < 18; i++) {

@@ -21,6 +21,13 @@ import {
   vec3,
 } from "three/tsl";
 
+/**
+ * The layer of things the chase camera draws but reflections leave out
+ * (outlines, spray, birds): small, bright or thin, they add nothing to a
+ * mirror image laid in as flat shapes. A reflector's camera sees layer 0.
+ */
+export const UNREFLECTED = 1;
+
 /** The sun's unshadowed strength (sum of its colour's channels × intensity), to tell light from cast shadow. */
 export const SUN_STRENGTH = uniform(1);
 /** Toward the sun (world). */
@@ -214,6 +221,18 @@ export function inklessBasic(params: THREE.MeshBasicNodeMaterialParameters): THR
   return inkOnlyInPass(new THREE.MeshBasicNodeMaterial(params), inkNode(0, 0, 0, 0));
 }
 
+/** A key for cel options made of plain values (null if any is a node or a texture: those are never alike). */
+function signature(o: CelOptions): string | null {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(o).toSorted(([a], [b]) => a.localeCompare(b))) {
+    if (v === undefined || v === null) continue;
+    if (v instanceof THREE.Color) parts.push(`${k}=${v.r},${v.g},${v.b}`);
+    else if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") parts.push(`${k}=${v}`);
+    else return null;
+  }
+  return parts.join(";");
+}
+
 /**
  * Swaps the standard materials under `root` for cel ones (same colour,
  * vertex colours and facets). `tune` picks per-material options.
@@ -225,13 +244,15 @@ export function celify(
   keepColorNodes = false,
 ): void {
   const done = new Map<THREE.Material, CelMaterial>();
+  // Materials that would come out the same are made once (so meshes can share them, and batch).
+  const alike = new Map<string, CelMaterial>();
   const swap = (m: THREE.Material, o: THREE.Mesh): THREE.Material => {
     if (!(m instanceof THREE.MeshStandardNodeMaterial)) return m;
     if (m.positionNode || (!keepColorNodes && (m.colorNode || m.emissiveNode))) return m;
     let c = done.get(m);
     if (!c) {
       const colorNode: unknown = m.userData.colorNode ?? (keepColorNodes ? m.colorNode : null);
-      c = new CelMaterial({
+      const options: CelOptions = {
         colorNode: colorNode instanceof THREE.Node ? asVec3(colorNode) : undefined,
         color: m.color,
         map: m.map,
@@ -240,7 +261,10 @@ export function celify(
         fog: m.fog,
         side: m.side,
         ...tune(m, o),
-      });
+      };
+      const key = signature(options);
+      c = (key !== null ? alike.get(key) : undefined) ?? new CelMaterial(options);
+      if (key !== null) alike.set(key, c);
       done.set(m, c);
     }
     return c;

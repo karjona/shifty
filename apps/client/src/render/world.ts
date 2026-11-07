@@ -5,7 +5,7 @@
 import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import { devParams } from "../dev-params.ts";
-import { SUN_DIR, SUN_STRENGTH } from "./cel/material.ts";
+import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
 import { CelPost } from "./cel/post.ts";
 import { PIXEL_AT_1M } from "./cel/rider.ts";
 
@@ -196,6 +196,7 @@ export class World {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.append(this.renderer.domElement);
+    this.camera.layers.enable(UNREFLECTED);
 
     this.scene.background = new THREE.Color(DEFAULT_SKY);
     this.hemi = new THREE.HemisphereLight(0xfff4e0, 0x2a6f8f, 1.2);
@@ -225,9 +226,10 @@ export class World {
     this.camera.updateProjectionMatrix();
   }
 
-  setRenderScale(scale: number): void {
+  /** Draws `scale` of the screen's pixels (0-1), upscaled sharp (`pixelated`) or smooth. */
+  setRenderScale(scale: number, pixelated = scale < 1): void {
     this.renderScale = scale;
-    this.renderer.domElement.style.imageRendering = scale < 1 ? "pixelated" : "auto";
+    this.renderer.domElement.style.imageRendering = pixelated ? "pixelated" : "auto";
     this.resize();
   }
 

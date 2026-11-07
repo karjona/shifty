@@ -223,6 +223,7 @@ export const ca: Messages = {
   settings: {
     language: "Idioma",
     scale: "Resolució",
+    scaleAuto: "Automàtica",
     water: "Aigua",
     waterSea: "Completa",
     waterBasic: "Bàsica (més ràpida)",

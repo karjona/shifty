@@ -13,7 +13,7 @@
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
-import type { LandData } from "./course.ts";
+import { type LandData, landDistance } from "./course.ts";
 import { celWaterMaterial } from "./cel/water.ts";
 import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
@@ -24,7 +24,6 @@ import {
   dot,
   float,
   max,
-  min,
   mix,
   normalLocal,
   normalWorldGeometry,
@@ -45,8 +44,9 @@ import {
 const CHOP_WAVES = 10;
 /** The reflection is rendered at this fraction of the screen resolution. */
 const REFLECTION_SCALE = 0.5;
-/** Most land pieces the shore foam knows about. */
-const MAX_LAND = 16;
+/** The baked shore distance covers this many metres, centred on the course, in this many texels a side. */
+const SHORE_SPAN = 1600;
+const SHORE_RES = 640;
 const RIPPLES = 12;
 const MAX_WAKE_RIDERS = 8;
 /** Wake texture covers this many metres, centred on the course. */
@@ -227,19 +227,20 @@ export class SeaWater {
   private chop = new WaveUniforms(CHOP_WAVES);
   private origin = uniform(new THREE.Vector2());
   private swellDir = uniform(new THREE.Vector2(1, 0));
-  /** Land capsules: segment (ax, az, bx, bz) and radius; unused ones sit far away. */
-  private landSeg = uniformArray<"vec4">(
-    Array.from({ length: MAX_LAND }, () => new THREE.Vector4(1e6, 1e6, 1e6, 1e6)),
-    "vec4",
-  );
-  private landRadius = uniformArray<"float">(
-    Array.from({ length: MAX_LAND }, () => 0),
-    "float",
+  /** Distance to the nearest shore (m) over the bay, baked once the land is known (see `setLand`). */
+  private shore = texture(
+    new THREE.DataTexture(
+      new Uint16Array([THREE.DataUtils.toHalfFloat(1e4)]),
+      1,
+      1,
+      THREE.RedFormat,
+      THREE.HalfFloatType,
+    ),
   );
 
   constructor(size: number, segments: number) {
     const t = this.time;
-    const { swells, chop, origin, landSeg, landRadius } = this;
+    const { swells, chop, origin } = this;
     const wakeTex = this.wake.output;
 
     const displaced = Fn(() => {
@@ -268,24 +269,10 @@ export class SeaWater {
     const fine = ripples();
     const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.y.negate())).normalize();
 
-    // Distance from this pixel to the nearest shore (metres).
+    // Distance from this pixel to the nearest shore (metres), from the baked field.
     const shoreAt = Fn(() => {
-      const p = positionWorld.xz;
-      let d: THREE.Node<"float"> = float(1e6);
-      for (let i = 0; i < MAX_LAND; i++) {
-        const seg = landSeg.element(i);
-        const a = seg.xy;
-        const ab = seg.zw.sub(a);
-        const k = clamp(dot(p.sub(a), ab).div(max(dot(ab, ab), 1e-4)), 0, 1);
-        d = min(
-          d,
-          p
-            .sub(a.add(ab.mul(k)))
-            .length()
-            .sub(landRadius.element(i)),
-        );
-      }
-      return d;
+      const at = positionWorld.xz.div(SHORE_SPAN).add(0.5);
+      return this.shore.sample(at).x;
     });
 
     const wakeAt = Fn(() => {
@@ -317,13 +304,25 @@ export class SeaWater {
     this.mesh.add(mirror.target);
   }
 
-  /** Where the shores are, for the surf. */
+  /** Where the shores are, for the surf and the shallows: bakes the distance to the nearest one. */
   setLand(land: LandData[]): void {
-    for (let i = 0; i < MAX_LAND; i++) {
-      const l = land[i];
-      this.landSeg.array[i] = l ? new THREE.Vector4(l.ax, l.az, l.bx, l.bz) : new THREE.Vector4(1e6, 1e6, 1e6, 1e6);
-      this.landRadius.array[i] = l ? l.radius : 0;
+    const data = new Uint16Array(SHORE_RES * SHORE_RES);
+    const texel = SHORE_SPAN / SHORE_RES;
+    for (let j = 0; j < SHORE_RES; j++) {
+      const z = (j + 0.5) * texel - SHORE_SPAN / 2;
+      for (let i = 0; i < SHORE_RES; i++) {
+        const x = (i + 0.5) * texel - SHORE_SPAN / 2;
+        let d = 1e4;
+        for (const l of land) d = Math.min(d, landDistance(l, x, z));
+        data[j * SHORE_RES + i] = THREE.DataUtils.toHalfFloat(d);
+      }
     }
+    const field = new THREE.DataTexture(data, SHORE_RES, SHORE_RES, THREE.RedFormat, THREE.HalfFloatType);
+    field.magFilter = THREE.LinearFilter;
+    field.minFilter = THREE.LinearFilter;
+    field.needsUpdate = true;
+    this.shore.value.dispose();
+    this.shore.value = field;
   }
 
   /** Move the grid's centre to world `(x, z)`. */

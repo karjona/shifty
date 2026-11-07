@@ -3,7 +3,7 @@
 // scale), baked once. A lookup costs one texture fetch where the shader
 // function costs a hundred-odd instructions per pixel.
 import * as THREE from "three/webgpu";
-import { texture } from "three/tsl";
+import { texture, vec2 } from "three/tsl";
 
 /** Lattice cells across the texture (it repeats every `CELLS` units of noise space). */
 export const NOISE_CELLS = 32;
@@ -70,4 +70,15 @@ export function noiseTexture(): THREE.DataTexture {
 /** Noise at 2D point `p` (noise-space units, like `mx_noise_float`'s input): four independent channels, each about -1 to 1. */
 export function noise4(p: THREE.Node<"vec2">): THREE.Node<"vec4"> {
   return texture(noiseTexture(), p.div(NOISE_CELLS)).mul(2).sub(1);
+}
+
+/**
+ * Noise at 2D point `p` that changes over time `t` (in place of a 3D noise
+ * with time as its third axis): two layers drifting apart, `rate` noise
+ * units a second, so their sum keeps changing shape.
+ */
+export function flowNoise(p: THREE.Node<"vec2">, t: THREE.Node<"float">, rate: number): THREE.Node<"float"> {
+  const a = noise4(p.add(vec2(0.71, 0.29).mul(t.mul(rate)))).x;
+  const b = noise4(p.add(vec2(13.7, 5.3)).sub(vec2(0.31, 0.83).mul(t.mul(rate)))).y;
+  return a.add(b).mul(Math.SQRT1_2);
 }

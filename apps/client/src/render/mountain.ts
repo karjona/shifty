@@ -34,6 +34,7 @@ import {
 } from "three/tsl";
 import { noise4 } from "./cel/noise.ts";
 import { CarveTrails } from "./trails.ts";
+import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
 import { celify } from "./cel/material.ts";
@@ -477,6 +478,8 @@ export class Mountain implements Environment {
       (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
       true,
     );
+    this.trails.group.userData.noMerge = true;
+    mergeStatic(this.group, { cell: 400 });
     this.group.add(skyDome());
   }
 
@@ -592,6 +595,8 @@ export class Mountain implements Environment {
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
       mesh.receiveShadow = true;
+      // Each chunk is a batch of its own (so the ones out of view are culled).
+      mesh.userData.noMerge = true;
       this.group.add(mesh);
     }
   }
@@ -719,6 +724,7 @@ export class Mountain implements Environment {
         geo.computeVertexNormals();
         const mesh = new THREE.Mesh(geo, mat);
         mesh.receiveShadow = true;
+        mesh.userData.noMerge = true;
         this.group.add(mesh);
       }
     }
