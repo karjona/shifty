@@ -10,7 +10,8 @@ import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
 import { type EventChoice, lobbySocket, meQuery, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
-import { Button, Hints, Panel, Picker, Spinner } from "../ui.tsx";
+import { Button, Hints, Panel, Picker } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 import { TopBar } from "./common.tsx";
 
 const route = getRouteApi("/room/$code");
@@ -79,6 +80,7 @@ export function RoomScreen() {
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
+  useLoading(room === null, t.room.connecting);
 
   const leave = () => {
     leaving.current = true;
@@ -146,14 +148,10 @@ export function RoomScreen() {
         <div className="party" aria-hidden="true" />
         <div className="mode-side">
           <Panel className="mode-panel" title={t.room.title(code)}>
-            {!room ? (
-              <p className="muted">
-                <Spinner /> {t.room.connecting}
-              </p>
-            ) : (
+            <p className="room-code">{code}</p>
+            <p className="muted small">{t.room.share}</p>
+            {room && (
               <>
-                <p className="room-code">{code}</p>
-                <p className="muted small">{t.room.share}</p>
                 <ul className="members">
                   {room.members.map((m) => (
                     <li key={m.userId}>

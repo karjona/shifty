@@ -19,6 +19,7 @@ import {
   setPendingRace,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
+import { useLoading } from "../busy.tsx";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker, Spinner, TabBar, TextField } from "../ui.tsx";
@@ -40,6 +41,7 @@ export function ModeSelect() {
   const [joining, setJoining] = useState(false);
   const [searching, setSearching] = useState(false);
   const [tuning, setTuning] = useState(false);
+  useLoading(busy);
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
   useEffect(() => setClubRiders(1), []);
