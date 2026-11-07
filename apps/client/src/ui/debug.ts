@@ -73,7 +73,9 @@ export function createDebugPanel(net: NetConditions, settings: DebugSettings, on
   const view = gui.addFolder("View");
   view.add(settings, "renderScale", 0.25, 1, 0.05).name("render scale").onChange(onRenderScale);
 
-  let visible = true;
+  // A phone has no F1 to put it away: it starts hidden there, off the touch controls.
+  let visible = !matchMedia("(pointer: coarse)").matches;
+  gui.show(visible);
   const onKey = (e: KeyboardEvent) => {
     if (e.code === "F1") {
       e.preventDefault();

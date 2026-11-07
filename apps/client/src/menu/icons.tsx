@@ -32,6 +32,7 @@ export const GlobeIcon = svg(
   "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3.5 12h17M12 3.2c2.3 2.4 3.4 5.4 3.4 8.8s-1.1 6.4-3.4 8.8c-2.3-2.4-3.4-5.4-3.4-8.8s1.1-6.4 3.4-8.8Z",
 );
 export const PlusIcon = svg("M12 5v14M5 12h14");
+export const MenuIcon = svg("M5 7h14M5 12h14M5 17h14");
 export const PlayIcon = svg("M7 4.5v15L19 12Z", true);
 export const ChevronLeft = svg("M14.5 6 8.5 12l6 6");
 export const ChevronRight = svg("M9.5 6l6 6-6 6");

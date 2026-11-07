@@ -6,8 +6,15 @@ import { installSound } from "./audio/ui.ts";
 import { App } from "./menu/app.tsx";
 import { devParams } from "./dev-params.ts";
 import { booted } from "./loading.ts";
+import { messages, onLocale } from "./i18n/index.ts";
+import { installScreen } from "./touch/device.ts";
 
 installSound();
+installScreen();
+onLocale(() => {
+  const rotate = document.querySelector("#rotate span");
+  if (rotate) rotate.textContent = messages().common.rotate;
+});
 
 // The quick race, the look checks, the podium and the sound board only exist on the dev server: builds
 // drop these branches and the modules with them (and vite.config.ts fails a

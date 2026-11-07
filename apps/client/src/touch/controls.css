@@ -1,0 +1,158 @@
+/* Touch controls (controls.ts): translucent paper over the race, the
+   season's accent where a thumb holds a button. Sized in screen points, not
+   on the UI canvas: thumbs don't scale with the window. The root's padding
+   is the screen's safe area (the notch, the home bar), read by controls.ts. */
+
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  pointer-events: none;
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Where a thumb can come down: each half below the top band (the HUD and
+   the race menu's button stay tappable there). */
+.touch-zone {
+  position: absolute;
+  top: 22%;
+  bottom: 0;
+  width: 50%;
+  pointer-events: auto;
+  touch-action: none;
+}
+.touch-zone.left {
+  left: 0;
+}
+.touch-zone.right {
+  right: 0;
+}
+
+.touch-stick {
+  position: absolute;
+  left: -64px;
+  top: -64px;
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  background: rgb(243 237 225 / 0.16);
+  box-shadow:
+    inset 0 0 0 2px rgb(243 237 225 / 0.6),
+    0 0 0 1px rgb(29 27 23 / 0.22),
+    0 2px 12px rgb(24 16 8 / 0.12);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 120ms;
+}
+.touch-stick.on {
+  opacity: 1;
+}
+.touch-knob {
+  position: absolute;
+  left: 36px;
+  top: 36px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgb(243 237 225 / 0.92);
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.25),
+    0 4px 12px rgb(24 16 8 / 0.25);
+}
+.touch-stick.on .touch-knob {
+  background: var(--accent, #2b3fd0);
+  box-shadow:
+    inset 0 0 0 2px rgb(246 241 231 / 0.9),
+    0 4px 12px rgb(24 16 8 / 0.25);
+}
+
+/* The right thumb's fan: the big button in the corner, the others around
+   it, up and to the left. Offsets are from the big button's box. */
+.touch-fan {
+  position: absolute;
+  right: calc(env(safe-area-inset-right) + 36px);
+  bottom: calc(env(safe-area-inset-bottom) + 28px);
+  width: 88px;
+  height: 88px;
+}
+.touch-button {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: rgb(243 237 225 / 0.5);
+  box-shadow:
+    inset 0 0 0 2px rgb(243 237 225 / 0.85),
+    0 0 0 1px rgb(29 27 23 / 0.28),
+    0 2px 12px rgb(24 16 8 / 0.16);
+  color: #1d1b17;
+  font-size: 12px;
+  font-weight: 760;
+  font-stretch: 75%;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  pointer-events: none;
+  transition:
+    scale 80ms,
+    background-color 80ms;
+}
+.touch-button.main {
+  left: 0;
+  top: 0;
+  width: 88px;
+  height: 88px;
+  background: rgb(243 237 225 / 0.6);
+  font-size: 15px;
+}
+.touch-button.left {
+  left: -89px;
+  top: 19px;
+}
+.touch-button.upleft {
+  left: -65px;
+  top: -65px;
+}
+.touch-button.up {
+  left: 5px;
+  top: -91px;
+}
+.touch-button.far {
+  left: -163px;
+  top: -29px;
+  width: 54px;
+  height: 54px;
+  font-size: 11px;
+}
+.touch-button.held {
+  background: var(--accent, #2b3fd0);
+  color: #f6f1e7;
+  box-shadow:
+    inset 0 0 0 2px rgb(246 241 231 / 0.9),
+    0 2px 12px rgb(24 16 8 / 0.2);
+  scale: 0.94;
+}
+
+/* The HUD makes room for the thumbs: the speed between them, the bay's map
+   up top. */
+[data-touch] #hud {
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  width: fit-content;
+  margin: 0 auto;
+}
+[data-touch] #help {
+  display: none;
+}
+[data-touch] #minimap:not(.run) {
+  top: 120px;
+  bottom: auto;
+  transform: scale(0.75);
+  transform-origin: top right;
+}

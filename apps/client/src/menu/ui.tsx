@@ -15,12 +15,12 @@ import type { Player } from "./api.ts";
 import { useAction, useAutoFocus, useDevice } from "./hooks.ts";
 import { type GlyphAction, KeyGlyph, PadGlyph } from "./glyphs.tsx";
 import { ChevronLeft } from "./icons.tsx";
-import { nav } from "./nav.ts";
+import { nav, pointing } from "./nav.ts";
 
 /** The button that does `action` on the device in use (nothing for the mouse). */
 export function Glyph({ action }: { action: GlyphAction }) {
   const { device, pad } = useDevice();
-  if (device === "mouse") return null;
+  if (pointing(device)) return null;
   return (
     <span className={`glyph ${device}`} aria-hidden="true">
       {device === "gamepad" ? <PadGlyph pad={pad} action={action} /> : <KeyGlyph action={action} />}
@@ -298,8 +298,8 @@ export function SocialCard({ player, onClick }: { player: Player; onClick?: () =
 /** What the buttons do, in the corner. */
 export function Hints({ items }: { items: [GlyphAction, string][] }) {
   const { device } = useDevice();
-  // The mouse picks and plays with what is on screen: what it can't reach otherwise is going back.
-  const shown = device === "mouse" ? items.filter(([action]) => action === "back") : items;
+  // The mouse and a finger pick and play with what is on screen: what they can't reach otherwise is going back.
+  const shown = pointing(device) ? items.filter(([action]) => action === "back") : items;
   if (shown.length === 0) return null;
   return (
     <div className="hints">
@@ -323,7 +323,7 @@ export function Hints({ items }: { items: [GlyphAction, string][] }) {
           );
         return (
           <button key={action} type="button" tabIndex={-1} className="hint" onClick={() => nav.fire(action)}>
-            {device === "mouse" && action === "back" && <ChevronLeft />}
+            {pointing(device) && action === "back" && <ChevronLeft />}
             {glyph}
             {label}
           </button>

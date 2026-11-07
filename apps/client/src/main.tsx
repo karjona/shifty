@@ -8,7 +8,10 @@ import { fitUi } from "./menu/scale.ts";
 
 fitUi();
 
+const words = { en, es, ca }[initialLocale()].common;
 const label = document.querySelector("#loading span");
-if (label) label.textContent = { en, es, ca }[initialLocale()].common.loading;
+if (label) label.textContent = words.loading;
+const rotate = document.querySelector("#rotate span");
+if (rotate) rotate.textContent = words.rotate;
 
 void import("./start.tsx");

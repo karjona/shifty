@@ -104,3 +104,62 @@
     transform: skewX(23.4deg);
   }
 }
+
+/* A touch screen held upright: the game is played sideways, so a card asks
+   to turn it (browsers on phones can't lock the screen's orientation). */
+#rotate {
+  display: none;
+}
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 0 40px;
+    background: #f3ede1;
+    color: #1d1b17;
+    font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 650;
+    font-stretch: 112%;
+    letter-spacing: 0.16em;
+    line-height: 1.6;
+    text-align: center;
+    text-transform: uppercase;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+#rotate svg {
+  width: 120px;
+  height: 120px;
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+#rotate .arc {
+  stroke: var(--accent, #2b3fd0);
+}
+#rotate .phone {
+  stroke: #1d1b17;
+  transform-origin: 60px 62px;
+  animation: turn-sideways 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes turn-sideways {
+  0%,
+  20% {
+    transform: none;
+  }
+  55%,
+  85% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: none;
+  }
+}

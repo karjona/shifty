@@ -1,5 +1,7 @@
-// Gamepad first (analog sticks and triggers), keyboard as the fallback.
-// Output is analog in [-1, 1]; the sim quantizes it before predicting.
+// Gamepad first (analog sticks and triggers), then the touch screen's
+// controls (touch/controls.ts), keyboard as the fallback. Output is analog
+// in [-1, 1]; the sim quantizes it before predicting.
+import type { TouchControls } from "./touch/controls.ts";
 
 /** Hold in the air: the stick spins and flips. */
 export const BUTTON_TRICK = 1;
@@ -35,7 +37,9 @@ export class InputReader {
   private keys = new Set<string>();
   private keySteer = 0;
   private keyLean = 0;
-  lastDevice: "keyboard" | "gamepad" = "keyboard";
+  lastDevice: "keyboard" | "gamepad" | "touch";
+  /** The on-screen controls, on a touch screen. */
+  touch: TouchControls | null = null;
   /** The buttons mean different things on a jetski and on a snowboard. */
   sport: "jetski" | "snow" = "jetski";
   /** Test hook: when set, overrides real input. */
@@ -54,7 +58,8 @@ export class InputReader {
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.code);
   private onBlur = () => this.keys.clear();
 
-  constructor() {
+  constructor(touchFirst = false) {
+    this.lastDevice = touchFirst ? "touch" : "keyboard";
     addEventListener("keydown", this.onKeyDown);
     addEventListener("keyup", this.onKeyUp);
     addEventListener("blur", this.onBlur);
@@ -64,6 +69,11 @@ export class InputReader {
     removeEventListener("keydown", this.onKeyDown);
     removeEventListener("keyup", this.onKeyUp);
     removeEventListener("blur", this.onBlur);
+  }
+
+  /** The camera button on screen (a tap, a click). */
+  pressCamera(): void {
+    this.cameraPressed = true;
   }
 
   /** Whether the camera button went down since the last call (once a frame). */
@@ -86,7 +96,12 @@ export class InputReader {
       return pad;
     }
     const k = (...codes: string[]) => codes.some((c) => this.keys.has(c));
+    if (this.touch?.takeTouched()) this.lastDevice = "touch";
     if (this.keys.size > 0) this.lastDevice = "keyboard";
+    if (this.lastDevice === "touch" && this.touch) {
+      this.touch.sport = this.sport;
+      return this.touch.read();
+    }
     if (this.sport === "snow") {
       // WASD or the arrows: steer, tuck (up) and sit back (down). Space
       // jumps; J or Shift spins and flips; K or E grabs.
@@ -138,14 +153,14 @@ export class InputReader {
           (held(2) || held(5) ? BUTTON_TRICK : 0) |
           (held(1) || held(4) ? BUTTON_GRAB : 0);
         const active = steer !== 0 || lean !== 0 || rt > 0.05 || lt > 0.05 || buttons !== 0;
-        if (!active && this.lastDevice === "keyboard") return null;
+        if (!active && this.lastDevice !== "gamepad") return null;
         return { steer, throttle: 0, lean: Math.max(-1, Math.min(1, lean + rt - lt)), buttons };
       }
       // A or RB spins and flips (as on the board), X barrel-rolls, B or LB stunts (the board's grab).
       const buttons =
         (held(0) || held(5) ? BUTTON_TRICK : 0) | (held(2) ? BUTTON_ROLL : 0) | (held(1) || held(4) ? BUTTON_GRAB : 0);
       const active = steer !== 0 || lean !== 0 || rt > 0.05 || lt > 0.05 || buttons !== 0;
-      if (!active && this.lastDevice === "keyboard") return null;
+      if (!active && this.lastDevice !== "gamepad") return null;
       return { steer, throttle: rt - lt, lean, buttons };
     }
     return null;

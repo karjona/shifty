@@ -26,6 +26,8 @@ import { disposeTree } from "./dispose.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
 import { SeasonCard, SeasonChange, seasonOf } from "./season-change.ts";
+import { TouchControls } from "../touch/controls.ts";
+import { canTouch, keepAwake, touchScreen } from "../touch/device.ts";
 
 /** Why the race server said no, by client phase (2 + the protocol's reject reason). */
 function rejectReason(phase: number): string {
@@ -74,9 +76,13 @@ export interface RaceState {
   over: boolean;
   /** The race is on television: your rider rides on autopilot (finished, or joined midway), or the results are up. */
   watching: boolean;
+  /** What the player rides with: the race's help talks about it. */
+  device: "keyboard" | "gamepad" | "touch";
 }
 
-/** `sim::Phase::Results`. */
+/** `sim::Phase`: the countdown, the race, the results. */
+const COUNTDOWN = 1;
+const RACING = 2;
 const RESULTS = 3;
 
 /** Roster JSON comes from our own WASM, but parse it defensively anyway. */
@@ -131,7 +137,11 @@ export class RaceSession implements Stage {
   private transport: Transport | null = null;
   private client: WasmClient | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
-  private input = new InputReader();
+  private input = new InputReader(touchScreen());
+  /** On a touch screen: the stick and buttons over the race. */
+  private touch: TouchControls | null = null;
+  /** Lets the screen sleep again. */
+  private sleep: (() => void) | null = null;
   private lastInput: FrameInput | null = null;
   private sfx = new RaceAudio();
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
@@ -181,6 +191,7 @@ export class RaceSession implements Stage {
     eventCount: 1,
     over: false,
     watching: false,
+    device: "keyboard",
   };
   /** The last race of the plan has reached its results. */
   private finalResults = false;
@@ -211,8 +222,18 @@ export class RaceSession implements Stage {
     this.paused = paused;
   }
 
+  /** Cuts to another television camera (the on-screen button). */
+  nextCamera(): void {
+    this.input.pressCamera();
+  }
+
   start(engine: Engine): void {
     this.engine = engine;
+    if (canTouch()) {
+      this.touch = new TouchControls();
+      this.input.touch = this.touch;
+    }
+    this.sleep = keepAwake();
     if (this.opts.render ?? engine.render) {
       this.card = new SeasonCard(seasonOf(ticketCourse(this.opts.ticket.token)), false);
       this.card.loading = true;
@@ -521,9 +542,16 @@ export class RaceSession implements Stage {
     const current = race.course === this.course && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
-    this.showHud(!this.covered && !RaceIntro.active(race.phase));
+    const hud = !this.covered && !RaceIntro.active(race.phase);
+    this.showHud(hud);
     const watching = onAir(race, this.sport);
     this.state.watching = watching;
+    this.state.device = this.input.lastDevice;
+    const touching = this.input.lastDevice === "touch";
+    this.touch?.show(
+      touching && hud && !watching && !this.paused && (race.phase === COUNTDOWN || race.phase === RACING),
+      touching,
+    );
     this.hud.showGauges(!watching);
     this.sfx.broadcast = watching;
     if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
@@ -615,6 +643,9 @@ export class RaceSession implements Stage {
         names: () => Object.fromEntries(this.names),
         grandPrix: () => Object.fromEntries(this.gpPoints),
         ready: () => this.shown,
+        /** What the rider got last frame, from whichever device. */
+        input: () => this.lastInput,
+        touchControls: () => document.querySelector(".touch-controls:not([hidden])") !== null,
         setInput: (v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null) => {
           this.input.forced = v;
         },
@@ -641,6 +672,8 @@ export class RaceSession implements Stage {
     this.client?.free();
     this.client = null;
     this.debug?.destroy();
+    this.touch?.dispose();
+    this.sleep?.();
     this.opts.hud.replaceChildren();
     if (this.env && this.engine) {
       this.engine.world.clearEnvironment();

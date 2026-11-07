@@ -13,6 +13,22 @@ import { useAction, useAutoFocus, useBackdrop, useEngine, useRiderShot } from ".
 import { Button, Glyph, Hints, Modal, Panel, Picker, TabBar } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
 import { Wardrobe } from "./wardrobe.tsx";
+import {
+  apple,
+  canFullscreen,
+  canInstall,
+  canTouch,
+  enterFullscreen,
+  exitFullscreen,
+  fullscreen,
+  type GasMode,
+  install,
+  onScreenChange,
+  screenVersion,
+  setGasMode,
+  standalone,
+  touchSettings,
+} from "../../touch/device.ts";
 
 export type MenuTab = "home" | "collection" | "settings";
 const route = getRouteApi("/");
@@ -183,6 +199,59 @@ function HeroBanner({ banners, onOpen }: { banners: Banner[]; onOpen: (b: Banner
   );
 }
 
+/**
+ * The touch screen's settings, and full screen: a setting where the browser
+ * has it, on an iPhone (which hasn't) how to get it from the Home Screen,
+ * and Chrome's install.
+ */
+function TouchPanels() {
+  const t = useT();
+  useSyncExternalStore(onScreenChange, screenVersion);
+  const away = !standalone();
+  const toggle = canFullscreen() && away;
+  const homeScreen = apple() && away && !canFullscreen();
+  return (
+    <>
+      {canTouch() && (
+        <Panel title={t.settings.touch}>
+          <p className="muted">{t.settings.touchBody}</p>
+          <Picker<GasMode>
+            label={t.settings.gas}
+            options={[
+              { value: "auto", label: t.settings.gasAuto },
+              { value: "hold", label: t.settings.gasHold },
+            ]}
+            value={touchSettings().gas}
+            onChange={setGasMode}
+          />
+        </Panel>
+      )}
+      {(toggle || homeScreen || canInstall()) && (
+        <Panel title={t.settings.screen} className="screen-panel">
+          {toggle && (
+            <Picker<"on" | "off">
+              label={t.settings.fullscreen}
+              options={[
+                { value: "on", label: t.settings.on },
+                { value: "off", label: t.settings.off },
+              ]}
+              value={fullscreen() ? "on" : "off"}
+              onChange={(v) => (v === "on" ? enterFullscreen() : exitFullscreen())}
+            />
+          )}
+          {homeScreen && <p className="muted">{t.settings.homeScreen}</p>}
+          {canInstall() && (
+            <>
+              <p className="muted">{t.settings.installBody}</p>
+              <Button onClick={install}>{t.settings.install}</Button>
+            </>
+          )}
+        </Panel>
+      )}
+    </>
+  );
+}
+
 const SCALES = [0.5, 0.75, 1];
 /** Volume steps (0-1). */
 const VOLUMES = Array.from({ length: 11 }, (_, i) => i / 10);
@@ -271,6 +340,7 @@ function SettingsTab() {
       <Panel title={t.settings.controls}>
         <p className="muted">{t.settings.controlsBody}</p>
       </Panel>
+      <TouchPanels />
       <Panel title={t.settings.account}>
         <p className="muted">{t.settings.signedInAs(me?.user.email ?? "")}</p>
         <div className="row">
