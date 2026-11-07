@@ -18,11 +18,11 @@ use sim::math::Vec3;
 use sim::quant;
 use sim::race::{Phase, Progress, Race};
 use sim::world::Rider;
-use sim::{CourseId, MAX_RIDERS, SurfaceKind};
+use sim::{Conditions, CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 11;
+pub const PROTOCOL_VERSION: u16 = 12;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -217,6 +217,7 @@ pub struct Welcome {
     pub snapshot_interval: u8,
     pub max_riders: u8,
     pub course: CourseId,
+    pub conditions: Conditions,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     /// Server tick when the welcome was sent.
@@ -277,8 +278,10 @@ pub struct Snapshot {
     /// Ms between receiving the echoed packet and sending this snapshot.
     pub echo_hold_ms: u16,
     pub events: Vec<Event>,
-    /// The course raced now (a Tilt moves on to the next one).
+    /// The course raced now (a Tilt moves on to the next one), and its
+    /// conditions.
     pub course: CourseId,
+    pub conditions: Conditions,
     /// Which race of the room's plan this is (0-based), out of `event_count`.
     pub event_index: u8,
     pub event_count: u8,
@@ -557,6 +560,7 @@ impl ServerMsg {
                 w.u8(m.snapshot_interval);
                 w.u8(m.max_riders);
                 w.u8(m.course as u8);
+                w.bytes(&m.conditions.to_bytes());
                 w.u8(m.surface_kind as u8);
                 w.u32(m.surface_seed);
                 w.u32(m.server_tick);
@@ -578,6 +582,7 @@ impl ServerMsg {
                     write_event(&mut w, e);
                 }
                 w.u8(s.course as u8);
+                w.bytes(&s.conditions.to_bytes());
                 w.u8(s.event_index);
                 w.u8(s.event_count);
                 w.u8(s.race.phase as u8);
@@ -601,6 +606,7 @@ impl ServerMsg {
                 let snapshot_interval = r.u8()?;
                 let max_riders = r.u8()?;
                 let course = CourseId::from_u8(r.u8()?).ok_or(DecodeError::Invalid("course"))?;
+                let conditions = read_conditions(&mut r)?;
                 let surface_kind =
                     SurfaceKind::from_u8(r.u8()?).ok_or(DecodeError::Invalid("surface kind"))?;
                 let surface_seed = r.u32()?;
@@ -616,6 +622,7 @@ impl ServerMsg {
                     snapshot_interval,
                     max_riders,
                     course,
+                    conditions,
                     surface_kind,
                     surface_seed,
                     server_tick,
@@ -637,6 +644,7 @@ impl ServerMsg {
                     .map(|_| read_event(&mut r))
                     .collect::<Result<Vec<_>, _>>()?;
                 let course = CourseId::from_u8(r.u8()?).ok_or(DecodeError::Invalid("course"))?;
+                let conditions = read_conditions(&mut r)?;
                 let event_index = r.u8()?;
                 let event_count = r.u8()?;
                 let race = Race {
@@ -658,6 +666,7 @@ impl ServerMsg {
                     echo_hold_ms,
                     events,
                     course,
+                    conditions,
                     event_index,
                     event_count,
                     race,
@@ -667,6 +676,11 @@ impl ServerMsg {
             other => Err(DecodeError::UnknownMessage(other)),
         }
     }
+}
+
+fn read_conditions(r: &mut Reader<'_>) -> Result<Conditions, DecodeError> {
+    let b = r.bytes(4)?;
+    Conditions::from_bytes([b[0], b[1], b[2], b[3]]).ok_or(DecodeError::Invalid("conditions"))
 }
 
 /// Cuts a string to at most `max` bytes without splitting a character.
