@@ -5,14 +5,14 @@
 // slower than 60 Hz) is undone, and not tried again for a while.
 
 /** Frames should come at least this often (ms): 60 a second, with a little slack. */
-const TARGET_MS = 1000 / 57;
+const TARGET_MS = 1000 / 59;
 /** A gap longer than this (ms) is a stall (loading, a hidden tab), not a slow frame. */
 const STALL_MS = 250;
 /** Frames looked at before each decision. */
 const WINDOW = 40;
 /** Each step changes the pixel ratio by this factor (about a quarter of the pixels). */
 const STEP = 0.86;
-/** A step down must make frames at least this much faster to stay. */
+/** A step down must make frames this much faster, or fast enough, to stay. */
 const HELPS = 0.94;
 /** Waits before trying more pixels again after a try failed (s), doubling each time. */
 const BACKOFF_FROM = 4;
@@ -79,7 +79,7 @@ export class AutoResolution {
         return this.set(trial.from);
       }
       this.backoff = BACKOFF_FROM;
-    } else if (trial?.kind === "down" && mean > trial.before * HELPS) {
+    } else if (trial?.kind === "down" && slow && mean > trial.before * HELPS) {
       // Fewer pixels didn't help: frames are slow for another reason. Undo, and leave it.
       this.downAt = now + BACKOFF_MAX * 1000;
       return this.set(trial.from);

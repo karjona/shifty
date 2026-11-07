@@ -87,6 +87,40 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     }
     pipeline.needsUpdate = true;
   };
+  /** Draw calls in one frame, by what they draw into. */
+  const passes = (detail = false) => {
+    const counts: Record<string, number> = {};
+    const backend = renderer.backend;
+    const original: unknown = Reflect.get(backend, "draw");
+    if (typeof original !== "function") return counts;
+    Reflect.set(backend, "draw", function (this: object, ...args: unknown[]) {
+      const target = renderer.getRenderTarget();
+      const pass = target ? `${target.width}x${target.height}${renderer.getMRT() ? " mrt" : ""}` : "canvas";
+      counts[pass] = (counts[pass] ?? 0) + 1;
+      if (detail) {
+        const ro: unknown = args[0];
+        const object: unknown = isObject(ro) ? Reflect.get(ro, "object") : null;
+        if (object instanceof THREE.Object3D) {
+          let kind = object.type;
+          if (object instanceof THREE.Mesh && !(object instanceof THREE.SkinnedMesh)) {
+            const n = object.geometry.attributes.position?.count ?? 0;
+            kind += n > 5000 ? " big" : n > 500 ? " mid" : " small";
+            if (object instanceof THREE.InstancedMesh) kind += ` x${object.count}`;
+          }
+          if (object.userData.outline) kind += " hull";
+          const key = `${pass} | ${kind}`;
+          counts[key] = (counts[key] ?? 0) + 1;
+        }
+      }
+      return Reflect.apply(original, this, args) as unknown;
+    });
+    try {
+      draw();
+    } finally {
+      Reflect.set(backend, "draw", original);
+    }
+    return counts;
+  };
   /** What is drawn: objects by kind, and the last frame's draw calls and triangles. */
   const scene = () => {
     const out: Record<string, number> = {};
@@ -125,6 +159,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     __shiftyBench: {
       bench,
       ablate,
+      passes,
       /** The fraction of the screen's pixels drawn now. */
       scale: () => world.renderScale,
       scene,

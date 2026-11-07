@@ -205,6 +205,11 @@ export class World {
     this.sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    // Drawn once a frame (see `draw`): three would draw it again for every
+    // camera that looks at the scene, the reflection's too.
+    this.sun.shadow.autoUpdate = false;
+    // Shadows come from everything, whichever camera's view draws them.
+    this.sun.shadow.camera.layers.enable(UNREFLECTED);
     Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
     this.scene.add(this.hemi, this.sun, this.sun.target);
     this.cel = new CelPost(this.renderer, this.scene, this.camera);
@@ -243,6 +248,7 @@ export class World {
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.cel.width.value = 1.6 * (size.y / 1080);
+    this.sun.shadow.needsUpdate = true;
     this.cel.render();
   }
 

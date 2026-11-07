@@ -283,6 +283,15 @@ export class SeaWater {
     // The world reflected (sky, land, riders, spray): mirrored about the
     // mean water level and bent by the waves.
     const mirror = reflector({ resolutionScale: REFLECTION_SCALE });
+    // The mirror's camera starts as a copy of the viewer's: keep it to layer 0
+    // (it leaves out what the viewer alone sees, see `UNREFLECTED`).
+    const base = mirror.reflector;
+    const virtual = base.getVirtualCamera.bind(base);
+    base.getVirtualCamera = (camera: THREE.Camera) => {
+      const v = virtual(camera);
+      v.layers.set(0);
+      return v;
+    };
     mirror.target.rotateX(-Math.PI / 2);
     mirror.uvNode = screenUV.flipX().add(surfaceNormal.xz.mul(0.06));
 
