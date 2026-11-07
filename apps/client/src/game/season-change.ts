@@ -54,12 +54,18 @@ export class SeasonCard {
     }
   }
 
-  hide(): void {
-    if (this.gone) return;
+  /** Fades the card out; resolves once it is gone. */
+  hide(): Promise<void> {
+    if (this.gone) return Promise.resolve();
     this.gone = true;
     this.loading = false;
     this.el.classList.remove("shown");
-    setTimeout(() => this.el.remove(), FADE_MS);
+    return new Promise((resolve) =>
+      setTimeout(() => {
+        this.el.remove();
+        resolve();
+      }, FADE_MS),
+    );
   }
 }
 
@@ -75,7 +81,7 @@ export class SeasonChange {
   private swap: () => Promise<void>;
   private cleared: () => void;
 
-  /** `swap` puts the next course up behind the card; it clears once that is done, then `cleared` runs. */
+  /** `swap` puts the next course up behind the card; it clears once that is done, and `cleared` runs once it is gone. */
   constructor(engine: Engine, season: Season, swap: () => Promise<void>, cleared: () => void = () => {}) {
     this.engine = engine;
     this.swap = swap;
@@ -101,17 +107,14 @@ export class SeasonChange {
     this.active = false;
     this.card.loading = true;
     const hold = new Promise((resolve) => setTimeout(resolve, HOLD * 1000));
-    void Promise.all([this.swap(), hold]).finally(() => {
-      this.card.hide();
-      this.cleared();
-    });
+    void Promise.all([this.swap(), hold]).finally(() => this.card.hide().then(this.cleared));
   }
 
   /** Takes the card away without swapping courses (the race is over). */
   cancel(): void {
     this.swapped = true;
     this.active = false;
-    this.card.hide();
+    void this.card.hide();
   }
 
   /** Swaps now (if it hasn't yet), and clears the card once the next course is up. */

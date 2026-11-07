@@ -214,7 +214,7 @@ export class RaceSession implements Stage {
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
       this.opts.status(e instanceof Error ? e.message : String(e));
-      this.card?.hide();
+      void this.card?.hide();
       this.opts.onJoin?.(false);
     });
   }
@@ -444,11 +444,11 @@ export class RaceSession implements Stage {
     if (!this.joined && phase !== 0) {
       this.joined = true;
       this.joining(null);
-      if (phase !== 1) this.card?.hide();
+      if (phase !== 1) void this.card?.hide();
       this.opts.onJoin?.(phase === 1);
     }
     if (phase >= 2 || this.closedReason) {
-      this.card?.hide();
+      void this.card?.hide();
       this.joining(null);
     }
     if (phase !== 1) return;
@@ -475,9 +475,10 @@ export class RaceSession implements Stage {
         const card = this.card;
         if (card) card.season = seasonOf(race.course);
         void this.setCourse(engine, client, render).finally(() => {
-          card?.hide();
           if (this.card === card) this.card = null;
-          this.covered = false;
+          void (card?.hide() ?? Promise.resolve()).then(() => {
+            this.covered = false;
+          });
         });
       } else {
         // A Tilt moves on: the season changes, and the new course
@@ -602,7 +603,7 @@ export class RaceSession implements Stage {
     this.joining(null);
     if (this.timer) clearInterval(this.timer);
     this.seasonChange?.cancel();
-    this.card?.hide();
+    void this.card?.hide();
     this.transport?.close();
     this.client?.free();
     this.client = null;
