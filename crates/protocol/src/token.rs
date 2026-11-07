@@ -59,6 +59,13 @@ pub struct JoinClaims {
     /// `sim::Setup` bytes, locked for the whole room plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setups: Vec<[u8; 4]>,
+    /// A time trial: the rider alone (no bots), the run recorded, and
+    /// restarted on request.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trial: bool,
+    /// The season raced (0 summer, 1 fall, 2 winter, 3 spring).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub season: u8,
 }
 
 /// Most races in one room's plan.
@@ -66,6 +73,10 @@ pub const MAX_EVENTS: usize = 8;
 
 fn is_zero(n: &u8) -> bool {
     *n == 0
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 impl JoinClaims {
@@ -193,6 +204,15 @@ pub fn verify(
     {
         return Err(TokenError::BadClaims("look"));
     }
+    if claims.season > 3
+        || (claims.trial
+            && claims
+                .plan()
+                .iter()
+                .any(|c| c.course().sport == sim::Sport::Snowboard && claims.season == 0))
+    {
+        return Err(TokenError::BadClaims("season"));
+    }
     if claims.setups.len() > crate::MAX_SETUPS
         || claims
             .setups
@@ -240,7 +260,50 @@ mod tests {
             events: vec![0, 1],
             look: b64(&[1, 0, 2, 3]),
             setups: vec![[3, 3, 3, 3], [6, 2, 2, 2]],
+            trial: false,
+            season: 0,
         }
+    }
+
+    #[test]
+    fn a_time_trial_rides_a_season_its_sport_has() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let vk = key.verifying_key();
+        let trial = |course: u8, season: u8| JoinClaims {
+            trial: true,
+            season,
+            bots: 0,
+            course,
+            events: vec![course],
+            ..claims()
+        };
+        let ok = verify(
+            &sign(&trial(1, 2), &key),
+            &vk,
+            "race.example:443",
+            1_000_000,
+        )
+        .unwrap();
+        assert!(ok.trial);
+        assert_eq!(ok.season, 2);
+        assert_eq!(
+            verify(
+                &sign(&trial(1, 0), &key),
+                &vk,
+                "race.example:443",
+                1_000_000
+            ),
+            Err(TokenError::BadClaims("season"))
+        );
+        assert_eq!(
+            verify(
+                &sign(&trial(0, 4), &key),
+                &vk,
+                "race.example:443",
+                1_000_000
+            ),
+            Err(TokenError::BadClaims("season"))
+        );
     }
 
     #[test]
