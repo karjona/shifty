@@ -7,6 +7,7 @@ export const ca: Messages = {
     play: "Juga",
     tabs: "Pestanyes",
     loading: "Carregant…",
+    soundLocked: "Fes clic o prem una tecla per activar el so",
     retry: "Torna-ho a provar",
     close: "Tanca",
     cancel: "Cancel·la",
@@ -227,6 +228,8 @@ export const ca: Messages = {
     water: "Aigua",
     waterSea: "Completa",
     waterBasic: "Bàsica (més ràpida)",
+    sound: "So",
+    volume: { master: "General", effects: "Efectes", music: "Música" },
     controls: "Controls",
     controlsBody:
       "Menús: estic o creueta per moure't, A / ✕ per triar, B / ○ per tornar, LB / RB per canviar de pestanya. Teclat: fletxes, Retorn, Esc, Q / E.",

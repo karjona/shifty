@@ -7,6 +7,7 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
+    soundLocked: "Click or press any key for sound",
     retry: "Try again",
     close: "Close",
     cancel: "Cancel",
@@ -227,6 +228,8 @@ export const en = {
     water: "Water",
     waterSea: "Full",
     waterBasic: "Basic (faster)",
+    sound: "Sound",
+    volume: { master: "Master", effects: "Effects", music: "Music" },
     controls: "Controls",
     controlsBody:
       "Menus: stick or d-pad to move, A / ✕ to pick, B / ○ to go back, LB / RB to change tabs. Keyboard: arrows, Enter, Esc, Q / E.",

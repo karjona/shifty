@@ -1,0 +1,51 @@
+/* The sound sign (hint.ts): a paper tag like the loading sign, centred in
+   the bottom margin of the 1920×1080 canvas (the loading sign keeps the
+   right corner), over everything, never in the way of a click. */
+#sound-hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 110;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 200ms ease,
+    visibility 0s 200ms;
+}
+#sound-hint.on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 200ms ease;
+}
+#sound-hint > div {
+  zoom: var(--ui-zoom, 1);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  margin-bottom: 12px;
+  padding: 0 16px 0 12px;
+  background: #f3ede1;
+  color: #1d1b17;
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.2),
+    0 12px 32px rgb(24 16 8 / 0.24),
+    0 2px 6px rgb(24 16 8 / 0.12);
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+}
+#sound-hint svg {
+  width: 20px;
+  height: 20px;
+  color: #5f5a51;
+}
