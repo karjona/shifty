@@ -151,6 +151,12 @@ run(
     "--persist-to",
     join(repoRoot, ".dev", "wrangler"),
     "--show-interactive-dev-session=false",
+    // Requests reach the Worker as from the game's dev origin, not as from
+    // the production custom domain in wrangler.jsonc (Better Auth checks it).
+    "--local-upstream",
+    "localhost:5173",
+    "--upstream-protocol",
+    "http",
     "--env-file",
     lobbyEnv,
     ...(existsSync(userEnv) ? ["--env-file", userEnv] : []),
