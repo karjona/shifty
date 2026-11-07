@@ -5,6 +5,7 @@
 // the card clears.
 import * as THREE from "three/webgpu";
 import { messages } from "../i18n/index.ts";
+import { holdLoading } from "../loading.ts";
 import type { Engine } from "./engine.ts";
 
 export type Season = "summer" | "fall" | "winter" | "spring";
@@ -25,6 +26,7 @@ export function seasonOf(course: number): Season {
 export class SeasonCard {
   private el: HTMLDivElement;
   private gone = false;
+  private release: (() => void) | null = null;
 
   constructor(season: Season, fadeIn = true) {
     const m = messages();
@@ -43,14 +45,19 @@ export class SeasonCard {
     this.el.querySelector("b")!.textContent = messages().seasons[season];
   }
 
-  /** Rocks its axis while something loads behind it. */
+  /** Puts the loading sign up while something loads behind it. */
   set loading(on: boolean) {
-    this.el.classList.toggle("loading", on);
+    if (on) this.release ??= holdLoading();
+    else {
+      this.release?.();
+      this.release = null;
+    }
   }
 
   hide(): void {
     if (this.gone) return;
     this.gone = true;
+    this.loading = false;
     this.el.classList.remove("shown");
     setTimeout(() => this.el.remove(), FADE_MS);
   }

@@ -5,6 +5,7 @@
 // state comes from the predicted world every frame.
 
 import { messages } from "../i18n/index.ts";
+import { NameTags } from "./tags.ts";
 
 export interface RaceView {
   phase: number;
@@ -113,6 +114,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, id: string, parent: H
 }
 
 export class Hud {
+  /** The other riders' name tags (set `tags.hidden` to take them off). */
+  readonly tags: NameTags;
   private banner: HTMLDivElement;
   private info: HTMLDivElement;
   private speed: HTMLDivElement;
@@ -126,6 +129,7 @@ export class Hud {
   private split: { html: string; until: number } | null = null;
 
   constructor(root: HTMLElement) {
+    this.tags = new NameTags(root);
     this.banner = el("div", "banner", root);
     this.info = el("div", "race-info", root);
     const bottom = el("div", "hud", root);

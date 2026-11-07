@@ -147,12 +147,6 @@ const SHADOW_REACH = 45;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
 
-/** Shows or hides an element, touching the page only when that changes. */
-function setDisplay(el: HTMLElement, on: boolean): void {
-  const display = on ? "block" : "none";
-  if (el.style.display !== display) el.style.display = display;
-}
-
 /** An angle wrapped to (-π, π]. */
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 /** Smooth 0-1 ramp of `x` clamped to [0, 1]. */
@@ -171,14 +165,12 @@ export class World {
   private sun: THREE.DirectionalLight;
   private hemi: THREE.HemisphereLight;
   private env: Environment | null = null;
-  private riders = new Map<number, { model: RiderModel; label: HTMLDivElement }>();
   private models = new Map<number, RiderModel>();
   private camLook = new THREE.Vector3();
   private frustum = new THREE.Frustum();
   private viewProjection = new THREE.Matrix4();
   /** Around a rider: the figure, and the shadow it throws. */
   private bounds = new THREE.Sphere(new THREE.Vector3(), RIDER_REACH);
-  private tag = new THREE.Vector3();
   private seen = new Set<number>();
   /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
@@ -197,14 +189,12 @@ export class World {
   private camWasBailing = false;
   private camLastVy = 0;
   private camReady = false;
-  private labels: HTMLElement;
   /** The frame: the scene, inked. */
   readonly cel: CelPost;
   /** What each seat's rider looks like, as told by the race server. */
   private appearances = new Map<number, Appearance | null>();
 
-  constructor(container: HTMLElement, labels: HTMLElement) {
-    this.labels = labels;
+  constructor(container: HTMLElement) {
     // Dev: `?webgl` forces the WebGL2 fallback (browsers without WebGPU).
     const webgl = import.meta.env.DEV && devParams.has("webgl");
     // No multisampling: the frame is drawn into the ink pass's targets, and FXAA smooths it.
@@ -298,12 +288,10 @@ export class World {
   setAppearance(slot: number, appearance: Appearance | null): void {
     if (JSON.stringify(this.appearances.get(slot) ?? null) === JSON.stringify(appearance)) return;
     this.appearances.set(slot, appearance);
-    const r = this.riders.get(slot);
+    const r = this.models.get(slot);
     if (r) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
-      this.riders.delete(slot);
+      this.scene.remove(r.mesh);
+      r.dispose?.();
       this.models.delete(slot);
     }
   }
@@ -316,12 +304,10 @@ export class World {
     env.light(this.scene, this.sun, this.hemi);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();
-    for (const r of this.riders.values()) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
+    for (const r of this.models.values()) {
+      this.scene.remove(r.mesh);
+      r.dispose?.();
     }
-    this.riders.clear();
     this.models.clear();
     this.camReady = false;
   }
@@ -330,12 +316,10 @@ export class World {
   clearEnvironment(): void {
     if (this.env) this.scene.remove(this.env.group);
     this.env = null;
-    for (const r of this.riders.values()) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
+    for (const r of this.models.values()) {
+      this.scene.remove(r.mesh);
+      r.dispose?.();
     }
-    this.riders.clear();
     this.models.clear();
     this.camReady = false;
   }
@@ -376,37 +360,24 @@ export class World {
   /** Puts these seats' riders in the scene ahead of drawing them (so they warm up with the course). */
   addRiders(slots: number[]): RiderModel[] {
     const env = this.env;
-    return env ? slots.map((slot) => this.rider(env, slot).model) : [];
+    return env ? slots.map((slot) => this.rider(env, slot)) : [];
   }
 
-  private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
-    let r = this.riders.get(slot);
-    if (r) return r;
-    const model = env.makeRider(slot, this.appearances.get(slot) ?? null);
+  private rider(env: Environment, slot: number): RiderModel {
+    let model = this.models.get(slot);
+    if (model) return model;
+    model = env.makeRider(slot, this.appearances.get(slot) ?? null);
     this.scene.add(model.mesh);
-    const label = document.createElement("div");
-    label.className = "label";
-    label.style.display = "none";
-    this.labels.append(label);
-    r = { model, label };
-    this.riders.set(slot, r);
     this.models.set(slot, model);
-    return r;
+    return model;
   }
 
   /**
    * Draw a frame. `tick` is the fractional sim tick to show (water,
    * snowfall); `shot` places the camera by hand instead of (or on its way
-   * into) the chase camera, without name tags.
+   * into) the chase camera.
    */
-  render(
-    riders: RiderView[],
-    names: Map<number, string>,
-    tick: number,
-    dt: number,
-    nextBuoy: number | null,
-    shot: CameraShot | null = null,
-  ): void {
+  render(riders: RiderView[], tick: number, dt: number, nextBuoy: number | null, shot: CameraShot | null = null): void {
     const env = this.env;
     if (!env) {
       this.draw();
@@ -416,7 +387,6 @@ export class World {
     const me = riders.find((r) => r.isMe);
     if (me) this.followCamera(env, me, t, dt);
     if (shot) this.applyShot(shot, me);
-    this.labels.style.visibility = shot && shot.chase < 1 ? "hidden" : "";
     this.camera.updateMatrixWorld();
     this.frustum.setFromProjectionMatrix(
       this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
@@ -424,7 +394,7 @@ export class World {
     this.seen.clear();
     for (const r of riders) {
       this.seen.add(r.slot);
-      const { model, label } = this.rider(env, r.slot);
+      const model = this.rider(env, r.slot);
       model.update(r, dt);
       const shown = r.isMe || this.inView(model.mesh.position);
       model.mesh.visible = shown;
@@ -432,23 +402,9 @@ export class World {
         this.detail(model.mesh, r, me);
         model.mesh.updateMatrixWorld();
       }
-      // Name tags for the other riders only.
-      const name = names.get(r.slot) ?? `#${r.slot + 1}`;
-      if (label.textContent !== name) label.textContent = name;
-      const p = this.tag.copy(model.mesh.position);
-      p.y += 2.2;
-      p.project(this.camera);
-      const visible = shown && !r.isMe && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
-      setDisplay(label, visible);
-      if (visible) {
-        label.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
-      }
     }
-    for (const [slot, r] of this.riders) {
-      if (!this.seen.has(slot)) {
-        r.model.mesh.visible = false;
-        setDisplay(r.label, false);
-      }
+    for (const [slot, model] of this.models) {
+      if (!this.seen.has(slot)) model.mesh.visible = false;
     }
 
     env.update({
