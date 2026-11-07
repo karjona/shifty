@@ -25,6 +25,7 @@ import {
 import { isRoomCode, newRoomCode } from "./rooms.ts";
 import type { ServerInfo } from "./servers.ts";
 import { isEventChoice } from "./tickets.ts";
+import { VERSION } from "./version.ts";
 
 export { Matchmaker } from "./matchmaker.ts";
 export { RoomLobby } from "./rooms.ts";
@@ -40,7 +41,14 @@ app.onError((err, c) => {
   return c.json({ error: "internal" }, 500);
 });
 
-app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/health", async (c) => {
+  const servers = await c.env.SERVERS.get(c.env.SERVERS.idFromName("all")).live();
+  return c.json({
+    ok: true,
+    version: VERSION,
+    raceServers: servers.map(({ version, draining }) => ({ version, draining })),
+  });
+});
 
 // Race servers authenticate with the shared secret, not a session.
 const raceServer = async (c: Ctx): Promise<boolean> => {
@@ -58,7 +66,13 @@ app.post("/api/servers/heartbeat", async (c) => {
   const info: ServerInfo = {
     addr: o.addr,
     region: typeof o.region === "string" ? o.region.slice(0, 32) : "unknown",
-    certHash: typeof o.certHash === "string" ? o.certHash.slice(0, 64) : null,
+    version: typeof o.version === "string" ? o.version.slice(0, 32) : "",
+    certHashes: Array.isArray(o.certHashes)
+      ? (o.certHashes as unknown[])
+          .filter((h): h is string => typeof h === "string")
+          .slice(0, 4)
+          .map((h) => h.slice(0, 64))
+      : [],
     rooms: count(o.rooms),
     humans: count(o.humans),
     draining: o.draining === true,

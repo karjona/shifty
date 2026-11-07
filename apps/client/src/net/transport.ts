@@ -13,8 +13,11 @@ export interface JoinTicket {
   token: string;
   room: string;
   webTransportUrl: string;
-  /** Base64 SHA-256 of the server certificate (hash mode), or null (domain mode). */
-  certHash: string | null;
+  /** The race server's release; this client must be the same one. */
+  version: string;
+  /** Base64 SHA-256 of each certificate the server may serve (hash mode);
+   * empty in domain mode. */
+  certHashes: string[];
 }
 
 /** Validates a join ticket from the lobby instead of trusting its shape. */
@@ -25,13 +28,15 @@ export function parseJoinTicket(v: unknown): JoinTicket {
     if (typeof x !== "string" || x === "") throw new Error(`join ticket: missing ${k}`);
     return x;
   };
-  const certHash: unknown = Reflect.get(v, "certHash");
-  if (certHash !== null && typeof certHash !== "string") throw new Error("join ticket: bad certHash");
+  const certHashes: unknown = Reflect.get(v, "certHashes");
+  if (!Array.isArray(certHashes) || !certHashes.every((h): h is string => typeof h === "string"))
+    throw new Error("join ticket: bad certHashes");
   return {
     token: str("token"),
     room: str("room"),
     webTransportUrl: str("webTransportUrl"),
-    certHash: certHash ?? null,
+    version: str("version"),
+    certHashes,
   };
 }
 
@@ -73,8 +78,8 @@ export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Tra
     );
   }
   const options: WebTransportOptions = {};
-  if (ticket.certHash) {
-    options.serverCertificateHashes = [{ algorithm: "sha-256", value: base64ToBytes(ticket.certHash) }];
+  if (ticket.certHashes.length > 0) {
+    options.serverCertificateHashes = ticket.certHashes.map((h) => ({ algorithm: "sha-256", value: base64ToBytes(h) }));
   }
   const wt = new WebTransport(ticket.webTransportUrl, options);
   const timeout = new Promise<never>((_, reject) =>

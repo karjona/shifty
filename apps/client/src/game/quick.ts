@@ -57,6 +57,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
         render: params.get("render") !== "0",
         autopilot: params.get("autopilot") === "1",
         debug: true,
+        onOver: () => location.reload(),
       }),
     );
   } catch (e) {

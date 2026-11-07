@@ -30,6 +30,10 @@ pub struct JoinClaims {
     pub name: String,
     /// Expiry, unix seconds.
     pub exp: u64,
+    /// When the lobby signed the token, unix seconds (0 = unknown). A room
+    /// whose plan is over refuses tokens signed before it ended.
+    #[serde(default)]
+    pub iat: u64,
     /// Room settings, applied when this token creates the room.
     #[serde(default)]
     pub bots: u8,
@@ -219,6 +223,7 @@ mod tests {
             pid: "p_1".into(),
             name: "Kilian".into(),
             exp: 1_000_060,
+            iat: 1_000_000,
             bots: 2,
             surface: 1,
             course: 1,
@@ -304,13 +309,14 @@ mod tests {
     /// for a Grand Prix (see apps/lobby/test/tickets.test.ts).
     #[test]
     fn verifies_a_token_signed_by_the_lobby() {
-        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJib3RzIjo3LCJzdXJmYWNlIjoxLCJjb3Vyc2UiOjAsImV2ZW50cyI6WzAsMV19.eMBZeAYgcGluX_xHlndGuqz7i133iyLf8hPvaRudW2izHmeXo8i8GCs3oagqLWlD-0CCo3RozYJEOvrg1eLeDw";
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXX0.3_soaIfoUK8Ujek_VchbKyUP_9Fzzep3homz5Mz1J0rWm1SkUsVAEEB8Kj1khh6aS7SSpSR8584JgtKMg7M0DA";
         let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
         let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
         assert_eq!(claims.room, "m_test");
         assert_eq!(claims.pid, "user_1");
         assert_eq!(claims.name, "Lord Kylian#0042");
         assert_eq!(claims.bots, 7);
+        assert_eq!(claims.iat, 1_000_000);
         assert_eq!(
             claims.plan(),
             vec![sim::CourseId::Oval, sim::CourseId::Mountain]
@@ -320,7 +326,7 @@ mod tests {
     /// The same Grand Prix with a rider on it (see tickets.test.ts too).
     #[test]
     fn verifies_a_lobby_token_with_a_rider() {
-        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJib3RzIjo3LCJzdXJmYWNlIjoxLCJjb3Vyc2UiOjAsImV2ZW50cyI6WzAsMV0sImxvb2siOiJBUUFCQWdNIiwic2V0dXBzIjpbWzMsMywzLDNdLFs2LDIsMiwyXV19.XDaA_EOm3gHDyjXoHwBse8_f60mZJR3y-N7kyS2SkooOFUNwgEwRFLMUFVp_stLYVQ2zvR2EL2in_2bolS8oBw";
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXSwibG9vayI6IkFRQUJBZ00iLCJzZXR1cHMiOltbMywzLDMsM10sWzYsMiwyLDJdXX0.1tSmr7BgiTu6PSO6_gr6O_t5PqiFcJX9mDsXAyW8lYHBoAn9LD5NKL6NxyeTqhZQhIkQQ607nZsMmVAY-U1JBw";
         let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
         let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
         assert_eq!(claims.look_bytes(), vec![1, 0, 1, 2, 3]);

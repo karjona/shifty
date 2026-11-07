@@ -282,6 +282,7 @@ export const ca: Messages = {
     leave: "Surt de la sala",
     full: "Aquesta sala és plena (4 riders).",
     notReadyError: "Abans tothom ha d'estar a punt.",
+    raceOver: "Aquella cursa ja s'ha acabat.",
     gone: "Aquesta sala ja no existeix.",
     connecting: "Connectant amb la sala…",
   },
@@ -291,7 +292,11 @@ export const ca: Messages = {
     leave: "Surt de la cursa",
     noPause: "Les curses en línia no es pausen.",
     connecting: "Connectant…",
-    gpOver: "El Gran Premi s'ha acabat. Torna-hi o surt.",
+    updated: {
+      title: "Shifty s'ha actualitzat",
+      body: "Torna a carregar la pàgina per córrer amb la versió nova.",
+      reload: "Torna a carregar",
+    },
     joining: "Entrant a la cursa…",
     controls: "Controls",
     help: {
@@ -317,6 +322,7 @@ export const ca: Messages = {
       draining: "el servidor s'està apagant",
       kicked: "desconnectat per inactivitat",
       started: "aquest Gran Premi ja ha començat",
+      over: "aquesta cursa ja s'ha acabat",
     },
   },
   hud: {

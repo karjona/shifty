@@ -35,13 +35,22 @@ jobs:
       - name: Image boots and reports healthy
         run: |
           docker run -d --name rs -p 4433:4433/udp -p 4433:4433/tcp \
-            -e BIND='[::]:4433' -e PUBLIC_ADDR=localhost:4433 \
+            -e PUBLIC_ADDR=localhost:4433 \
             -e LOBBY_PUBLIC_KEY=C8eRicBps7bsA6cb8Py-d84vXBFooZvoNBWeD0odyMo \
             shifty-race-server
           for i in $(seq 1 20); do curl -fs localhost:4433/healthz && break; sleep 1; done
           curl -fs localhost:4433/healthz
           docker image ls shifty-race-server --format '{{.Size}}'
           docker logs rs
+      - name: Image health check passes
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' rs)
+            [ "$status" = healthy ] && break
+            sleep 1
+          done
+          echo "health: $status"
+          test "$status" = healthy
       - name: Image ships license notices
         run: |
           docker cp rs:/usr/share/doc/shifty/. notices/

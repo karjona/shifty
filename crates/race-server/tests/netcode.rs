@@ -85,6 +85,7 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         pid: pid.into(),
         name: pid.to_uppercase(),
         exp: u64::MAX,
+        iat: 0,
         bots,
         surface: surface as u8,
         course: course as u8,

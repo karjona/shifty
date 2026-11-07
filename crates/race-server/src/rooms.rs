@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use protocol::token::JoinClaims;
@@ -16,6 +16,11 @@ use crate::room::{ConnId, RaceReport, Room, RoomConfig};
 
 /// Rooms with no humans for this long shut down.
 const EMPTY_ROOM_TTL: Duration = Duration::from_secs(30);
+/// A room whose plan is over closes this long after (its last snapshots).
+const OVER_LINGER: Duration = Duration::from_secs(5);
+/// Rooms that ended are remembered this long (longer than a join token
+/// lives), so tokens signed before the end can't start the plan again.
+const ENDED_MEMORY_SECS: u64 = 15 * 60;
 const ROOM_INBOX: usize = 1024;
 
 pub enum RoomCmd {
@@ -56,6 +61,8 @@ pub struct Metrics {
 #[derive(Default)]
 pub struct Rooms {
     rooms: Mutex<HashMap<String, RoomHandle>>,
+    /// Rooms whose plan is over, and when it ended (unix seconds).
+    ended: Mutex<HashMap<String, u64>>,
     pub draining: AtomicBool,
     pub metrics: Metrics,
     /// Where finished races go (the lobby reporter), if anywhere.
@@ -76,6 +83,23 @@ impl Rooms {
         self.rooms.lock().expect("rooms lock").len()
     }
 
+    /// Remembers that a room's plan is over, and lets its id go: a token
+    /// signed after the end starts the room afresh.
+    fn ended(&self, room: &str, now_unix: u64) {
+        self.rooms.lock().expect("rooms lock").remove(room);
+        let mut ended = self.ended.lock().expect("ended lock");
+        ended.retain(|_, at| now_unix.saturating_sub(*at) < ENDED_MEMORY_SECS);
+        ended.insert(room.to_owned(), now_unix);
+    }
+
+    /// The room's plan ended after this token was signed.
+    fn ended_since(&self, claims: &JoinClaims, now_unix: u64) -> bool {
+        let ended = self.ended.lock().expect("ended lock");
+        ended
+            .get(&claims.room)
+            .is_some_and(|&at| now_unix.saturating_sub(at) < ENDED_MEMORY_SECS && claims.iat <= at)
+    }
+
     /// Find the room named in the token, creating it (with the token's room
     /// settings) if it does not exist. New rooms are refused while draining.
     pub fn get_or_create(
@@ -87,6 +111,9 @@ impl Rooms {
             && !h.tx.is_closed()
         {
             return Ok(h.clone());
+        }
+        if self.ended_since(claims, now_unix()) {
+            return Err(RejectReason::Over);
         }
         if self.draining.load(Ordering::Relaxed) {
             return Err(RejectReason::Draining);
@@ -112,6 +139,12 @@ impl Rooms {
     }
 }
 
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 fn send(conns: &HashMap<ConnId, mpsc::Sender<Bytes>>, conn: ConnId, bytes: Vec<u8>) {
     if let Some(tx) = conns.get(&conn) {
         // Datagram semantics: if the connection is backed up, drop.
@@ -125,6 +158,7 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
     let mut next = start + tick;
     let mut conns: HashMap<ConnId, mpsc::Sender<Bytes>> = HashMap::new();
     let mut empty_since = Some(Instant::now());
+    let mut over_since: Option<Instant> = None;
     let mut humans = 0usize;
     let now_ms = |at: Instant| at.duration_since(start).as_millis() as u64;
     loop {
@@ -206,6 +240,16 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
             humans = now_humans;
         }
 
+        if room.is_over() {
+            let since = *over_since.get_or_insert_with(|| {
+                info!(room = %room.config.id, "plan over");
+                rooms.ended(&room.config.id, now_unix());
+                now
+            });
+            if now.duration_since(since) > OVER_LINGER {
+                break;
+            }
+        }
         if room.human_count() == 0 {
             let since = *empty_since.get_or_insert(now);
             if now.duration_since(since) > EMPTY_ROOM_TTL {
@@ -214,5 +258,42 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
         } else {
             empty_since = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn claims(room: &str, iat: u64) -> JoinClaims {
+        JoinClaims {
+            v: 1,
+            aud: "test".into(),
+            room: room.into(),
+            pid: "ana".into(),
+            name: "Ana".into(),
+            exp: u64::MAX,
+            iat,
+            bots: 0,
+            surface: 0,
+            course: 0,
+            events: vec![0],
+            look: String::new(),
+            setups: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_ended_room_refuses_tokens_signed_before_the_end() {
+        let rooms = Rooms::default();
+        rooms.ended("r1", 1_000);
+        assert!(rooms.ended_since(&claims("r1", 999), 1_010));
+        assert!(rooms.ended_since(&claims("r1", 1_000), 1_010));
+        assert!(rooms.ended_since(&claims("r1", 0), 1_010));
+        // A token signed after the end starts the room afresh.
+        assert!(!rooms.ended_since(&claims("r1", 1_001), 1_010));
+        assert!(!rooms.ended_since(&claims("r2", 0), 1_010));
+        // Forgotten once no token signed before the end can still be valid.
+        assert!(!rooms.ended_since(&claims("r1", 0), 1_000 + ENDED_MEMORY_SECS));
     }
 }

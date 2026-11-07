@@ -108,6 +108,7 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         pid: pid.into(),
         name: name.into(),
         exp: now_unix() + 10 * 60,
+        iat: now_unix(),
         bots: m.get("bots").map_or(Ok(0), |b| b.parse())?,
         surface: m.get("surface").map_or(Ok(1), |b| b.parse())?,
         course: m.get("course").map_or(Ok(0), |b| b.parse())?,

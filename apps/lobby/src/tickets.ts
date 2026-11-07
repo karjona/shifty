@@ -26,6 +26,8 @@ export interface JoinClaims {
   name: string;
   /** Expiry, unix seconds. */
   exp: number;
+  /** Signed at, unix seconds. */
+  iat: number;
   bots: number;
   surface: number;
   /** First course (older servers read only this). */
@@ -38,12 +40,24 @@ export interface JoinClaims {
   setups?: number[][];
 }
 
+/** The race server a ticket is for. */
+export interface TicketServer {
+  addr: string;
+  /** The release it runs (the client must match it). */
+  version: string;
+  certHashes: string[];
+}
+
 /** What a client needs to join a race. */
 export interface JoinTicket {
   token: string;
   room: string;
   webTransportUrl: string;
-  certHash: string | null;
+  /** The race server's release. */
+  version: string;
+  /** Base64 SHA-256 of each certificate the race server may serve (hash
+   * mode), else empty. */
+  certHashes: string[];
 }
 
 const TOKEN_LIFETIME_SECS = 10 * 60;
@@ -87,7 +101,7 @@ export async function signJoinToken(seedB64: string, claims: JoinClaims): Promis
 }
 
 export interface TicketRequest {
-  server: { addr: string; certHash: string | null };
+  server: TicketServer;
   room: string;
   pid: string;
   name: string;
@@ -106,6 +120,7 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
     pid: req.pid,
     name: req.name,
     exp: Math.floor(nowMs / 1000) + TOKEN_LIFETIME_SECS,
+    iat: Math.floor(nowMs / 1000),
     bots: req.bots,
     surface: 1,
     course: events[0] ?? COURSE.summer,
@@ -117,7 +132,8 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
     token: await signJoinToken(seedB64, claims),
     room: req.room,
     webTransportUrl: `https://${req.server.addr}/race`,
-    certHash: req.server.certHash,
+    version: req.server.version,
+    certHashes: req.server.certHashes,
   };
 }
 

@@ -282,6 +282,7 @@ export const en = {
     leave: "Leave the room",
     full: "This room is full (4 riders).",
     notReadyError: "Everyone has to be ready first.",
+    raceOver: "That race is over.",
     gone: "This room is gone.",
     connecting: "Connecting to the room…",
   },
@@ -291,7 +292,11 @@ export const en = {
     leave: "Leave the race",
     noPause: "Online races don't pause.",
     connecting: "Connecting…",
-    gpOver: "The Grand Prix is over. Race it again, or leave.",
+    updated: {
+      title: "Shifty has been updated",
+      body: "Reload the page to race on the new version.",
+      reload: "Reload",
+    },
     joining: "Joining the race…",
     controls: "Controls",
     help: {
@@ -317,6 +322,7 @@ export const en = {
       draining: "the server is shutting down",
       kicked: "disconnected for inactivity",
       started: "this Grand Prix has already started",
+      over: "this race is over",
     },
   },
   hud: {

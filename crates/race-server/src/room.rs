@@ -3,8 +3,9 @@
 //! the returned packets. This keeps the netcode testable in-process with a
 //! simulated network (see `tests/netcode.rs`).
 //!
-//! A room races its plan: one course over and over, or a Grand Prix (every
-//! course in order, points by finishing place, then from the top again).
+//! A room races its plan once: one course, or a Grand Prix (every course in
+//! order, points by finishing place). After the last race's results the room
+//! is over: it refuses everyone, and the caller closes it.
 
 use std::collections::VecDeque;
 
@@ -100,7 +101,8 @@ pub struct ReportEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RaceReport {
     pub room: String,
-    /// Counts runs through the plan (a Grand Prix raced again is a new round).
+    /// Counts runs through the plan (a plan started again from the top, when
+    /// the first player arrives in a room that bots kept racing, is a new round).
     pub round: u16,
     /// The race's place in the plan.
     pub event: u8,
@@ -194,6 +196,8 @@ pub struct Room {
     /// Which race of the plan is on.
     event_index: usize,
     round: u16,
+    /// The last race's results are done.
+    over: bool,
     pub stats: RoomStats,
 }
 
@@ -216,6 +220,7 @@ impl Room {
             entrants: Default::default(),
             event_index: 0,
             round: 1,
+            over: false,
             stats: RoomStats::default(),
             config,
         };
@@ -240,6 +245,11 @@ impl Room {
 
     pub fn event_index(&self) -> usize {
         self.event_index
+    }
+
+    /// The plan is done: the last race's results are over.
+    pub fn is_over(&self) -> bool {
+        self.over
     }
 
     fn standings_event(&self) -> EventBody {
@@ -327,6 +337,9 @@ impl Room {
         client_time: u16,
         now_ms: u64,
     ) -> Result<(Welcome, Outbox), RejectReason> {
+        if self.over {
+            return Err(RejectReason::Over);
+        }
         let mut out = Outbox::default();
         let existing = self
             .players
@@ -507,9 +520,9 @@ impl Room {
     /// Back to a warm-up before the first race of the plan, with no points.
     fn restart_plan(&mut self) {
         if self.event_index != 0 || self.world.course != self.config.plan[0] {
-            // Past the last race: `next_event` starts a new round at the top.
-            self.event_index = self.config.plan.len() - 1;
-            self.next_event();
+            self.event_index = 0;
+            self.round = self.round.wrapping_add(1);
+            self.load_course();
         }
         for e in self.entrants.iter_mut().flatten() {
             e.points = 0;
@@ -517,21 +530,20 @@ impl Room {
         self.world.restart_warmup();
     }
 
-    /// The results are over: on to the next race of the plan (from the top
-    /// after the last one, as a new round).
-    fn next_event(&mut self) {
-        self.event_index += 1;
-        if self.event_index >= self.config.plan.len() {
-            self.event_index = 0;
-            self.round = self.round.wrapping_add(1);
-            if self.config.grand_prix() {
-                for e in self.entrants.iter_mut().flatten() {
-                    e.points = 0;
-                }
-                let table = self.standings_event();
-                self.broadcast_event(&table, None);
-            }
+    /// The results are over: on to the next race of the plan, or the plan is
+    /// over after the last one.
+    fn results_done(&mut self) {
+        if self.event_index + 1 >= self.config.plan.len() {
+            self.over = true;
+            return;
         }
+        self.event_index += 1;
+        self.load_course();
+    }
+
+    /// A fresh world on the plan's current course (if it changed), with
+    /// every seated rider on the grid.
+    fn load_course(&mut self) {
         let course = self.config.plan[self.event_index];
         if course == self.world.course {
             return;
@@ -622,7 +634,7 @@ impl Room {
         self.world.step(&inputs);
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
-            (Phase::Results, Phase::Warmup) => self.next_event(),
+            (Phase::Results, Phase::Warmup) => self.results_done(),
             _ => {}
         }
 
@@ -700,6 +712,7 @@ mod tests {
             pid: pid.into(),
             name: pid.into(),
             exp: u64::MAX,
+            iat: 0,
             bots,
             surface: SurfaceKind::Flat as u8,
             course: events[0],
@@ -709,16 +722,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_grand_prix_scores_reports_and_moves_on() {
-        let ana = claims("ana", vec![0, 1], 3);
-        let mut room = Room::new(RoomConfig::from_claims(&ana));
-        let mut now = 0u64;
-        room.join(1, &ana, 0, now).unwrap();
+    /// The player on connection 1 idles on the grid while the bots race,
+    /// until `done` (at most eight minutes). Returns the race reports.
+    fn idle_until(room: &mut Room, now: &mut u64, done: impl Fn(&Room) -> bool) -> Vec<RaceReport> {
         let mut reports = Vec::new();
-        // Ana idles on the grid; the bots race. Until the mountain is up.
         for _ in 0..TICK_HZ * 60 * 8 {
-            now += 16;
+            *now += 16;
             let packet = InputPacket {
                 event_ack: 0,
                 last_snapshot_tick: 0,
@@ -726,12 +735,24 @@ mod tests {
                 first_tick: room.tick() + 1,
                 inputs: vec![Input::default()],
             };
-            room.handle_inputs(1, &packet, now);
-            reports.extend(room.step(now).reports);
-            if room.world().course == CourseId::Mountain {
+            room.handle_inputs(1, &packet, *now);
+            reports.extend(room.step(*now).reports);
+            if done(room) {
                 break;
             }
         }
+        reports
+    }
+
+    #[test]
+    fn a_grand_prix_scores_reports_and_moves_on() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        let reports = idle_until(&mut room, &mut now, |r| {
+            r.world().course == CourseId::Mountain
+        });
         assert_eq!(room.world().course, CourseId::Mountain);
         assert_eq!(room.event_index(), 1);
         assert_eq!(room.world().race.phase, Phase::Warmup);
@@ -760,5 +781,22 @@ mod tests {
             Some(RejectReason::Started)
         );
         assert!(room.join(3, &ana, 0, now).is_ok());
+    }
+
+    #[test]
+    fn a_plan_runs_once() {
+        let ana = claims("ana", vec![0], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        let reports = idle_until(&mut room, &mut now, Room::is_over);
+        assert!(room.is_over());
+        assert_eq!(reports.len(), 1, "one race, one report");
+        assert_eq!(room.event_index(), 0);
+        assert_eq!(room.join(1, &ana, 0, now).err(), Some(RejectReason::Over));
+        assert_eq!(
+            room.join(2, &claims("bea", vec![0], 3), 0, now).err(),
+            Some(RejectReason::Over)
+        );
     }
 }

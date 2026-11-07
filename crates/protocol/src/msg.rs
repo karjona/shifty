@@ -19,7 +19,7 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 9;
+pub const PROTOCOL_VERSION: u16 = 10;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -180,6 +180,8 @@ pub enum RejectReason {
     Kicked = 5,
     /// The Grand Prix in this room has started: no new riders until it's over.
     Started = 6,
+    /// The room's plan is over (its last race's results are done).
+    Over = 7,
 }
 
 impl RejectReason {
@@ -191,6 +193,7 @@ impl RejectReason {
             4 => Self::Draining,
             5 => Self::Kicked,
             6 => Self::Started,
+            7 => Self::Over,
             _ => return Err(DecodeError::Invalid("reject reason")),
         })
     }

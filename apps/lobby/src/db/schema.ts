@@ -251,6 +251,8 @@ export const match = pgTable("match", {
   event: text("event").notNull(),
   server: text("server").notNull(),
   createdAt: createdAt(),
+  /** When the last race of its plan finished (rejoining is over). */
+  endedAt: timestamp("ended_at"),
 });
 
 export const matchPlayer = pgTable(

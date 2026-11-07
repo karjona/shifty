@@ -1,6 +1,6 @@
 // Race results reported by race servers. Only matches the lobby started are
 // kept (not single player), and only for that match's players.
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { match, matchPlayer, raceResult } from "./db/schema.ts";
 import { isRecord } from "./json.ts";
@@ -60,6 +60,12 @@ export async function storeReport(db: Db, report: ResultReport): Promise<number>
     .where(eq(match.id, report.room))
     .limit(1);
   if (!m) return 0;
+  const planLength = isEventChoice(m.event) ? courses(m.event).length : 1;
+  if (report.event >= planLength - 1)
+    await db
+      .update(match)
+      .set({ endedAt: new Date() })
+      .where(and(eq(match.id, m.id), isNull(match.endedAt)));
   const pids = report.entries.flatMap((e) => (e.pid ? [e.pid] : []));
   if (pids.length === 0) return 0;
   const players = await db
@@ -82,7 +88,6 @@ export async function storeReport(db: Db, report: ResultReport): Promise<number>
     }));
   if (rows.length === 0) return 0;
   await db.insert(raceResult).values(rows).onConflictDoNothing();
-  const planLength = isEventChoice(m.event) ? courses(m.event).length : 1;
   await pay(db, payouts(report, m, known, planLength));
   return rows.length;
 }

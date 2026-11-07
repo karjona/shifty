@@ -34,9 +34,15 @@ fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// `BIND`: where to listen (UDP for WebTransport, TCP for ops HTTP).
+pub fn bind_from_env() -> Result<SocketAddr> {
+    let bind = env("BIND").unwrap_or_else(|| "[::]:4433".into());
+    bind.parse()
+        .with_context(|| format!("BIND={bind} is not a socket address"))
+}
+
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let bind = env("BIND").unwrap_or_else(|| "[::]:443".into());
         let key = env("LOBBY_PUBLIC_KEY")
             .context("LOBBY_PUBLIC_KEY is required (base64 Ed25519 public key of the lobby)")?;
         let tls = match (env("TLS_CERT"), env("TLS_KEY")) {
@@ -50,10 +56,8 @@ impl Config {
             }
         };
         Ok(Self {
-            bind: bind
-                .parse()
-                .with_context(|| format!("BIND={bind} is not a socket address"))?,
-            public_addr: env("PUBLIC_ADDR").unwrap_or_else(|| "localhost:443".into()),
+            bind: bind_from_env()?,
+            public_addr: env("PUBLIC_ADDR").unwrap_or_else(|| "localhost:4433".into()),
             region: env("REGION").unwrap_or_else(|| "local".into()),
             lobby_url: env("LOBBY_URL"),
             race_server_secret: env("RACE_SERVER_SECRET"),

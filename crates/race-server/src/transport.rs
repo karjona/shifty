@@ -6,8 +6,11 @@
 //! - **Ops over HTTP (TCP):** `/healthz`, `/metrics`, `/cert-hash`. Never
 //!   game traffic.
 
+use std::io::{Read, Write};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::{StatusCode, header};
@@ -113,6 +116,32 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// `race-server healthcheck`: whether `/healthz` on the ops port answers
+/// 200 (it doesn't while draining). Blocking; for container health checks.
+pub fn healthy(bind: SocketAddr) -> bool {
+    let ips = if bind.ip().is_unspecified() {
+        vec![
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ]
+    } else {
+        vec![bind.ip()]
+    };
+    ips.into_iter()
+        .any(|ip| probe(SocketAddr::new(ip, bind.port())).unwrap_or(false))
+}
+
+fn probe(addr: SocketAddr) -> std::io::Result<bool> {
+    let timeout = Duration::from_secs(2);
+    let mut stream = TcpStream::connect_timeout(&addr, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    stream.write_all(b"GET /healthz HTTP/1.0\r\nHost: localhost\r\n\r\n")?;
+    let mut head = Vec::new();
+    stream.take(16).read_to_end(&mut head)?;
+    Ok(head.starts_with(b"HTTP/1.1 200 ") || head.starts_with(b"HTTP/1.0 200 "))
+}
+
 async fn healthz(State(s): State<AppState>) -> Response {
     if s.rooms.draining.load(Ordering::Relaxed) {
         (StatusCode::SERVICE_UNAVAILABLE, "draining").into_response()
@@ -159,9 +188,40 @@ async fn cert_hash(State(s): State<AppState>) -> Response {
     let cert = s.cert.read().await.clone();
     let body = serde_json::json!({
         "algorithm": "sha-256",
-        "hash": cert.sha256_b64,
+        "hash": cert.hashes.first(),
+        "hashes": cert.hashes,
         "expires": cert.expires_unix,
         "publicAddr": s.config.public_addr,
     });
     ([(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(body)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    /// A one-shot server answering with `status_line`.
+    fn answer(status_line: &'static str) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut req = [0u8; 256];
+            let _ = s.read(&mut req);
+            let _ = s.write_all(format!("{status_line}\r\ncontent-length: 2\r\n\r\nok").as_bytes());
+        });
+        addr
+    }
+
+    #[test]
+    fn healthy_only_on_200() {
+        assert!(healthy(answer("HTTP/1.1 200 OK")));
+        assert!(!healthy(answer("HTTP/1.1 503 Service Unavailable")));
+        let closed = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        assert!(!healthy(closed));
+    }
 }

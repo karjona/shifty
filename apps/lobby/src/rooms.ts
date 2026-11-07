@@ -4,8 +4,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
 import { isRecord } from "./json.ts";
-import { FIELD, MAX_HUMANS, NoRaceServer, matchRider, startMatch } from "./matches.ts";
-import { type EventChoice, isEventChoice, type JoinTicket, mintTicket } from "./tickets.ts";
+import { FIELD, MAX_HUMANS, NoRaceServer, matchEnded, matchRider, startMatch } from "./matches.ts";
+import { type EventChoice, isEventChoice, type JoinTicket, mintTicket, type TicketServer } from "./tickets.ts";
 
 export interface RoomSettings {
   code: string;
@@ -14,7 +14,7 @@ export interface RoomSettings {
   bots: number;
   createdAt: number;
   /** The race the room last started, while it may still be running. */
-  race: { room: string; server: { addr: string; certHash: string | null }; userIds: string[]; at: number } | null;
+  race: { room: string; server: TicketServer; userIds: string[]; at: number } | null;
 }
 
 interface Member {
@@ -41,7 +41,7 @@ export type RoomServerMsg =
       racing: string[];
     }
   | { t: "ticket"; ticket: JoinTicket }
-  | { t: "error"; error: "not_host" | "not_ready" | "no_server" | "full" | "bad_message" };
+  | { t: "error"; error: "not_host" | "not_ready" | "no_server" | "full" | "over" | "bad_message" };
 
 /** Codes avoid look-alikes (0/O, 1/I). */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -123,6 +123,17 @@ export class RoomLobby extends DurableObject<Env> {
     return (await this.load()) !== null;
   }
 
+  /** The room's settings, forgetting its race once that race's plan is over. */
+  private async withLiveRace(s: RoomSettings): Promise<RoomSettings> {
+    const race = s.race;
+    if (!race) return s;
+    const stale = Date.now() - race.at > RACE_TTL_MS || !Array.isArray(race.server.certHashes);
+    if (!stale && !(await matchEnded(this.env, race.room))) return s;
+    const next = { ...s, race: null };
+    await this.save(next);
+    return next;
+  }
+
   private sockets(except?: WebSocket): WebSocket[] {
     return this.ctx.getWebSockets().filter((ws) => ws !== except && ws.readyState === WebSocket.OPEN);
   }
@@ -134,8 +145,9 @@ export class RoomLobby extends DurableObject<Env> {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    const s = await this.load();
-    if (!s) return new Response("no such room", { status: 404 });
+    const loaded = await this.load();
+    if (!loaded) return new Response("no such room", { status: 404 });
+    const s = await this.withLiveRace(loaded);
     const userId = request.headers.get("x-shifty-user");
     const handle = decodeURIComponent(request.headers.get("x-shifty-handle") ?? "");
     if (!userId || !handle) return new Response("unauthorized", { status: 401 });
@@ -219,8 +231,12 @@ export class RoomLobby extends DurableObject<Env> {
         await this.start(ws, me, s);
         return;
       case "rejoin": {
-        const race = s.race;
-        if (!race || Date.now() - race.at > RACE_TTL_MS || !race.userIds.includes(me.userId)) return;
+        const race = (await this.withLiveRace(s)).race;
+        if (!race) {
+          this.send(ws, { t: "error", error: "over" });
+          break;
+        }
+        if (!race.userIds.includes(me.userId)) return;
         const ticket = await mintTicket(this.env.LOBBY_SIGNING_KEY, {
           server: race.server,
           room: race.room,
@@ -258,7 +274,11 @@ export class RoomLobby extends DurableObject<Env> {
     }
     const first = tickets.values().next().value;
     if (!first) return;
-    const server = { addr: new URL(first.webTransportUrl).host, certHash: first.certHash };
+    const server: TicketServer = {
+      addr: new URL(first.webTransportUrl).host,
+      version: first.version,
+      certHashes: first.certHashes,
+    };
     await this.save({ ...s, race: { room: first.room, server, userIds: [...tickets.keys()], at: Date.now() } });
     for (const sock of this.sockets()) {
       const m = memberOf(sock);

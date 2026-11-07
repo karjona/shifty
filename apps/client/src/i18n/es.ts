@@ -282,6 +282,7 @@ export const es: Messages = {
     leave: "Salir de la sala",
     full: "Esta sala está llena (4 riders).",
     notReadyError: "Antes tienen que estar todos listos.",
+    raceOver: "Esa carrera ya ha terminado.",
     gone: "Esta sala ya no existe.",
     connecting: "Conectando con la sala…",
   },
@@ -291,7 +292,11 @@ export const es: Messages = {
     leave: "Salir de la carrera",
     noPause: "Las carreras online no se pausan.",
     connecting: "Conectando…",
-    gpOver: "El Gran Premio ha terminado. Vuelve a correrlo o sal.",
+    updated: {
+      title: "Shifty se ha actualizado",
+      body: "Recarga la página para correr con la versión nueva.",
+      reload: "Recargar",
+    },
     joining: "Entrando en la carrera…",
     controls: "Controles",
     help: {
@@ -317,6 +322,7 @@ export const es: Messages = {
       draining: "el servidor se está apagando",
       kicked: "desconectado por inactividad",
       started: "este Gran Premio ya ha empezado",
+      over: "esta carrera ya ha terminado",
     },
   },
   hud: {

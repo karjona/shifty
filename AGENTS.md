@@ -53,14 +53,14 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 ### Jetski (summer)
 
-- **Course:** an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. Rooms loop warm-up → countdown → race → results.
+- **Course:** an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. A race goes warm-up → countdown → race → results.
 - **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
 - **One speed meter, passive:** clean buoy passes fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
 - **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail.
 
 ### Snowboard (winter)
 
-- **Course:** one run down the mountain (~2.2 km, about 90 s), from the summit start hut to the village: wide open slopes with sweeping turns, rollers and tables, tree-lined S-turns past the chairlift, a bench ending in a cliff drop, a winding gully, side kickers, a final pitch. Checkpoints across the run (you can't miss them), then the finish. Rooms loop warm-up → countdown → race → results.
+- **Course:** one run down the mountain (~2.2 km, about 90 s), from the summit start hut to the village: wide open slopes with sweeping turns, rollers and tables, tree-lined S-turns past the chairlift, a bench ending in a cliff drop, a winding gully, side kickers, a final pitch. Checkpoints across the run (you can't miss them), then the finish. A race goes warm-up → countdown → race → results.
 - **The mountain is one height function in `crates/sim/src/mountain.rs`:** slope bands along Z, a valley that follows the run, noise; the run carved into it (a level bench, banked in turns, tables, rollers, a gully, berms where the slope falls away). The client draws the snow from those same heights, so what you see is what you ride.
 - **Gravity is the engine:** carve (the edge turns sideways speed into speed along the board; fast turns are wide), tuck for speed (stick up), sit back to skid and brake (stick down), skate when slow. The board flies wherever the snow falls away faster than gravity can follow (lips, knuckles, the cliff).
 - **Jump button:** hold to crouch and load, let go to pop (bigger the longer you loaded). Letting go at a lip adds to the lip's launch; a few ticks late still pops.
@@ -70,7 +70,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 ### Grand Prix
 
-- A room races a plan: one event over and over, or the **Grand Prix** (summer then winter for now; each season in turn as they're built), then from the top again.
+- A room races a plan once: one event, or the **Grand Prix** (summer then winter for now; each season in turn as they're built). After the last race's results everyone goes back where they came from (the room screen, or mode select), and a room stops offering "rejoin" once its plan is over.
 - Points by finishing place: 10, 8, 6, 5, 4, 3, 2, 1. Tricks don't count. Riders who haven't finished when the race ends get last place's points. The last race breaks ties.
 - Nobody new joins a Grand Prix once its first countdown starts (reconnecting is fine). A rider who leaves keeps the points already reported; a bot takes the seat.
 - Between races the camera lifts off the course while the screen washes into the next season's colours and name, and the next course comes up behind (the simple version of the season change).
@@ -151,24 +151,26 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 
 - One Rust binary, many rooms (one Tokio task per room). Docker image based on distroless, about 10-20 MB.
 - WebTransport with **`web-transport-quinn` + `quinn`** (the stack behind Cloudflare's production MoQ relay).
-- Ports: 443/UDP (WebTransport, all game traffic). 443/TCP serves only ops HTTP (`/healthz`, `/metrics`, `/cert-hash`). Docker needs `-p 443:443/udp` explicitly, or `--network host`.
-- Config through env vars: `LOBBY_URL`, `RACE_SERVER_SECRET`, `REGION`, `PUBLIC_ADDR`, `LOBBY_PUBLIC_KEY`, plus `BIND` (default `[::]:443`), `TLS_CERT`/`TLS_KEY` (domain mode), `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
+- Ports: 4433/UDP (WebTransport, all game traffic). 4433/TCP serves only ops HTTP (`/healthz`, `/metrics`, `/cert-hash`), never published in production. Docker needs `-p 4433:4433/udp` explicitly, or `--network host`. The image's `HEALTHCHECK` runs `race-server healthcheck` (GETs `/healthz` inside the container; 503 while draining).
+- Config through env vars: `LOBBY_URL`, `RACE_SERVER_SECRET`, `REGION`, `PUBLIC_ADDR`, `LOBBY_PUBLIC_KEY`, plus `BIND` (default `[::]:4433`), `TLS_CERT`/`TLS_KEY` (domain mode), `DRAIN_TIMEOUT_SECS`, `RUST_LOG`.
 - Join tokens: `base64url(claims JSON) "." base64url(Ed25519 sig over "shifty-join-v1." + payload)`. Claims carry `aud` = the race server's `PUBLIC_ADDR`, so a token only works on the server it was issued for, `events` (the room's plan of courses), `look` (the rider's appearance bytes, passed on to the room unread) and `setups` (per sport, checked again by the sim). The lobby checks a rider only wears what they own before signing. Every `RiderJoined` event tells the room each rider's look and setups (clients need the setups to predict them), and bots dress alike on every screen. Format lives in `crates/protocol/src/token.rs`; the lobby signs them (`apps/lobby/src/tickets.ts`; a test pins one token both sides must agree on). `scripts/dev-lobby.ts` signs dev quick-race tickets with the same dev key.
 - Paths: WebTransport `/race`; ops HTTP `/healthz`, `/metrics`, `/cert-hash`.
 - On boot it registers with the lobby and sends heartbeats (region, load).
 - Verifies join tokens with the lobby's **public key only**. A race server can check tokens but never create them.
-- Heartbeats to the lobby every 5 s (address, region, certificate hash, rooms, humans, draining) and reports every finished race (`POST /api/servers/results`, retried), both with the shared `RACE_SERVER_SECRET`. **Race servers never touch Postgres.**
-- Graceful shutdown on SIGTERM: no new rooms, finish current races, then exit.
+- Heartbeats to the lobby every 5 s (address, region, version, certificate hashes, rooms, humans, draining) and reports every finished race (`POST /api/servers/results`, retried), both with the shared `RACE_SERVER_SECRET`. **Race servers never touch Postgres.**
+- Versions must match: the lobby only sends players to race servers of its own version (the Cargo workspace version, one for the whole game), tickets carry it, and a client on another build asks the player to reload instead of racing.
+- A room closes a few seconds after its plan ends, and for 15 minutes refuses tickets issued before the end (`iat` in the claims).
+- Graceful shutdown on SIGTERM: no new rooms, wait for the current plans to end (`DRAIN_TIMEOUT_SECS`, 900 by default), then exit.
 - `/healthz`, logs to stdout, tick-time metrics.
 - TLS, two modes:
   - **Domain mode:** real certificate (Let's Encrypt) mounted into the container.
-  - **Hash mode:** short-lived self-signed cert generated at boot, hash sent to the lobby, browsers trust it via `serverCertificateHashes`. No domain needed (LAN, friend's PC). ECDSA P-256, valid 13 days (Chrome rejects more than 14), rotated every 6 days without dropping sessions.
+  - **Hash mode:** short-lived self-signed cert generated at boot, hash sent to the lobby, browsers trust it via `serverCertificateHashes`. No domain needed (LAN, friend's PC). ECDSA P-256, valid 13 days (Chrome rejects more than 14), rotated every 6 days without dropping sessions. The next certificate is made an hour before the switch: heartbeats and tickets carry every live hash (the current one first), so tickets signed around the switch still connect.
 
 ### Lobby
 
 - `apps/lobby`: a Worker (Hono) with **Better Auth** (GitHub OAuth and email one-time codes, sessions in Postgres, the admin plugin for roles and bans) on **Drizzle + Postgres** (`src/db/schema.ts`; migrations in `drizzle/`, made with `pnpm --filter lobby db:generate`). Postgres comes from Hyperdrive in production, `DATABASE_URL` in dev and self-hosting.
-- Durable Objects: `RoomLobby` (one per room code: members over hibernatable WebSockets, host settings, ready, start), `Matchmaker` (the Grand Prix queue: a race starts with four, or when the first in line has waited `MATCH_WAIT_SECS`, 20 by default; bots fill the seats), `ServerRegistry` (race servers from their heartbeats; picks the least busy).
-- API under `/api`: `auth/*` (Better Auth), `me` (with the rider: appearance, setups, credits, owned items), `me/handle`, `me/card`, `me/rider`, `me/setups`, `me/earnings`, `shop/buy`, `content`, `play/single`, `rooms`, `rooms/:code/ws`, `matchmaking/ws`; race servers use `servers/heartbeat` and `servers/results` (which also pays the race's credits). Our own endpoints only take requests from the game's origin.
+- Durable Objects: `RoomLobby` (one per room code: members over hibernatable WebSockets, host settings, ready, start), `Matchmaker` (the Grand Prix queue: a race starts with four, or when the first in line has waited `MATCH_WAIT_SECS`, 20 by default; bots fill the seats), `ServerRegistry` (race servers from their heartbeats; picks the least busy one on the lobby's version).
+- API under `/api`: `health` (the lobby's version and the live race servers' versions, no addresses), `auth/*` (Better Auth), `me` (with the rider: appearance, setups, credits, owned items), `me/handle`, `me/card`, `me/rider`, `me/setups`, `me/earnings`, `shop/buy`, `content`, `play/single`, `rooms`, `rooms/:code/ws`, `matchmaking/ws`; race servers use `servers/heartbeat` and `servers/results` (which also pays the race's credits). Our own endpoints only take requests from the game's origin.
 - Secrets: `BETTER_AUTH_SECRET`, `LOBBY_SIGNING_KEY` (Ed25519 seed for join tokens), `RACE_SERVER_SECRET`, `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`; `BETTER_AUTH_URL` is the public origin. Email: `MAIL_MODE=console` prints codes (dev); production sends them through Cloudflare Email Service (the `EMAIL` binding, from `MAIL_FROM` = `noreply@4shifty.gg`; `4shifty.gg` is onboarded for sending). workerd has no Email Service, so self-hosted lobbies log the codes as errors for now. `DEV_MAILBOX=1` (dev and tests only) exposes the last code per address at `/api/dev/mailbox`. `SIGNUPS=open` lets anyone make an account; otherwise new accounts need an invite code (`src/invites.ts`, the `invite` table).
 - Client and lobby share one origin (the lobby serves `/api`), so the session cookie just works.
 - TypeScript Worker + Durable Objects. Runs on Cloudflare, or self-hosted with **`workerd`** (Cloudflare's open-source runtime) in Docker. Same code.
@@ -181,7 +183,7 @@ Browser (Vite + Three.js + TypeScript, Rust sim compiled to WASM)
 |---|---|---|
 | Client | Cloudflare (the lobby Worker's static assets) | workerd |
 | Lobby | Cloudflare (Workers + Durable Objects) | workerd in Docker |
-| Race server | VPS with UDP (provider TBD) | Docker anywhere |
+| Race server | Hetzner CX23 (Nuremberg) running Coolify: `eu1.4shifty.gg` (DNS-only, UDP 4433), project Shifty, app `race-server-eu1`, image `ghcr.io/karjona/shifty-race-server` (`:live` is what runs) | Docker anywhere |
 | Postgres | Neon (Frankfurt), reached through Hyperdrive | Docker |
 
 Self-hosting target: `docker compose up` runs workerd + race-server + postgres.
@@ -244,7 +246,8 @@ Blender runs headless for asset work: `/Applications/Blender.app/Contents/MacOS/
 - **Checks:** `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo deny check`, `pnpm audit`, `pnpm check:determinism`, `pnpm lint`, `pnpm fmt:check`, `pnpm typecheck`, `pnpm --filter lobby test`, `pnpm --filter @shifty/rider test`, `pnpm test:e2e` (menus against the real lobby, and the netcode). CI runs all of them on every PR. The race server image (`.github/workflows/image.yml`) builds on every push to `main`, and on PRs only when packaging changes (Dockerfile, Cargo manifests and lockfile, toolchain, notices config). CI actions are pinned by commit SHA (with the version in a comment).
 - **Tooling:** pnpm, TypeScript 7 (the Go-native `tsc`), Vite 8, **oxlint** (type-aware) and **oxfmt** for TS/JSON/MD/CSS. Their configs changed a lot recently: read the current docs before changing `.oxlintrc.json` / `.oxfmtrc.json`. Rust: rustfmt + clippy, toolchain pinned in `rust-toolchain.toml`.
 - **WASM:** `pnpm build:wasm` (cargo + `wasm-bindgen` CLI, which must match the `wasm-bindgen` version in `Cargo.lock`). Generated files in `apps/client/src/wasm/` are not committed.
-- **Deploy (lobby + client):** the game lives at `https://23.4shifty.gg` (`4shifty.gg` and `www` redirect there). From Kilian's machine for now: `pnpm build`, then `pnpm --filter lobby exec wrangler deploy --secrets-file ../../.dev/prod.env` (the Worker serves `apps/client/dist`; production secrets live in `.dev/prod.env`, the race server's settings in `.dev/prod-race-server.env`, both gitignored). Migrate Neon first when the schema changed: `pnpm --filter lobby db:migrate` with `.dev/neon.env` loaded.
+- **Deploy:** the game lives at `https://23.4shifty.gg` (`4shifty.gg` and `www` redirect there). Merging the release-please PR publishes the release, and `.github/workflows/deploy.yml` deploys it: the race server image to GHCR (`ghcr.io/karjona/shifty-race-server:X.Y.Z`), Neon migrations, `wrangler deploy` (the Worker, which serves `apps/client/dist`), then the race server through Coolify (moves `:live` to the version, redeploys, and waits until the lobby sees it; the old server finishes its races first). To redeploy or roll back, run Deploy on a release tag. Secrets live in the GitHub `production` environment (tags `v*` only): `CLOUDFLARE_API_TOKEN` (account token, Workers Editor on `shifty-lobby` only), `NEON_DATABASE_URL`, `COOLIFY_TOKEN` (deploy-only); variables `CLOUDFLARE_ACCOUNT_ID`, `COOLIFY_URL`, `COOLIFY_APP_UUID`. Worker secrets and the race server's env vars are set once by hand (`wrangler secret put`, the Coolify app); their values live in `.dev/prod.env` and `.dev/prod-race-server.env` (gitignored). By hand, if ever needed: `pnpm build`, then `pnpm --filter lobby exec wrangler deploy --secrets-file ../../.dev/prod.env`, and `pnpm --filter lobby db:migrate` with `.dev/neon.env` loaded.
+- **Migrations must keep working with the previous release's code** (add first, drop a release later): the old Worker keeps serving while a deploy runs.
 - **Containers:** Kilian's Mac has no Docker; use Apple's `container` CLI (Docker-compatible): `container build -f crates/race-server/Dockerfile -t shifty-race-server .`. For UDP from the host use `127.0.0.1`, not `::1`.
 - **Git:** never push to `main`. Work on a branch per piece of work and open a PR; PRs are squash-merged, so the PR title becomes the commit on `main`.
   - **PR titles are Conventional Commits** (`feat: …`, `fix(netcode): …`), checked in CI by commitlint. Scopes (optional): `sim`, `protocol`, `netcode`, `server`, `client`, `lobby`, `devkit`, `art`, `audio`, `ci`, `deps`. Local commits are checked too, by a lefthook `commit-msg` hook that `pnpm install` sets up.
