@@ -1,6 +1,6 @@
 # 23.4° Shifty
 
-23.4° Shifty is an online web game that aims to recreate the great skate, waterski, and snowboarding games of the fifth and sixth console generation era.
+23.4° Shifty is an online web game that aims to recreate the great jetski and snowboarding games of the fifth and sixth console generation era.
 
 ## GitHub Game Off 2026
 
@@ -14,28 +14,30 @@ Kilian is in charge of direction, production, vibes, taste, etc. but all code an
 
 ### Concept: one place, four seasons
 
-Following the "shift" theme, we have devised a "Shifting Seasons" arch: a **grand prix** where each event is one season with a different sport. The season does **not** change during a race.
+Following the "shift" theme, we have devised a "Shifting Seasons" arch: a **Grand Prix** is one year in Costa Nevada, one race per season: summer → fall → winter → spring. Two sports for the jam:
 
-| Order in grand prix | Season | Sport | Inspired by | Where |
-|---|---|---|---|---|
-| 1 | Summer | Jetski | Wave Race 64, Wave Race: Blue Storm | Beach / sea |
-| 2 | Fall | Skateboard | EA's skate (grounded, flick-it controls), the more grounded parts from Tony Hawk | Town |
-| 3 | Winter | Snowboard | 1080° Snowboarding, the more grounded parts from SSX Tricky | Mountain |
-| 4 | Spring | Downhill mountain bike | No Fear Downhill Mountain Biking, Downhill Domination | Forest trails |
+| Sport | Inspired by | Where | Seasons |
+|---|---|---|---|
+| Jetski | Wave Race 64, Wave Race: Blue Storm | The sea | All four |
+| Snowboard | 1080° Snowboarding, the more grounded parts from SSX Tricky | The mountain | Fall, winter, spring (no snow in summer) |
 
+- **A circuit is a place, not a season.** Any circuit can come up in any season its sport rides, in any weather and at any time of day (see Conditions). The season does **not** change during a race; the weather can.
 - **Tone: grounded**, not over-the-top. Arcadey feel, but not juvenile humor or grinding on a lava pit. No sim either. Happy, fun in-between.
-- **Location:** one "place" (region) for the jam: **Costa Nevada** ("snowy coast"), a fictional region where the beach and the ski slopes are close together. It can feel Mediterranean or Californian (there's a Sierra Nevada in Spain and in California). Each event uses its own part of it; it does **not** have to be the same circuit in every season.
-- **Season transitions:** at the end of an event the camera pulls back over the whole place and time-lapses into the next season (inspired by Forza Horizon). This is how the theme shows.
-- More locations later, if the jam version is fun.
+- **Location:** one "place" (region) for the jam: **Costa Nevada** ("snowy coast"), a fictional region where the beach and the ski slopes are close together. It can feel Mediterranean or Californian (there's a Sierra Nevada in Spain and in California). Each circuit is its own part of it.
+- **Season transitions:** at the end of a race the camera pulls back over the whole place and time-lapses into the next season (inspired by Forza Horizon). This is how the theme shows.
+- Skateboard (EA's skate) and downhill mountain bike (No Fear, Downhill Domination) are out for the jam. Maybe later, like more locations, if the jam version is fun.
 
 ### Build order
 
 1. **Make it work**: foundation and netcode first (a box riding a plane, two browsers, a server-authoritative room, client prediction).
-2. Jetski (summer)
-3. Snowboard (winter)
+2. Jetski (the bay)
+3. Snowboard (the mountain)
 4. Menus and customization
-5. Skate (fall)
-6. Downhill bike (spring)
+5. Polish both sports: audio, real jetskis and boards, feel (tricks, landings, particles, camera)
+6. Conditions: season, weather and time of day on every circuit
+7. More circuits, enough for a Grand Prix without repeats
+8. The full season change: the camera pulls back over Costa Nevada while the season time-lapses
+9. Time trial with ghosts
 
 ## Gameplay
 
@@ -45,32 +47,45 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 ### Design notes
 
-- **Gamepad-first.** skate-style flick tricks need analog sticks. The Gamepad API works in all browsers. Keyboard must work, but second-class citizen.
-- **Physics per sport.** Grounded means each sport has its own model: water and buoyancy (jetski), edge carving (snow), board flip physics (skate), suspension and traction (bike).
+- **Gamepad-first.** Carving, leaning and trick input need analog sticks. The Gamepad API works in all browsers. Keyboard must work, but second-class citizen.
+- **Physics per sport.** Grounded means each sport has its own model: water and buoyancy (jetski), edge carving (snow).
 - **Tricks never make you faster**, in any sport: races are won on the line and the clock. Tricks score style points (what style earns is decided later, maybe customization), and a bail still costs you.
 - **Split times:** at every checkpoint (and the finish) the HUD shows your gap to the first rider through it, or your time if you are first.
 - **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2.
 
-### Jetski (summer)
+### Jetski
 
-- **Course:** an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. A race goes warm-up → countdown → race → results.
+- **The bay** (the first circuit): an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. A race goes warm-up → countdown → race → results.
 - **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
 - **One speed meter, passive:** clean buoy passes fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
 - **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail.
 
-### Snowboard (winter)
+### Snowboard
 
-- **Course:** one run down the mountain (~2.2 km, about 90 s), from the summit start hut to the village: wide open slopes with sweeping turns, rollers and tables, tree-lined S-turns past the chairlift, a bench ending in a cliff drop, a winding gully, side kickers, a final pitch. Checkpoints across the run (you can't miss them), then the finish. A race goes warm-up → countdown → race → results.
+- **The mountain run** (the first circuit): one run down the mountain (~2.2 km, about 90 s), from the summit start hut to the village: wide open slopes with sweeping turns, rollers and tables, tree-lined S-turns past the chairlift, a bench ending in a cliff drop, a winding gully, side kickers, a final pitch. Checkpoints across the run (you can't miss them), then the finish. A race goes warm-up → countdown → race → results.
 - **The mountain is one height function in `crates/sim/src/mountain.rs`:** slope bands along Z, a valley that follows the run, noise; the run carved into it (a level bench, banked in turns, tables, rollers, a gully, berms where the slope falls away). The client draws the snow from those same heights, so what you see is what you ride.
 - **Gravity is the engine:** carve (the edge turns sideways speed into speed along the board; fast turns are wide), tuck for speed (stick up), sit back to skid and brake (stick down), skate when slow. The board flies wherever the snow falls away faster than gravity can follow (lips, knuckles, the cliff).
 - **Jump button:** hold to crouch and load, let go to pop (bigger the longer you loaded). Letting go at a lip adds to the lip's launch; a few ticks late still pops.
 - **Tricks only score points** (no speed meter): the trick button + stick spins (in 180s) and flips, the grab button grabs (the stick picks Indy, nose, tail, melon or method). Let go and the rider finishes toward the nearest way to land, forward or switch. Land along the direction of travel, flat on the slope and not still grabbing, or you fall. In between is **sketchy**: a little crooked, or slammed into the snow, and you lose some speed, wobble for a moment (weaker edge, no loading a jump) and the trick scores half. Trees, rocks and lift towers knock you down.
 - **Look:** 1080° Avalanche framing. The camera is close and low, the rider fills about half the screen's height, the view tips down the slope so the snow rushing past fills the screen to about a third from the top, the horizon leans with the slope, and in the air the camera's height lags so the rider drops in the frame.
-- **Snow you can read:** a low sun ahead of the riders, shade baked into faces that rise toward you and into hollows (so rollers and kickers show even in flat light), blue dye lines on lips, knuckles and the cliff edge, old tracks streaking down the run, and every board carves a fading track of its own. Fog closes in at a few hundred metres.
+- **Snow you can read:** the sun ahead of the riders, shade baked into faces that rise toward you and into hollows (so rollers and kickers show even in flat light), blue dye lines on lips, knuckles and the cliff edge, old tracks streaking down the run, and every board carves a fading track of its own. Fog closes in at a few hundred metres.
+
+### Conditions
+
+- **A race is a circuit plus its conditions:** season, weather and time of day. The circuit is only the place (terrain, buoys, scenery). Conditions are picked for each race and carried in the room's plan; the server draws them from a seed, so every screen agrees. In a room the host picks the circuit and its conditions, or leaves them to the draw; single player and matchmaking draw them.
+- **Seasons:** the jetski rides all four, the snowboard fall, winter and spring (no snow in summer).
+- **Weather follows the season's climate:** each season draws from its own weathers (storms mostly in fall, no snowfall in summer).
+- **Time of day:** dawn to dusk. No night races for now: they need real lights and make the snow hard to read.
+- **What touches the physics lives in the sim**, deterministic like the rest: swell size and direction, wind, the snow's type (powder, packed, slush) and how deep it covers the ground. Everything else is a look driven by shader values: snow line, foliage, sea colour, sky, sun, rain, falling snow, fog.
+- **The sun's height follows the season** (the 23.4° tilt at work): Costa Nevada sits at about 37°N, like Spain's Sierra Nevada, so the noon sun stands about 76° high in summer, 53° at the equinoxes and 30° in winter.
+- **On the mountain**, fall is early season: a thin cover, a white run through brown slopes, rocks poking through that knock you down. Winter is powder, falling snow and a low sun. Spring is hard snow up top and slush below (slow and grippy), with green meadows by the lower run.
+- **On the water**, the cold puts snow on the hills down to the shore and the riders in cold-water gear: always in winter, and in cold weather in fall and spring.
+- **The weather can change during a race** (the season never does): on the water a storm builds lap by lap (swell, wind, rain); on the mountain the weather and the snow change with altitude (cloud and wind at the top, sun below; in spring, hard snow above and slush below). In the sim it's a function of race time and position, so it stays deterministic.
+- **Every circuit is built for every season it can come up in.** Snow cover, foliage, water and light follow the conditions' values (snow settles on upward faces above the snow line), never painted per season. Every combination keeps the snow readable and holds 60 fps, the heaviest one (a storm at dusk) included.
 
 ### Grand Prix
 
-- A room races a plan once: one event, or the **Grand Prix** (summer then winter for now; each season in turn as they're built). After the last race's results everyone goes back where they came from (the room screen, or mode select), and a room stops offering "rejoin" once its plan is over.
+- A room races a plan once: one event, or the **Grand Prix**: a year, summer → fall → winter → spring, one race per season. Each race draws a circuit that suits its season (summer is always on the water) and its weather from the season's climate, **every Grand Prix has both sports** (summer is always on the water, so at least one of the other three is on the mountain), and **no circuit repeats** in a Grand Prix, so a year takes at least four circuits (until there are, it's summer on the bay, then winter on the mountain). After the last race's results everyone goes back where they came from (the room screen, or mode select), and a room stops offering "rejoin" once its plan is over.
 - Points by finishing place: 10, 8, 6, 5, 4, 3, 2, 1. Tricks don't count. Riders who haven't finished when the race ends get last place's points. The last race breaks ties.
 - Nobody new joins a Grand Prix once its first countdown starts (reconnecting is fine). A rider who leaves keeps the points already reported; a bot takes the seat.
 - Between races the camera lifts off the course while the screen washes into the next season's colours and name, and the next course comes up behind (the simple version of the season change). The same season card covers a race's first course while it loads.
@@ -90,7 +105,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 
 - **Your rider from presets, no sliders** (Mii Maker, Tony Hawk's create-a-skater): male or female, then a row of presets per part: skin (6), hair (5 per body), hair colour (6), eyes, eye colour, eyebrows, nose, mouth (5 each), beard and moustache (5, male only), height and build (5 each). Every body and face preset is free from the start, and you can change them any time. New players make their rider right after picking their handle.
 - **Looks never touch the physics:** every body rides with the same hitbox and the same speed.
-- **Clothes and gear per sport**, with made-up Costa Nevada brands named after the Mediterranean winds (Tramuntana, Garbí, Llevant, Xaloc, Ponent). Summer: head, eyes, top, life vest, bottom, feet, jetski. Winter: head, eyes, top, bottom, hands, feet, board. Each item is a model in one colourway (main, second and accent colours). Everyone starts with a free starter kit that already gives some variety, and **gear is cosmetic only**. Your summer and winter kits swap with the season in a Grand Prix.
+- **Clothes and gear per sport**, with made-up Costa Nevada brands named after the Mediterranean winds (Tramuntana, Garbí, Llevant, Xaloc, Ponent). Jetski (`summer` in the catalog): head, eyes, top, life vest, bottom, feet, jetski. Snowboard (`winter`): head, eyes, top, bottom, hands, feet, board. Each item is a model in one colourway (main, second and accent colours). Everyone starts with a free starter kit that already gives some variety, and **gear is cosmetic only**. Your jetski and snowboard kits swap with the sport in a Grand Prix. The jetski kit also needs cold-water gear for cold conditions (see Conditions); how it's picked and shown isn't designed yet.
 - **Setups:** every rider spreads the same 12 points over speed, handling, stability and tricks (0-6 each), per sport. A point is a small change (top speed about 0.6%, turns and grip 4%, landing tolerance 8%, rotation speed 6%), so a setup is a style, not an advantage, and the budget is never earned. Set before entering a match; a match keeps the setups it started with (no changes between seasons). `cargo run -p sim --example setup_lab --release` races bots with each setup to keep them fair (racing builds within about ±0.6% of balanced).
 - **The catalog, looks, setups and appearance bytes live in `packages/rider`** (`@shifty/rider`, shared by the client and the lobby). Item numbers are stable forever: add items at the end, never reuse a number.
 - Riders are modelled in Blender (`art/rider/`; the head comes from MakeHuman's CC0 assets) with painted and baked textures and heroic proportions, exported to `apps/client/public/riders/` and drawn in the cel look. The same riders ride in races (`render/rider.ts` on the jetski, `render/boarder.ts` on the board, poses in `render/rider/ride.ts`); jetskis and boards are still boxes in the colours of the rider's ride. Both bodies are modelled, each with its five hair styles and both starter kits; an item whose model isn't built yet shows the starter's model in its own colours where the slot is required, and nothing elsewhere. The bodies share one builder (`art/rider/figure.py`; their tables in `male.py` and `female.py`), both 1.78 m tall, scaled to the height presets in the game; hair styles are in `art/rider/hairdo.py`. Eye, nose and mouth presets are MakeHuman shape targets (morph targets on the face), each with its own paint over the face (ink lines, the iris, and how its shape moves the shade line); brows and beards are painted overlays in the hair's colour.
