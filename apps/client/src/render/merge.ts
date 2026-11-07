@@ -50,7 +50,11 @@ export function mergeStatic(root: THREE.Object3D, { cell = 160, maxVertices = 60
   for (const meshes of batches.values()) {
     if (meshes.length < 2) continue;
     const first = meshes[0]!;
-    const geometries = meshes.map((m) => m.geometry.clone().applyMatrix4(toRoot.clone().multiply(m.matrixWorld)));
+    const geometries = meshes.map((m) => {
+      const g = m.geometry.clone().applyMatrix4(toRoot.clone().multiply(m.matrixWorld));
+      g.clearGroups();
+      return g;
+    });
     const merged = mergeGeometries(geometries);
     for (const g of geometries) g.dispose();
     if (!merged) continue;
@@ -69,7 +73,8 @@ export function mergeStatic(root: THREE.Object3D, { cell = 160, maxVertices = 60
 
 function mergeable(o: THREE.Mesh, maxVertices: number): boolean {
   if (o instanceof THREE.InstancedMesh || o instanceof THREE.SkinnedMesh) return false;
-  if (Array.isArray(o.material) || o.geometry.groups.length > 0) return false;
+  // (With one material, a geometry's groups don't matter: it is drawn whole.)
+  if (Array.isArray(o.material)) return false;
   if (Object.keys(o.geometry.morphAttributes).length > 0) return false;
   if ((o.geometry.attributes.position?.count ?? 0) > maxVertices) return false;
   // A mirrored transform would turn the faces inside out.

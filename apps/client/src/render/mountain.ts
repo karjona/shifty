@@ -693,7 +693,7 @@ export class Mountain implements Environment {
     this.gridHeights = new Float32Array(nx * nz);
     for (let i = 0; i < nx * nz; i++) this.gridHeights[i] = data[i * 2]!;
     const mat = snowMaterial(false);
-    const TILE = 32;
+    const TILE = 64;
     for (let tz = 0; tz < nz - 1; tz += TILE) {
       for (let tx = 0; tx < nx - 1; tx += TILE) {
         const ex = Math.min(nx - 1, tx + TILE);

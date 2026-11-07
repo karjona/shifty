@@ -88,7 +88,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     pipeline.needsUpdate = true;
   };
   /** Draw calls in one frame, by what they draw into. */
-  const passes = (detail = false) => {
+  const passes = (detail: boolean | 2 = false) => {
     const counts: Record<string, number> = {};
     const backend = renderer.backend;
     const original: unknown = Reflect.get(backend, "draw");
@@ -108,6 +108,11 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
             if (object instanceof THREE.InstancedMesh) kind += ` x${object.count}`;
           }
           if (object.userData.outline) kind += " hull";
+          const m: unknown = object instanceof THREE.Mesh ? object.material : null;
+          if (detail === 2 && m instanceof THREE.Material) {
+            const c: unknown = Reflect.get(m, "color");
+            kind += ` ${m.type}${c instanceof THREE.Color ? ` #${c.getHexString()}` : ""} ${object.parent?.type ?? ""}`;
+          }
           const key = `${pass} | ${kind}`;
           counts[key] = (counts[key] ?? 0) + 1;
         }
