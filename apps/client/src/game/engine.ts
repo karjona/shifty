@@ -27,6 +27,19 @@ export interface ViewSettings {
 
 const SETTINGS_KEY = "shifty.view";
 
+/** A frame later than this (ms) is a stall. */
+const STALL_MS = 100;
+/** Drawing has settled once it has gone this long (ms) without a stall. */
+const SETTLE_MS = 800;
+/** Nothing waits longer than this (ms) for drawing to settle (a slow machine never does). */
+const SETTLE_MAX_MS = 8000;
+
+/** Someone waiting for drawing to settle, since `since` (ms). */
+interface Settling {
+  since: number;
+  resolve: () => void;
+}
+
 export function loadViewSettings(): ViewSettings {
   let saved: unknown = null;
   try {
@@ -58,6 +71,9 @@ export class Engine {
   /** Warm-ups running or queued: nothing is drawn while there are any. */
   private warming = 0;
   private warmed: Promise<void> = Promise.resolve();
+  /** When the current run of frames without a stall began (null: none is running). */
+  private smoothSince: number | null = null;
+  private settling: Settling[] = [];
 
   readonly wasm: InitOutput;
 
@@ -123,8 +139,8 @@ export class Engine {
       .finally(() => {
         if (--this.warming > 0) return;
         setBusy(false);
-        // Once the first backdrop has been drawn, the page is up.
-        requestAnimationFrame(() => requestAnimationFrame(booted));
+        // Once the first backdrop draws smoothly, the page is up.
+        void this.settled().then(booted);
       });
     this.warmed = run;
     return run;
@@ -148,11 +164,43 @@ export class Engine {
     saveViewSettings(this.view);
   }
 
+  /**
+   * Resolves once frames have been drawn for a while without a stall: what
+   * the first frames of something new still do (the few shaders a warm-up
+   * can't reach, uploads, the clean-up after loading) is over.
+   */
+  settled(): Promise<void> {
+    if (!this.render) return Promise.resolve();
+    return new Promise((resolve) => {
+      const waiter = { since: performance.now(), resolve };
+      this.settling.push(waiter);
+      setTimeout(() => this.settle(waiter), SETTLE_MAX_MS);
+    });
+  }
+
+  private settle(waiter: Settling): void {
+    const i = this.settling.indexOf(waiter);
+    if (i < 0) return;
+    this.settling.splice(i, 1);
+    waiter.resolve();
+  }
+
   private frame(now: number): void {
-    const dt = Math.min(0.1, (now - this.last) / 1000);
+    const gap = now - this.last;
+    const dt = Math.min(0.1, gap / 1000);
     this.last = now;
-    if (this.warming > 0) return;
+    if (this.warming > 0) {
+      this.smoothSince = null;
+      return;
+    }
     if (this.stage) this.stage.frame(now, dt);
     else if (this.render) this.world.renderer.render(this.world.scene, this.world.camera);
+    const end = performance.now();
+    if (gap > STALL_MS || end - now > STALL_MS) this.smoothSince = null;
+    else this.smoothSince ??= end;
+    const since = this.smoothSince;
+    if (since === null) return;
+    const done = this.settling.filter((w) => end - Math.max(since, w.since) >= SETTLE_MS);
+    for (const w of done) this.settle(w);
   }
 }

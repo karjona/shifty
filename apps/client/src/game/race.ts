@@ -142,6 +142,8 @@ export class RaceSession implements Stage {
   private card: SeasonCard | null = null;
   /** The course on screen is built and ready to draw. */
   private ready = false;
+  /** ...and draws smoothly: its card is coming off. */
+  private shown = false;
   private debug: ReturnType<typeof createDebugPanel> | null = null;
   private fps = { frames: 0, since: performance.now(), bytesIn: 0, bytesOut: 0, at: performance.now() };
   readonly state: RaceState = {
@@ -333,6 +335,7 @@ export class RaceSession implements Stage {
     this.mapRoot.replaceChildren();
     if (!render) return;
     this.ready = false;
+    this.shown = false;
     const old = this.env;
     if (course.sport === "snow") {
       this.env = new Mountain(course.run, {
@@ -365,9 +368,9 @@ export class RaceSession implements Stage {
     await Promise.race([Promise.all(riders.map((r) => r.ready)), late]);
     if (this.env !== env || this.stopped) return;
     this.ready = true;
-    // The first frame still compiles a few shaders the warm-up can't reach (shadows, the ink pass's own):
-    // it is drawn before the course shows.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // It draws behind the card until it runs smoothly.
+    await engine.settled();
+    if (this.env === env && !this.stopped) this.shown = true;
   }
 
   /** The HUD is off while a season card is up. */
@@ -519,7 +522,7 @@ export class RaceSession implements Stage {
         standings: () => (this.client ? parseStandings(this.client.standingsJson()) : []),
         names: () => Object.fromEntries(this.names),
         grandPrix: () => Object.fromEntries(this.gpPoints),
-        ready: () => this.ready,
+        ready: () => this.shown,
         setInput: (v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null) => {
           this.input.forced = v;
         },
