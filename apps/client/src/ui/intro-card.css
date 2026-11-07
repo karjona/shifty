@@ -1,0 +1,140 @@
+/* The race's title card (see intro-card.ts): a paper panel low on the left,
+   over the fly-over. It shows even while the rest of the HUD is hidden. */
+.intro-card,
+.intro-wait {
+  position: fixed;
+  left: 72px;
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-32px);
+  visibility: hidden;
+  transition:
+    opacity 480ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 480ms cubic-bezier(0.25, 1, 0.5, 1),
+    visibility 0s linear 480ms;
+}
+.intro-card.shown,
+.intro-wait.shown {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.intro-card {
+  bottom: 120px;
+  min-width: 560px;
+  max-width: 860px;
+  padding: 28px 36px 22px;
+  background: #f3ede1;
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.2),
+    0 12px 32px rgb(24 16 8 / 0.24),
+    0 2px 6px rgb(24 16 8 / 0.12);
+  color: #1d1b17;
+}
+.intro-kicker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5f5a51;
+}
+.intro-kicker i {
+  width: 8px;
+  height: 28px;
+  background: var(--accent);
+  transform: skewX(-23.4deg);
+}
+.intro-title {
+  margin: 12px 0 0;
+  font-size: 84px;
+  line-height: 0.9;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.04em;
+}
+.intro-subtitle {
+  margin-top: 12px;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.intro-rows {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid #d2c9b8;
+}
+.intro-rows li {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 0 8px;
+  border-bottom: 1px solid #d2c9b8;
+}
+.intro-rows .n {
+  font-size: 20px;
+  font-weight: 700;
+  font-stretch: 75%;
+  color: #a59e91;
+}
+.intro-rows .k {
+  font-size: 18px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5f5a51;
+}
+.intro-rows .v {
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 800;
+  font-stretch: 75%;
+}
+.intro-wait {
+  bottom: 56px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 22px;
+  line-height: 48px;
+  background: var(--accent);
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.2),
+    0 12px 32px rgb(24 16 8 / 0.24);
+  color: #f6f1e7;
+  font-size: 18px;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.intro-wait::before {
+  content: "";
+  width: 7px;
+  height: 24px;
+  background: currentColor;
+  transform: skewX(-23.4deg);
+  animation: intro-rock 0.7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+@keyframes intro-rock {
+  to {
+    transform: skewX(23.4deg);
+  }
+}

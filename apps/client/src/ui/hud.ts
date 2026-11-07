@@ -1,4 +1,4 @@
-// Race HUD: phase banner (warm-up, countdown, results), lap / position /
+// Race HUD: phase banner (countdown, results), lap / position /
 // time, the speed meter (summer) or trick score (winter), split times at
 // checkpoints and the finish (against the first rider through), and short
 // popups for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the
@@ -70,7 +70,6 @@ export interface StandingView {
   points: number;
 }
 
-const WARMUP = 0;
 const COUNTDOWN = 1;
 const RACING = 2;
 const RESULTS = 3;
@@ -215,8 +214,7 @@ export class Hud {
     const hz = race.tickHz;
     const left = Math.max(0, race.phaseLength - race.phaseTicks);
     let banner = "";
-    if (race.phase === WARMUP) banner = m.warmup(Math.ceil(left / hz));
-    else if (race.phase === COUNTDOWN) {
+    if (race.phase === COUNTDOWN) {
       const n = Math.ceil(left / hz);
       banner = n > 3 ? m.getReady : String(n);
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = m.go;

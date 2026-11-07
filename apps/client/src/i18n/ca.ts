@@ -327,7 +327,6 @@ export const ca: Messages = {
     },
   },
   hud: {
-    warmup: (s: number) => `ESCALFAMENT · cursa d'aquí a ${s}`,
     getReady: "PREPARATS",
     go: "JA!",
     freeRide: "Volta lliure · la propera cursa, aviat",
@@ -362,6 +361,19 @@ export const ca: Messages = {
       gpFinal: "El Tilt · classificació final",
     },
     ordinal: (n: number) => `${n}${n === 1 || n === 3 ? "r" : n === 2 ? "n" : n === 4 ? "t" : "è"}`,
+  },
+  intro: {
+    courses: { bay: "La Badia", mountain: "La Baixada de la Muntanya" },
+    sports: { jetski: "Moto d'aigua", snow: "Snowboard" },
+    tilt: (i: number, n: number) => `El Tilt · cursa ${i} de ${n}`,
+    season: "Estació",
+    laps: "Voltes",
+    lap: "Volta",
+    run: "Baixada",
+    checkpoints: "Controls",
+    metres: (m: number) => `${Math.round(m).toLocaleString("ca")} m`,
+    km: (km: number) => `${km.toLocaleString("ca", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`,
+    waiting: "Esperant la resta de riders",
   },
   about: {
     title: "Quant a",

@@ -85,6 +85,17 @@ export interface CameraTuning {
   tilt: number;
 }
 
+/**
+ * A camera placed by hand (the intro's fly-over), blended with the chase
+ * camera behind your rider: `chase` 0 is all the shot, 1 all the chase.
+ */
+export interface CameraShot {
+  eye: THREE.Vector3;
+  look: THREE.Vector3;
+  fov: number;
+  chase: number;
+}
+
 /** What surrounds the riders: sky, light, ground or water, scenery and effects. */
 export interface Environment {
   readonly group: THREE.Group;
@@ -177,6 +188,7 @@ export class World {
   private camTilt = 0;
   private camLookY = 0;
   private camFloor = 0;
+  private camFov = 55;
   /** Landing jolt: a dip on a spring (m, m/s) and a shake that dies away. */
   private camDip = 0;
   private camDipV = 0;
@@ -382,8 +394,19 @@ export class World {
     return r;
   }
 
-  /** Draw a frame. `tick` is the fractional sim tick to show (water, snowfall). */
-  render(riders: RiderView[], names: Map<number, string>, tick: number, dt: number, nextBuoy: number | null): void {
+  /**
+   * Draw a frame. `tick` is the fractional sim tick to show (water,
+   * snowfall); `shot` places the camera by hand instead of (or on its way
+   * into) the chase camera, without name tags.
+   */
+  render(
+    riders: RiderView[],
+    names: Map<number, string>,
+    tick: number,
+    dt: number,
+    nextBuoy: number | null,
+    shot: CameraShot | null = null,
+  ): void {
     const env = this.env;
     if (!env) {
       this.draw();
@@ -392,6 +415,8 @@ export class World {
     const t = tick * DT;
     const me = riders.find((r) => r.isMe);
     if (me) this.followCamera(env, me, t, dt);
+    if (shot) this.applyShot(shot, me);
+    this.labels.style.visibility = shot && shot.chase < 1 ? "hidden" : "";
     this.camera.updateMatrixWorld();
     this.frustum.setFromProjectionMatrix(
       this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
@@ -437,6 +462,30 @@ export class World {
       nextBuoy,
     });
     this.draw();
+  }
+
+  private shotEye = new THREE.Vector3();
+  private shotLook = new THREE.Vector3();
+  private shotUp = new THREE.Vector3();
+  private shotRider = new THREE.Vector3();
+
+  /** Moves the camera from the chase camera's place toward a shot's (see `CameraShot`). */
+  private applyShot(shot: CameraShot, me: RiderView | undefined): void {
+    const k = me ? Math.min(1, Math.max(0, shot.chase)) : 0;
+    const cam = this.camera;
+    const eye = this.shotEye.copy(shot.eye).lerp(cam.position, k);
+    const look = this.shotLook.copy(shot.look).lerp(this.camLook, k);
+    const up = this.shotUp.set(0, 1, 0).lerp(cam.up, k).normalize();
+    cam.position.copy(eye);
+    cam.up.copy(up);
+    cam.lookAt(look);
+    this.camLook.copy(look);
+    const fov = shot.fov + (this.camFov - shot.fov) * k;
+    if (Math.abs(fov - cam.fov) > 0.01) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+    this.aimSun(this.sunAt.copy(shot.look).lerp(me ? this.shotRider.set(me.x, me.y, me.z) : shot.look, k));
   }
 
   /** Whether a rider at `p` (or the shadow it casts) can be in the picture. */
@@ -490,6 +539,7 @@ export class World {
       this.camBack = c.back;
       this.camLookY = me.y;
       this.camFloor = env.ground(me.x, me.z, t) + c.clearance;
+      this.camFov = c.fov;
       this.camReady = true;
     }
     this.jolt(me, dt);
@@ -553,8 +603,9 @@ export class World {
     }
     this.camera.lookAt(this.camLook);
     const fov = c.fov + Math.min(1, me.speed / env.topSpeed) * c.fovSpeed + this.camAir * c.fovAir;
-    if (Math.abs(fov - this.camera.fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-dt * 3));
+    this.camFov += (fov - this.camFov) * (1 - Math.exp(-dt * 3));
+    if (Math.abs(this.camFov - this.camera.fov) > 0.05) {
+      this.camera.fov = this.camFov;
       this.camera.updateProjectionMatrix();
     }
     this.aimSun(this.sunAt.set(me.x, me.y, me.z));

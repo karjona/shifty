@@ -327,7 +327,6 @@ export const es: Messages = {
     },
   },
   hud: {
-    warmup: (s: number) => `CALENTAMIENTO · carrera en ${s}`,
     getReady: "PREPARADOS",
     go: "¡YA!",
     freeRide: "Vuelta libre · la próxima carrera, en breve",
@@ -362,6 +361,19 @@ export const es: Messages = {
       gpFinal: "El Tilt · clasificación final",
     },
     ordinal: (n: number) => `${n}.º`,
+  },
+  intro: {
+    courses: { bay: "La Bahía", mountain: "La Bajada de la Montaña" },
+    sports: { jetski: "Moto de agua", snow: "Snowboard" },
+    tilt: (i: number, n: number) => `El Tilt · carrera ${i} de ${n}`,
+    season: "Estación",
+    laps: "Vueltas",
+    lap: "Vuelta",
+    run: "Bajada",
+    checkpoints: "Controles",
+    metres: (m: number) => `${Math.round(m).toLocaleString("es")} m`,
+    km: (km: number) => `${km.toLocaleString("es", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`,
+    waiting: "Esperando al resto de riders",
   },
   about: {
     title: "Acerca de",

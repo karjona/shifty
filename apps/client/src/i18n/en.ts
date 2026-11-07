@@ -327,7 +327,6 @@ export const en = {
     },
   },
   hud: {
-    warmup: (s: number) => `WARM-UP · race in ${s}`,
     getReady: "GET READY",
     go: "GO!",
     freeRide: "Free ride · next race soon",
@@ -358,6 +357,19 @@ export const en = {
       const v = n % 100;
       return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
     },
+  },
+  intro: {
+    courses: { bay: "The Bay", mountain: "The Mountain Run" },
+    sports: { jetski: "Jetski", snow: "Snowboard" },
+    tilt: (i: number, n: number) => `The Tilt · race ${i} of ${n}`,
+    season: "Season",
+    laps: "Laps",
+    lap: "Lap",
+    run: "Run",
+    checkpoints: "Checkpoints",
+    metres: (m: number) => `${Math.round(m).toLocaleString("en")} m`,
+    km: (km: number) => `${km.toLocaleString("en", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`,
+    waiting: "Waiting for the other riders",
   },
   about: {
     title: "About",

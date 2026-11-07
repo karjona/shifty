@@ -15,6 +15,8 @@ import { VERSION } from "../../version.ts";
 
 /** `sim::Phase::Results`. */
 const RESULTS = 3;
+/** `sim::Phase`: the race waits on the grid, then its intro runs. */
+const BEFORE_COUNTDOWN = new Set([0, 4]);
 
 export function RaceScreen() {
   const t = useT();
@@ -130,7 +132,7 @@ export function RaceScreen() {
     <div className="screen race-screen">
       <div ref={hudRef} className="race-hud" />
       {status && <div className="race-status">{status}</div>}
-      {view && (view.racePhase === 0 || menu) && (
+      {view && (BEFORE_COUNTDOWN.has(view.racePhase) || menu) && (
         <div className={`race-help ${menu ? "in-menu" : ""}`}>
           <b>{t.race.controls}</b>
           {t.race.help[view.sport].map((line) => (
