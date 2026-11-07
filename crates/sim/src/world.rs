@@ -161,14 +161,15 @@ impl World {
         }
     }
 
-    /// Places a rider at its grid spot, at rest. Riders who arrive during
-    /// the countdown join the race; at any other time they ride free until
-    /// the next one.
+    /// Places a rider at its grid spot, at rest. Riders who arrive before
+    /// the start (on the grid, in the intro or the countdown) line up for
+    /// the race; during the race or its results they ride free until the
+    /// next one.
     pub fn spawn(&mut self, slot: usize) {
         let spot = self.course().grid_spot(slot);
         let y = self.rest_height(spot.x, spot.z);
         let mut r = Rider::at(spot, y);
-        if self.race.phase == Phase::Countdown {
+        if self.race.phase.before_start() {
             r.race = Progress::lined_up();
         }
         self.riders[slot] = Some(r);
@@ -178,10 +179,29 @@ impl World {
         self.riders[slot] = None;
     }
 
-    /// Starts a fresh warm-up from now: nobody is lined up, laps and gates
-    /// start over (meters are kept).
-    pub fn restart_warmup(&mut self) {
+    /// Starts the race over from now: everyone back on the grid, waiting
+    /// for the intro (see `start_intro`).
+    pub fn restart(&mut self) {
         self.race = Race::new(self.tick);
+        self.line_up();
+    }
+
+    /// Ends the wait on the grid (every screen is ready, or the wait is
+    /// over): the intro starts now, then the countdown and the race follow
+    /// by themselves. Only the server calls this; clients learn it from
+    /// snapshots.
+    pub fn start_intro(&mut self) {
+        if self.race.phase == Phase::Grid {
+            self.race = Race {
+                phase: Phase::Intro,
+                phase_tick: self.tick,
+            };
+        }
+    }
+
+    /// Takes every rider out of the race to ride free: not held on the grid,
+    /// and nothing they do counts (tools and tests).
+    pub fn ride_free(&mut self) {
         for r in self.riders.iter_mut().flatten() {
             r.race = Progress {
                 meter: r.race.meter,
@@ -215,7 +235,7 @@ impl World {
             }
         }
         self.resolve_collisions();
-        let holding = self.race.phase == Phase::Countdown;
+        let holding = self.race.phase.before_start();
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
             let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
@@ -296,27 +316,24 @@ impl World {
             return;
         }
         let next = match self.race.phase {
-            Phase::Warmup => Phase::Countdown,
+            Phase::Grid => Phase::Intro,
+            Phase::Intro => Phase::Countdown,
             Phase::Countdown => Phase::Racing,
             Phase::Racing => Phase::Results,
-            Phase::Results => Phase::Warmup,
+            Phase::Results => Phase::Grid,
         };
         self.race = Race {
             phase: next,
             phase_tick: self.tick,
         };
-        match next {
-            Phase::Countdown => self.line_up(),
-            Phase::Warmup => {
-                for r in self.riders.iter_mut().flatten() {
-                    r.race.racing = false;
-                }
-            }
-            _ => {}
+        // The countdown starts everyone clean from their spot, whatever they
+        // did while held.
+        if matches!(next, Phase::Grid | Phase::Countdown) {
+            self.line_up();
         }
     }
 
-    /// Everyone to the grid for a new race.
+    /// Everyone to the grid, lined up for the race.
     fn line_up(&mut self) {
         let course = self.course();
         for slot in 0..MAX_RIDERS {

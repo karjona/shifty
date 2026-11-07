@@ -52,7 +52,8 @@ pub const MAX_HUMANS: usize = 4;
 
 /// A fixed scenario used to compare native and WASM builds bit for bit:
 /// a full room of riders on every course (swells, then snow), driven by
-/// seeded pseudo-random inputs and bots.
+/// seeded pseudo-random inputs and bots through the intro, the countdown
+/// and the race.
 pub fn determinism_scenario(ticks: u32) -> u64 {
     let mut hash: u64 = 0;
     for course in [CourseId::Oval, CourseId::Mountain] {
@@ -60,6 +61,7 @@ pub fn determinism_scenario(ticks: u32) -> u64 {
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }
+        world.start_intro();
         let mut rng = math::Pcg32::new(42);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for _ in 0..ticks {
@@ -113,11 +115,13 @@ mod tests {
         w
     }
 
-    /// Puts a rider on the course at `(s, offset)` heading along it at `speed`.
+    /// Puts a rider on the course at `(s, offset)` heading along it at
+    /// `speed`, riding free.
     fn place(w: &mut World, slot: usize, s: f32, offset: f32, speed: f32) {
         let f = OVAL.centerline(s);
         let (x, z) = f.at_offset(offset);
         let mut r = w.riders[slot].unwrap();
+        r.race.racing = false;
         r.pos = Vec3::new(x, w.surface.height(x, z, w.tick) - jet::DRAFT, z);
         r.yaw = f.yaw;
         r.vel = r.forward() * speed;
@@ -542,29 +546,40 @@ mod tests {
     }
 
     #[test]
-    fn countdown_holds_everyone_on_the_grid() {
+    fn everyone_waits_on_the_grid_until_the_start() {
         let mut w = World::on_course(CourseId::Oval, SurfaceKind::Swells, 5);
         w.spawn(0);
         w.spawn(3);
-        // Ride off during the warm-up...
+        let held = |w: &World| {
+            for slot in [0, 3] {
+                let r = w.riders[slot].unwrap();
+                let spot = OVAL.grid_spot(slot);
+                assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
+                assert!(r.race.racing && r.race.lap == 0);
+            }
+        };
+        // The grid waits as long as it takes, full throttle or not...
+        run(&mut w, Input::from_analog(0.2, 1.0, 0.0, 0), 60 * 40);
+        assert_eq!(w.race.phase, Phase::Grid);
+        held(&w);
+        // ...until the server starts the intro, which runs into the countdown.
+        w.start_intro();
         run(
             &mut w,
             Input::from_analog(0.2, 1.0, 0.0, 0),
-            race::tuning::WARMUP_TICKS,
+            race::tuning::INTRO_TICKS,
         );
         assert_eq!(w.race.phase, Phase::Countdown);
-        // ...and get put back and held at full throttle.
+        held(&w);
+        // A rider who arrives now lines up too.
+        w.spawn(5);
+        assert!(w.riders[5].unwrap().race.racing);
         run(&mut w, Input::from_analog(0.0, 1.0, 0.0, 0), 60);
-        for slot in [0, 3] {
-            let r = w.riders[slot].unwrap();
-            let spot = OVAL.grid_spot(slot);
-            assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
-            assert!(r.race.racing && r.race.lap == 0);
-        }
+        held(&w);
         run(
             &mut w,
             Input::from_analog(0.0, 1.0, 0.0, 0),
-            race::tuning::COUNTDOWN_TICKS,
+            race::tuning::COUNTDOWN_TICKS - 60,
         );
         assert_eq!(w.race.phase, Phase::Racing);
         let ev = run(&mut w, Input::from_analog(0.0, 1.0, 0.0, 0), 120);
@@ -581,6 +596,7 @@ mod tests {
             for slot in 0..MAX_RIDERS {
                 w.spawn(slot);
             }
+            w.start_intro();
             let mut inputs: Inputs = [None; MAX_RIDERS];
             let mut finished_in = Vec::new();
             for _ in 0..60 * 60 * 5 {
@@ -634,9 +650,14 @@ mod tests {
                 w.step(&inputs);
             }
             assert_eq!(results(&w.standings()), results(&standings));
-            // Results, then a new warm-up.
+            // Results, then everyone back on the grid, waiting.
             run(&mut w, Input::default(), race::tuning::RESULTS_TICKS);
-            assert_eq!(w.race.phase, Phase::Warmup);
+            assert_eq!(w.race.phase, Phase::Grid);
+            for (slot, r) in w.riders.iter().enumerate() {
+                let r = r.unwrap();
+                let spot = OVAL.grid_spot(slot);
+                assert!((r.pos.x - spot.x).abs() < 0.01 && r.race.racing && !r.race.finished());
+            }
         }
     }
 
@@ -645,10 +666,11 @@ mod tests {
         for seed in 0..10 {
             let mut w = World::on_course(CourseId::Oval, SurfaceKind::Swells, seed);
             w.tick = seed * 997; // spawn at arbitrary times, on crests and troughs
-            w.restart_warmup();
+            w.restart();
             for slot in 0..MAX_RIDERS {
                 w.spawn(slot);
             }
+            w.ride_free();
             let mut rng = math::Pcg32::new(u64::from(seed));
             let mut inputs: Inputs = [None; MAX_RIDERS];
             for _ in 0..60 * 20 {

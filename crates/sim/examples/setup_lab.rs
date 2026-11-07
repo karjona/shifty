@@ -32,6 +32,7 @@ fn race(course: CourseId, seed: u32, setup: Setup) -> Tally {
         w.spawn(slot);
         w.setups[slot] = setup;
     }
+    w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut t = Tally {
         time: 0.0,

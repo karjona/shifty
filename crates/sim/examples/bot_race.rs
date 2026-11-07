@@ -15,6 +15,7 @@ fn main() {
     for slot in 0..MAX_RIDERS {
         w.spawn(slot);
     }
+    w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut bails = [0u32; MAX_RIDERS];
     let mut airtime = [0u32; MAX_RIDERS];

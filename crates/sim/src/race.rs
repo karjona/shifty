@@ -1,9 +1,12 @@
 //! Race rules: phases, gates, laps, the speed meter, trick points and
 //! standings.
 //!
-//! A room loops through warm-up (free riding), a countdown on the grid, the
-//! race, and a results screen. All of it is sim state, so clients predict
-//! it like everything else and the server's copy is the official one.
+//! A race starts with everyone lined up on the grid, held still, until every
+//! screen has the course loaded (the server decides when: see
+//! `World::start_intro`). Then an intro shows the course, a countdown runs,
+//! the race, and a results screen. All of it is sim state, so clients
+//! predict it like everything else and the server's copy is the official
+//! one.
 //!
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
 //! order (on a loop the start line is also the finish). In summer, passing a
@@ -16,7 +19,7 @@ use crate::course::{Course, Gate, Keep};
 
 pub mod tuning {
     use crate::TICK_HZ;
-    pub const WARMUP_TICKS: u32 = TICK_HZ * 12;
+    pub const INTRO_TICKS: u32 = TICK_HZ * 7;
     pub const COUNTDOWN_TICKS: u32 = TICK_HZ * 4;
     /// After the first finisher, the others get this long to finish.
     pub const FINISH_GRACE_TICKS: u32 = TICK_HZ * 30;
@@ -32,33 +35,47 @@ pub mod tuning {
 
 use tuning::*;
 
+/// The phases of a race, in order: grid, intro, countdown, racing, results.
+/// The numbers are wire values and never change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Phase {
-    Warmup = 0,
+    /// Lined up and held still until every screen is ready. Never ends by
+    /// itself: the server starts the intro.
+    Grid = 0,
     Countdown = 1,
     Racing = 2,
     Results = 3,
+    /// Still held on the grid while every screen shows the course.
+    Intro = 4,
 }
 
 impl Phase {
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
-            0 => Some(Self::Warmup),
+            0 => Some(Self::Grid),
             1 => Some(Self::Countdown),
             2 => Some(Self::Racing),
             3 => Some(Self::Results),
+            4 => Some(Self::Intro),
             _ => None,
         }
     }
 
+    /// How long the phase lasts (None: until something ends it).
     pub fn duration(self) -> Option<u32> {
         match self {
-            Self::Warmup => Some(WARMUP_TICKS),
+            Self::Grid | Self::Racing => None,
+            Self::Intro => Some(INTRO_TICKS),
             Self::Countdown => Some(COUNTDOWN_TICKS),
-            Self::Racing => None,
             Self::Results => Some(RESULTS_TICKS),
         }
+    }
+
+    /// Before the start: riders lined up for the race are held on the grid,
+    /// and riders who arrive line up too.
+    pub fn before_start(self) -> bool {
+        matches!(self, Self::Grid | Self::Intro | Self::Countdown)
     }
 }
 
@@ -70,9 +87,10 @@ pub struct Race {
 }
 
 impl Race {
+    /// A race on the grid from `tick`, waiting to start.
     pub fn new(tick: u32) -> Self {
         Self {
-            phase: Phase::Warmup,
+            phase: Phase::Grid,
             phase_tick: tick,
         }
     }
@@ -200,7 +218,7 @@ pub fn pass_gates(
     events: &mut Vec<SimEvent>,
 ) {
     if race.phase == Phase::Results {
-        // Everyone's race is frozen until the next warm-up.
+        // Everyone's race is frozen until the next grid.
         return;
     }
     let moved = course.delta_s(s_prev, s_now);

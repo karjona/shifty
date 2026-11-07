@@ -6,6 +6,12 @@
 //! A room races its plan once: one course, or a Tilt (every course in
 //! order, points by finishing place). After the last race's results the room
 //! is over: it refuses everyone, and the caller closes it.
+//!
+//! Every race starts on the grid and waits there until everyone the lobby
+//! sent has arrived and every screen in the room has the race's course
+//! loaded (each input packet says which race its screen is ready for), or
+//! until the grid has waited `GRID_TIMEOUT_TICKS`. Then the intro starts and
+//! the sim takes it from there.
 
 use std::collections::VecDeque;
 
@@ -29,6 +35,9 @@ pub const MAX_INPUT_LEAD_TICKS: u32 = 60;
 const LEAD_WINDOW_TICKS: u32 = 30;
 /// Players silent for this long are removed.
 pub const IDLE_TIMEOUT_MS: u64 = 10_000;
+/// The grid waits at most this long for every screen to be ready; screens
+/// still loading then see the race wherever it is.
+pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
 /// Packet rate limit per connection: burst and sustained packets per second.
 const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
@@ -58,6 +67,8 @@ pub struct RoomConfig {
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     pub bots: u8,
+    /// People the lobby sent: the first race waits for them all to arrive.
+    pub humans: u8,
 }
 
 impl RoomConfig {
@@ -76,6 +87,7 @@ impl RoomConfig {
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
             bots: claims.bots.min((MAX_RIDERS - 1) as u8),
+            humans: claims.humans.min(MAX_HUMANS as u8),
         }
     }
 
@@ -123,6 +135,8 @@ pub struct RoomStats {
     pub missed_inputs: u64,
     pub future_inputs: u64,
     pub rate_limited_packets: u64,
+    /// Races that started without every screen ready.
+    pub grid_timeouts: u64,
 }
 
 struct Player {
@@ -144,6 +158,9 @@ struct Player {
     rate_last_ms: u64,
     events: VecDeque<Event>,
     next_event_id: u16,
+    /// The race of the plan this player's screen is ready for, plus one
+    /// (0 = none yet).
+    ready: u8,
 }
 
 impl Player {
@@ -196,6 +213,8 @@ pub struct Room {
     /// Which race of the plan is on.
     event_index: usize,
     round: u16,
+    /// People seated in this run of the plan so far.
+    arrived: usize,
     /// The last race's results are done.
     over: bool,
     pub stats: RoomStats,
@@ -220,6 +239,7 @@ impl Room {
             entrants: Default::default(),
             event_index: 0,
             round: 1,
+            arrived: 0,
             over: false,
             stats: RoomStats::default(),
             config,
@@ -238,9 +258,9 @@ impl Room {
         room
     }
 
-    /// The Tilt is under way: past the first warm-up.
+    /// The Tilt is under way: its first race has left the grid.
     pub fn grand_prix_started(&self) -> bool {
-        self.config.grand_prix() && (self.event_index > 0 || self.world.race.phase != Phase::Warmup)
+        self.config.grand_prix() && (self.event_index > 0 || self.world.race.phase != Phase::Grid)
     }
 
     pub fn event_index(&self) -> usize {
@@ -351,6 +371,8 @@ impl Room {
                 if p.conn != conn {
                     out.close.push(p.conn);
                     p.conn = conn;
+                    // A new screen: it says again what it has loaded.
+                    p.ready = 0;
                 }
                 p.last_packet_ms = now_ms;
                 slot
@@ -360,8 +382,8 @@ impl Room {
                     return Err(RejectReason::RoomFull);
                 }
                 if self.human_count() == 0 {
-                    // First player in: a fresh warm-up (and Tilt), not
-                    // the middle of a bots-only race.
+                    // First player in: a fresh start on the grid (and
+                    // Tilt), not the middle of a bots-only race.
                     self.restart_plan();
                 } else if self.grand_prix_started() {
                     return Err(RejectReason::Started);
@@ -404,7 +426,9 @@ impl Room {
                     rate_last_ms: now_ms,
                     events: VecDeque::new(),
                     next_event_id: 0,
+                    ready: 0,
                 };
+                self.arrived += 1;
                 // The newcomer learns the whole roster, in slot order, and
                 // the Tilt table.
                 self.players[slot] = Some(player);
@@ -458,7 +482,8 @@ impl Room {
                 pid: None,
                 points: 0,
             });
-            // The bot starts from the grid; it rides free until the next race.
+            // The bot starts from the grid: in this race if it hasn't
+            // started, riding free until the next one if it has.
             self.world.remove(slot);
             self.world.spawn(slot);
             self.apply_setups();
@@ -517,7 +542,7 @@ impl Room {
         }
     }
 
-    /// Back to a warm-up before the first race of the plan, with no points.
+    /// Back to the grid of the plan's first race, with no points.
     fn restart_plan(&mut self) {
         if self.event_index != 0 || self.world.course != self.config.plan[0] {
             self.event_index = 0;
@@ -527,7 +552,25 @@ impl Room {
         for e in self.entrants.iter_mut().flatten() {
             e.points = 0;
         }
-        self.world.restart_warmup();
+        self.arrived = 0;
+        self.world.restart();
+    }
+
+    /// Whether the race on the grid can start: everyone the lobby sent has
+    /// arrived and every screen here is ready for this race (people who left
+    /// don't count), or the grid has waited long enough.
+    fn grid_done(&mut self) -> bool {
+        let event = self.event_index as u8 + 1;
+        let ready = self.arrived >= usize::from(self.config.humans)
+            && self.players.iter().flatten().all(|p| p.ready >= event);
+        if ready {
+            return true;
+        }
+        let timed_out = self.world.race.elapsed(self.world.tick) >= GRID_TIMEOUT_TICKS;
+        if timed_out {
+            self.stats.grid_timeouts += 1;
+        }
+        timed_out
     }
 
     /// The results are over: on to the next race of the plan, or the plan is
@@ -578,6 +621,8 @@ impl Room {
         }
         p.last_packet_ms = now_ms;
         p.ack_events(packet.event_ack);
+        // Readiness only moves on (packets can arrive out of order).
+        p.ready = p.ready.max(packet.ready);
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
 
@@ -615,6 +660,9 @@ impl Room {
     /// Advance the world one tick. Returns snapshots on snapshot ticks.
     pub fn step(&mut self, now_ms: u64) -> Outbox {
         let mut out = Outbox::default();
+        if self.world.race.phase == Phase::Grid && self.grid_done() {
+            self.world.start_intro();
+        }
         let next = self.world.tick.wrapping_add(1);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for slot in 0..MAX_RIDERS {
@@ -634,7 +682,7 @@ impl Room {
         self.world.step(&inputs);
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
-            (Phase::Results, Phase::Warmup) => self.results_done(),
+            (Phase::Results, Phase::Grid) => self.results_done(),
             _ => {}
         }
 
@@ -703,6 +751,7 @@ impl Room {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim::race::tuning::{COUNTDOWN_TICKS, INTRO_TICKS};
 
     fn claims(pid: &str, events: Vec<u8>, bots: u8) -> JoinClaims {
         JoinClaims {
@@ -714,6 +763,7 @@ mod tests {
             exp: u64::MAX,
             iat: 0,
             bots,
+            humans: 0,
             surface: SurfaceKind::Flat as u8,
             course: events[0],
             events,
@@ -722,20 +772,39 @@ mod tests {
         }
     }
 
-    /// The player on connection 1 idles on the grid while the bots race,
-    /// until `done` (at most eight minutes). Returns the race reports.
+    /// An input packet from `conn`, its screen ready for race `ready` of
+    /// the plan (None: still loading).
+    fn send(room: &mut Room, conn: ConnId, now: u64, ready: Option<usize>) {
+        let packet = InputPacket {
+            event_ack: 0,
+            last_snapshot_tick: 0,
+            client_time: 0,
+            ready: ready.map_or(0, |e| e as u8 + 1),
+            first_tick: room.tick() + 1,
+            inputs: vec![Input::default()],
+        };
+        room.handle_inputs(conn, &packet, now);
+    }
+
+    /// `ticks` ticks, each connection sending a packet before each one.
+    fn run(room: &mut Room, now: &mut u64, ticks: u32, screens: &[(ConnId, Option<usize>)]) {
+        for _ in 0..ticks {
+            *now += 16;
+            for &(conn, ready) in screens {
+                send(room, conn, *now, ready);
+            }
+            room.step(*now);
+        }
+    }
+
+    /// The player on connection 1 idles on the grid while the bots race
+    /// (their screen ready for every race), until `done` (at most eight
+    /// minutes). Returns the race reports.
     fn idle_until(room: &mut Room, now: &mut u64, done: impl Fn(&Room) -> bool) -> Vec<RaceReport> {
         let mut reports = Vec::new();
         for _ in 0..TICK_HZ * 60 * 8 {
             *now += 16;
-            let packet = InputPacket {
-                event_ack: 0,
-                last_snapshot_tick: 0,
-                client_time: 0,
-                first_tick: room.tick() + 1,
-                inputs: vec![Input::default()],
-            };
-            room.handle_inputs(1, &packet, *now);
+            send(room, 1, *now, Some(room.event_index()));
             reports.extend(room.step(*now).reports);
             if done(room) {
                 break;
@@ -755,8 +824,13 @@ mod tests {
         });
         assert_eq!(room.world().course, CourseId::Mountain);
         assert_eq!(room.event_index(), 1);
-        assert_eq!(room.world().race.phase, Phase::Warmup);
+        assert_eq!(room.world().race.phase, Phase::Grid);
         assert!(room.grand_prix_started());
+        // The next race waits for Ana's screen to have the mountain loaded.
+        run(&mut room, &mut now, 120, &[(1, Some(0))]);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        run(&mut room, &mut now, 2, &[(1, Some(1))]);
+        assert_eq!(room.world().race.phase, Phase::Intro);
 
         let [report] = &reports[..] else {
             panic!("one race, one report: {reports:?}")
@@ -798,5 +872,96 @@ mod tests {
             room.join(2, &claims("bea", vec![0], 3), 0, now).err(),
             Some(RejectReason::Over)
         );
+    }
+
+    #[test]
+    fn a_race_waits_on_the_grid_for_everyone_sent_and_every_screen() {
+        let ana = JoinClaims {
+            humans: 2,
+            ..claims("ana", vec![0], 2)
+        };
+        let bea = JoinClaims {
+            pid: "bea".into(),
+            name: "bea".into(),
+            ..ana.clone()
+        };
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        // Ana's screen is ready, but Bea hasn't arrived yet...
+        run(&mut room, &mut now, 120, &[(1, Some(0))]);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        // ...then she has, and her screen is still loading.
+        room.join(2, &bea, 0, now).unwrap();
+        run(&mut room, &mut now, 120, &[(1, Some(0)), (2, None)]);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        run(&mut room, &mut now, 2, &[(1, Some(0)), (2, Some(0))]);
+        assert_eq!(room.world().race.phase, Phase::Intro);
+        // Everyone lined up, held through the intro and the countdown.
+        let both = [(1, Some(0)), (2, Some(0))];
+        run(
+            &mut room,
+            &mut now,
+            INTRO_TICKS + COUNTDOWN_TICKS - 4,
+            &both,
+        );
+        assert_eq!(room.world().race.phase, Phase::Countdown);
+        for conn in [1, 2] {
+            let slot = room.slot_of(conn).unwrap();
+            let r = room.world().riders[slot].unwrap();
+            let spot = room.world().course().grid_spot(slot);
+            assert!(r.race.racing && (r.pos.x - spot.x).abs() < 0.01);
+        }
+        run(&mut room, &mut now, 4, &both);
+        assert_eq!(room.world().race.phase, Phase::Racing);
+        assert_eq!(room.stats.grid_timeouts, 0);
+    }
+
+    #[test]
+    fn a_screen_that_never_loads_holds_the_grid_only_so_long() {
+        let ana = claims("ana", vec![0], 2);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &claims("bea", vec![0], 2), 0, now).unwrap();
+        let screens = [(1, Some(0)), (2, None)];
+        run(&mut room, &mut now, GRID_TIMEOUT_TICKS - 10, &screens);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        run(&mut room, &mut now, 20, &screens);
+        assert_eq!(room.world().race.phase, Phase::Intro);
+        assert_eq!(room.stats.grid_timeouts, 1);
+    }
+
+    #[test]
+    fn people_who_leave_dont_hold_the_grid() {
+        let ana = JoinClaims {
+            humans: 2,
+            ..claims("ana", vec![0], 2)
+        };
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &claims("bea", vec![0], 2), 0, now).unwrap();
+        run(&mut room, &mut now, 60, &[(1, Some(0)), (2, None)]);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        room.leave(2);
+        run(&mut room, &mut now, 2, &[(1, Some(0))]);
+        assert_eq!(room.world().race.phase, Phase::Intro);
+    }
+
+    #[test]
+    fn a_new_screen_for_the_same_seat_says_again_what_it_has_loaded() {
+        let ana = claims("ana", vec![0], 0);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &claims("bea", vec![0], 0), 0, now).unwrap();
+        run(&mut room, &mut now, 30, &[(1, None), (2, Some(0))]);
+        // Bea reloads the page: her new screen is still loading.
+        room.join(3, &claims("bea", vec![0], 0), 0, now).unwrap();
+        run(&mut room, &mut now, 30, &[(1, Some(0)), (3, None)]);
+        assert_eq!(room.world().race.phase, Phase::Grid);
+        run(&mut room, &mut now, 2, &[(1, Some(0)), (3, Some(0))]);
+        assert_eq!(room.world().race.phase, Phase::Intro);
     }
 }

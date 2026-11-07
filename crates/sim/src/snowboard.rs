@@ -591,11 +591,12 @@ mod tests {
     use crate::race::{self, EventKind, Phase, SimEvent};
     use crate::{CourseId, Inputs, MAX_RIDERS, SurfaceKind, World};
 
-    /// A mountain world with one rider free riding (the room never moves on
+    /// A mountain world with one rider riding free (the room never moves on
     /// to a race unless the test lets it).
     fn world() -> World {
         let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
         w.spawn(0);
+        w.ride_free();
         w
     }
 
@@ -631,13 +632,12 @@ mod tests {
         Input::from_analog(steer, 0.0, lean, buttons)
     }
 
-    /// Steps the world with `drive` choosing rider 0's input, holding the
-    /// room in free ride. Returns the events.
+    /// Steps the world with `drive` choosing rider 0's input. Returns the
+    /// events.
     fn run(w: &mut World, ticks: u32, mut drive: impl FnMut(&World) -> Input) -> Vec<SimEvent> {
         let mut inputs: Inputs = [None; MAX_RIDERS];
         let mut events = Vec::new();
         for _ in 0..ticks {
-            w.race.phase_tick = w.tick;
             inputs[0] = Some(drive(w));
             events.extend(w.step(&inputs));
         }
@@ -1018,10 +1018,10 @@ mod tests {
         for slot in 1..MAX_RIDERS {
             w.spawn(slot);
         }
+        w.ride_free();
         let mut rng = crate::math::Pcg32::new(7);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for _ in 0..60 * 40 {
-            w.race.phase_tick = w.tick;
             for i in inputs.iter_mut() {
                 *i = Some(Input::from_analog(
                     rng.range(-1.0, 1.0),
@@ -1050,6 +1050,7 @@ mod tests {
         for slot in 0..MAX_RIDERS {
             w.spawn(slot);
         }
+        w.start_intro();
         let mut inputs: Inputs = [None; MAX_RIDERS];
         let mut checkpoints = 0;
         let mut finishes = Vec::new();
@@ -1090,27 +1091,33 @@ mod tests {
             }
             w.step(&inputs);
         }
-        assert_eq!(w.race.phase, Phase::Warmup);
+        assert_eq!(w.race.phase, Phase::Grid);
     }
 
     #[test]
-    fn the_countdown_holds_riders_at_the_top() {
+    fn riders_wait_at_the_top_until_the_start() {
         let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
         w.spawn(0);
         w.spawn(5);
         let mut inputs: Inputs = [None; MAX_RIDERS];
-        for _ in 0..race::tuning::WARMUP_TICKS + 30 {
-            inputs[0] = Some(Input::from_analog(0.3, 0.0, 1.0, 0));
-            inputs[5] = Some(Input::from_analog(-0.3, 0.0, 1.0, 0));
-            w.step(&inputs);
-        }
+        let mut ride = |w: &mut World, ticks: u32| {
+            for _ in 0..ticks {
+                inputs[0] = Some(Input::from_analog(0.3, 0.0, 1.0, buttons::JUMP));
+                inputs[5] = Some(Input::from_analog(-0.3, 0.0, 1.0, 0));
+                w.step(&inputs);
+            }
+            for slot in [0, 5] {
+                let r = w.riders[slot].unwrap();
+                let spot = w.course().grid_spot(slot);
+                assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
+                assert!((r.pos.y - RUN.height(spot.x, spot.z)).abs() < 0.01);
+                assert!(r.race.racing && r.speed() == 0.0);
+            }
+        };
+        ride(&mut w, 60 * 20);
+        assert_eq!(w.race.phase, Phase::Grid);
+        w.start_intro();
+        ride(&mut w, race::tuning::INTRO_TICKS + 30);
         assert_eq!(w.race.phase, Phase::Countdown);
-        for slot in [0, 5] {
-            let r = w.riders[slot].unwrap();
-            let spot = w.course().grid_spot(slot);
-            assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
-            assert!((r.pos.y - RUN.height(spot.x, spot.z)).abs() < 0.01);
-            assert!(r.race.racing && r.speed() == 0.0);
-        }
     }
 }

@@ -15,6 +15,9 @@
 //! - **Rendering:** every rider is drawn from the predicted world, so what
 //!   you see is what you bump into. Corrections to other riders are smoothed
 //!   the same way as your own.
+//! - **Ready:** the caller says when its screen has a race's course loaded
+//!   (`set_ready`); every input packet repeats it, and the race waits on the
+//!   grid until every screen is ready.
 
 use protocol::{
     ClientMsg, Event, EventBody, InputPacket, MAX_INPUTS_PER_PACKET, PROTOCOL_VERSION,
@@ -174,6 +177,8 @@ pub struct Client {
     last_snapshot_tick: Option<u32>,
     next_event_id: u16,
     pending_events: Vec<Event>,
+    /// The race (of the room's plan) this screen is ready for, plus one (0 = none).
+    ready: u8,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
@@ -214,6 +219,7 @@ impl Client {
             last_snapshot_tick: None,
             next_event_id: 0,
             pending_events: Vec::new(),
+            ready: 0,
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -266,6 +272,13 @@ impl Client {
     /// How many races the room's plan has (more than one: a Tilt).
     pub fn event_count(&self) -> u8 {
         self.event_count
+    }
+
+    /// This screen has race `event` of the room's plan (its course) loaded
+    /// and on show, or nothing yet (`None`). The server starts a race once
+    /// every screen in the room is ready for it.
+    pub fn set_ready(&mut self, event: Option<u8>) {
+        self.ready = event.map_or(0, |e| e.saturating_add(1));
     }
 
     /// Tilt points by seat (None: no rider there).
@@ -449,6 +462,7 @@ impl Client {
             event_ack: self.next_event_id,
             last_snapshot_tick: self.last_snapshot_tick.unwrap_or(0),
             client_time: Self::time16(now_ms),
+            ready: self.ready,
             first_tick: first,
             inputs,
         };

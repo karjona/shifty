@@ -37,6 +37,11 @@ pub struct JoinClaims {
     /// Room settings, applied when this token creates the room.
     #[serde(default)]
     pub bots: u8,
+    /// How many people the lobby sent to this room: its first race waits on
+    /// the grid until they have all arrived (or the wait is over). 0 = just
+    /// whoever has joined.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub humans: u8,
     #[serde(default)]
     pub surface: u8,
     /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
@@ -58,6 +63,10 @@ pub struct JoinClaims {
 
 /// Most races in one room's plan.
 pub const MAX_EVENTS: usize = 8;
+
+fn is_zero(n: &u8) -> bool {
+    *n == 0
+}
 
 impl JoinClaims {
     /// The appearance bytes (empty if absent).
@@ -225,6 +234,7 @@ mod tests {
             exp: 1_000_060,
             iat: 1_000_000,
             bots: 2,
+            humans: 0,
             surface: 1,
             course: 1,
             events: vec![0, 1],
@@ -331,6 +341,15 @@ mod tests {
         let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
         assert_eq!(claims.look_bytes(), vec![1, 0, 1, 2, 3]);
         assert_eq!(claims.setups, vec![[3, 3, 3, 3], [6, 2, 2, 2]]);
+    }
+
+    /// A Tilt the lobby sent three people to (see tickets.test.ts too).
+    #[test]
+    fn verifies_a_lobby_token_with_its_humans() {
+        const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjUsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXSwiaHVtYW5zIjozfQ.GisI8PPr26yGWDatniD0Cfb_Sd978ZlgfunycDWm2rcxn--37s3Jur7AEo_VYNzipROuAHDJLHiwtYtVpllMBQ";
+        let vk = SigningKey::from_bytes(&[7; 32]).verifying_key();
+        let claims = verify(LOBBY_TOKEN, &vk, "race.example:443", 1_000_000).unwrap();
+        assert_eq!((claims.humans, claims.bots), (3, 5));
     }
 
     #[test]

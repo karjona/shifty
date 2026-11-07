@@ -29,6 +29,7 @@ fn run(
 ) -> Run {
     let mut w = World::new(CourseId::Oval, surface);
     w.spawn(0);
+    w.ride_free();
     let mut r = w.riders[0].unwrap();
     r.yaw = heading;
     let start = OVAL.centerline(150.0).at_offset(-20.0);
@@ -61,7 +62,7 @@ fn run(
         w.step(&inputs);
         let mut r = w.riders[0].unwrap();
         // Stay in the open water of the first straight, clear of the walls:
-        // jump back (the sea is endless anyway). And never start a race.
+        // jump back (the sea is endless anyway).
         let before = (r.pos.x, r.pos.z);
         if r.pos.x.abs() > 130.0 {
             r.pos.x -= 260.0 * r.pos.x.signum();
@@ -70,9 +71,6 @@ fn run(
             r.pos.z -= 58.0;
         } else if r.pos.z < -80.0 {
             r.pos.z += 58.0;
-        }
-        if w.race.phase != sim::Phase::Warmup {
-            w.restart_warmup();
         }
         since_jump += 1;
         if before != (r.pos.x, r.pos.z) {
@@ -137,6 +135,7 @@ fn main() {
     // Flat water: draft and settling.
     let mut w = World::new(CourseId::Oval, Surface::flat());
     w.spawn(0);
+    w.ride_free();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     inputs[0] = Some(Input::default());
     for _ in 0..120 {
@@ -224,6 +223,7 @@ fn main() {
 fn turning() {
     let mut w = World::new(CourseId::Oval, Surface::flat());
     w.spawn(0);
+    w.ride_free();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     inputs[0] = Some(Input::from_analog(0.0, 1.0, 0.0, 0));
     for _ in 0..60 * 8 {
@@ -267,6 +267,7 @@ fn tricks() {
         let ramp = OVAL.ramps[0];
         let mut w = World::new(CourseId::Oval, Surface::flat());
         w.spawn(0);
+        w.ride_free();
         let f = OVAL.centerline(ramp.s - 40.0);
         let (x, z) = f.at_offset(ramp.offset);
         let mut r = w.riders[0].unwrap();

@@ -93,6 +93,13 @@ impl WasmClient {
         self.inner.handle_packet(bytes, now_ms);
     }
 
+    /// This screen has race `event` of the room's plan loaded and on show
+    /// (negative: not yet). The race waits on the grid for every screen.
+    #[wasm_bindgen(js_name = setReady)]
+    pub fn set_ready(&mut self, event: i32) {
+        self.inner.set_ready(u8::try_from(event).ok());
+    }
+
     /// Advance the clock with this frame's input (analog values in [-1, 1]).
     pub fn update(&mut self, now_ms: f64, steer: f32, throttle: f32, lean: f32, buttons: u8) {
         self.inner

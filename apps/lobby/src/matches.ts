@@ -47,6 +47,7 @@ export async function startSingle(env: Env, racer: Racer, event: EventChoice): P
     event,
     bots: FIELD - 1,
     rider,
+    humans: 1,
   });
 }
 
@@ -91,6 +92,7 @@ export async function startMatch(
       event,
       bots: Math.max(0, Math.min(bots, FIELD - racers.length)),
       rider: riders.get(r.userId),
+      humans: racers.length,
     });
     tickets.set(r.userId, ticket);
   }

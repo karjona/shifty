@@ -38,6 +38,8 @@ export interface JoinClaims {
   look?: string;
   /** Setup per sport (summer, winter), four stats each. */
   setups?: number[][];
+  /** How many people the room's first race waits for on the grid. */
+  humans?: number;
 }
 
 /** The race server a ticket is for. */
@@ -109,6 +111,8 @@ export interface TicketRequest {
   bots: number;
   /** The rider, as the race server should show and simulate them. */
   rider?: { look: string; setups: number[][] };
+  /** Everyone sent to this race (its first one waits on the grid until they have all arrived). */
+  humans?: number;
 }
 
 export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Date.now()): Promise<JoinTicket> {
@@ -128,6 +132,7 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
   };
   if (req.rider?.look) claims.look = req.rider.look;
   if (req.rider?.setups.length) claims.setups = req.rider.setups;
+  if (req.humans) claims.humans = req.humans;
   return {
     token: await signJoinToken(seedB64, claims),
     room: req.room,
