@@ -385,13 +385,10 @@ fn hops(world: &World, slot: usize, r: &Rider) -> bool {
     }
     let since = race.elapsed(world.tick).wrapping_sub(r.race.finish_ticks);
     let spell = since / HOP_SPELL;
-    let lucky = spell == HOP_FROM
-        || (spell > HOP_FROM
-            && (spell
-                .wrapping_add(slot as u32 * 7)
-                .wrapping_mul(0x9E37_79B9)
-                >> 16)
-                % 3
-                == 0);
+    let roll = spell
+        .wrapping_add(slot as u32 * 7)
+        .wrapping_mul(0x9E37_79B9)
+        >> 16;
+    let lucky = spell == HOP_FROM || (spell > HOP_FROM && roll.is_multiple_of(3));
     lucky && since % HOP_SPELL < u32::from(snow::CHARGE_TICKS)
 }
