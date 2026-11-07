@@ -1,12 +1,12 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
 import type { CourseData } from "./render/course.ts";
-import type { GateData, ObstacleData, RunData, RunPoint, TableData } from "./render/mountain.ts";
+import type { GateData, LipData, ObstacleData, RunData, RunPoint, SpineData, TableData } from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
 import type { RosterName } from "./ui/results.ts";
 
-/** A course: the summer bay (jetski) or the winter mountain run (snowboard). */
-export type CourseInfo = { sport: "jetski"; bay: CourseData } | { sport: "snow"; run: RunData };
+/** A course (`id`: `sim::CourseId`): the bay (jetski) or a run down the mountain (snowboard). */
+export type CourseInfo = { sport: "jetski"; id: number; bay: CourseData } | { sport: "snow"; id: number; run: RunData };
 
 type Obj = Record<string, unknown>;
 
@@ -81,8 +81,9 @@ export function parseEvents(json: string): RaceEvent[] {
 export function parseCourse(json: string): CourseInfo {
   const raw: unknown = JSON.parse(json);
   const o = isObj(raw) ? raw : {};
-  if (o.sport === "snow" && isObj(o.run)) return { sport: "snow", run: parseRun(o.run) };
-  return { sport: "jetski", bay: parseBay(o) };
+  const id = num(o, "id");
+  if (o.sport === "snow" && isObj(o.run)) return { sport: "snow", id, run: parseRun(o.run) };
+  return { sport: "jetski", id, bay: parseBay(o) };
 }
 
 const gate = (v: unknown): GateData => {
@@ -129,6 +130,21 @@ function parseRun(o: Obj): RunData {
       lip: num(t, "lip"),
       offset: num(t, "offset"),
       halfWidth: num(t, "halfWidth"),
+    })),
+    lips: list(o.lips).map((t): LipData => ({
+      s: num(t, "s"),
+      lip: num(t, "lip"),
+      offset: num(t, "offset"),
+      halfWidth: num(t, "halfWidth"),
+      height: num(t, "height"),
+      kind: t.kind === "log" ? "log" : t.kind === "rock" ? "rock" : "wind",
+    })),
+    spines: list(o.spines).map((t): SpineData => ({
+      s: num(t, "s"),
+      end: num(t, "end"),
+      offset: num(t, "offset"),
+      halfWidth: num(t, "halfWidth"),
+      height: num(t, "height"),
     })),
   };
 }

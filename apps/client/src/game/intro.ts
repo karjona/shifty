@@ -7,6 +7,7 @@ import type { CameraShot, Environment } from "../render/world.ts";
 import type { RaceView } from "../ui/hud.ts";
 import { IntroCard, type IntroFacts } from "../ui/intro-card.ts";
 import type { CourseInfo } from "../wasm-json.ts";
+import { courseName } from "./courses.ts";
 import { Flyover } from "./flyover.ts";
 import { seasonOf } from "./season-change.ts";
 import { PALETTE } from "./seasons.ts";
@@ -94,7 +95,7 @@ export class RaceIntro {
     }
     this.card.set({
       kicker: race.eventCount > 1 ? i.tilt(race.eventIndex + 1, race.eventCount) : m.place,
-      title: info.sport === "snow" ? i.courses.mountain : i.courses.bay,
+      title: courseName(info.id),
       subtitle: race.eventCount > 1 ? `${i.sports[info.sport]} · ${m.place}` : i.sports[info.sport],
       rows,
       accent: `#${PALETTE[season].accent.toString(16).padStart(6, "0")}`,

@@ -1,8 +1,8 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
 // ticket from the dev server (see vite.config.ts); a Tilt ends on its
 // podium. The netcode e2e tests use it too. URL options: name, room, bots,
-// event (snow, or gp for the Tilt), surface, pid, render=0, autopilot=1,
-// scale, water.
+// event (snow: the mountain run, glades, or gp for the Tilt), surface, pid,
+// render=0, autopilot=1, scale, water.
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -28,8 +28,10 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
     status.textContent = text;
     status.hidden = text === "";
   };
-  const snow = params.get("event") === "snow";
-  const gp = params.get("event") === "gp";
+  const event = params.get("event");
+  const glades = event === "glades";
+  const snow = event === "snow" || glades;
+  const gp = event === "gp";
   const help = document.querySelector<HTMLDivElement>("#help")!;
   help.innerHTML = snow ? HELP.snow : HELP.jetski;
   help.hidden = false;
@@ -39,10 +41,10 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
     setStatus("Getting a join ticket…");
     const q = new URLSearchParams({
       name: params.get("name") || `Rider ${Math.floor(Math.random() * 900 + 100)}`,
-      room: params.get("room") ?? (snow ? "dev-snow" : "dev"),
+      room: params.get("room") ?? (glades ? "dev-glades" : snow ? "dev-snow" : "dev"),
       bots: params.get("bots") ?? "2",
       surface: params.get("surface") ?? "1",
-      course: snow ? "1" : "0",
+      course: glades ? "3" : snow ? "1" : "0",
     });
     if (gp) q.set("events", "0,1");
     const pid = params.get("pid");

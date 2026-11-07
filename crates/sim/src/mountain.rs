@@ -1263,8 +1263,10 @@ mod tests {
         assert!(pines > 12, "{pines}");
         // The spine stands proud of the bowl.
         let f = run.centerline(420.0);
-        let (sx, sz) = f.at_offset(-2.0);
-        let (ox, oz) = f.at_offset(-12.0);
-        assert!(run.height(sx, sz) > run.height(ox, oz) + 1.0);
+        let at = |off: f32| {
+            let (x, z) = f.at_offset(off);
+            run.height(x, z)
+        };
+        assert!(at(-2.0) > (at(-11.0) + at(7.0)) * 0.5 + 1.5);
     }
 }

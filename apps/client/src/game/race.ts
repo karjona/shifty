@@ -235,7 +235,8 @@ export class RaceSession implements Stage {
     }
     this.sleep = keepAwake();
     if (this.opts.render ?? engine.render) {
-      this.card = new SeasonCard(seasonOf(ticketCourse(this.opts.ticket.token)), false);
+      const course = ticketCourse(this.opts.ticket.token);
+      this.card = new SeasonCard(seasonOf(course), false, course);
       this.card.loading = true;
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
@@ -407,11 +408,15 @@ export class RaceSession implements Stage {
     this.shown = false;
     const old = this.env;
     if (course.sport === "snow") {
-      this.env = new Mountain(course.run, {
-        ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
-        grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
-        heights: (points) => client.heightsAt(points),
-      });
+      this.env = new Mountain(
+        course.run,
+        {
+          ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
+          grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
+          heights: (points) => client.heightsAt(points),
+        },
+        { course: course.id },
+      );
       engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {
@@ -508,7 +513,10 @@ export class RaceSession implements Stage {
       this.course = race.course;
       if (first || !render) {
         const card = this.card;
-        if (card) card.season = seasonOf(race.course);
+        if (card) {
+          card.season = seasonOf(race.course);
+          card.course = race.course;
+        }
         void this.setCourse(engine, client, render).finally(() => {
           if (this.card === card) this.card = null;
           void (card?.hide() ?? Promise.resolve()).then(() => {
@@ -523,6 +531,7 @@ export class RaceSession implements Stage {
         this.seasonChange = new SeasonChange(
           engine,
           seasonOf(race.course),
+          race.course,
           () => this.setCourse(engine, client, render),
           () => {
             this.covered = false;

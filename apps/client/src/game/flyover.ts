@@ -160,13 +160,53 @@ function mountainShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: 
   ];
 }
 
+/** The glades: the col and the couloir below it, the bowl and its spine, through the pines, the grid. */
+function gladesShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: Environment): Shot[] {
+  const ground = (x: number, z: number) => env.ground(x, z, 0);
+  const on = (s: number, offset: number, up: number) => {
+    const p = runAt(run.path, s);
+    const x = p.x + Math.cos(p.yaw) * -offset;
+    const z = p.z + Math.sin(p.yaw) * offset;
+    return new THREE.Vector3(x, ground(x, z) + up, z);
+  };
+  const start = runAt(run.path, run.startS - 8);
+  const grid: Grid = { centre: new THREE.Vector3(start.x, start.y + 0.4, start.z), yaw: start.yaw };
+  const spine = run.spines[0] ?? { s: 380, end: 490, offset: 0 };
+  return [
+    // Over the col, the lift's top station beside it, down into the couloir.
+    dolly(
+      2.0,
+      { eye: on(-40, 18, 14), look: on(70, -2, -6), fov: 50 },
+      { eye: on(-12, 10, 22), look: on(150, 0, -10), fov: 48 },
+    ),
+    // Along the bowl's rim, to its spine.
+    dolly(
+      1.5,
+      { eye: on(spine.s - 120, -40, 22), look: on(spine.s - 20, spine.offset, 0), fov: 50 },
+      { eye: on(spine.s - 60, -38, 18), look: on(spine.s + 40, spine.offset, 0), fov: 50 },
+    ),
+    // Low through the pines.
+    dolly(
+      1.5,
+      { eye: on(830, 0, 3.2), look: on(880, 0, 1), fov: 54 },
+      { eye: on(870, 0, 2.8), look: on(925, 0, 1), fov: 54 },
+    ),
+    round(2.0, grid, ground, env.camera.fov),
+  ];
+}
+
 export class Flyover {
   private shots: Shot[];
   private pose: Pose = { eye: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private shot: CameraShot = { eye: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, chase: 0 };
 
   constructor(course: CourseInfo, env: Environment) {
-    this.shots = course.sport === "snow" ? mountainShots(course.run, env) : bayShots(course.bay, env);
+    this.shots =
+      course.sport === "jetski"
+        ? bayShots(course.bay, env)
+        : course.id === 3
+          ? gladesShots(course.run, env)
+          : mountainShots(course.run, env);
   }
 
   /** Seconds the shots last, before they are fitted to the intro. */

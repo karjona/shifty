@@ -394,9 +394,9 @@ impl WasmClient {
         top_speed_on(self.inner.predicted_world())
     }
 
-    /// The course, for drawing it (positions in metres, angles in radians).
-    /// Bay courses carry `stadium`, buoys, ramps and land; mountain runs
-    /// carry `run`.
+    /// The course, for drawing it (positions in metres, angles in radians):
+    /// its `id` (`sim::CourseId`), then bay courses carry `stadium`, buoys,
+    /// ramps and land; mountain runs carry `run`.
     #[wasm_bindgen(js_name = courseJson)]
     pub fn course_json(&self) -> String {
         course_json_on(self.inner.predicted_world())
@@ -587,6 +587,7 @@ fn course_json_on(world: &World) -> String {
     let c = world.course();
     let start = c.centerline(c.start_s);
     let mut out = json!({
+        "id": world.course as u8,
         "sport": if c.sport == Sport::Snowboard { "snow" } else { "jetski" },
         "length": c.length(),
         "laps": c.laps,

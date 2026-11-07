@@ -4,9 +4,11 @@
 // camera circles a rider standing in the finish area, and a crane circling
 // the finish area and a high wide shot take in the whole of it. A rider still up the run (watching a race you
 // joined midway) is followed by cameras set beside the run ahead of it, and
-// a drone.
+// a drone. At the bottom of the glades, a camera on the lodge's deck and one
+// across the frozen lake look on at the finish area too.
 import * as THREE from "three/webgpu";
 import type { RunData } from "../render/mountain.ts";
+import { runScenery } from "../render/runs.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { type Rig, type Watch, clear, drone, onRider } from "./broadcast-rig.ts";
 
@@ -51,7 +53,13 @@ class Along {
   }
 }
 
-export function snowRigs(run: RunData, env: Environment, heights?: (points: Float32Array) => Float32Array): Rig[] {
+/** The cameras for a run (`course`: `sim::CourseId`, for the cameras only some runs have). */
+export function snowRigs(
+  run: RunData,
+  env: Environment,
+  heights?: (points: Float32Array) => Float32Array,
+  course = 1,
+): Rig[] {
   const along = new Along(run);
   const finish = run.finishS;
   const ground = (x: number, z: number) => env.ground(x, z, 0);
@@ -244,5 +252,39 @@ export function snowRigs(run: RunData, env: Environment, heights?: (points: Floa
       along.of(r) < sideS + 12 && Math.hypot(sideEye.x - r.x, sideEye.z - r.z) < 120 && sees(sideEye, r),
   };
 
-  return [low, pitch, orbit, crane, wide, trackside, drone("drone", (x, z) => ground(x, z))];
+  const rigs = [low, pitch, orbit, crane, wide, trackside, drone("drone", (x, z) => ground(x, z))];
+  const scenery = runScenery(course);
+  const standing = (w: Watch, r: RiderView) => w.still(r.slot) > 0.4 && along.of(r) > finish;
+  /** A long lens from `eye` on a rider standing in the finish area (yours first). */
+  const onlooker = (name: string, eye: THREE.Vector3, frame: number, score: number): Rig => ({
+    name,
+    minShot: 4,
+    maxShot: 8,
+    rest: 14,
+    rate(w) {
+      const r = w.me && standing(w, w.me) ? w.me : w.riders.find((x) => standing(w, x));
+      return r && sees(eye, r) ? { slot: r.slot, score: r.isMe ? score : score * 0.7 } : null;
+    },
+    aim(_w, r, out) {
+      out.eye.copy(eye);
+      out.frame = frame;
+      out.follow = 4;
+      onRider(out, r);
+    },
+    holds: (_w, r) => along.of(r) > finish - 5 && sees(eye, r),
+  });
+  const lodge = scenery.lodge;
+  if (lodge.size !== 1) {
+    // On the lodge's deck, over the finish area.
+    const p = run.path.find((q) => q.s >= lodge.s) ?? run.path.at(-1)!;
+    rigs.push(onlooker("deck", on(lodge.s - 6, (p.limit + lodge.out - 9 * lodge.size) * lodge.side, 4.5), 5, 0.5));
+  }
+  if (scenery.lake) {
+    // Across the frozen lake, low: the ice, the finish area, the mountain behind.
+    const l = scenery.lake;
+    rigs.push(
+      onlooker("lake", on(l.s + l.along * 0.4, l.offset * 1.05 - Math.sign(l.offset) * l.across, 1.6), 7, 0.45),
+    );
+  }
+  return rigs;
 }

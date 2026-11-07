@@ -125,23 +125,24 @@ const SLOPE: &[super::Slope] = &[
 ];
 
 const VALLEY: &[Valley] = &[
-    // A col on the ridge: the mountain falls away either side.
-    valley(0.0, 16.0, -0.2, 30.0),
-    valley(40.0, 16.0, -0.2, 30.0),
-    // Rock rising round the couloir, then the bowl's walls.
-    valley(110.0, 20.0, 0.6, 20.0),
-    valley(150.0, 20.0, 0.6, 20.0),
-    valley(220.0, 40.0, 0.6, 40.0),
-    valley(560.0, 40.0, 0.6, 40.0),
-    valley(650.0, 36.0, 0.4, 50.0),
-    valley(1180.0, 36.0, 0.4, 50.0),
+    // A col on the ridge, between two peaks.
+    valley(0.0, 40.0, 0.5, 50.0),
+    valley(40.0, 40.0, 0.5, 50.0),
+    // Rock rising close round the couloir.
+    valley(90.0, 18.0, 0.6, 20.0),
+    valley(150.0, 18.0, 0.6, 20.0),
+    // The bowl's walls.
+    valley(220.0, 36.0, 0.7, 30.0),
+    valley(560.0, 36.0, 0.7, 30.0),
+    valley(650.0, 34.0, 0.5, 50.0),
+    valley(1180.0, 34.0, 0.5, 50.0),
     // The creek's valley.
-    valley(1240.0, 24.0, 0.55, 30.0),
+    valley(1250.0, 24.0, 0.55, 30.0),
     valley(1470.0, 24.0, 0.55, 30.0),
-    valley(1560.0, 45.0, 0.45, 60.0),
-    valley(1880.0, 50.0, 0.45, 60.0),
+    valley(1560.0, 45.0, 0.5, 60.0),
+    valley(1880.0, 50.0, 0.5, 60.0),
     // A wide floor at the bottom, round the lake.
-    valley(1960.0, 90.0, 0.35, 80.0),
+    valley(1990.0, 90.0, 0.4, 80.0),
 ];
 
 const FEATURES: &[Feature] = &[
@@ -156,7 +157,7 @@ const FEATURES: &[Feature] = &[
     Feature::Bowl {
         s: 215.0,
         length: 330.0,
-        depth: 3.5,
+        depth: 5.0,
         ease: 40.0,
     },
     lip(262.0, -11.0, 6.0, 1.3, LipKind::Wind),
@@ -235,7 +236,7 @@ const OBSTACLES: &[super::ObstacleDef] = &[
     pine(1090.0, 3.0),
     pine(1112.0, -9.5),
     pine(1150.0, -4.0),
-    pine(1190.0, 5.0),
+    pine(1196.0, -8.5),
     // Boulders by the creek.
     rock(1300.0, 6.4, 1.0),
     rock(1392.0, 6.0, 1.2),

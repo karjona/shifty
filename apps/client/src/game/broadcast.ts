@@ -95,7 +95,7 @@ export class Broadcast {
 
   /** The course on screen, once it is built. `heights`: the ground at many points at once (the mountain's). */
   setCourse(course: CourseInfo, env: Environment, heights?: (points: Float32Array) => Float32Array): void {
-    this.rigs = course.sport === "snow" ? snowRigs(course.run, env, heights) : bayRigs(course.bay, env);
+    this.rigs = course.sport === "snow" ? snowRigs(course.run, env, heights, course.id) : bayRigs(course.bay, env);
     this.rig = null;
     this.restUntil.clear();
     this.still.clear();
