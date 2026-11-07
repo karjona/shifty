@@ -292,6 +292,8 @@ export const en = {
   },
   race: {
     menu: "Race menu",
+    /** Cut to another television camera. */
+    camera: "Camera",
     resume: "Back to the race",
     leave: "Leave the race",
     noPause: "Online races don't pause.",
@@ -332,7 +334,7 @@ export const en = {
   hud: {
     getReady: "GET READY",
     go: "GO!",
-    freeRide: "Free ride · next race soon",
+    spectating: "Spectating · next race soon",
     wrongWay: "WRONG WAY",
     maxPower: "✓ MAX POWER",
     missedBuoy: "MISSED BUOY",

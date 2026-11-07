@@ -1562,6 +1562,19 @@ a {
 .race-menu-hint .glyph {
   --glyph-ink: var(--paper);
 }
+.race-menu-hint .race-camera {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 14px;
+  padding-right: 14px;
+  border-right: 1px solid var(--rule);
+  font-size: var(--fs-label);
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
 .race-menu {
   position: absolute;
   inset: 0;

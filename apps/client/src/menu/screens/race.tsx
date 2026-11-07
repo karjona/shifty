@@ -10,7 +10,7 @@ import { RaceSession } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { type PendingRace, fetchMe, meQuery, takePendingRace } from "../api.ts";
 import { toast } from "../toast.tsx";
-import { useAction, useAutoFocus } from "../hooks.ts";
+import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { nav } from "../nav.ts";
 import { Button, Glyph } from "../ui.tsx";
 import { PodiumScreen } from "./podium.tsx";
@@ -32,7 +32,8 @@ export function RaceScreen() {
   const [menu, setMenu] = useState(false);
   const [status, setStatus] = useState("");
   const [failed, setFailed] = useState(false);
-  const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow" } | null>(null);
+  const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow"; watching: boolean } | null>(null);
+  const { device } = useDevice();
   const [podium, setPodium] = useState<PodiumData | null>(null);
   const queryClient = useQueryClient();
   const credits = useRef<number | null>(queryClient.getQueryData(meQuery.queryKey)?.rider?.credits ?? null);
@@ -97,8 +98,8 @@ export function RaceScreen() {
   useEffect(() => {
     if (!session) return undefined;
     const id = setInterval(() => {
-      const { phase, racePhase, sport } = session.state;
-      setView(phase === 1 ? { racePhase, sport } : null);
+      const { phase, racePhase, sport, watching } = session.state;
+      setView(phase === 1 ? { racePhase, sport, watching } : null);
     }, 250);
     return () => clearInterval(id);
   }, [session]);
@@ -148,6 +149,12 @@ export function RaceScreen() {
       )}
       {!menu && !failed && (
         <div className="race-menu-hint">
+          {view?.watching && device !== "mouse" && (
+            <span className="race-camera">
+              <Glyph action="play" />
+              {t.race.camera}
+            </span>
+          )}
           <Glyph action="menu" />
         </div>
       )}

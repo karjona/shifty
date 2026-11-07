@@ -40,9 +40,13 @@ export class InputReader {
   sport: "jetski" | "snow" = "jetski";
   /** Test hook: when set, overrides real input. */
   forced: Partial<FrameInput> | null = null;
+  /** The camera button (Y / △ on a pad, P on the keyboard): went down since last asked, and is down on the pad. */
+  private cameraPressed = false;
+  private cameraHeld = false;
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement) return;
+    if (e.code === "KeyP" && !e.repeat) this.cameraPressed = true;
     if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
       e.preventDefault();
     this.keys.add(e.code);
@@ -60,6 +64,18 @@ export class InputReader {
     removeEventListener("keydown", this.onKeyDown);
     removeEventListener("keyup", this.onKeyUp);
     removeEventListener("blur", this.onBlur);
+  }
+
+  /** Whether the camera button went down since the last call (once a frame). */
+  takeCamera(): boolean {
+    let held = false;
+    for (const pad of navigator.getGamepads()) {
+      if (pad?.connected && pad.buttons[3]?.pressed === true) held = true;
+    }
+    const pressed = this.cameraPressed || (held && !this.cameraHeld);
+    this.cameraHeld = held;
+    this.cameraPressed = false;
+    return pressed;
   }
 
   read(dt: number): FrameInput {

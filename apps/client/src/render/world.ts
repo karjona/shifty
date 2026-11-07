@@ -86,14 +86,19 @@ export interface CameraTuning {
 }
 
 /**
- * A camera placed by hand (the intro's fly-over), blended with the chase
- * camera behind your rider: `chase` 0 is all the shot, 1 all the chase.
+ * A camera placed by hand (the intro's fly-over, the television cameras),
+ * blended with the chase camera behind your rider: `chase` 0 is all the
+ * shot, 1 all the chase.
  */
 export interface CameraShot {
   eye: THREE.Vector3;
   look: THREE.Vector3;
   fov: number;
   chase: number;
+  /** Horizon tilt (rad). */
+  roll?: number;
+  /** The rider the shot is about, if not yours: shadows fall round it. */
+  focus?: THREE.Vector3;
 }
 
 /** What surrounds the riders: sky, light, ground or water, scenery and effects. */
@@ -146,6 +151,8 @@ const REFLECT_FAR = 30;
 const SHADOW_REACH = 45;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
+/** The field of view (degrees) the distances above are for: a narrower one brings riders that much closer. */
+const DETAIL_FOV = 55;
 
 /** An angle wrapped to (-π, π]. */
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -392,6 +399,7 @@ export class World {
       this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
     );
     this.seen.clear();
+    const focus = shot?.focus ?? (me ? this.focusAt.set(me.x, me.y, me.z) : null);
     for (const r of riders) {
       this.seen.add(r.slot);
       const model = this.rider(env, r.slot);
@@ -399,7 +407,7 @@ export class World {
       const shown = r.isMe || this.inView(model.mesh.position);
       model.mesh.visible = shown;
       if (shown) {
-        this.detail(model.mesh, r, me);
+        this.detail(model.mesh, r, focus);
         model.mesh.updateMatrixWorld();
       }
     }
@@ -420,6 +428,7 @@ export class World {
     this.draw();
   }
 
+  private focusAt = new THREE.Vector3();
   private shotEye = new THREE.Vector3();
   private shotLook = new THREE.Vector3();
   private shotUp = new THREE.Vector3();
@@ -431,7 +440,13 @@ export class World {
     const cam = this.camera;
     const eye = this.shotEye.copy(shot.eye).lerp(cam.position, k);
     const look = this.shotLook.copy(shot.look).lerp(this.camLook, k);
-    const up = this.shotUp.set(0, 1, 0).lerp(cam.up, k).normalize();
+    const up = this.shotUp.set(0, 1, 0);
+    if (shot.roll) {
+      // Lean the up vector across the view: right is the view direction crossed with up.
+      const across = this.shotRider.copy(look).sub(eye).cross(up).normalize();
+      up.multiplyScalar(Math.cos(shot.roll)).addScaledVector(across, Math.sin(shot.roll));
+    }
+    up.lerp(cam.up, k).normalize();
     cam.position.copy(eye);
     cam.up.copy(up);
     cam.lookAt(look);
@@ -454,15 +469,15 @@ export class World {
   /**
    * How much of a rider is drawn: the outline only close enough to show
    * (the ink pass draws the silhouette further away), a reflection only
-   * close by, and a shadow only inside the sun's shadow box around the
-   * camera's rider.
+   * close by (as it looks: a long lens brings riders closer), and a shadow
+   * only inside the sun's shadow box around the rider the camera is on.
    */
-  private detail(mesh: THREE.Object3D, r: RiderView, me: RiderView | undefined): void {
-    const distance = this.camera.position.distanceTo(mesh.position);
+  private detail(mesh: THREE.Object3D, r: RiderView, focus: THREE.Vector3 | null): void {
+    const zoom = Math.min(1, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((DETAIL_FOV * Math.PI) / 360));
+    const distance = this.camera.position.distanceTo(mesh.position) * zoom;
     const far = distance > OUTLINE_FAR;
     const reflected = distance < REFLECT_FAR;
-    const focus = me ?? r;
-    const shadow = Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
+    const shadow = !focus || Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
     mesh.traverse((o) => {
       const data = o.userData as { outline?: boolean; castsShadow?: boolean; reflects?: boolean };
       if (data.outline) o.visible = !far;

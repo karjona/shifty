@@ -3,7 +3,8 @@
 // voices; the nearest few riders get cheap ones placed around the camera
 // (distance, pan, air absorption, Doppler). Landings, pops, bumps and
 // crashes are one-shots at the rider. The countdown follows the sim's
-// countdown phase, tick by tick.
+// countdown phase, tick by tick. While the race is on television, your
+// rider is heard from the camera like everyone else.
 //
 // Nothing here allocates per frame: per-seat state lives in typed arrays.
 import type { FrameInput } from "../input.ts";
@@ -56,6 +57,8 @@ function slipAngle(r: RiderView): number {
 }
 
 export class RaceAudio {
+  /** The race is on television: your ride is heard from the camera, not ridden. */
+  broadcast = false;
   private sport: "jetski" | "snow" = "jetski";
   private top = 30;
   private obstacles: readonly ObstacleData[] = [];
@@ -64,6 +67,8 @@ export class RaceAudio {
   private builtFor: "jetski" | "snow" | null = null;
   private bus: GainNode | null = null;
   private busLevel: Glide | null = null;
+  /** Your own ride's voices, faded out on television. */
+  private mineLevel: Glide | null = null;
   private engine: JetEngine | null = null;
   private hull: Hull | null = null;
   private board: Board | null = null;
@@ -151,6 +156,7 @@ export class RaceAudio {
     if (this.builtFor !== this.sport) this.build(ctx, kit, sfx);
     const t = ctx.currentTime;
     this.busLevel?.to(audible ? 1 : 0, t, audible ? 0.3 : 0.06);
+    this.mineLevel?.to(this.broadcast ? 0 : 1, t, 0.2);
     this.hearing.follow(listener.matrixWorld.elements, dt);
     // A clock resync replays or skips the world: what riders did across it is no news.
     const tick = race.phaseStart + race.phaseTicks;
@@ -175,17 +181,20 @@ export class RaceAudio {
     bus.connect(sfx);
     this.bus = bus;
     this.busLevel = new Glide(bus.gain, 0.3, 0.001);
+    const mine = gain(ctx, 1);
+    mine.connect(bus);
+    this.mineLevel = new Glide(mine.gain, 1, 0.001);
     this.wind = new Wind(ctx, kit);
-    this.wind.out.connect(bus);
+    this.wind.out.connect(mine);
     if (this.sport === "jetski") {
       this.engine = new JetEngine(ctx, kit);
-      this.engine.out.connect(bus);
+      this.engine.out.connect(mine);
       this.hull = new Hull(ctx, kit);
-      this.hull.out.connect(bus);
+      this.hull.out.connect(mine);
       for (let i = 0; i < FAR_VOICES; i++) this.farJet.push(new FarJetski(ctx, kit, bus));
     } else {
       this.board = new Board(ctx, kit);
-      this.board.out.connect(bus);
+      this.board.out.connect(mine);
       for (let i = 0; i < FAR_VOICES; i++) this.farBoard.push(new FarBoard(ctx, kit, bus));
     }
     this.builtFor = this.sport;
@@ -206,6 +215,7 @@ export class RaceAudio {
     }
     this.bus = null;
     this.busLevel = null;
+    this.mineLevel = null;
     this.engine = null;
     this.hull = null;
     this.board = null;
@@ -221,7 +231,7 @@ export class RaceAudio {
     if (s < 0 || s >= SLOTS) return;
     this.px[s] = r.x;
     this.pz[s] = r.z;
-    if (r.isMe) {
+    if (r.isMe && !this.broadcast) {
       this.dist[s] = 0;
       this.level[s] = 1;
       this.pan[s] = 0;
@@ -250,7 +260,9 @@ export class RaceAudio {
   private onEvents(events: readonly RaceEvent[], mySlot: number, race: RaceView): void {
     for (const e of events) {
       const s = e.slot;
-      const mine = s === mySlot;
+      // On autopilot nothing counts: your rider's tricks and buoys go unmarked.
+      const mine = s === mySlot && !race.autopilot;
+      const heardHere = s === mySlot && !this.broadcast;
       switch (e.kind) {
         case "buoy":
           if (!mine || race.phase !== RACING || !race.racing) break;
@@ -265,18 +277,18 @@ export class RaceAudio {
           if (mine && (e.lap ?? 0) > 1) audio.play((e.lap ?? 0) === race.laps ? "finalLap" : "lap");
           break;
         case "finish":
-          if (mine) audio.play("finish");
+          if (s === mySlot) audio.play("finish");
           break;
         case "trick":
           if (mine) audio.play("trick", e.sketchy ? 0.45 : 1, 0, e.sketchy ? 0.84 : 1);
-          if (e.sketchy) this.judged(s, SKETCHY, mine);
+          if (e.sketchy) this.judged(s, SKETCHY, heardHere);
           break;
         case "sketchy":
-          this.judged(s, SKETCHY, mine);
+          this.judged(s, SKETCHY, heardHere);
           break;
         case "bail":
           if (s >= 0 && s < SLOTS) this.bailAt[s] = this.clock;
-          this.judged(s, FALL, mine);
+          this.judged(s, FALL, heardHere);
           break;
       }
     }
@@ -368,7 +380,7 @@ export class RaceAudio {
   private ride(r: RiderView, input: FrameInput | null, t: number, dt: number): void {
     const s = r.slot;
     if (s < 0 || s >= SLOTS) return;
-    const me = r.isMe;
+    const me = r.isMe && !this.broadcast;
     const air = !r.grounded;
     const speedN = r.speed / this.top;
     // Put somewhere (the start grid, back on the course): no news either.
@@ -482,7 +494,7 @@ export class RaceAudio {
     this.heard.fill(0);
     for (const r of riders) {
       const s = r.slot;
-      if (s >= 0 && s < SLOTS && !r.isMe && this.level[s]! > 0) this.heard[s] = 1;
+      if (s >= 0 && s < SLOTS && (!r.isMe || this.broadcast) && this.level[s]! > 0) this.heard[s] = 1;
     }
     for (let s = 0; s < SLOTS; s++) {
       let rank = 0;

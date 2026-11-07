@@ -33,6 +33,8 @@ export interface RaceView {
   gates: number;
   /** Raced for laps (or one run down). */
   looped: boolean;
+  /** Your rider rides on autopilot: through the finish, joined midway, or on the results. */
+  autopilot: boolean;
 }
 
 export interface RaceEvent {
@@ -106,6 +108,7 @@ export class Hud {
   private info: HTMLDivElement;
   private speed: HTMLDivElement;
   private meter: HTMLDivElement;
+  private gauges: HTMLDivElement;
   private popups: HTMLDivElement;
   /** Who passed each checkpoint (and the finish) in this race, and when (race ticks). */
   private passes = new Map<string, { slot: number; ticks: number }[]>();
@@ -117,6 +120,7 @@ export class Hud {
     this.banner = el("div", "banner", root);
     this.info = el("div", "race-info", root);
     const bottom = el("div", "hud", root);
+    this.gauges = bottom;
     this.speed = el("div", "speed", bottom);
     this.meter = el("div", "meter", bottom);
     this.popups = el("div", "popups", root);
@@ -132,12 +136,18 @@ export class Hud {
     while (this.popups.childElementCount > 4) this.popups.firstElementChild?.remove();
   }
 
-  /** Popups for my own race events, and split times from everyone's. */
+  /** The speed and the meter (off while the race is on television). */
+  showGauges(on: boolean): void {
+    const display = on ? "" : "none";
+    if (this.gauges.style.display !== display) this.gauges.style.display = display;
+  }
+
+  /** Popups for my own race events (none on autopilot, where nothing counts), and split times from everyone's. */
   events(events: RaceEvent[], mySlot: number, race: RaceView): void {
     const m = messages().hud;
     for (const e of events) {
       if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
-      if (e.slot !== mySlot) continue;
+      if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish")) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "✓", "good");
         else this.popup(m.missedBuoy, "bad");
@@ -203,7 +213,7 @@ export class Hud {
       const n = Math.ceil(left / hz);
       banner = n > 3 ? m.getReady : String(n);
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = m.go;
-    else if (race.phase === RACING && !race.racing) banner = m.freeRide;
+    else if (race.phase === RACING && !race.racing) banner = m.spectating;
     if (race.wrongWay && race.phase !== COUNTDOWN) banner = m.wrongWay;
     if (banner !== this.banner.textContent) {
       this.banner.textContent = banner;

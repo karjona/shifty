@@ -21,6 +21,7 @@ import { type RosterName, Scoreboard } from "../ui/results.ts";
 import { WrongWay } from "../ui/wrong-way.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
+import { Broadcast, onAir } from "./broadcast.ts";
 import { disposeTree } from "./dispose.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
@@ -71,6 +72,8 @@ export interface RaceState {
   eventCount: number;
   /** The plan is over: the last race's results are done. */
   over: boolean;
+  /** The race is on television: your rider rides on autopilot (finished, or joined midway), or the results are up. */
+  watching: boolean;
 }
 
 /** `sim::Phase::Results`. */
@@ -161,6 +164,8 @@ export class RaceSession implements Stage {
   /** The race whose results came up last: the grid after them waits for the next course. */
   private resultsEvent = -1;
   private intro: RaceIntro | null = null;
+  /** The cameras once your race is over. */
+  private tv: Broadcast | null = null;
   /** The course on screen is built and ready to draw. */
   private ready = false;
   /** ...and draws smoothly: its card is coming off. */
@@ -175,6 +180,7 @@ export class RaceSession implements Stage {
     eventIndex: 0,
     eventCount: 1,
     over: false,
+    watching: false,
   };
   /** The last race of the plan has reached its results. */
   private finalResults = false;
@@ -212,6 +218,7 @@ export class RaceSession implements Stage {
       this.card.loading = true;
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
+      this.tv = new Broadcast();
     }
     this.joining(() => messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
@@ -349,6 +356,7 @@ export class RaceSession implements Stage {
       eventIndex: f("eventIndex"),
       eventCount: f("eventCount") || 1,
       gpVersion: f("gpVersion"),
+      autopilot: f("autopilot") === 1,
     };
   }
 
@@ -397,6 +405,7 @@ export class RaceSession implements Stage {
     }
     engine.world.setEnvironment(this.env);
     this.intro?.setCourse(this.course, course, this.env);
+    this.tv?.setCourse(course, this.env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
     if (old) disposeTree(old.group);
     const env = this.env;
     engine.world.addRiders(this.slots);
@@ -513,12 +522,23 @@ export class RaceSession implements Stage {
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
     this.showHud(!this.covered && !RaceIntro.active(race.phase));
+    const watching = onAir(race, this.sport);
+    this.state.watching = watching;
+    this.hud.showGauges(!watching);
+    this.sfx.broadcast = watching;
+    if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
 
     const riders = this.readRiders();
     const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (render) {
       const tick = client.renderTick();
-      const shot = this.intro?.frame(race, current && this.ready, this.covered, tick, now) ?? null;
+      const intro = this.intro?.frame(race, current && this.ready, this.covered, tick, now) ?? null;
+      if (!watching) this.tv?.off();
+      const tv =
+        watching && !intro
+          ? (this.tv?.frame(riders, now / 1000, tick / race.tickHz, dt, race.phase === RESULTS) ?? null)
+          : null;
+      const shot = intro ?? tv;
       if (this.seasonChange?.active) this.seasonChange.frame(dt);
       else if (this.ready) {
         engine.world.render(riders, tick, dt, nextBuoy, shot);
@@ -600,6 +620,10 @@ export class RaceSession implements Stage {
         },
         introAt: (seconds: number | null) => {
           if (this.intro) this.intro.pinned = seconds;
+        },
+        tv: (camera?: string | null) => {
+          if (this.tv && camera !== undefined) this.tv.pinned = camera;
+          return { cameras: this.tv?.cameras ?? [], on: this.tv?.onAir ?? null };
         },
         net: this.net,
       },

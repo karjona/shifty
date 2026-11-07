@@ -292,6 +292,7 @@ export const ca: Messages = {
   },
   race: {
     menu: "Menú de la cursa",
+    camera: "Càmera",
     resume: "Torna a la cursa",
     leave: "Surt de la cursa",
     noPause: "Les curses en línia no es pausen.",
@@ -332,7 +333,7 @@ export const ca: Messages = {
   hud: {
     getReady: "PREPARATS",
     go: "JA!",
-    freeRide: "Volta lliure · la propera cursa, aviat",
+    spectating: "D'espectador · la propera cursa, aviat",
     wrongWay: "SENTIT CONTRARI",
     maxPower: "✓ POTÈNCIA MÀXIMA",
     missedBuoy: "BOIA FALLADA",

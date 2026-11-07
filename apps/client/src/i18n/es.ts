@@ -292,6 +292,7 @@ export const es: Messages = {
   },
   race: {
     menu: "Menú de carrera",
+    camera: "Cámara",
     resume: "Volver a la carrera",
     leave: "Salir de la carrera",
     noPause: "Las carreras online no se pausan.",
@@ -332,7 +333,7 @@ export const es: Messages = {
   hud: {
     getReady: "PREPARADOS",
     go: "¡YA!",
-    freeRide: "Vuelta libre · la próxima carrera, en breve",
+    spectating: "De espectador · la próxima carrera, en breve",
     wrongWay: "SENTIDO CONTRARIO",
     maxPower: "✓ POTENCIA MÁXIMA",
     missedBuoy: "BOYA FALLADA",
