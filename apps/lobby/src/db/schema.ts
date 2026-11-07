@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -17,6 +18,10 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Uint8Array<ArrayBuffer>; driverData: Uint8Array<ArrayBuffer> }>({
+  dataType: () => "bytea",
+});
 
 const createdAt = () => timestamp("created_at").notNull().defaultNow();
 const updatedAt = () =>
@@ -300,5 +305,55 @@ export const raceResult = pgTable(
     index("race_result_user_idx")
       .on(t.userId)
       .where(sql`${t.userId} is not null`),
+  ],
+);
+
+/**
+ * Every time trial run a race server reported, best or not. `room` and
+ * `run` (the attempt in that room) identify it, so a retried report is kept
+ * once; a deleted account keeps its runs, without the user.
+ */
+export const timeTrialRun = pgTable(
+  "time_trial_run",
+  {
+    id: serial("id").primaryKey(),
+    room: text("room").notNull(),
+    run: integer("run").notNull(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    course: smallint("course").notNull(),
+    season: smallint("season").notNull(),
+    timeMs: integer("time_ms").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("time_trial_run_idx").on(t.room, t.run),
+    index("time_trial_run_user_idx")
+      .on(t.userId)
+      .where(sql`${t.userId} is not null`),
+  ],
+);
+
+/**
+ * A player's best time trial run per course and season, with its ghost
+ * (see ghosts.ts for the format). The id is the ghost's: a new best gets a
+ * new id, so the bytes behind an id never change.
+ */
+export const timeTrialBest = pgTable(
+  "time_trial_best",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    course: smallint("course").notNull(),
+    season: smallint("season").notNull(),
+    timeMs: integer("time_ms").notNull(),
+    ghost: bytea("ghost").notNull(),
+    /** Milliseconds, so a value read back compares exactly in rank queries. */
+    setAt: timestamp("set_at", { precision: 3 }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("time_trial_best_idx").on(t.userId, t.course, t.season),
+    index("time_trial_best_board_idx").on(t.course, t.season, t.timeMs, t.setAt),
   ],
 );
