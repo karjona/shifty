@@ -6,6 +6,7 @@
 //! no iteration over hash maps.
 
 pub mod bot;
+pub mod buoy;
 pub mod course;
 pub mod input;
 pub mod jetski;

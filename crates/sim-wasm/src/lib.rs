@@ -569,6 +569,9 @@ fn course_json_on(world: &World) -> String {
             out["radius"] = json!(st.radius);
             out["breakwaterRadius"] = json!(st.breakwater_radius);
             out["outerLimit"] = json!(st.outer_limit);
+            out["buoyRadius"] = json!(sim::buoy::tuning::RADIUS);
+            out["buoyHeight"] = json!(sim::buoy::tuning::HEIGHT);
+            out["riderRadius"] = json!(c.sport.rider_radius());
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
