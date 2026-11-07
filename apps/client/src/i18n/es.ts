@@ -7,6 +7,7 @@ export const es: Messages = {
     play: "Jugar",
     tabs: "Pestañas",
     loading: "Cargando…",
+    soundLocked: "Haz clic o pulsa una tecla para activar el sonido",
     retry: "Reintentar",
     close: "Cerrar",
     cancel: "Cancelar",
@@ -227,6 +228,8 @@ export const es: Messages = {
     water: "Agua",
     waterSea: "Completa",
     waterBasic: "Básica (más rápida)",
+    sound: "Sonido",
+    volume: { master: "General", effects: "Efectos", music: "Música" },
     controls: "Controles",
     controlsBody:
       "Menús: stick o cruceta para moverte, A / ✕ para elegir, B / ○ para volver, LB / RB para cambiar de pestaña. Teclado: flechas, Intro, Esc, Q / E.",

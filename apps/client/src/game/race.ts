@@ -4,8 +4,9 @@
 // change in between.
 import { type Appearance, botAppearance, decodeAppearance } from "@shifty/rider";
 import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
+import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
-import { InputReader } from "../input.ts";
+import { type FrameInput, InputReader } from "../input.ts";
 import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
@@ -126,6 +127,8 @@ export class RaceSession implements Stage {
   private client: WasmClient | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private input = new InputReader();
+  private lastInput: FrameInput | null = null;
+  private sfx = new RaceAudio();
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
   private hud: Hud;
   private board: Scoreboard;
@@ -268,6 +271,7 @@ export class RaceSession implements Stage {
       i = { steer, throttle, lean, buttons };
     }
     client.update(now, i.steer, i.throttle, i.lean, i.buttons);
+    this.lastInput = i;
     this.sendOutgoing(client, transport);
     return dt;
   }
@@ -358,6 +362,7 @@ export class RaceSession implements Stage {
     const course = parseCourse(client.courseJson());
     this.sport = course.sport;
     this.input.sport = course.sport;
+    this.sfx.setCourse(course, client.topSpeed());
     this.hud.tags.sport = course.sport;
     this.mapRoot.replaceChildren();
     if (!render) return;
@@ -500,7 +505,10 @@ export class RaceSession implements Stage {
     }
     const me = riders.find((r) => r.isMe);
     race.wrongWay = this.wrongWay.update(race, me);
-    this.hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
+    const events = parseEvents(client.takeEventsJson());
+    this.hud.events(events, client.slot(), race);
+    const audible = this.shown && !this.seasonChange?.active;
+    this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
     this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
     this.board.update({
@@ -575,6 +583,7 @@ export class RaceSession implements Stage {
     this.joining(null);
     if (this.timer) clearInterval(this.timer);
     this.seasonChange?.cancel();
+    this.sfx.stop();
     this.card?.hide();
     this.transport?.close();
     this.client?.free();
