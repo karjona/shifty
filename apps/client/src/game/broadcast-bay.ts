@@ -31,7 +31,7 @@ const BOARD = { half: 2.2, top: 2.4 };
 
 const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
-/** How high what stands on the bay is at `(x, z)` (0: open water), for what hides a rider. */
+/** How high what stands on the bay is at `(x, z)` (0: open water: the land, the breakwater, the lighthouse, boards, ramps and buoys), for what hides a rider. */
 function solid(course: CourseData): (x: number, z: number) => number {
   const sh = course.straightHalf;
   const bw = course.breakwaterRadius;
@@ -44,6 +44,8 @@ function solid(course: CourseData): (x: number, z: number) => number {
     if (Math.hypot(x - light.x, z - light.z) < LIGHTHOUSE.radius) h = LIGHTHOUSE.top;
     for (const b of boards) if (Math.hypot(x - b.x, z - b.z) < BOARD.half) h = Math.max(h, BOARD.top);
     for (const r of course.ramps) if (Math.hypot(x - r.x, z - r.z) < r.length / 2) h = Math.max(h, r.height);
+    for (const b of course.buoys)
+      if (Math.hypot(x - b.x, z - b.z) < course.buoyRadius) h = Math.max(h, course.buoyHeight);
     for (const l of course.land) {
       const ax = l.bx - l.ax;
       const az = l.bz - l.az;
