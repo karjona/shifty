@@ -252,7 +252,7 @@ export const match = pgTable("match", {
   id: text("id").primaryKey(),
   /** `room` or `matchmaking`. */
   mode: text("mode").notNull(),
-  /** `gp`, `summer` or `winter`. */
+  /** `gp` (the Tilt) or `race` (one race; older matches say `summer` or `winter`). */
   event: text("event").notNull(),
   server: text("server").notNull(),
   createdAt: createdAt(),

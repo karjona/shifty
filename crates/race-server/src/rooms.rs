@@ -292,12 +292,12 @@ mod tests {
             bots: 0,
             humans: 0,
             surface: 0,
-            course: 0,
-            events: vec![0],
+            tilt: false,
+            races: Vec::new(),
+            seed: 0,
             look: String::new(),
             setups: Vec::new(),
             trial: false,
-            season: 0,
         }
     }
 

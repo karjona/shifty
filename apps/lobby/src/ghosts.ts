@@ -18,6 +18,7 @@
 //
 // Varints are LEB128. The frames end the blob exactly. The lobby only walks
 // them to check the count; clients decode the values.
+import { SEASONS, SPORT_SEASONS, circuit } from "@shifty/rider";
 import { and, asc, count, eq, lt, or, sql } from "drizzle-orm";
 import { openDb, type Db } from "./db/client.ts";
 import { player, timeTrialBest, timeTrialRun } from "./db/schema.ts";
@@ -26,7 +27,7 @@ import { formatHandle } from "./handles.ts";
 import { isRecord } from "./json.ts";
 import { type Racer, pickServer } from "./matches.ts";
 import { type RiderClaims, loadRiderClaims } from "./riders.ts";
-import { type JoinTicket, b64urlDecode, b64urlEncode, mintTicket, roomId } from "./tickets.ts";
+import { type JoinTicket, b64urlDecode, b64urlEncode, mintTicket, planSeed, roomId } from "./tickets.ts";
 
 export const GHOST_VERSION = 1;
 /** Sim ticks per ghost frame (the sim runs at 60 Hz). */
@@ -37,7 +38,8 @@ const MAX_SPLITS = 64;
 const MAX_LOOK = 64;
 /** Highest course id a time trial may name. */
 export const MAX_COURSE = 31;
-export const SEASONS = 4;
+/** `sim::Weather::Clear`: time trials are ridden in clear, steady weather. */
+const CLEAR = 0;
 /** How many rows a board shows. */
 export const BOARD_TOP = 10;
 
@@ -49,10 +51,19 @@ export interface Trial {
   season: number;
 }
 
-/** A course and season to race or look up, checked. */
+/** A course and season to race or look up, checked: a circuit, in a season its sport rides. */
 export function parseTrial(v: { course?: unknown; season?: unknown }): Trial | null {
   const course = int(v.course, 0, MAX_COURSE);
-  const season = int(v.season, 0, SEASONS - 1);
+  const season = int(v.season, 0, SEASONS.length - 1);
+  if (course === null || season === null) return null;
+  const c = circuit(course);
+  return c && SPORT_SEASONS[c.sport].includes(SEASONS[season]!) ? { course, season } : null;
+}
+
+/** A course and season as a race server reports them (any circuit id it knows, any season). */
+function reportedTrial(v: { course?: unknown; season?: unknown }): Trial | null {
+  const course = int(v.course, 0, MAX_COURSE);
+  const season = int(v.season, 0, SEASONS.length - 1);
   return course === null || season === null ? null : { course, season };
 }
 
@@ -78,11 +89,12 @@ export async function startTimeTrial(env: Env, racer: Racer, course: number, sea
     room: roomId("t"),
     pid: racer.userId,
     name: racer.handle,
-    event: "summer",
+    plan: { tilt: false, race: { course, season, weather: CLEAR, turns: CLEAR } },
+    seed: planSeed(),
     bots: 0,
     rider,
     humans: 1,
-    trial: { course, season },
+    trial: true,
   });
 }
 
@@ -105,7 +117,7 @@ export interface RunReport {
 export function parseRun(v: unknown): RunReport | null {
   if (!isRecord(v)) return null;
   const run = int(v.run, 1, 65_535);
-  const trial = parseTrial(v);
+  const trial = reportedTrial(v);
   const timeMs = int(v.timeMs, 1, 3_600_000);
   if (typeof v.server !== "string" || !/^[\w.[\]:-]{1,255}$/u.test(v.server)) return null;
   if (typeof v.room !== "string" || !/^[\w-]{1,64}$/u.test(v.room)) return null;

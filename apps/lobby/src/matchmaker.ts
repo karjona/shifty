@@ -5,6 +5,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
 import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, startMatch } from "./matches.ts";
+import { TILT } from "@shifty/rider";
 import type { JoinTicket } from "./tickets.ts";
 
 interface Queued {
@@ -108,13 +109,13 @@ export class Matchmaker extends DurableObject<Env> {
   private async startRace(group: { ws: WebSocket; q: Queued }[]): Promise<void> {
     let tickets: Map<string, JoinTicket>;
     try {
-      tickets = await startMatch(
+      ({ tickets } = await startMatch(
         this.env,
         "matchmaking",
-        "gp",
+        TILT,
         group.map(({ q }) => ({ userId: q.userId, handle: q.handle })),
         FIELD,
-      );
+      ));
     } catch (e) {
       if (!(e instanceof NoRaceServer)) throw e;
       for (const { ws } of group) {

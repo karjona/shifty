@@ -1,20 +1,41 @@
-// Private rooms: friends gather with a code, the host picks the event and
+// Private rooms: friends gather with a code, the host picks the plan (the
+// Tilt, or one race with its circuit and conditions picked or drawn) and
 // the bots, everyone readies up and the host starts the race. One Durable
 // Object per code; members are hibernatable WebSockets.
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "./env.ts";
 import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, matchEnded, matchRider, startMatch } from "./matches.ts";
-import { type EventChoice, isEventChoice, type JoinTicket, mintTicket, type TicketServer } from "./tickets.ts";
+import { type PlanRequest, parsePlan } from "@shifty/rider";
+import { type JoinTicket, legacyPlan, mintTicket, type TicketServer } from "./tickets.ts";
+
+/** The race a room started: its plan and seed are what rejoin tickets carry. */
+export interface StartedRace {
+  room: string;
+  server: TicketServer;
+  userIds: string[];
+  at: number;
+  plan: PlanRequest;
+  seed: number;
+}
 
 export interface RoomSettings {
   code: string;
   hostId: string;
-  event: EventChoice;
+  plan: PlanRequest;
   bots: number;
   createdAt: number;
   /** The race the room last started, while it may still be running. */
-  race: { room: string; server: TicketServer; userIds: string[]; at: number } | null;
+  race: StartedRace | null;
+}
+
+/** Stored settings (rooms saved by older lobbies name an `event`, and their race no seed). */
+function readSettings(v: RoomSettings | undefined): RoomSettings | null {
+  if (!v) return null;
+  const old: unknown = Reflect.get(v, "event");
+  const plan = parsePlan(v.plan) ?? legacyPlan(old);
+  const race = v.race && typeof v.race.seed === "number" && parsePlan(v.race.plan) ? v.race : null;
+  return { ...v, plan, race };
 }
 
 interface Member {
@@ -25,7 +46,7 @@ interface Member {
 }
 
 export type RoomClientMsg =
-  | { t: "settings"; event: EventChoice; bots: number }
+  | { t: "settings"; plan: PlanRequest; bots: number }
   | { t: "ready"; ready: boolean }
   | { t: "start" }
   | { t: "rejoin" };
@@ -35,7 +56,7 @@ export type RoomServerMsg =
       t: "state";
       code: string;
       hostId: string;
-      event: EventChoice;
+      plan: PlanRequest;
       bots: number;
       members: { userId: string; handle: string; ready: boolean }[];
       racing: string[];
@@ -82,8 +103,10 @@ function parseMessage(data: string): RoomClientMsg | null {
   }
   if (!isRecord(m)) return null;
   switch (m.t) {
-    case "settings":
-      return isEventChoice(m.event) ? { t: "settings", event: m.event, bots: clampBots(m.bots) } : null;
+    case "settings": {
+      const plan = parsePlan(m.plan);
+      return plan ? { t: "settings", plan, bots: clampBots(m.bots) } : null;
+    }
     case "ready":
       return { t: "ready", ready: m.ready === true };
     case "start":
@@ -102,7 +125,7 @@ export class RoomLobby extends DurableObject<Env> {
   private settings: RoomSettings | null | undefined;
 
   private async load(): Promise<RoomSettings | null> {
-    if (this.settings === undefined) this.settings = (await this.ctx.storage.get<RoomSettings>("settings")) ?? null;
+    if (this.settings === undefined) this.settings = readSettings(await this.ctx.storage.get<RoomSettings>("settings"));
     return this.settings;
   }
 
@@ -112,9 +135,9 @@ export class RoomLobby extends DurableObject<Env> {
   }
 
   /** Creates the room; false if the code is already in use. */
-  async create(code: string, hostId: string, event: EventChoice, bots: number): Promise<boolean> {
+  async create(code: string, hostId: string, plan: PlanRequest, bots: number): Promise<boolean> {
     if (await this.load()) return false;
-    await this.save({ code, hostId, event, bots: clampBots(bots), createdAt: Date.now(), race: null });
+    await this.save({ code, hostId, plan, bots: clampBots(bots), createdAt: Date.now(), race: null });
     await this.ctx.storage.setAlarm(Date.now() + EMPTY_TTL_MS);
     return true;
   }
@@ -189,7 +212,7 @@ export class RoomLobby extends DurableObject<Env> {
       t: "state",
       code: s.code,
       hostId: s.hostId,
-      event: s.event,
+      plan: s.plan,
       bots: s.bots,
       members: this.members(except).map(({ userId, handle, ready }) => ({ userId, handle, ready })),
       racing: race,
@@ -216,7 +239,7 @@ export class RoomLobby extends DurableObject<Env> {
     switch (msg.t) {
       case "settings": {
         if (!isHost) return this.send(ws, { t: "error", error: "not_host" });
-        await this.save({ ...s, event: msg.event, bots: msg.bots });
+        await this.save({ ...s, plan: msg.plan, bots: msg.bots });
         // New settings: everyone confirms again.
         for (const other of this.sockets()) {
           const m = memberOf(other);
@@ -242,7 +265,8 @@ export class RoomLobby extends DurableObject<Env> {
           room: race.room,
           pid: me.userId,
           name: me.handle,
-          event: s.event,
+          plan: race.plan,
+          seed: race.seed,
           bots: s.bots,
           rider: await matchRider(this.env, race.room, me.userId),
           humans: race.userIds.length,
@@ -261,14 +285,15 @@ export class RoomLobby extends DurableObject<Env> {
     if (members.some((m) => m.userId !== s.hostId && !m.ready))
       return this.send(ws, { t: "error", error: "not_ready" });
     let tickets: Map<string, JoinTicket>;
+    let seed: number;
     try {
-      tickets = await startMatch(
+      ({ tickets, seed } = await startMatch(
         this.env,
         "room",
-        s.event,
+        s.plan,
         members.map((m) => ({ userId: m.userId, handle: m.handle })),
         s.bots,
-      );
+      ));
     } catch (e) {
       if (e instanceof NoRaceServer) return this.send(ws, { t: "error", error: "no_server" });
       throw e;
@@ -280,7 +305,10 @@ export class RoomLobby extends DurableObject<Env> {
       version: first.version,
       certHashes: first.certHashes,
     };
-    await this.save({ ...s, race: { room: first.room, server, userIds: [...tickets.keys()], at: Date.now() } });
+    await this.save({
+      ...s,
+      race: { room: first.room, server, userIds: [...tickets.keys()], at: Date.now(), plan: s.plan, seed },
+    });
     for (const sock of this.sockets()) {
       const m = memberOf(sock);
       if (!m) continue;

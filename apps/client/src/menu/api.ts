@@ -1,6 +1,14 @@
 // The lobby, from the menus: the account (Better Auth), the player's
 // profile, menu content, and getting into races.
-import { type Appearance, type Setups, defaultSetups, parseAppearance, parseSetup, SPORTS } from "@shifty/rider";
+import {
+  type Appearance,
+  type PlanRequest,
+  type Setups,
+  defaultSetups,
+  parseAppearance,
+  parseSetup,
+  SPORTS,
+} from "@shifty/rider";
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import { createAuthClient } from "better-auth/react";
 import { emailOTPClient } from "better-auth/client/plugins";
@@ -12,7 +20,6 @@ export const auth = createAuthClient({
   plugins: [emailOTPClient()],
 });
 
-export type EventChoice = "gp" | "summer" | "winter";
 /** The modes on the mode select screen. */
 export type Mode = "trial" | "single" | "room" | "matchmaking";
 
@@ -200,8 +207,9 @@ export async function fetchContent(locale: string): Promise<{ banners: Banner[];
   };
 }
 
-export async function playSingle(event: EventChoice): Promise<JoinTicket> {
-  const { ticket } = await call("/api/play/single", { method: "POST", body: JSON.stringify({ event }) });
+/** Single player: the Tilt, or one race (the lobby draws everything). */
+export async function playSingle(plan: PlanRequest): Promise<JoinTicket> {
+  const { ticket } = await call("/api/play/single", { method: "POST", body: JSON.stringify({ plan }) });
   return parseJoinTicket(ticket);
 }
 
@@ -252,8 +260,8 @@ export async function fetchGhost(id: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-export async function createRoom(event: EventChoice, bots: number): Promise<string> {
-  const { code } = await call("/api/rooms", { method: "POST", body: JSON.stringify({ event, bots }) });
+export async function createRoom(plan: PlanRequest, bots: number): Promise<string> {
+  const { code } = await call("/api/rooms", { method: "POST", body: JSON.stringify({ plan, bots }) });
   if (typeof code !== "string") throw new ApiError(500, "bad_response");
   return code;
 }

@@ -176,7 +176,8 @@ function startVite() {
   console.log(`
   ▸ open http://localhost:5173 (sign-in codes show up in the lobby log)
     quick race without the menus: http://localhost:5173/?name=YourName
-    URL options: name, room, bots (0-7), event (snow), surface (0-3),
+    URL options: name, room, bots (0-7), event (snow, gp, or a circuit's id),
+                 season, weather, turns, time, seed, surface (0-3),
                  scale (0.25-1), water=basic (plain swells, for slow machines)
 `);
 }

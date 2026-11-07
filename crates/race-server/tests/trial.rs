@@ -3,11 +3,11 @@
 
 use protocol::InputPacket;
 use protocol::ghost::{Ghost, frames_for};
-use protocol::token::JoinClaims;
+use protocol::token::{JoinClaims, RaceClaims};
 use race_server::record::RunReport;
 use race_server::room::{Room, RoomConfig};
 use sim::race::tuning::RESULTS_TICKS;
-use sim::{CourseId, Phase, SurfaceKind, TICK_HZ};
+use sim::{CourseId, Phase, Season, SurfaceKind, TICK_HZ, Weather};
 
 fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
     JoinClaims {
@@ -21,12 +21,17 @@ fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
         bots: 5,
         humans: 0,
         surface: SurfaceKind::Swells as u8,
-        course: course as u8,
-        events: vec![course as u8],
+        tilt: false,
+        races: vec![RaceClaims {
+            course: Some(course as u8),
+            season: Some(season),
+            weather: Some(Weather::Storm as u8),
+            ..RaceClaims::default()
+        }],
+        seed: 7,
         look: protocol::token::b64(&[4, 5, 6]),
         setups: Vec::new(),
         trial: true,
-        season,
     }
 }
 
@@ -89,6 +94,12 @@ impl Run {
 #[test]
 fn a_run_to_the_finish_is_recorded_and_the_results_wait_for_a_retry() {
     let mut run = Run::new(CourseId::Mountain, 2);
+    // Clear and steady whatever the ticket says.
+    let c = run.room.world().conditions;
+    assert_eq!(
+        (c.season, c.weather, c.turns),
+        (Season::Winter, Weather::Clear, Weather::Clear)
+    );
     // No bots in a time trial, and nobody else gets in.
     assert_eq!(run.room.world().riders.iter().flatten().count(), 1);
     let bea = JoinClaims {

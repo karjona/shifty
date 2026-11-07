@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ITEMS, STARTER, defaultOutfits, defaultAppearance } from "@shifty/rider";
 import { GRAND_PRIX_BONUS, PLACE_CREDITS, STYLE_CAP, payouts } from "../src/rewards.ts";
-import type { ResultReport } from "../src/results.ts";
+import { type ResultReport, parseReport } from "../src/results.ts";
 import { checkAppearance, parseSetups } from "../src/riders.ts";
 
 const report = (entries: ResultReport["entries"], event = 0): ResultReport => ({
   room: "m_1",
   round: 1,
   event,
+  eventCount: null,
   course: event,
+  conditions: null,
   entries,
 });
 const entry = (pid: string | null, place: number, trickPoints = 0) => ({
@@ -79,4 +81,16 @@ void test("a rider can only wear what they own, in the right slots", () => {
       winter: { speed: 3, handling: 3, stability: 3, tricks: 3 },
     }),
   );
+});
+
+void test("race reports carry the plan's length and the race's conditions", () => {
+  const base = { room: "m_1", round: 1, event: 3, course: 1, entries: [] };
+  assert.deepEqual(parseReport({ ...base, eventCount: 4, conditions: { season: 3, weather: 4, turns: 0, time: 80 } }), {
+    ...base,
+    eventCount: 4,
+    conditions: { season: 3, weather: 4, turns: 0, time: 80 },
+  });
+  assert.deepEqual(parseReport(base), { ...base, eventCount: null, conditions: null });
+  assert.equal(parseReport({ ...base, conditions: { season: 4, weather: 0, turns: 0, time: 72 } }), null);
+  assert.equal(parseReport({ ...base, eventCount: 0 }), null);
 });

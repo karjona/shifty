@@ -174,9 +174,13 @@ void test("run reports are checked before they are trusted", () => {
     assert.equal(parseRun({ ...body, ...bad }), null, JSON.stringify(bad));
 });
 
-void test("a time trial names a course and a season", () => {
-  assert.deepEqual(parseTrial({ course: 31, season: 3 }), { course: 31, season: 3 });
-  assert.equal(parseTrial({ course: 32, season: 0 }), null);
+void test("a time trial names a circuit and a season its sport rides", () => {
+  assert.deepEqual(parseTrial({ course: 0, season: 3 }), { course: 0, season: 3 });
+  assert.deepEqual(parseTrial({ course: 1, season: 2 }), { course: 1, season: 2 });
+  // No snow in summer.
+  assert.equal(parseTrial({ course: 1, season: 0 }), null);
+  assert.equal(parseTrial({ course: 31, season: 0 }), null);
+  assert.equal(parseTrial({ course: 0, season: 4 }), null);
   assert.equal(parseTrial({ course: 0, season: "0" }), null);
   assert.equal(parseTrial({}), null);
   assert.deepEqual(trialQuery("1", "2"), { course: 1, season: 2 });

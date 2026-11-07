@@ -22,10 +22,13 @@ use protocol::{
 };
 use serde::Serialize;
 use sim::bot::bot_input;
+use sim::conditions::Event as RaceEvent;
+use sim::race::{Phase, Race};
+use sim::{
+    CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, Weather, World,
+};
 
 use crate::record::{RunReport, Trial};
-use sim::race::{Phase, Race};
-use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, World};
 
 pub type ConnId = u64;
 
@@ -64,8 +67,9 @@ const BOT_SETUPS: [[u8; 4]; 8] = [
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
     pub id: String,
-    /// The courses raced, in order: one, or a Tilt.
-    pub plan: Vec<CourseId>,
+    /// The races, in order: one, or a Tilt. Drawn once, from the token
+    /// that creates the room.
+    pub plan: Vec<RaceEvent>,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     pub bots: u8,
@@ -81,14 +85,19 @@ impl RoomConfig {
         for b in claims.room.bytes() {
             seed = (seed ^ u32::from(b)).wrapping_mul(0x0100_0193);
         }
-        let mut plan = claims.plan();
+        let mut plan = claims.events();
+        plan.truncate(protocol::token::MAX_EVENTS);
         if plan.is_empty() {
-            plan.push(CourseId::Oval);
+            plan.push(RaceEvent::home(CourseId::Oval));
         }
-        let trial = claims.trial.then_some(claims.season);
-        if trial.is_some() {
+        // A time trial: one race, in clear, steady weather.
+        let trial = claims.trial.then(|| {
             plan.truncate(1);
-        }
+            let c = &mut plan[0].conditions;
+            c.weather = Weather::Clear;
+            c.turns = Weather::Clear;
+            c.season as u8
+        });
         Self {
             id: claims.room.clone(),
             plan,
@@ -126,16 +135,40 @@ pub struct ReportEntry {
     pub gp_points: Option<u16>,
 }
 
+/// A race's conditions, for the lobby (JSON, wire numbers).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ReportConditions {
+    pub season: u8,
+    pub weather: u8,
+    pub turns: u8,
+    pub time: u8,
+}
+
+impl From<sim::Conditions> for ReportConditions {
+    fn from(c: sim::Conditions) -> Self {
+        let [season, weather, turns, time] = c.to_bytes();
+        Self {
+            season,
+            weather,
+            turns,
+            time,
+        }
+    }
+}
+
 /// A finished race, for the lobby (JSON).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RaceReport {
     pub room: String,
     /// Counts runs through the plan (a plan started again from the top, when
     /// the first player arrives in a room that bots kept racing, is a new round).
     pub round: u16,
-    /// The race's place in the plan.
+    /// The race's place in the plan, and how many races the plan has.
     pub event: u8,
+    pub event_count: u8,
     pub course: u8,
+    pub conditions: ReportConditions,
     pub entries: Vec<ReportEntry>,
 }
 
@@ -253,7 +286,7 @@ pub struct Outbox {
 
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
-        let mut world = World::on_course(config.plan[0], config.surface_kind, config.surface_seed);
+        let mut world = World::for_event(config.plan[0], config.surface_kind, config.surface_seed);
         world.trial = config.trial.is_some();
         let mut room = Self {
             trial: config.trial.map(|season| Trial::new(&config.id, season)),
@@ -492,6 +525,7 @@ impl Room {
             snapshot_interval: SNAPSHOT_INTERVAL as u8,
             max_riders: MAX_RIDERS as u8,
             course: self.world.course,
+            conditions: self.world.conditions,
             surface_kind: self.config.surface_kind,
             surface_seed: self.config.surface_seed,
             server_tick: self.world.tick,
@@ -568,7 +602,9 @@ impl Room {
                 room: self.config.id.clone(),
                 round: self.round,
                 event: self.event_index as u8,
+                event_count: self.config.plan.len() as u8,
                 course: self.world.course as u8,
+                conditions: self.world.conditions.into(),
                 entries,
             });
         }
@@ -576,7 +612,7 @@ impl Room {
 
     /// Back to the grid of the plan's first race, with no points.
     fn restart_plan(&mut self) {
-        if self.event_index != 0 || self.world.course != self.config.plan[0] {
+        if self.event_index != 0 || self.world.event() != self.config.plan[0] {
             self.event_index = 0;
             self.round = self.round.wrapping_add(1);
             self.load_course();
@@ -616,16 +652,15 @@ impl Room {
         self.load_course();
     }
 
-    /// A fresh world on the plan's current course (if it changed), with
+    /// A fresh world for the plan's current race (if it changed), with
     /// every seated rider on the grid.
     fn load_course(&mut self) {
-        let course = self.config.plan[self.event_index];
-        if course == self.world.course {
+        let event = self.config.plan[self.event_index];
+        if event == self.world.event() {
             return;
         }
         let tick = self.world.tick;
-        let mut world =
-            World::on_course(course, self.config.surface_kind, self.config.surface_seed);
+        let mut world = World::for_event(event, self.config.surface_kind, self.config.surface_seed);
         world.tick = tick;
         world.race = Race::new(tick);
         for slot in 0..MAX_RIDERS {
@@ -778,6 +813,7 @@ impl Room {
                         .saturating_sub(p.echo_received_ms)
                         .min(u64::from(u16::MAX)) as u16,
                     course: self.world.course,
+                    conditions: self.world.conditions,
                     event_index: self.event_index as u8,
                     event_count: self.config.plan.len() as u8,
                     race: self.world.race,
@@ -809,12 +845,18 @@ mod tests {
             bots,
             humans: 0,
             surface: SurfaceKind::Flat as u8,
-            course: events[0],
-            events,
+            tilt: false,
+            races: events
+                .into_iter()
+                .map(|c| protocol::token::RaceClaims {
+                    course: Some(c),
+                    ..Default::default()
+                })
+                .collect(),
+            seed: 5,
             look: String::new(),
             setups: Vec::new(),
             trial: false,
-            season: 0,
         }
     }
 
@@ -883,6 +925,9 @@ mod tests {
             panic!("one race, one report: {reports:?}")
         };
         assert_eq!((report.round, report.event, report.course), (1, 0, 0));
+        assert_eq!(report.event_count, 2);
+        assert_eq!(report.conditions, room.config.plan[0].conditions.into());
+        assert_eq!(room.world().conditions, room.config.plan[1].conditions);
         assert_eq!(report.entries.len(), 4);
         let mine = report
             .entries

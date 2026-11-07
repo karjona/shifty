@@ -1,56 +1,18 @@
 // The time trial, on the mode select: pick a circuit and a season it rides,
 // see your best and the board, and pick the ghosts to race (your best and
-// the record unless you choose others). The circuits come from the sim.
+// the record unless you choose others).
+import { CIRCUITS, type Circuit, SEASONS, SPORT_SEASONS, type Season } from "@shifty/rider";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { type Season } from "../../game/season-change.ts";
-import { SEASONS } from "../../game/seasons.ts";
+import { circuitName } from "../../game/conditions.ts";
 import { useT } from "../../i18n/index.ts";
 import { formatTime } from "../../ui/hud.ts";
-import { circuitsJson } from "../../wasm/sim.js";
 import { type Board, type BoardRow, type GhostPick, type TrialRace, boardQuery } from "../api.ts";
-import { useEngine } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Panel, Picker, Spinner } from "../ui.tsx";
 
 /** Most ghosts in one run. */
 export const MAX_GHOSTS = 3;
-
-export interface Circuit {
-  course: number;
-  sport: "jetski" | "snow";
-}
-
-/** The seasons a sport rides (no snow in summer). */
-export function seasonsOf(sport: Circuit["sport"]): Season[] {
-  return sport === "snow" ? SEASONS.filter((s) => s !== "summer") : SEASONS;
-}
-
-/** Every circuit, from the sim. */
-export function useCircuits(): Circuit[] {
-  const engine = useEngine();
-  return useMemo(() => {
-    if (!engine) return [];
-    const data: unknown = JSON.parse(circuitsJson());
-    if (!Array.isArray(data)) return [];
-    return (data as unknown[]).flatMap((c): Circuit[] => {
-      if (typeof c !== "object" || c === null) return [];
-      const course: unknown = Reflect.get(c, "course");
-      const sport: unknown = Reflect.get(c, "sport");
-      return typeof course === "number" && (sport === "jetski" || sport === "snow") ? [{ course, sport }] : [];
-    });
-  }, [engine]);
-}
-
-/** A circuit's name. */
-export function useCircuitName(): (c: Circuit) => string {
-  const t = useT();
-  return (c) => {
-    if (c.course === 0) return t.intro.courses.bay;
-    if (c.course === 1) return t.intro.courses.mountain;
-    return `${t.intro.sports[c.sport]} ${c.course + 1}`;
-  };
-}
 
 /** The ghosts picked off a board: what each is called, and its time. */
 function picksOf(board: Board | undefined, ids: string[]): GhostPick[] {
@@ -76,12 +38,10 @@ export interface TrialChoice {
 
 export function TrialPanel({ title, onChange }: { title: string; onChange: (c: TrialChoice) => void }) {
   const t = useT();
-  const circuits = useCircuits();
-  const name = useCircuitName();
   const [course, setCourse] = useState(0);
   const [season, setSeason] = useState<Season>("summer");
-  const circuit = circuits.find((c) => c.course === course) ?? circuits[0];
-  const seasons = circuit ? seasonsOf(circuit.sport) : SEASONS;
+  const circuit = CIRCUITS.find((c) => c.id === course) ?? CIRCUITS[0];
+  const seasons = circuit ? SPORT_SEASONS[circuit.sport] : SEASONS;
   const shownSeason = seasons.includes(season) ? season : seasons[0]!;
   const seasonIndex = SEASONS.indexOf(shownSeason);
   const board = useQuery(boardQuery(course, seasonIndex));
@@ -125,14 +85,12 @@ export function TrialPanel({ title, onChange }: { title: string; onChange: (c: T
   return (
     <Panel className="mode-panel trial-panel" title={title}>
       <p>{t.trial.about}</p>
-      {circuits.length > 0 && (
-        <Picker
-          label={t.trial.circuit}
-          options={circuits.map((c) => ({ value: c.course, label: name(c) }))}
-          value={course}
-          onChange={setCourse}
-        />
-      )}
+      <Picker
+        label={t.trial.circuit}
+        options={CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) }))}
+        value={course}
+        onChange={setCourse}
+      />
       <Picker<Season>
         label={t.trial.season}
         options={seasons.map((s) => ({ value: s, label: t.seasons[s] }))}

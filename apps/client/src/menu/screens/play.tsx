@@ -7,10 +7,10 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
+import { CIRCUITS, type PlanRequest, SEASONS, TILT, circuit } from "@shifty/rider";
 import {
   ApiError,
   createRoom,
-  type EventChoice,
   lobbySocket,
   meQuery,
   type Mode,
@@ -20,6 +20,7 @@ import {
   setPendingRace,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
+import { PlanPickers, seasonSports } from "../plan.tsx";
 import { useLoading } from "../busy.tsx";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
@@ -30,14 +31,12 @@ import { type TrialChoice, TrialPanel } from "./trial.tsx";
 
 export type { Mode };
 const route = getRouteApi("/play");
-const EVENTS: EventChoice[] = ["gp", "summer", "winter"];
-
 export function ModeSelect() {
   useBackdrop("club");
   const t = useT();
   const navigate = useNavigate();
   const { mode = "single" } = route.useSearch();
-  const [event, setEvent] = useState<EventChoice>("gp");
+  const [plan, setPlan] = useState<PlanRequest>(TILT);
   const [bots, setBots] = useState(3);
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -50,8 +49,8 @@ export function ModeSelect() {
   useEffect(() => setClubRiders(1), []);
   const sport = mode === "trial" ? (trial?.sport === "snow" ? "winter" : "summer") : null;
   useEffect(() => {
-    if (appearance) setClubRider(appearance, sport ?? (event === "winter" ? "winter" : "summer"));
-  }, [appearance, event, sport]);
+    if (appearance) setClubRider(appearance, sport ?? clubSport(plan));
+  }, [appearance, plan, sport]);
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
@@ -75,11 +74,11 @@ export function ModeSelect() {
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
         await navigate({ to: "/race" });
       } else if (mode === "single") {
-        const ticket = await playSingle(event);
+        const ticket = await playSingle(plan);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
         await navigate({ to: "/race" });
       } else {
-        const code = await createRoom(event, bots);
+        const code = await createRoom(plan, bots);
         await navigate({ to: "/room/$code", params: { code } });
       }
     } catch (e) {
@@ -89,15 +88,6 @@ export function ModeSelect() {
     }
   };
   useAction("play", () => void play(), !joining && !searching);
-
-  const eventPicker = (
-    <Picker<EventChoice>
-      label={t.room.event}
-      options={EVENTS.map((e) => ({ value: e, label: t.play.events[e] }))}
-      value={event}
-      onChange={setEvent}
-    />
-  );
 
   return (
     <div className="screen mode-select">
@@ -127,10 +117,10 @@ export function ModeSelect() {
           ) : (
             <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
               <p>{t.play.about[mode]}</p>
-              {mode === "single" && eventPicker}
+              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} full={false} />}
               {mode === "room" && (
                 <>
-                  {eventPicker}
+                  <PlanPickers plan={plan} onChange={setPlan} full={false} />
                   <Picker
                     label={t.room.bots}
                     options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
@@ -139,10 +129,10 @@ export function ModeSelect() {
                   />
                 </>
               )}
-              {(mode === "single" || mode === "matchmaking") && <Races event={mode === "single" ? event : "gp"} />}
+              {(mode === "single" || mode === "matchmaking") && <Races tilt={mode !== "single" || plan.tilt} />}
               {mode === "room" && (
                 <>
-                  <p className="muted">{t.play.eventAbout[event]}</p>
+                  <p className="muted">{plan.tilt ? t.play.eventAbout.gp : t.play.eventAbout.pick}</p>
                   <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
                 </>
               )}
@@ -181,19 +171,33 @@ export function ModeSelect() {
   );
 }
 
-/** The races an event runs, in order. */
-function Races({ event }: { event: EventChoice }) {
+/** The sport the club's terrace dresses your rider for: a race on the snow, or the water. */
+function clubSport(plan: PlanRequest): "summer" | "winter" {
+  if (plan.tilt || plan.race.course === undefined) return "summer";
+  return circuit(plan.race.course)?.sport === "snow" ? "winter" : "summer";
+}
+
+/** The races a plan runs, in order: a Tilt's seasons (its circuits are drawn), or one race. */
+function Races({ tilt }: { tilt: boolean }) {
   const t = useT();
-  const seasons = event === "gp" ? (["summer", "winter"] as const) : [event];
+  if (!tilt) return <p className="muted">{t.play.eventAbout.race}</p>;
+  // With fewer circuits than seasons, a Tilt is summer on the water, then winter on the mountain.
+  const seasons = CIRCUITS.length >= SEASONS.length ? SEASONS : (["summer", "winter"] as const);
   return (
     <div className="races">
-      <p className="muted">{t.play.eventAbout[event]}</p>
+      <p className="muted">{t.play.eventAbout.gp}</p>
       <ol>
         {seasons.map((s, i) => (
           <li key={s}>
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <b>{t.seasons[s]}</b>
-            <span className="muted">{t.play.eventAbout[s]}</span>
+            <span className="muted">
+              {i === 0 || seasonSports(s).length === 1
+                ? t.play.seasonSports.water
+                : seasons.length < SEASONS.length
+                  ? t.play.seasonSports.mountain
+                  : t.play.seasonSports.either}
+            </span>
           </li>
         ))}
       </ol>

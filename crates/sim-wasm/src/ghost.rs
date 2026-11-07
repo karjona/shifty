@@ -1,6 +1,5 @@
 //! Ghosts for the browser: a time trial recording (`protocol::ghost`)
-//! unpacked into a flat array of frames ready to draw, and the circuits a
-//! time trial can be ridden on.
+//! unpacked into a flat array of frames ready to draw.
 
 use protocol::ghost::Ghost;
 use serde_json::json;
@@ -78,23 +77,4 @@ pub fn ghost_frames(bytes: &[u8]) -> Vec<f32> {
         ]);
     }
     out
-}
-
-/// Every circuit, in id order, as JSON: `[{ "course": 0, "sport":
-/// "jetski" | "snow" }, …]`.
-#[wasm_bindgen(js_name = circuitsJson)]
-pub fn circuits_json() -> String {
-    let list: Vec<_> = (0..=u8::MAX)
-        .map_while(CourseId::from_u8)
-        .map(|c| {
-            json!({
-                "course": c as u8,
-                "sport": match c.course().sport {
-                    Sport::Jetski => "jetski",
-                    Sport::Snowboard => "snow",
-                },
-            })
-        })
-        .collect();
-    serde_json::Value::from(list).to_string()
 }

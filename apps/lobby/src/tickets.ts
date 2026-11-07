@@ -2,18 +2,22 @@
 // (see crates/protocol/src/token.rs): base64url(claims JSON) "." base64url
 // (signature over "shifty-join-v1." + that first part).
 
-/** Courses on the race server (`sim::CourseId`). */
-export const COURSE = { summer: 0, winter: 1 } as const;
+import { type PlanRequest, type RaceSpec, TILT } from "@shifty/rider";
 
-/** What a room races: the Tilt (every season in order) or one event. */
-export type EventChoice = "gp" | "summer" | "winter";
-export const EVENT_CHOICES: readonly EventChoice[] = ["gp", "summer", "winter"];
-export const isEventChoice = (v: unknown): v is EventChoice =>
-  typeof v === "string" && (EVENT_CHOICES as readonly string[]).includes(v);
+/** What `match.event` records: the Tilt, or one race. */
+export const planName = (plan: PlanRequest): "gp" | "race" => (plan.tilt ? "gp" : "race");
 
-/** The courses of an event choice, in race order. */
-export function courses(event: EventChoice): number[] {
-  return event === "gp" ? [COURSE.summer, COURSE.winter] : [COURSE[event]];
+/** A plan from what `match.event` records (rooms made before plans name their event). */
+export function legacyPlan(event: unknown): PlanRequest {
+  if (event === "summer") return { tilt: false, race: { course: 0, season: 0 } };
+  if (event === "winter") return { tilt: false, race: { course: 1, season: 2 } };
+  if (event === "race") return { tilt: false, race: {} };
+  return TILT;
+}
+
+/** A random seed for a plan's draw (every ticket of a room carries the same). */
+export function planSeed(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0]!;
 }
 
 export interface JoinClaims {
@@ -30,20 +34,20 @@ export interface JoinClaims {
   iat: number;
   bots: number;
   surface: number;
-  /** First course (older servers read only this). */
-  course: number;
-  /** Every course of the room, in order (a Tilt has several). */
-  events: number[];
+  /** The Tilt: a year, everything drawn... */
+  tilt?: true;
+  /** ...or these races, each field picked or left out to be drawn. */
+  races?: RaceSpec[];
+  /** Seeds the plan's draw. */
+  seed: number;
   /** The rider's appearance bytes (base64url), passed on to the room. */
   look?: string;
   /** Setup per sport (summer, winter), four stats each. */
   setups?: number[][];
   /** How many people the room's first race waits for on the grid. */
   humans?: number;
-  /** A time trial: one rider alone, every run recorded. */
+  /** A time trial: one race with its circuit and season picked, the rider alone, every run recorded. */
   trial?: true;
-  /** A time trial's season (0 summer, 1 fall, 2 winter, 3 spring). */
-  season?: number;
 }
 
 /** The race server a ticket is for. */
@@ -64,6 +68,14 @@ export interface JoinTicket {
   /** Base64 SHA-256 of each certificate the race server may serve (hash
    * mode), else empty. */
   certHashes: string[];
+}
+
+/** A race spec's fields in the claims' order, only those picked. */
+function raceClaims(spec: RaceSpec): RaceSpec {
+  const out: RaceSpec = {};
+  for (const k of ["course", "season", "weather", "turns", "time"] as const)
+    if (spec[k] !== undefined) out[k] = spec[k];
+  return out;
 }
 
 const TOKEN_LIFETIME_SECS = 10 * 60;
@@ -111,18 +123,19 @@ export interface TicketRequest {
   room: string;
   pid: string;
   name: string;
-  event: EventChoice;
+  plan: PlanRequest;
+  /** The plan's seed: the same for every ticket of a room. */
+  seed: number;
   bots: number;
   /** The rider, as the race server should show and simulate them. */
   rider?: { look: string; setups: number[][] };
   /** Everyone sent to this race (its first one waits on the grid until they have all arrived). */
   humans?: number;
-  /** A time trial on one course and season; its course replaces `event`'s. */
-  trial?: { course: number; season: number };
+  /** A time trial (its plan: one race, its circuit and season picked). */
+  trial?: boolean;
 }
 
 export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Date.now()): Promise<JoinTicket> {
-  const events = req.trial ? [req.trial.course] : courses(req.event);
   const claims: JoinClaims = {
     v: 1,
     aud: req.server.addr,
@@ -133,16 +146,13 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
     iat: Math.floor(nowMs / 1000),
     bots: req.bots,
     surface: 1,
-    course: events[0] ?? COURSE.summer,
-    events,
+    ...(req.plan.tilt ? { tilt: true } : { races: [raceClaims(req.plan.race)] }),
+    seed: req.seed >>> 0,
   };
   if (req.rider?.look) claims.look = req.rider.look;
   if (req.rider?.setups.length) claims.setups = req.rider.setups;
   if (req.humans) claims.humans = req.humans;
-  if (req.trial) {
-    claims.trial = true;
-    claims.season = req.trial.season;
-  }
+  if (req.trial) claims.trial = true;
   return {
     token: await signJoinToken(seedB64, claims),
     room: req.room,
