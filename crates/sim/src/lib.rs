@@ -7,6 +7,7 @@
 
 pub mod bot;
 pub mod buoy;
+pub mod circuit;
 pub mod course;
 pub mod input;
 pub mod jetski;
@@ -52,13 +53,14 @@ pub const MAX_RIDERS: usize = 8;
 pub const MAX_HUMANS: usize = 4;
 
 /// A fixed scenario used to compare native and WASM builds bit for bit:
-/// a full room of riders on every course (swells, then snow), driven by
+/// a full room of riders on every course (swells, snow, then the cape's
+/// sheltered swells), driven by
 /// seeded pseudo-random inputs and bots through the intro, the countdown
 /// and the race, where one rider leaves and comes back mid-race (on
 /// autopilot from then on).
 pub fn determinism_scenario(ticks: u32) -> u64 {
     let mut hash: u64 = 0;
-    for course in [CourseId::Oval, CourseId::Mountain] {
+    for course in [CourseId::Oval, CourseId::Mountain, CourseId::Cape] {
         let mut world = World::on_course(course, SurfaceKind::Swells, 0xC0FFEE);
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);

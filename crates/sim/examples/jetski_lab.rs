@@ -2,10 +2,11 @@
 //! speed, how turns build up, how long tricks take off a ramp, how often and
 //! how high crests launch you, and how deep the hull dives. For tuning.
 //!
-//! `cargo run -p sim --example jetski_lab --release [seed] [surface]`
-//! (surface: 1 = the course's sea, 2 = calm, 3 = rough)
+//! `cargo run -p sim --example jetski_lab --release [seed] [surface] [cape]`
+//! (surface: 1 = the course's sea, 2 = calm, 3 = rough; `cape` adds how
+//! much swell reaches each part of the cape)
 
-use sim::course::OVAL;
+use sim::course::{CAPE, OVAL};
 use sim::math::{angle_diff, clamp};
 use sim::{CourseId, Input, Inputs, MAX_RIDERS, Surface, SurfaceKind, World};
 
@@ -168,6 +169,9 @@ fn main() {
 
     turning();
     tricks();
+    if std::env::args().any(|a| a == "cape") {
+        cape_shelter(seed);
+    }
 
     let kind = std::env::args()
         .nth(2)
@@ -394,5 +398,32 @@ fn tricks() {
             }
         });
         println!("  {rot_name} + {stunt_name}: {}", j.result);
+    }
+}
+
+/// The cape's swell where it races: how much of it reaches each part
+/// (sheltered or open), and the highest crest there over a minute.
+fn cape_shelter(seed: u32) {
+    let sea = CAPE.surface(SurfaceKind::Swells, seed);
+    println!("cape: swell by place (exposure, highest crest over a minute)");
+    for (name, s) in [
+        ("harbour", 20.0),
+        ("arch", 140.0),
+        ("beach (start)", 280.0),
+        ("round the point", 450.0),
+        ("off the point", 560.0),
+        ("stacks", 720.0),
+        ("harbour mouth", 800.0),
+    ] {
+        let f = CAPE.centerline(s);
+        let (exposure, _, _) = sea.exposure(f.x, f.z);
+        let crest = (0..3600)
+            .step_by(4)
+            .map(|t| sea.height(f.x, f.z, t))
+            .fold(f32::MIN, f32::max);
+        println!(
+            "  {name:<16} s {s:>4.0}  exposure {:>4.0}%  crest {crest:.2} m",
+            exposure * 100.0
+        );
     }
 }
