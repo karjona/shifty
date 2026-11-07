@@ -7,8 +7,11 @@ export interface ServerInfo {
   /** Public `host:port`; join tokens name it as their audience. */
   addr: string;
   region: string;
-  /** Base64 SHA-256 of the self-signed certificate (hash mode), else null. */
-  certHash: string | null;
+  /** The release it runs. */
+  version: string;
+  /** Base64 SHA-256 of each self-signed certificate it may serve (hash mode;
+   * two during a hand-over), else empty. */
+  certHashes: string[];
   rooms: number;
   humans: number;
   draining: boolean;
@@ -36,8 +39,8 @@ export class ServerRegistry extends DurableObject<Env> {
     await this.ctx.storage.put(info.addr, entry);
   }
 
-  /** The least busy live server, or null if none is up. */
-  async pick(): Promise<ServerInfo | null> {
+  /** The least busy live server on `version`, or null if none is up. */
+  async pick(version: string): Promise<ServerInfo | null> {
     const servers = await this.load();
     const now = Date.now();
     let best: Entry | null = null;
@@ -47,7 +50,7 @@ export class ServerRegistry extends DurableObject<Env> {
         gone.push(addr);
         continue;
       }
-      if (s.draining || now - s.seenAt > ALIVE_MS) continue;
+      if (s.draining || s.version !== version || now - s.seenAt > ALIVE_MS) continue;
       if (!best || s.humans < best.humans || (s.humans === best.humans && s.rooms < best.rooms)) best = s;
     }
     if (gone.length > 0) {
@@ -61,7 +64,15 @@ export class ServerRegistry extends DurableObject<Env> {
     return info;
   }
 
-  async list(): Promise<Entry[]> {
-    return [...(await this.load()).values()];
+  /** The servers that sent a heartbeat lately. */
+  async live(): Promise<ServerInfo[]> {
+    const now = Date.now();
+    const live: ServerInfo[] = [];
+    for (const s of (await this.load()).values()) {
+      if (now - s.seenAt > ALIVE_MS) continue;
+      const { seenAt: _, ...info } = s;
+      live.push(info);
+    }
+    return live;
   }
 }

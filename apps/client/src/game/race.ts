@@ -29,6 +29,7 @@ function rejectReason(phase: number): string {
     6: r.draining,
     7: r.kicked,
     8: r.started,
+    9: r.over,
   };
   return reasons[phase] ?? String(phase);
 }
@@ -47,6 +48,8 @@ export interface RaceOptions {
   debug?: boolean;
   /** Called once the race server has said yes or no. */
   onJoin?: (ok: boolean) => void;
+  /** Called once the room's plan is over (the last race's results are done). */
+  onOver?: () => void;
 }
 
 /** What the menus (and tests) can see of a race. */
@@ -59,7 +62,12 @@ export interface RaceState {
   course: number;
   eventIndex: number;
   eventCount: number;
+  /** The plan is over: the last race's results are done. */
+  over: boolean;
 }
+
+/** `sim::Phase::Results`. */
+const RESULTS = 3;
 
 /** Roster JSON comes from our own WASM, but parse it defensively anyway. */
 function parseRoster(json: string, seed: number): { names: Map<number, string>; looks: Map<number, Appearance> } {
@@ -114,7 +122,17 @@ export class RaceSession implements Stage {
   private seasonChange: SeasonChange | null = null;
   private debug: ReturnType<typeof createDebugPanel> | null = null;
   private fps = { frames: 0, since: performance.now(), bytesIn: 0, bytesOut: 0, at: performance.now() };
-  readonly state: RaceState = { phase: 0, racePhase: 0, sport: "jetski", course: -1, eventIndex: 0, eventCount: 1 };
+  readonly state: RaceState = {
+    phase: 0,
+    racePhase: 0,
+    sport: "jetski",
+    course: -1,
+    eventIndex: 0,
+    eventCount: 1,
+    over: false,
+  };
+  /** The last race of the plan has reached its results. */
+  private finalResults = false;
 
   private opts: RaceOptions;
 
@@ -339,6 +357,11 @@ export class RaceSession implements Stage {
       eventIndex: race.eventIndex,
       eventCount: race.eventCount,
     });
+    if (race.phase === RESULTS && race.eventIndex >= race.eventCount - 1) this.finalResults = true;
+    else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
+      this.state.over = true;
+      this.opts.onOver?.();
+    }
     if (race.course !== this.course) {
       const first = this.course === -1;
       this.course = race.course;

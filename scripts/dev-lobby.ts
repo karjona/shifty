@@ -20,6 +20,8 @@ export interface JoinClaims {
   pid: string;
   name: string;
   exp: number;
+  /** Signed at, unix seconds. */
+  iat: number;
   bots: number;
   surface: number;
   /** 0 = the summer bay (jetski), 1 = the winter mountain (snowboard). */
@@ -87,6 +89,7 @@ export function devJoinTicket(raceServer: string, opts: DevJoinOptions) {
     pid: opts.pid ?? `dev-${randomUUID().slice(0, 8)}`,
     name: opts.name.slice(0, 24),
     exp: Math.floor(Date.now() / 1000) + 10 * 60,
+    iat: Math.floor(Date.now() / 1000),
     bots: opts.bots ?? 2,
     surface: opts.surface ?? 1,
     course: opts.course ?? 0,

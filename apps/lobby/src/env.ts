@@ -21,14 +21,34 @@ export interface Env {
   RACE_SERVER_SECRET: string;
   /** `console` prints sign-in codes to the log instead of sending mail. */
   MAIL_MODE?: string;
+  /** Cloudflare Email Service. Sign-in codes go out through it. */
+  EMAIL?: SendEmail;
+  /** The address sign-in codes come from, on a domain onboarded for sending. */
+  MAIL_FROM?: string;
   /** `1`: keep the last code per address readable at /api/dev/mailbox (tests). */
   DEV_MAILBOX?: string;
+  /** `open`: anyone can make an account. Otherwise (the default) a new account needs an invite code. */
+  SIGNUPS?: string;
   /** Seconds matchmaking waits for more players before racing with bots. */
   MATCH_WAIT_SECS?: string;
   ROOMS: DurableObjectNamespace<RoomLobby>;
   MATCHMAKER: DurableObjectNamespace<Matchmaker>;
   SERVERS: DurableObjectNamespace<ServerRegistry>;
 }
+
+/** The settings accounts need: Better Auth, sign-in mail and the sign-up gate. */
+export type AuthEnv = Pick<
+  Env,
+  | "BETTER_AUTH_SECRET"
+  | "BETTER_AUTH_URL"
+  | "GITHUB_CLIENT_ID"
+  | "GITHUB_CLIENT_SECRET"
+  | "MAIL_MODE"
+  | "EMAIL"
+  | "MAIL_FROM"
+  | "DEV_MAILBOX"
+  | "SIGNUPS"
+>;
 
 /** The Postgres connection string, from Hyperdrive or the environment. */
 export function databaseUrl(env: Env): string {

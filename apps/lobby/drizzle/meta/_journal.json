@@ -15,6 +15,20 @@
       "when": 1793805554120,
       "tag": "0001_riders",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794003788608,
+      "tag": "0002_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794011502676,
+      "tag": "0003_match_ended",
+      "breakpoints": true
     }
   ]
 }

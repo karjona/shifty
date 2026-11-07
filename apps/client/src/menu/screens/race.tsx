@@ -2,7 +2,7 @@
 // Start / Esc opens the race menu over it (online races don't pause).
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
 import { RaceSession } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
@@ -11,6 +11,7 @@ import { toast } from "../toast.tsx";
 import { useAction, useAutoFocus } from "../hooks.ts";
 import { nav } from "../nav.ts";
 import { Button, Glyph } from "../ui.tsx";
+import { VERSION } from "../../version.ts";
 
 /** `sim::Phase::Results`. */
 const RESULTS = 3;
@@ -20,6 +21,8 @@ export function RaceScreen() {
   const navigate = useNavigate();
   const hudRef = useRef<HTMLDivElement>(null);
   const [race] = useState<PendingRace | null>(() => takePendingRace());
+  /** The race server runs another release: this page must reload first. */
+  const outdated = race !== null && race.ticket.version !== VERSION;
   const [session, setSession] = useState<RaceSession | null>(null);
   const [menu, setMenu] = useState(false);
   const [status, setStatus] = useState(t.race.connecting);
@@ -54,6 +57,7 @@ export function RaceScreen() {
     if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params });
     else void navigate({ to: "/play", search: race.back.search });
   };
+  const planOver = useEffectEvent(back);
 
   useEffect(() => {
     const hud = hudRef.current;
@@ -61,6 +65,7 @@ export function RaceScreen() {
       void navigate({ to: "/play" });
       return undefined;
     }
+    if (outdated) return undefined;
     let s: RaceSession | null = null;
     let live = true;
     void Engine.get().then((engine) => {
@@ -70,6 +75,7 @@ export function RaceScreen() {
         hud,
         status: setStatus,
         onJoin: (ok) => setFailed(!ok),
+        onOver: () => planOver(),
       });
       engine.show(s);
       setSession(s);
@@ -79,7 +85,7 @@ export function RaceScreen() {
       const stage = s;
       if (stage) void Engine.get().then((engine) => engine.hide(stage));
     };
-  }, [race, navigate]);
+  }, [race, navigate, outdated]);
 
   // What the race is up to, for the help (a few times a second is plenty).
   useEffect(() => {
@@ -93,14 +99,32 @@ export function RaceScreen() {
 
   // The controller drives the rider; only Start (or Esc) reaches the menus.
   useEffect(() => {
-    nav.setEnabled(menu || failed);
+    nav.setEnabled(menu || failed || outdated);
     session?.setPaused(menu);
     return () => nav.setEnabled(true);
-  }, [menu, failed, session]);
+  }, [menu, failed, outdated, session]);
 
-  useAction("menu", () => setMenu((m) => !m));
-  useAction("back", () => (failed ? back() : setMenu(false)), menu || failed);
+  useAction("menu", () => setMenu((m) => !m), !outdated);
+  useAction("back", () => (failed || outdated ? back() : setMenu(false)), menu || failed || outdated);
   useAutoFocus();
+
+  if (outdated)
+    return (
+      <div className="screen race-screen">
+        <div className="race-menu" data-nav-scope="">
+          <div className="panel">
+            <h2 className="panel-title">{t.race.updated.title}</h2>
+            <p>{t.race.updated.body}</p>
+            <Button kind="primary" onClick={() => location.reload()} autoFocus>
+              {t.race.updated.reload}
+            </Button>
+            <Button glyph="back" onClick={back}>
+              {t.race.leave}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
 
   return (
     <div className="screen race-screen">

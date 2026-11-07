@@ -1,6 +1,9 @@
 //! Race server: one native binary, many rooms. Game traffic is WebTransport
 //! over UDP only; plain HTTP on TCP (same port number) serves ops endpoints.
 //!
+//! `race-server healthcheck` checks a running server's `/healthz` (exit 0
+//! when healthy), for container health checks.
+//!
 //! Env: `LOBBY_PUBLIC_KEY` (required), `PUBLIC_ADDR`, `BIND`, `REGION`,
 //! `LOBBY_URL` + `RACE_SERVER_SECRET` (report to the lobby), `TLS_CERT` +
 //! `TLS_KEY` (domain mode; otherwise hash mode), `DRAIN_TIMEOUT_SECS`,
@@ -22,6 +25,10 @@ use web_transport_quinn::quinn;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        let ok = transport::healthy(race_server::config::bind_from_env()?);
+        std::process::exit(if ok { 0 } else { 1 });
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -53,7 +60,7 @@ async fn main() -> Result<()> {
         public_addr = %config.public_addr,
         region = %config.region,
         tls = if matches!(config.tls, TlsMode::Hash) { "hash" } else { "domain" },
-        cert_sha256 = material.info.sha256_b64.as_deref().unwrap_or("-"),
+        cert_sha256 = material.info.hashes.first().map_or("-", String::as_str),
         "race server listening (WebTransport on UDP /race; ops HTTP on TCP: /healthz /metrics /cert-hash)"
     );
     match (&config.lobby_url, &config.race_server_secret) {
@@ -70,26 +77,13 @@ async fn main() -> Result<()> {
 
     // Hash mode: rotate the short-lived certificate without dropping sessions.
     if matches!(config.tls, TlsMode::Hash) {
-        let endpoint = endpoint.clone();
-        let host = host.to_owned();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(tls::HASH_CERT_ROTATE_AFTER).await;
-                match tls::self_signed(&host)
-                    .and_then(|m| Ok((tls::quic_server_config(&m)?, m.info)))
-                {
-                    Ok((cfg, info)) => {
-                        endpoint.set_server_config(Some(cfg));
-                        info!(
-                            cert_sha256 = info.sha256_b64.as_deref().unwrap_or("-"),
-                            "rotated self-signed certificate"
-                        );
-                        *cert.write().await = info;
-                    }
-                    Err(e) => warn!(error = %e, "certificate rotation failed"),
-                }
-            }
-        });
+        tokio::spawn(tls::rotate(
+            endpoint.clone(),
+            cert.clone(),
+            host.to_owned(),
+            tls::HASH_CERT_ROTATE_AFTER,
+            tls::HASH_CERT_HANDOVER,
+        ));
     }
 
     let wt = tokio::spawn(transport::serve_webtransport(

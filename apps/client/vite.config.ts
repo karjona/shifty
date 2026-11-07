@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { devJoinTicket, repoRoot } from "../../scripts/dev-lobby.ts";
+import pkg from "./package.json" with { type: "json" };
 
 // Where the race server listens in dev. Clients reach it directly; this is
 // also the audience their join tokens are signed for.
@@ -13,7 +14,7 @@ const LOBBY = process.env.LOBBY ?? "http://127.0.0.1:8787";
  * Dev-only quick join (`/?name=You` and the netcode tests skip the menus):
  * `GET /__dev/join?name=..&room=..&bots=..&surface=..&course=..` returns a
  * join ticket: a token signed with the dev lobby key, the race server URL
- * and (hash mode) its certificate hash. Not part of builds.
+ * and (hash mode) its certificate hashes. Not part of builds.
  */
 const devLobby = (): Plugin => ({
   name: "shifty-dev-lobby",
@@ -24,10 +25,8 @@ const devLobby = (): Plugin => ({
         try {
           const q = new URL(req.url ?? "", "http://x").searchParams;
           const body: unknown = await (await fetch(`http://${RACE_SERVER}/cert-hash`)).json();
-          const hash =
-            typeof body === "object" && body !== null && "hash" in body && typeof body.hash === "string"
-              ? body.hash
-              : null;
+          const hashes: unknown = typeof body === "object" && body !== null && "hashes" in body ? body.hashes : null;
+          const certHashes = Array.isArray(hashes) ? hashes.filter((h) => typeof h === "string") : [];
           const { token, claims } = devJoinTicket(RACE_SERVER, {
             name: q.get("name") || "Rider",
             room: q.get("room") || "dev",
@@ -43,7 +42,8 @@ const devLobby = (): Plugin => ({
               token,
               room: claims.room,
               webTransportUrl: `https://${RACE_SERVER}/race`,
-              certHash: hash,
+              version: pkg.version,
+              certHashes,
             }),
           );
         } catch (e) {

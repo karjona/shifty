@@ -109,9 +109,7 @@ test("a fifth human is turned away (4 humans max)", async ({ browser }) => {
   const pages: Page[] = [];
   // Join one by one so the four seats fill before the fifth player arrives.
   for (const name of ["P1", "P2", "P3", "P4"]) {
-    // oxlint-disable-next-line eslint/no-await-in-loop
     const p = await (await browser.newContext()).newPage();
-    // oxlint-disable-next-line eslint/no-await-in-loop
     await openPlayer(p, name, room);
     pages.push(p);
   }

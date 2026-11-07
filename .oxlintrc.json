@@ -56,6 +56,12 @@
           }
         ]
       }
+    },
+    {
+      "files": ["**/test/**", "e2e/**", "scripts/**", "apps/*/scripts/**"],
+      "rules": {
+        "eslint/no-await-in-loop": "off"
+      }
     }
   ]
 }

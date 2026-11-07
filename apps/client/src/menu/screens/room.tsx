@@ -105,7 +105,9 @@ export function RoomScreen() {
             ? t.room.notReadyError
             : m.error === "no_server"
               ? t.common.noServer
-              : t.common.error;
+              : m.error === "over"
+                ? t.room.raceOver
+                : t.common.error;
       toast(msg, "error");
     }
   });

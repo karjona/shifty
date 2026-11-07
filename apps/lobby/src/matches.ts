@@ -6,6 +6,7 @@ import { match, matchPlayer } from "./db/schema.ts";
 import { databaseUrl, type Env } from "./env.ts";
 import { type RiderClaims, loadRiderClaims } from "./riders.ts";
 import { type EventChoice, type JoinTicket, mintTicket, roomId } from "./tickets.ts";
+import { VERSION } from "./version.ts";
 
 /** Riders in a race; bots fill the seats humans don't take. */
 export const FIELD = 8;
@@ -23,7 +24,7 @@ export class NoRaceServer extends Error {
 }
 
 export async function pickServer(env: Env) {
-  const server = await env.SERVERS.get(env.SERVERS.idFromName("all")).pick();
+  const server = await env.SERVERS.get(env.SERVERS.idFromName("all")).pick(VERSION);
   if (!server) throw new NoRaceServer();
   return server;
 }
@@ -94,6 +95,17 @@ export async function startMatch(
     tickets.set(r.userId, ticket);
   }
   return tickets;
+}
+
+/** Whether the last race of a match's plan has finished. */
+export async function matchEnded(env: Env, matchId: string): Promise<boolean> {
+  const { db, close } = openDb(databaseUrl(env));
+  try {
+    const [row] = await db.select({ endedAt: match.endedAt }).from(match).where(eq(match.id, matchId)).limit(1);
+    return row?.endedAt != null;
+  } finally {
+    await close();
+  }
 }
 
 /** The rider a player entered a match with (for rejoin tickets). */

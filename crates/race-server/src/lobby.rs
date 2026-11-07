@@ -23,7 +23,9 @@ const REPORT_QUEUE: usize = 256;
 struct Heartbeat<'a> {
     addr: &'a str,
     region: &'a str,
-    cert_hash: Option<&'a str>,
+    /// The release this server runs; the lobby only sends players to its own.
+    version: &'static str,
+    cert_hashes: Vec<String>,
     rooms: usize,
     humans: usize,
     draining: bool,
@@ -72,11 +74,12 @@ impl Lobby {
         let mut interval = tokio::time::interval(HEARTBEAT_EVERY);
         loop {
             interval.tick().await;
-            let cert_hash = cert.read().await.sha256_b64.clone();
+            let cert_hashes = cert.read().await.hashes.clone();
             let beat = Heartbeat {
                 addr: &config.public_addr,
                 region: &config.region,
-                cert_hash: cert_hash.as_deref(),
+                version: env!("CARGO_PKG_VERSION"),
+                cert_hashes,
                 rooms: rooms.room_count(),
                 humans: rooms.metrics.humans.load(Ordering::Relaxed),
                 draining: rooms.draining.load(Ordering::Relaxed),

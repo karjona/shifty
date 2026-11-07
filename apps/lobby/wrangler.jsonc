@@ -1,9 +1,21 @@
+// Production: the game at https://23.4shifty.gg, the client's build served
+// as static assets and /api by this Worker. Secrets go up with the deploy
+// (see AGENTS.md). In dev, scripts/dev.ts overrides the vars from env files
+// and Vite serves the client.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "shifty-lobby",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
+  "routes": [{ "pattern": "23.4shifty.gg", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../client/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
   "durable_objects": {
     "bindings": [
       { "name": "ROOMS", "class_name": "RoomLobby" },
@@ -12,5 +24,13 @@
     ],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomLobby", "Matchmaker", "ServerRegistry"] }],
+  // Postgres on Neon, query caching off. In dev, scripts/dev.ts points it at
+  // the local database.
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "1cc45cb6c69c4f05990259a41de7d676" }],
+  // Sign-in codes through Cloudflare Email Service (4shifty.gg is onboarded
+  // for sending). `wrangler dev` only simulates it, and pnpm dev prints the
+  // codes instead (MAIL_MODE=console).
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@4shifty.gg"] }],
+  "vars": { "BETTER_AUTH_URL": "https://23.4shifty.gg", "MAIL_FROM": "noreply@4shifty.gg" },
   "observability": { "enabled": true },
 }
