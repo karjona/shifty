@@ -1,6 +1,6 @@
 // The season card: the screen washed over in a season's colours, with its
 // name and the place. It covers a course while it loads (joining a race),
-// and between two races of a Grand Prix, where the camera lifts away from
+// and between two races of a Tilt, where the camera lifts away from
 // the course as the card washes over, the next course loads behind it, and
 // the card clears.
 import * as THREE from "three/webgpu";

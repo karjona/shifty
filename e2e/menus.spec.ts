@@ -43,7 +43,7 @@ async function signUp(browser: Browser, name: string): Promise<{ page: Page; han
 
 const joinedRace = (p: Page) => p.waitForFunction(() => window.__shifty?.phase() === 1, null, { timeout: 30_000 });
 
-test("sign up, pick a handle and race the Grand Prix against bots", async ({ browser }) => {
+test("sign up, pick a handle and race the Tilt against bots", async ({ browser }) => {
   const { page, handle } = await signUp(browser, "Ana");
   await expect(page.locator(".social-card")).toContainText(handle.split("#")[0]!);
   // Play (P), then Play again on the mode select: single player is the default.
@@ -52,7 +52,7 @@ test("sign up, pick a handle and race the Grand Prix against bots", async ({ bro
   await page.keyboard.press("p");
   await page.waitForURL(/\/race/u);
   await joinedRace(page);
-  // A Grand Prix: two races, summer then winter.
+  // A Tilt: two races, summer then winter.
   await expect.poll(() => page.evaluate(() => window.__shifty.race().eventCount)).toBe(2);
   await expect.poll(() => page.evaluate(() => Object.values(window.__shifty.names()))).toContain(handle);
   // The race menu takes you back to the mode select.

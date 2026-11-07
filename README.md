@@ -1,10 +1,10 @@
 # 23.4° Shifty
 
-An online racing game about one place and four seasons: jetski on the sea, snowboard on the mountain, every circuit in any season and weather, and a Grand Prix that runs through the year. A love letter to Wave Race, 1080° and SSX. Made for GitHub Game Off 2026 (theme: **Shift**).
+An online racing game about one place and four seasons: jetski on the sea, snowboard on the mountain, every circuit in any season and weather, and the Tilt, a championship that runs through the year. A love letter to Wave Race, 1080° and SSX. Made for GitHub Game Off 2026 (theme: **Shift**).
 
 > 23.4° is Earth's axial tilt, the reason seasons exist. A shifty is a board trick: twist in the air, bring it back.
 
-**Status:** early prototype. A jetski race on the bay and a snowboard run down the mountain, raced alone against bots, with friends in a private room, or through matchmaking, as a Grand Prix that changes season between races. Accounts (GitHub or an email code), menus you can drive with a controller, the keyboard or the mouse, in English, Spanish and Catalan. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
+**Status:** early prototype. A jetski race on the bay and a snowboard run down the mountain, raced alone against bots, with friends in a private room, or through matchmaking, as the Tilt, a championship that changes season between races. Accounts (GitHub or an email code), menus you can drive with a controller, the keyboard or the mouse, in English, Spanish and Catalan. The game logic and netcode are real: server-authoritative, client prediction, WebTransport. The art isn't there yet.
 
 ## Play locally
 

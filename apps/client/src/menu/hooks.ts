@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react";
-import { backdrop, type BackdropKind } from "../game/backdrops.ts";
+import { backdrop, type BackdropKind, type RiderShot, type ScreenBox, setMenuShot } from "../game/backdrops.ts";
 import { Engine } from "../game/engine.ts";
 import { type Action, type Device, nav, type Pad } from "./nav.ts";
 
@@ -50,4 +50,36 @@ export function useBackdrop(kind: BackdropKind): void {
   useEffect(() => {
     if (engine) engine.show(backdrop(kind));
   }, [engine, kind]);
+}
+
+/**
+ * Frames your rider on the main menu's colours for `shot`, in the free
+ * space of the element the returned ref goes on (below the screen's top
+ * bar, which can run down over it).
+ */
+export function useRiderShot(shot: RiderShot): (el: HTMLElement | null) => void {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (el) setMenuShot(shot, () => spaceOf(el));
+  }, [el, shot]);
+  return setEl;
+}
+
+/** A space shorter than this (of the window's height) is no room for a rider: they stand in the default place. */
+const MIN_SPACE = 0.3;
+
+/** The free space of `el` on screen, below its screen's top bar (null once it has left the page, or when the
+ * layout leaves it no room, as narrow windows stack the panels). */
+function spaceOf(el: HTMLElement): ScreenBox | null {
+  if (!el.isConnected) return null;
+  const r = el.getBoundingClientRect();
+  const bar = el.closest(".screen")?.querySelector(".topbar")?.getBoundingClientRect();
+  const top = Math.max(r.top, bar ? bar.bottom : 0);
+  if ((r.bottom - top) / innerHeight < MIN_SPACE) return null;
+  return {
+    left: r.left / innerWidth,
+    right: r.right / innerWidth,
+    top: top / innerHeight,
+    bottom: r.bottom / innerHeight,
+  };
 }

@@ -53,7 +53,7 @@ export interface RaceEvent {
   index?: number;
 }
 
-/** A Grand Prix: which race of how many, and the points so far by seat. */
+/** A Tilt: which race of how many, and the points so far by seat. */
 export interface GrandPrixView {
   index: number;
   count: number;
@@ -292,7 +292,7 @@ export class Hud {
   }
 }
 
-/** Grand Prix standings: everyone's points so far, best first. */
+/** Tilt standings: everyone's points so far, best first. */
 function grandPrixTable(gp: GrandPrixView, names: Map<number, string>): string {
   const rows = [...gp.points]
     .toSorted((a, b) => b[1] - a[1] || a[0] - b[0])

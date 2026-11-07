@@ -11,7 +11,7 @@ if (!url) throw new Error("DATABASE_URL is not set");
 const BANNERS = {
   en: [
     {
-      title: "The Grand Prix is open",
+      title: "The Tilt is open",
       subtitle: "Summer on the bay, winter on the mountain. One championship.",
       action: "play",
       theme: "season:summer",
@@ -25,7 +25,7 @@ const BANNERS = {
   ],
   es: [
     {
-      title: "El Gran Premio está abierto",
+      title: "El Tilt está abierto",
       subtitle: "Verano en la bahía, invierno en la montaña. Un solo campeonato.",
       action: "play",
       theme: "season:summer",
@@ -39,7 +39,7 @@ const BANNERS = {
   ],
   ca: [
     {
-      title: "El Gran Premi és obert",
+      title: "El Tilt és obert",
       subtitle: "Estiu a la badia, hivern a la muntanya. Un sol campionat.",
       action: "play",
       theme: "season:summer",

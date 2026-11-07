@@ -421,6 +421,7 @@ export class Mountain implements Environment {
   private run: RunData;
   private terrain: Terrain;
   private sky = new THREE.Color(SKY);
+  private fog: THREE.Fog | null = null;
   /** True snow heights on the coarse grid (for cheap lookups: particles). */
   private gridHeights = new Float32Array(0);
   private grid = { x0: 0, z0: 0, nx: 0, nz: 0 };
@@ -485,7 +486,9 @@ export class Mountain implements Environment {
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     scene.background = this.sky;
-    scene.fog = new THREE.Fog(this.sky, 45, 330);
+    // (One fog for the mountain: a new one would rebuild every shader that draws in it.)
+    this.fog ??= new THREE.Fog(this.sky, 45, 330);
+    scene.fog = this.fog;
     hemi.color.set(0xdfe9fb);
     hemi.groundColor.set(0x6f84b0);
     hemi.intensity = 1.9;

@@ -2,13 +2,13 @@
 // along the top; on Home your rider stands over the seasons' colours with
 // a banner, missions and news around.
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
+import { preloadClub, setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { SEASONS, onSeasonShown, shownSeason } from "../../game/seasons.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useReducer, useState, useSyncExternalStore } from "react";
 import { type Locale, LOCALES, setLocale, useLocale, useT } from "../../i18n/index.ts";
 import { auth, type Banner, fetchContent, meQuery, type NewsPost } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop, useEngine } from "../hooks.ts";
+import { useAction, useAutoFocus, useBackdrop, useEngine, useRiderShot } from "../hooks.ts";
 import { Button, Glyph, Hints, Modal, Panel, Picker, TabBar } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
 import { Wardrobe } from "./wardrobe.tsx";
@@ -23,6 +23,11 @@ export function MainMenu() {
   const { tab = "home" } = route.useSearch();
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
+  const engine = useEngine();
+  useEffect(() => {
+    // The mode select is where Play goes: its terrace gets ready meanwhile.
+    if (engine && appearance) preloadClub(engine, appearance);
+  }, [engine, appearance]);
   useEffect(() => showMenuRider(tab !== "settings"), [tab]);
   useEffect(() => {
     if (appearance && tab === "home") setMenuRider(appearance, "summer");
@@ -82,6 +87,7 @@ function HomeTab() {
   const { data } = useQuery({ queryKey: ["content", locale], queryFn: () => fetchContent(locale), staleTime: 60_000 });
   const [reading, setReading] = useState<NewsPost | null>(null);
   const navigate = useNavigate();
+  const space = useRiderShot("hero");
 
   const open = (b: Banner) => {
     const action = b.action ?? "";
@@ -95,7 +101,7 @@ function HomeTab() {
   return (
     <main className="menu-body home">
       <div className="home-left">
-        <div className="rider-space" aria-hidden="true" />
+        <div className="rider-space" aria-hidden="true" ref={space} />
         <SeasonWord />
       </div>
       <div className="home-right">

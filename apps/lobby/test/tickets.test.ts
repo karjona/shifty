@@ -13,7 +13,7 @@ const SEED = b64urlEncode(new Uint8Array(32).fill(7));
 const GP_TOKEN =
   "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXX0.3_soaIfoUK8Ujek_VchbKyUP_9Fzzep3homz5Mz1J0rWm1SkUsVAEEB8Kj1khh6aS7SSpSR8584JgtKMg7M0DA";
 
-void test("a Grand Prix ticket names every course, signed in the token format", async () => {
+void test("a Tilt ticket names every course, signed in the token format", async () => {
   assert.deepEqual(courses("gp"), [0, 1]);
   assert.deepEqual(courses("winter"), [1]);
   const ticket = await mintTicket(
@@ -35,7 +35,7 @@ void test("a Grand Prix ticket names every course, signed in the token format", 
   assert.deepEqual(ticket.certHashes, ["abc", "def"]);
 });
 
-/** The same Grand Prix with a rider on it; `token.rs` verifies this one too. */
+/** The same Tilt with a rider on it; `token.rs` verifies this one too. */
 const RIDER_TOKEN =
   "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXSwibG9vayI6IkFRQUJBZ00iLCJzZXR1cHMiOltbMywzLDMsM10sWzYsMiwyLDJdXX0.1tSmr7BgiTu6PSO6_gr6O_t5PqiFcJX9mDsXAyW8lYHBoAn9LD5NKL6NxyeTqhZQhIkQQ607nZsMmVAY-U1JBw";
 

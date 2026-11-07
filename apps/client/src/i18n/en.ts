@@ -181,7 +181,7 @@ export const en = {
   },
   setup: {
     title: "Setup",
-    body: "Everyone gets the same 12 points. Spread them how you like: set them before a match, they stay for the whole Grand Prix.",
+    body: "Everyone gets the same 12 points. Spread them how you like: set them before a match, they stay for the whole Tilt.",
     stats: { speed: "Speed", handling: "Handling", stability: "Stability", tricks: "Tricks" },
     about: {
       speed: "A little more top speed.",
@@ -248,9 +248,9 @@ export const en = {
       trial: "Race the clock and chase ghosts.",
       single: "Ride against bots. Practice: times don't count.",
       room: "A private race with your friends: share the code.",
-      matchmaking: "Race the Grand Prix against riders from anywhere.",
+      matchmaking: "Race the Tilt against riders from anywhere.",
     },
-    events: { gp: "Grand Prix", summer: "Summer · Jetski", winter: "Winter · Snowboard" },
+    events: { gp: "The Tilt", summer: "Summer · Jetski", winter: "Winter · Snowboard" },
     eventAbout: {
       gp: "Every season in a row. Points for every race.",
       summer: "Three laps around the bay.",
@@ -322,7 +322,7 @@ export const en = {
       full: "room is full (4 players max)",
       draining: "the server is shutting down",
       kicked: "disconnected for inactivity",
-      started: "this Grand Prix has already started",
+      started: "this Tilt has already started",
       over: "this race is over",
     },
   },
@@ -350,8 +350,8 @@ export const en = {
       tricks: "tricks",
       points: "points",
       dnf: "DNF",
-      gp: "Grand Prix",
-      gpFinal: "Grand Prix · final standings",
+      gp: "The Tilt",
+      gpFinal: "The Tilt · final standings",
     },
     ordinal: (n: number) => {
       const s = ["th", "st", "nd", "rd"];

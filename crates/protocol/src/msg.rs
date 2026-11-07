@@ -178,7 +178,7 @@ pub enum RejectReason {
     RoomFull = 3,
     Draining = 4,
     Kicked = 5,
-    /// The Grand Prix in this room has started: no new riders until it's over.
+    /// The Tilt in this room has started: no new riders until it's over.
     Started = 6,
     /// The room's plan is over (its last race's results are done).
     Over = 7,
@@ -235,7 +235,7 @@ pub enum EventBody {
     RiderLeft {
         slot: u8,
     },
-    /// Grand Prix points after a race, by seat (seats without a rider are
+    /// Tilt points after a race, by seat (seats without a rider are
     /// left out).
     Standings {
         points: Vec<(u8, u16)>,
@@ -267,7 +267,7 @@ pub struct Snapshot {
     /// Ms between receiving the echoed packet and sending this snapshot.
     pub echo_hold_ms: u16,
     pub events: Vec<Event>,
-    /// The course raced now (a Grand Prix moves on to the next one).
+    /// The course raced now (a Tilt moves on to the next one).
     pub course: CourseId,
     /// Which race of the room's plan this is (0-based), out of `event_count`.
     pub event_index: u8,

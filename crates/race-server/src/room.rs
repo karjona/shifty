@@ -3,7 +3,7 @@
 //! the returned packets. This keeps the netcode testable in-process with a
 //! simulated network (see `tests/netcode.rs`).
 //!
-//! A room races its plan once: one course, or a Grand Prix (every course in
+//! A room races its plan once: one course, or a Tilt (every course in
 //! order, points by finishing place). After the last race's results the room
 //! is over: it refuses everyone, and the caller closes it.
 
@@ -34,7 +34,7 @@ const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
 const INPUT_RING: usize = 128;
 
-/// Grand Prix points by finishing place. Riders who don't finish get the
+/// Tilt points by finishing place. Riders who don't finish get the
 /// last place's points.
 pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
 /// Bots' setups by seat (the same for every sport): a spread, so the field
@@ -53,7 +53,7 @@ const BOT_SETUPS: [[u8; 4]; 8] = [
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
     pub id: String,
-    /// The courses raced, in order: one, or a Grand Prix.
+    /// The courses raced, in order: one, or a Tilt.
     pub plan: Vec<CourseId>,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
@@ -93,7 +93,7 @@ pub struct ReportEntry {
     pub place: u8,
     pub time_ms: Option<u32>,
     pub trick_points: u16,
-    /// Grand Prix points after this race.
+    /// Tilt points after this race.
     pub gp_points: Option<u16>,
 }
 
@@ -110,7 +110,7 @@ pub struct RaceReport {
     pub entries: Vec<ReportEntry>,
 }
 
-/// Whoever holds a seat in this Grand Prix, and their points.
+/// Whoever holds a seat in this Tilt, and their points.
 #[derive(Clone, Debug)]
 struct Entrant {
     pid: Option<String>,
@@ -238,7 +238,7 @@ impl Room {
         room
     }
 
-    /// The Grand Prix is under way: past the first warm-up.
+    /// The Tilt is under way: past the first warm-up.
     pub fn grand_prix_started(&self) -> bool {
         self.config.grand_prix() && (self.event_index > 0 || self.world.race.phase != Phase::Warmup)
     }
@@ -360,7 +360,7 @@ impl Room {
                     return Err(RejectReason::RoomFull);
                 }
                 if self.human_count() == 0 {
-                    // First player in: a fresh warm-up (and Grand Prix), not
+                    // First player in: a fresh warm-up (and Tilt), not
                     // the middle of a bots-only race.
                     self.restart_plan();
                 } else if self.grand_prix_started() {
@@ -406,7 +406,7 @@ impl Room {
                     next_event_id: 0,
                 };
                 // The newcomer learns the whole roster, in slot order, and
-                // the Grand Prix table.
+                // the Tilt table.
                 self.players[slot] = Some(player);
                 self.apply_setups();
                 let events: Vec<EventBody> = (0..MAX_RIDERS)
@@ -444,7 +444,7 @@ impl Room {
         }
     }
 
-    /// A player leaves. In a Grand Prix under way a bot takes the seat (the
+    /// A player leaves. In a Tilt under way a bot takes the seat (the
     /// player's points so far were already reported).
     pub fn leave(&mut self, conn: ConnId) {
         let Some(slot) = self.slot_of(conn) else {
@@ -474,7 +474,7 @@ impl Room {
         }
     }
 
-    /// The race just ended: points (Grand Prix) and the report.
+    /// The race just ended: points (Tilt) and the report.
     fn race_ended(&mut self, out: &mut Outbox) {
         let standings = self.world.standings();
         let gp = self.config.grand_prix();
@@ -775,7 +775,7 @@ mod tests {
         assert!(winner.time_ms.is_some());
         assert_eq!(winner.gp_points, Some(GP_POINTS[0]));
 
-        // Nobody new joins a Grand Prix under way; Ana can come back.
+        // Nobody new joins a Tilt under way; Ana can come back.
         assert_eq!(
             room.join(2, &claims("bea", vec![0, 1], 3), 0, now).err(),
             Some(RejectReason::Started)

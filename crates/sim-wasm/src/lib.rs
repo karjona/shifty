@@ -288,7 +288,7 @@ impl WasmClient {
         self.race_buf.as_ptr()
     }
 
-    /// Grand Prix points as JSON: `[{slot, points}]` (seats with a rider).
+    /// Tilt points as JSON: `[{slot, points}]` (seats with a rider).
     #[wasm_bindgen(js_name = grandPrixJson)]
     pub fn grand_prix_json(&self) -> String {
         let list: Vec<serde_json::Value> = self

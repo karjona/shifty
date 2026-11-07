@@ -42,7 +42,7 @@ pub struct JoinClaims {
     /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
     #[serde(default)]
     pub course: u8,
-    /// Every course the room races, in order (a Grand Prix has several).
+    /// Every course the room races, in order (a Tilt has several).
     /// Empty = just `course`.
     #[serde(default)]
     pub events: Vec<u8>,
@@ -306,7 +306,7 @@ mod tests {
     }
 
     /// The lobby's signer (apps/lobby/src/tickets.ts) signs this exact token
-    /// for a Grand Prix (see apps/lobby/test/tickets.test.ts).
+    /// for a Tilt (see apps/lobby/test/tickets.test.ts).
     #[test]
     fn verifies_a_token_signed_by_the_lobby() {
         const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXX0.3_soaIfoUK8Ujek_VchbKyUP_9Fzzep3homz5Mz1J0rWm1SkUsVAEEB8Kj1khh6aS7SSpSR8584JgtKMg7M0DA";
@@ -323,7 +323,7 @@ mod tests {
         );
     }
 
-    /// The same Grand Prix with a rider on it (see tickets.test.ts too).
+    /// The same Tilt with a rider on it (see tickets.test.ts too).
     #[test]
     fn verifies_a_lobby_token_with_a_rider() {
         const LOBBY_TOKEN: &str = "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjcsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXSwibG9vayI6IkFRQUJBZ00iLCJzZXR1cHMiOltbMywzLDMsM10sWzYsMiwyLDJdXX0.1tSmr7BgiTu6PSO6_gr6O_t5PqiFcJX9mDsXAyW8lYHBoAn9LD5NKL6NxyeTqhZQhIkQQ607nZsMmVAY-U1JBw";

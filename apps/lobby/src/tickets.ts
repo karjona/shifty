@@ -5,7 +5,7 @@
 /** Courses on the race server (`sim::CourseId`). */
 export const COURSE = { summer: 0, winter: 1 } as const;
 
-/** What a room races: the Grand Prix (every season in order) or one event. */
+/** What a room races: the Tilt (every season in order) or one event. */
 export type EventChoice = "gp" | "summer" | "winter";
 export const EVENT_CHOICES: readonly EventChoice[] = ["gp", "summer", "winter"];
 export const isEventChoice = (v: unknown): v is EventChoice =>
@@ -32,7 +32,7 @@ export interface JoinClaims {
   surface: number;
   /** First course (older servers read only this). */
   course: number;
-  /** Every course of the room, in order (a Grand Prix has several). */
+  /** Every course of the room, in order (a Tilt has several). */
   events: number[];
   /** The rider's appearance bytes (base64url), passed on to the room. */
   look?: string;
