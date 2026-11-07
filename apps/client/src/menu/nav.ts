@@ -4,11 +4,12 @@
 // direction, and the mouse focuses what it hovers. A / ✕ / Enter press the
 // focused element. The other buttons are actions screens subscribe to:
 // back (B / ○ / Esc), play (Y / △ / P), the tabs (LB RB / L1 R1 / Q E) and
-// the menu (Start / Options).
+// the menu (Start / Options). Each move and action makes its sound.
 //
 // The topmost `[data-nav-scope]` (a dialog) holds the focus while it is
 // open. An element with `data-nav-lr` (a picker) takes left and right for
 // itself, as a `nav-lr` event with `detail` -1 or 1.
+import { uiSound } from "../audio/ui.ts";
 
 export type Action = "back" | "play" | "prev" | "next" | "menu";
 export type Device = "keyboard" | "mouse" | "gamepad";
@@ -125,6 +126,7 @@ class Nav {
       if (el && scope().contains(el) && document.activeElement !== el && !isTextInput(document.activeElement)) {
         document.documentElement.dataset.navDir = "pointer";
         el.focus({ preventScroll: true });
+        uiSound("hover");
       }
     });
     const poll = () => {
@@ -164,6 +166,7 @@ class Nav {
     const handler = list?.[list.length - 1];
     if (!handler) return false;
     handler();
+    uiSound(action === "back" ? "back" : action === "prev" || action === "next" ? "tab" : "select");
     return true;
   }
 
@@ -187,11 +190,15 @@ class Nav {
     }
     if ((dir === "left" || dir === "right") && active.hasAttribute("data-nav-lr")) {
       active.dispatchEvent(new CustomEvent("nav-lr", { detail: dir === "left" ? -1 : 1, bubbles: true }));
+      uiSound("move");
       return;
     }
     // The focus styles read the way it came from (the fill wipes in from that side).
     document.documentElement.dataset.navDir = dir;
-    nearest(active, dir, list)?.focus({ preventScroll: false });
+    const next = nearest(active, dir, list);
+    if (!next) return;
+    next.focus({ preventScroll: false });
+    uiSound("move");
   }
 
   private press(): void {

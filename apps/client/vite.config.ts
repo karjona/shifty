@@ -61,6 +61,7 @@ const DEV_ONLY: [RegExp, string][] = [
   [/__shifty/u, "the e2e test hooks (window.__shifty)"],
   [/__celFly/u, "the flyover capture hook (window.__celFly)"],
   [/Shifty debug \(F1\)/u, "the netcode debug panel"],
+  [/Shifty sound board/u, "the dev sound board"],
   [/URLSearchParams\(\s*(?:window\.|globalThis\.|self\.)?location\.search/u, "a read of the page's URL query"],
   [/dev-params-read-in-a-build/u, "a URL switch read outside import.meta.env.DEV (dev-params.ts)"],
 ];
