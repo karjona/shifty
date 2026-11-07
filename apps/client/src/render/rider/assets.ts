@@ -39,7 +39,8 @@ export interface ModelAsset {
 
 const BASE = `${import.meta.env.BASE_URL}riders`;
 const gltf = new GLTFLoader();
-const images = new THREE.TextureLoader();
+/** Decoded off the main thread, as they are: the maps hold raw factors, not colours. */
+const images = new THREE.ImageBitmapLoader().setOptions({ premultiplyAlpha: "none", colorSpaceConversion: "none" });
 const cache = new Map<string, Promise<ModelAsset>>();
 let manifest: Promise<Record<string, string[]>> | null = null;
 
@@ -85,8 +86,9 @@ export function loadOverlay(body: BodyKind, name: string): Promise<THREE.Texture
 function loadTexture(url: string): Promise<THREE.Texture> {
   let t = textures.get(url);
   if (!t) {
-    t = images.loadAsync(url).then((tex) => {
-      // The art's UVs follow glTF (origin top left); the maps hold raw factors, not colours.
+    t = images.loadAsync(url).then((bitmap) => {
+      const tex = new THREE.Texture(bitmap);
+      // The art's UVs follow glTF (origin top left).
       tex.flipY = false;
       tex.colorSpace = THREE.NoColorSpace;
       tex.anisotropy = 4;
