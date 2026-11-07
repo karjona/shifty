@@ -7,6 +7,7 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
+    soundLocked: "Click or press any key for sound",
     retry: "Try again",
     close: "Close",
     cancel: "Cancel",

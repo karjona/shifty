@@ -1,6 +1,7 @@
 // The menus' sounds: soft ticks as the focus moves, and short blips to
 // pick, go back and change tabs. Anything pickable (`data-nav`) that is
 // clicked, by mouse, Enter or A, sounds as a pick.
+import { installSoundHint } from "./hint.ts";
 import { audio } from "./index.ts";
 
 export type UiSound = "move" | "hover" | "select" | "back" | "tab";
@@ -28,9 +29,10 @@ export function uiSound(kind: UiSound): void {
   }
 }
 
-/** Starts the game's sound (on the first gesture) and the menus' pick sound. */
+/** Starts the game's sound (on the first gesture), the sign for gamepad players while it waits, and the menus' pick sound. */
 export function installSound(): void {
   audio.install();
+  installSoundHint();
   document.addEventListener("click", (e) => {
     if (e.target instanceof Element && e.target.closest("[data-nav]")) uiSound("select");
   });

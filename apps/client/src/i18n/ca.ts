@@ -7,6 +7,7 @@ export const ca: Messages = {
     play: "Juga",
     tabs: "Pestanyes",
     loading: "Carregant…",
+    soundLocked: "Fes clic o prem una tecla per activar el so",
     retry: "Torna-ho a provar",
     close: "Tanca",
     cancel: "Cancel·la",
