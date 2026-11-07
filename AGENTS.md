@@ -56,6 +56,8 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 ### Jetski
 
 - **The bay** (the first circuit): an oval in the bay around a breakwater, past a small island and along the town quay (land is solid, in the sim); buoys to pass on the correct side (red on your right, green on your left), floating ramps, three laps. A race goes warm-up → countdown → race → results.
+- **Buoys are tall inflatable race marks** on a mooring float, red or green, each with an arrow on its white band pointing down to the side you pass it on. They give way: ride into one and it is shoved aside and under, then swings back up and bobs; you're pushed out the side you hit it on and lose some speed (about a fifth, dead centre), and never thrown off. In the sim a buoy stays on its anchor (`crates/sim/src/buoy.rs`); its swing is a look the client draws from where the riders are. The next buoy has a ring on the water and a flashing lamp on top.
+- **Chevron boards** (yellow, black chevrons) float along the outside of every turn, angled toward the riders coming in and pointing the way the course turns, so a bend reads from far down the straight. They stand just past the course's outer limit, so nobody rides into them.
 - **Air comes from waves and ramps only.** No jump button: pulling back (lean) as you leave a crest pops you higher.
 - **One speed meter, passive:** clean buoy passes fill it and raise top speed; a missed buoy or a bail empties it. Missing buoys never disqualifies.
 - **Tricks:** hold a trick button in the air and push the stick (spins, flips, barrel rolls). Land crooked and you bail.
