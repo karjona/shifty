@@ -7,7 +7,7 @@
 use client_core::{Client, Phase};
 use serde_json::json;
 use sim::course::{Keep, LandKind, Line, Sport, tuning as course_tuning};
-use sim::mountain::{Feature, ObstacleKind, Run};
+use sim::mountain::{Feature, LipKind, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 use wasm_bindgen::prelude::*;
@@ -462,7 +462,8 @@ impl WasmClient {
 }
 
 /// The run, for drawing it: its centre line every 4 m (with half width,
-/// walls and riding limit), gates, obstacles and what is built on it.
+/// walls and riding limit), gates, obstacles and what is built on it
+/// (tables, natural lips, spines).
 fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
     let length = run.length();
     let mut path = Vec::new();
@@ -512,6 +513,54 @@ fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
             _ => None,
         })
         .collect();
+    let lips: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Lip {
+                s,
+                offset,
+                half_width,
+                height,
+                ramp,
+                kind,
+                ..
+            } => Some(json!({
+                "s": s,
+                "lip": s + ramp,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+                "kind": match kind {
+                    LipKind::Wind => "wind",
+                    LipKind::Log => "log",
+                    LipKind::Rock => "rock",
+                },
+            })),
+            _ => None,
+        })
+        .collect();
+    let spines: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Spine {
+                s,
+                length,
+                ease,
+                offset,
+                half_width,
+                height,
+            } => Some(json!({
+                "s": s,
+                "end": s + length + 2.0 * ease,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+            })),
+            _ => None,
+        })
+        .collect();
     json!({
         "length": length,
         "startS": c.start_s,
@@ -522,6 +571,8 @@ fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
         "path": path,
         "obstacles": obstacles,
         "tables": tables,
+        "lips": lips,
+        "spines": spines,
     })
 }
 

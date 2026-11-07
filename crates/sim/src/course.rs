@@ -15,7 +15,7 @@
 //! every client agree on it without sending it over the network.
 
 use crate::math::{PI, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
-use crate::mountain::{MOUNTAIN, Run};
+use crate::mountain::{GLADES, MOUNTAIN, Run};
 use crate::surface::{SeaState, Surface, SurfaceKind};
 
 /// The sport a course is raced in. It picks the physics, the rules and how
@@ -96,10 +96,12 @@ pub struct LandDef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CourseId {
-    /// Costa Nevada bay: the summer jetski oval.
+    /// Costa Nevada bay: the jetski oval.
     Oval = 0,
-    /// Costa Nevada mountain: the winter snowboard run.
+    /// Costa Nevada mountain: the mountain run, from the summit to the village.
     Mountain = 1,
+    /// Costa Nevada mountain: the glades, from the ridge to the lake.
+    Glades = 3,
 }
 
 impl CourseId {
@@ -107,6 +109,7 @@ impl CourseId {
         match v {
             0 => Some(Self::Oval),
             1 => Some(Self::Mountain),
+            3 => Some(Self::Glades),
             _ => None,
         }
     }
@@ -115,6 +118,7 @@ impl CourseId {
         match self {
             Self::Oval => &OVAL,
             Self::Mountain => &MOUNTAIN,
+            Self::Glades => &GLADES,
         }
     }
 }

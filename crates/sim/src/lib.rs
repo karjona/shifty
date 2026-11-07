@@ -58,7 +58,7 @@ pub const MAX_HUMANS: usize = 4;
 /// autopilot from then on).
 pub fn determinism_scenario(ticks: u32) -> u64 {
     let mut hash: u64 = 0;
-    for course in [CourseId::Oval, CourseId::Mountain] {
+    for course in [CourseId::Oval, CourseId::Mountain, CourseId::Glades] {
         let mut world = World::on_course(course, SurfaceKind::Swells, 0xC0FFEE);
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);

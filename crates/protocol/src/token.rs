@@ -44,7 +44,8 @@ pub struct JoinClaims {
     pub humans: u8,
     #[serde(default)]
     pub surface: u8,
-    /// The course (`sim::CourseId`): 0 = the summer bay, 1 = the winter mountain.
+    /// The course (`sim::CourseId`): 0 = the bay, 1 = the mountain run, 3 =
+    /// the glades.
     #[serde(default)]
     pub course: u8,
     /// Every course the room races, in order (a Tilt has several).

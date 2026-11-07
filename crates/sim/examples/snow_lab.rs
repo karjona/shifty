@@ -1,10 +1,11 @@
-//! Prints how the snowboard and the mountain run behave: the run's profile
-//! (pitch, banks, widths), how fast a rider goes standing tall and tucked,
-//! how much air the tables and the drop give with and without a pop, and a
-//! bots-only race down the whole run (times, falls, tricks, cost per tick).
-//! For tuning.
+//! Prints how the snowboard and the mountain's runs behave: each run's
+//! profile (pitch, banks, widths), how fast a rider goes standing tall and
+//! tucked, how much air its tables, lips and drops give with and without a
+//! pop, and a bots-only race down the whole run (times, falls, tricks, cost
+//! per tick). For tuning.
 //!
-//! `cargo run -p sim --example snow_lab --release [seed]`
+//! `cargo run -p sim --example snow_lab --release [mountain|glades] [seed]`
+//! (both runs by default).
 
 use std::time::Instant;
 
@@ -12,23 +13,59 @@ use sim::bot::bot_input;
 use sim::course::Line;
 use sim::input::buttons;
 use sim::math::{angle_diff, atan2, clamp};
-use sim::mountain::{Feature, RUN};
+use sim::mountain::{Feature, GLADES_RUN, LipKind, RUN, Run};
 use sim::race::{EventKind, Phase};
 use sim::{CourseId, Input, Inputs, MAX_RIDERS, SurfaceKind, World};
 
-fn main() {
-    let seed: u32 = std::env::args()
-        .nth(1)
-        .and_then(|a| a.parse().ok())
-        .unwrap_or(1);
-    profile();
-    speeds();
-    jumps();
-    race(seed);
+/// A run to try: its course, where the open slope is, and its jumps that
+/// are not built features (drops, rollers): name and lip.
+struct Lab {
+    name: &'static str,
+    course: CourseId,
+    run: &'static Run,
+    open_s: f32,
+    extra: &'static [(&'static str, f32)],
 }
 
-fn profile() {
-    let run = &RUN;
+const LABS: [Lab; 2] = [
+    Lab {
+        name: "mountain",
+        course: CourseId::Mountain,
+        run: &RUN,
+        open_s: 100.0,
+        extra: &[("drop", 1061.0), ("rollers", 1440.0)],
+    },
+    Lab {
+        name: "glades",
+        course: CourseId::Glades,
+        run: &GLADES_RUN,
+        open_s: 200.0,
+        extra: &[
+            ("step-down", 1537.5),
+            ("glade rollers", 900.0),
+            ("rollers", 1700.0),
+        ],
+    },
+];
+
+fn main() {
+    let mut args = std::env::args().skip(1).peekable();
+    let only = args
+        .next_if(|a| LABS.iter().any(|l| l.name == a))
+        .unwrap_or_default();
+    let seed: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(1);
+    for lab in LABS.iter().filter(|l| only.is_empty() || l.name == only) {
+        println!("#### {}", lab.name);
+        profile(lab);
+        speeds(lab);
+        jumps(lab);
+        race(lab, seed);
+        println!();
+    }
+}
+
+fn profile(lab: &Lab) {
+    let run = lab.run;
     println!(
         "== run: {:.0} m, finish at {:.0} m",
         run.length(),
@@ -64,15 +101,16 @@ fn profile() {
 
 /// One rider from `s0` down the centre line, holding `lean`, for `secs`.
 /// Returns (speed every second, falls).
-fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
-    let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+fn ride(lab: &Lab, s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
+    let run = lab.run;
+    let mut w = World::on_course(lab.course, SurfaceKind::Flat, 0);
     w.spawn(0);
     w.ride_free();
     let mut r = w.riders[0].unwrap();
-    let f = RUN.centerline(s0);
+    let f = run.centerline(s0);
     r.pos.x = f.x;
     r.pos.z = f.z;
-    r.pos.y = RUN.height(f.x, f.z);
+    r.pos.y = run.height(f.x, f.z);
     r.yaw = f.yaw;
     r.quantize();
     w.riders[0] = Some(r);
@@ -81,8 +119,8 @@ fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     let mut falls = 0;
     for t in 0..secs * 60 {
         let r = w.riders[0].unwrap();
-        let (s, _) = RUN.project(r.pos.x, r.pos.z);
-        let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(0.0);
+        let (s, _) = run.project(r.pos.x, r.pos.z);
+        let (tx, tz) = run.centerline(s + 10.0 + r.speed() * 0.5).at_offset(0.0);
         let heading = if r.speed() > 3.0 {
             atan2(r.vel.x, r.vel.z)
         } else {
@@ -106,10 +144,13 @@ fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     (out, falls)
 }
 
-fn speeds() {
-    println!("\n== speed down the open slope (s = 100), km/h each second");
+fn speeds(lab: &Lab) {
+    println!(
+        "\n== speed down the open slope (s = {}), km/h each second",
+        lab.open_s
+    );
     for (name, lean) in [("tall ", 0.0), ("tuck ", 1.0), ("brake", -0.5)] {
-        let (v, falls) = ride(100.0, lean, 12);
+        let (v, falls) = ride(lab, lab.open_s, lean, 12);
         let line: Vec<String> = v.iter().map(|s| format!("{:3.0}", s * 3.6)).collect();
         println!("{name} {}  falls {falls}", line.join(" "));
     }
@@ -118,30 +159,53 @@ fn speeds() {
 /// Approaches a table (or the drop) along the centre line at the speed the
 /// slope gives, popping at the lip or not. Prints airtime, distance, and how
 /// it landed.
-fn jumps() {
-    println!("\n== air: tables and the drop (approach from 120 m up, tucked)");
+fn jumps(lab: &Lab) {
+    let run = lab.run;
+    println!("\n== air: tables, lips and drops (approach from 120 m up, tucked)");
     let mut spots: Vec<(String, f32, f32)> = Vec::new();
-    for f in RUN.features {
-        if let Feature::Table {
-            s, ramp, offset, ..
-        } = *f
-        {
-            spots.push((format!("table s={s:.0}"), s + ramp, offset));
+    for f in run.features {
+        match *f {
+            Feature::Table {
+                s, ramp, offset, ..
+            } => spots.push((format!("table s={s:.0}"), s + ramp, offset)),
+            Feature::Lip {
+                s,
+                ramp,
+                offset,
+                kind,
+                ..
+            } => {
+                let kind = match kind {
+                    LipKind::Wind => "wind lip",
+                    LipKind::Log => "log",
+                    LipKind::Rock => "rock lip",
+                };
+                spots.push((format!("{kind} s={s:.0}"), s + ramp, offset));
+            }
+            _ => {}
         }
     }
-    spots.push(("drop".into(), 1061.0, 0.0));
-    spots.push(("rollers".into(), 1440.0, 0.0));
+    for &(name, lip) in lab.extra {
+        spots.push((name.into(), lip, 0.0));
+    }
     for (name, lip, offset) in spots {
         for pop in [false, true] {
-            let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+            let mut w = World::on_course(lab.course, SurfaceKind::Flat, 0);
             w.spawn(0);
             w.ride_free();
             let mut r = w.riders[0].unwrap();
-            let f = RUN.centerline(lip - 120.0);
+            // From 120 m up, or from past the last trunk in the way.
+            let from = run
+                .obstacles
+                .iter()
+                .filter(|o| o.s < lip && (o.offset - offset).abs() < o.radius + 1.5)
+                .map(|o| o.s + 4.0)
+                .fold(lip - 120.0, f32::max);
+            let f = run.centerline(from);
             let (x, z) = f.at_offset(offset);
             r.pos.x = x;
             r.pos.z = z;
-            r.pos.y = RUN.height(x, z);
+            r.pos.y = run.height(x, z);
             r.yaw = f.yaw;
             r.quantize();
             w.riders[0] = Some(r);
@@ -153,8 +217,8 @@ fn jumps() {
             let mut outcome = String::from("-");
             for _ in 0..60 * 12 {
                 let r = w.riders[0].unwrap();
-                let (s, _) = RUN.project(r.pos.x, r.pos.z);
-                let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(offset);
+                let (s, _) = run.project(r.pos.x, r.pos.z);
+                let (tx, tz) = run.centerline(s + 10.0 + r.speed() * 0.5).at_offset(offset);
                 let heading = if r.speed() > 3.0 {
                     atan2(r.vel.x, r.vel.z)
                 } else {
@@ -191,7 +255,7 @@ fn jumps() {
                 } else {
                     if air > longest && flew_at > lip - 30.0 {
                         longest = air;
-                        landed_at = RUN.project(r2.pos.x, r2.pos.z).0;
+                        landed_at = run.project(r2.pos.x, r2.pos.z).0;
                         distance = landed_at - flew_at;
                         if outcome == "-" {
                             outcome = "ok".into();
@@ -203,8 +267,13 @@ fn jumps() {
                     break;
                 }
             }
+            let short = if from > lip - 120.0 {
+                format!(", from {:.0} m up", lip - from)
+            } else {
+                String::new()
+            };
             println!(
-                "{name:14} pop {:5}: {:4.2} s in the air, {:4.0} m, off at {:3.0} km/h ({outcome})",
+                "{name:14} pop {:5}: {:4.2} s in the air, {:4.0} m, off at {:3.0} km/h ({outcome}{short})",
                 pop,
                 longest as f32 / 60.0,
                 distance,
@@ -214,9 +283,9 @@ fn jumps() {
     }
 }
 
-fn race(seed: u32) {
+fn race(lab: &Lab, seed: u32) {
     println!("\n== bots race the run (seed {seed})");
-    let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, seed);
+    let mut w = World::on_course(lab.course, SurfaceKind::Flat, seed);
     assert!(matches!(w.course().line, Line::Run(_)));
     for slot in 0..MAX_RIDERS {
         w.spawn(slot);
@@ -224,6 +293,7 @@ fn race(seed: u32) {
     w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut falls = [0u32; MAX_RIDERS];
+    let mut fell_at: Vec<String> = Vec::new();
     let mut max_speed = [0.0f32; MAX_RIDERS];
     let mut air = [0u32; MAX_RIDERS];
     let mut longest = [0u32; MAX_RIDERS];
@@ -236,6 +306,10 @@ fn race(seed: u32) {
         for e in w.step(&inputs) {
             if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
                 falls[e.slot as usize] += 1;
+                if let Some(r) = w.riders[e.slot as usize] {
+                    let (s, off) = lab.run.project(r.pos.x, r.pos.z);
+                    fell_at.push(format!("bot {} s={s:.0} off={off:.1}", e.slot + 1));
+                }
             }
         }
         ticks += 1;
@@ -270,6 +344,9 @@ fn race(seed: u32) {
             max_speed[slot] * 3.6,
             longest[slot] as f32 / 60.0
         );
+    }
+    if !fell_at.is_empty() {
+        println!("falls at: {}", fell_at.join(", "));
     }
     println!("whole sim: {per_tick:.1} µs/tick with 8 riders");
 }
