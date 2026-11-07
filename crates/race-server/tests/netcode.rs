@@ -100,6 +100,8 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         look: String::new(),
         // Lopsided setups, so prediction has to know each rider's.
         setups: vec![[6, 2, 2, 2], [2, 3, 6, 1]],
+        trial: false,
+        season: 0,
     }
 }
 
@@ -405,6 +407,7 @@ fn server_does_not_trust_client_inputs() {
         last_snapshot_tick: 0,
         client_time: 0,
         ready: 0,
+        retry: 0,
         first_tick: tick + 1000,
         inputs: vec![
             Input {

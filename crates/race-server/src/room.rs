@@ -22,6 +22,8 @@ use protocol::{
 };
 use serde::Serialize;
 use sim::bot::bot_input;
+
+use crate::record::{RunReport, Trial};
 use sim::race::{Phase, Race};
 use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, World};
 
@@ -69,6 +71,8 @@ pub struct RoomConfig {
     pub bots: u8,
     /// People the lobby sent: the first race waits for them all to arrive.
     pub humans: u8,
+    /// A time trial in this season (0-3): one rider, no bots, runs recorded.
+    pub trial: Option<u8>,
 }
 
 impl RoomConfig {
@@ -81,13 +85,26 @@ impl RoomConfig {
         if plan.is_empty() {
             plan.push(CourseId::Oval);
         }
+        let trial = claims.trial.then_some(claims.season);
+        if trial.is_some() {
+            plan.truncate(1);
+        }
         Self {
             id: claims.room.clone(),
             plan,
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
-            bots: claims.bots.min((MAX_RIDERS - 1) as u8),
-            humans: claims.humans.min(MAX_HUMANS as u8),
+            bots: if trial.is_some() {
+                0
+            } else {
+                claims.bots.min((MAX_RIDERS - 1) as u8)
+            },
+            humans: if trial.is_some() {
+                1
+            } else {
+                claims.humans.min(MAX_HUMANS as u8)
+            },
+            trial,
         }
     }
 
@@ -217,6 +234,8 @@ pub struct Room {
     arrived: usize,
     /// The last race's results are done.
     over: bool,
+    /// A time trial's runs.
+    trial: Option<Trial>,
     pub stats: RoomStats,
 }
 
@@ -228,12 +247,17 @@ pub struct Outbox {
     pub close: Vec<ConnId>,
     /// Races that just ended, for the lobby.
     pub reports: Vec<RaceReport>,
+    /// Time trial runs that just finished, for the lobby.
+    pub runs: Vec<RunReport>,
 }
 
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
+        let mut world = World::on_course(config.plan[0], config.surface_kind, config.surface_seed);
+        world.trial = config.trial.is_some();
         let mut room = Self {
-            world: World::on_course(config.plan[0], config.surface_kind, config.surface_seed),
+            trial: config.trial.map(|season| Trial::new(&config.id, season)),
+            world,
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
             entrants: Default::default(),
@@ -373,12 +397,16 @@ impl Room {
                     p.conn = conn;
                     // A new screen: it says again what it has loaded.
                     p.ready = 0;
+                    if let Some(trial) = &mut self.trial {
+                        trial.seat(&claims.pid, &claims.look_bytes());
+                    }
                 }
                 p.last_packet_ms = now_ms;
                 slot
             }
             None => {
-                if self.human_count() >= MAX_HUMANS {
+                let most = if self.trial.is_some() { 1 } else { MAX_HUMANS };
+                if self.human_count() >= most {
                     return Err(RejectReason::RoomFull);
                 }
                 if self.human_count() == 0 {
@@ -433,6 +461,9 @@ impl Room {
                 // the Tilt table.
                 self.players[slot] = Some(player);
                 self.apply_setups();
+                if let Some(trial) = &mut self.trial {
+                    trial.seat(&claims.pid, &claims.look_bytes());
+                }
                 let events: Vec<EventBody> = (0..MAX_RIDERS)
                     .filter_map(|s| self.roster_event(s))
                     .collect();
@@ -465,6 +496,7 @@ impl Room {
             surface_seed: self.config.surface_seed,
             server_tick: self.world.tick,
             echo_client_time: client_time,
+            trial: self.trial.is_some(),
         }
     }
 
@@ -531,7 +563,7 @@ impl Room {
             let table = self.standings_event();
             self.broadcast_event(&table, None);
         }
-        if entries.iter().any(|e| e.pid.is_some()) {
+        if self.trial.is_none() && entries.iter().any(|e| e.pid.is_some()) {
             out.reports.push(RaceReport {
                 room: self.config.id.clone(),
                 round: self.round,
@@ -623,6 +655,9 @@ impl Room {
         p.ack_events(packet.event_ack);
         // Readiness only moves on (packets can arrive out of order).
         p.ready = p.ready.max(packet.ready);
+        if let Some(trial) = &mut self.trial {
+            trial.retries(packet.retry);
+        }
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
 
@@ -663,6 +698,9 @@ impl Room {
         if self.world.race.phase == Phase::Grid && self.grid_done() {
             self.world.start_intro();
         }
+        if let Some(trial) = &mut self.trial {
+            trial.before_step(&mut self.world);
+        }
         let next = self.world.tick.wrapping_add(1);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for slot in 0..MAX_RIDERS {
@@ -679,7 +717,13 @@ impl Room {
             }
         }
         let phase_before = self.world.race.phase;
-        self.world.step(&inputs);
+        let events = self.world.step(&inputs);
+        if let Some(trial) = &mut self.trial
+            && let Some(slot) = self.seats.iter().position(|s| *s == Seat::Human)
+        {
+            out.runs
+                .extend(trial.after_step(&self.world, slot, &events));
+        }
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
             (Phase::Results, Phase::Grid) => self.results_done(),
@@ -769,6 +813,8 @@ mod tests {
             events,
             look: String::new(),
             setups: Vec::new(),
+            trial: false,
+            season: 0,
         }
     }
 
@@ -780,6 +826,7 @@ mod tests {
             last_snapshot_tick: 0,
             client_time: 0,
             ready: ready.map_or(0, |e| e as u8 + 1),
+            retry: 0,
             first_tick: room.tick() + 1,
             inputs: vec![Input::default()],
         };
