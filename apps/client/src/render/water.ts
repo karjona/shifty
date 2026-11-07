@@ -13,7 +13,8 @@
 //               turns it into foam. Built from rendered positions, which
 //               every client has, so nothing extra goes over the network.
 import * as THREE from "three/webgpu";
-import { type LandData, landDistance } from "./course.ts";
+import type { LandData } from "./course.ts";
+import { landDistance } from "./land.ts";
 import { celWaterMaterial } from "./cel/water.ts";
 import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {

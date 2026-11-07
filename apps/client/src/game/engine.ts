@@ -127,7 +127,7 @@ export class Engine {
         booted();
         throw e;
       });
-      const world = new World(document.querySelector<HTMLElement>("#app")!, document.querySelector("#labels")!);
+      const world = new World(document.querySelector<HTMLElement>("#app")!);
       await world.init().catch((e: unknown) => {
         booted();
         throw e;

@@ -27,8 +27,7 @@ const SLOTS = 8;
 const FAR_VOICES = 3;
 /** The music ducks to this under the countdown and the results. */
 const DUCK = 0.35;
-/** Wrong way for this long (s) before the cue, then again every so often. */
-const WRONG_WAY_DELAY = 1;
+/** The wrong-way cue sounds as the warning goes up, and again this often (s) while it stays up. */
 const WRONG_WAY_REPEAT = 3;
 /** Hops shorter than this (s) land without a sound (the hull skipping over chop makes its own). */
 const MIN_AIR_S = 0.12;
@@ -118,7 +117,7 @@ export class RaceAudio {
   private countStart = -1;
   private countN = 4;
   private goStart = -1;
-  private wrongFor = 0;
+  private wrongUp = false;
   private wrongAt = -10;
 
   /** A new course (on joining, and at each race of a Tilt). */
@@ -160,7 +159,7 @@ export class RaceAudio {
     this.tick = tick;
     for (const r of riders) this.place(r);
     this.onEvents(events, mySlot, race);
-    this.cues(race, dt);
+    this.cues(race);
     for (const r of riders) this.ride(r, input, t, dt);
     this.updateFar(riders, t);
   }
@@ -342,7 +341,7 @@ export class RaceAudio {
   }
 
   /** The race's cues: the countdown, GO, wrong way; the music's duck. */
-  private cues(race: RaceView, dt: number): void {
+  private cues(race: RaceView): void {
     if (race.phase === COUNTDOWN) {
       if (race.phaseStart !== this.countStart) {
         this.countStart = race.phaseStart;
@@ -358,15 +357,12 @@ export class RaceAudio {
       this.goStart = race.phaseStart;
       if (race.phaseTicks < race.tickHz / 2) audio.play("go");
     }
-    if (race.wrongWay && race.phase === RACING && race.racing) {
-      this.wrongFor += dt;
-      if (this.wrongFor > WRONG_WAY_DELAY && this.clock - this.wrongAt > WRONG_WAY_REPEAT) {
-        this.wrongAt = this.clock;
-        audio.play("wrongWay");
-      }
-    } else {
-      this.wrongFor = 0;
+    // `wrongWay` is the HUD's steadied warning, so the cue and the banner agree.
+    if (race.wrongWay && (!this.wrongUp || this.clock - this.wrongAt > WRONG_WAY_REPEAT)) {
+      this.wrongAt = this.clock;
+      audio.play("wrongWay");
     }
+    this.wrongUp = race.wrongWay;
   }
 
   /** One rider's frame: landings, pops, bumps; your own voices. */

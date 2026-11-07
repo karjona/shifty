@@ -1,15 +1,16 @@
-// The loading sign: up while the 3D behind the menus gets something ready
-// (see game/loading.ts).
-import { useSyncExternalStore } from "react";
-import { busy, onBusy } from "../loading.ts";
-import { useT } from "../i18n/index.ts";
+// The menus' side of the loading sign (see loading.ts): up while a screen
+// waits for something (once it takes long enough to notice).
+import { useRouterState } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { SIGN_AFTER_MS, holdLoading } from "../loading.ts";
 
+/** Holds the loading sign up while `on` (once it takes long enough to notice), saying `label` ("Loading…" without one). */
+export function useLoading(on: boolean, label = ""): void {
+  useEffect(() => (on ? holdLoading(label ? () => label : null, SIGN_AFTER_MS) : undefined), [on, label]);
+}
+
+/** Puts the loading sign up while the router waits for a screen. */
 export function Busy() {
-  const t = useT();
-  const on = useSyncExternalStore(onBusy, busy);
-  return on ? (
-    <div className="busy" role="status">
-      {t.common.loading}
-    </div>
-  ) : null;
+  useLoading(useRouterState({ select: (s) => s.status === "pending" }));
+  return null;
 }

@@ -7,6 +7,7 @@ import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.j
 import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
+import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
@@ -15,9 +16,12 @@ import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
 import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
-import { parseCourse, parseEvents, parseGrandPrix, parseStandings } from "../wasm-json.ts";
+import { type RosterName, Scoreboard } from "../ui/results.ts";
+import { WrongWay } from "../ui/wrong-way.ts";
+import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
+import { type PodiumData, podiumData } from "./podium.ts";
 import { SeasonCard, SeasonChange, seasonOf } from "./season-change.ts";
 
 /** Why the race server said no, by client phase (2 + the protocol's reject reason). */
@@ -39,7 +43,7 @@ export interface RaceOptions {
   ticket: JoinTicket;
   /** Where the HUD goes. */
   hud: HTMLElement;
-  /** Status line (joining, rejected, connection lost). */
+  /** Status line (rejected, connection lost); connecting and joining show on the loading sign. */
   status: (text: string) => void;
   /** false: run the netcode without drawing (netcode tests). */
   render?: boolean;
@@ -49,8 +53,8 @@ export interface RaceOptions {
   debug?: boolean;
   /** Called once the race server has said yes or no. */
   onJoin?: (ok: boolean) => void;
-  /** Called once the room's plan is over (the last race's results are done). */
-  onOver?: () => void;
+  /** Called once the room's plan is over (the last race's results are done), with a Tilt's podium. */
+  onOver?: (podium: PodiumData | null) => void;
 }
 
 /** What the menus (and tests) can see of a race. */
@@ -127,10 +131,14 @@ export class RaceSession implements Stage {
   private sfx = new RaceAudio();
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
   private hud: Hud;
+  private board: Scoreboard;
+  private wrongWay = new WrongWay();
   private mapRoot: HTMLDivElement;
   private minimap: CourseMap | null = null;
   private env: Environment | null = null;
   private names = new Map<number, string>();
+  private riders = new Map<number, RosterName>();
+  private looks = new Map<number, Appearance>();
   /** The seats taken, as of the last roster. */
   private slots: number[] = [];
   private rosterVersion = -1;
@@ -171,6 +179,16 @@ export class RaceSession implements Stage {
     this.hud = new Hud(opts.hud);
     this.mapRoot = document.createElement("div");
     opts.hud.append(this.mapRoot);
+    this.board = new Scoreboard(opts.hud);
+  }
+
+  /** Takes down the loading sign put up by `joining`. */
+  private joinSign: (() => void) | null = null;
+
+  /** Puts the loading sign up saying how joining goes (null: joined, or turned away). */
+  private joining(label: (() => string) | null): void {
+    this.joinSign?.();
+    this.joinSign = label ? holdLoading(label) : null;
   }
 
   /** Paused (a menu is open over the race): the rider gets no input. */
@@ -187,8 +205,9 @@ export class RaceSession implements Stage {
       this.card.loading = true;
       this.showHud(false);
     }
-    this.opts.status(messages().race.connecting);
+    this.joining(() => messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
+      this.joining(null);
       this.opts.status(e instanceof Error ? e.message : String(e));
       this.card?.hide();
       this.opts.onJoin?.(false);
@@ -209,7 +228,7 @@ export class RaceSession implements Stage {
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.opts.status(messages().race.joining);
+    this.joining(() => messages().race.joining);
     if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -344,6 +363,7 @@ export class RaceSession implements Stage {
     this.sport = course.sport;
     this.input.sport = course.sport;
     this.sfx.setCourse(course, client.topSpeed());
+    this.hud.tags.sport = course.sport;
     this.mapRoot.replaceChildren();
     if (!render) return;
     this.ready = false;
@@ -394,8 +414,11 @@ export class RaceSession implements Stage {
   private readRoster(engine: Engine, client: WasmClient): void {
     if (client.rosterVersion() === this.rosterVersion) return;
     this.rosterVersion = client.rosterVersion();
-    const roster = parseRoster(client.rosterJson(), roomSeed(this.opts.ticket.room));
+    const json = client.rosterJson();
+    const roster = parseRoster(json, roomSeed(this.opts.ticket.room));
     this.names = roster.names;
+    this.riders = parseRosterNames(json);
+    this.looks = roster.looks;
     this.slots = [...roster.looks.keys()];
     for (const [slot, look] of roster.looks) engine.world.setAppearance(slot, look);
   }
@@ -410,16 +433,19 @@ export class RaceSession implements Stage {
     const phase = client.phase();
     this.state.phase = phase;
     const m = messages().race;
-    if (phase === 0) this.opts.status(m.joining);
-    else if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
+    if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
     else if (this.closedReason) this.opts.status(m.lost(this.closedReason));
     else this.opts.status("");
     if (!this.joined && phase !== 0) {
       this.joined = true;
+      this.joining(null);
       if (phase !== 1) this.card?.hide();
       this.opts.onJoin?.(phase === 1);
     }
-    if (phase >= 2 || this.closedReason) this.card?.hide();
+    if (phase >= 2 || this.closedReason) {
+      this.card?.hide();
+      this.joining(null);
+    }
     if (phase !== 1) return;
 
     const race = this.readRace();
@@ -433,7 +459,8 @@ export class RaceSession implements Stage {
     if (race.phase === RESULTS && race.eventIndex >= race.eventCount - 1) this.finalResults = true;
     else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
       this.state.over = true;
-      this.opts.onOver?.();
+      const rows = this.board.final(this.gpPoints);
+      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.course));
     }
     this.readRoster(engine, client);
     if (race.course !== this.course) {
@@ -469,23 +496,28 @@ export class RaceSession implements Stage {
     const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (render) {
       if (this.seasonChange?.active) this.seasonChange.frame(dt);
-      else if (this.ready) engine.world.render(riders, this.names, client.renderTick(), dt, nextBuoy);
+      else if (this.ready) {
+        engine.world.render(riders, client.renderTick(), dt, nextBuoy);
+        const tagged = race.phase === RESULTS ? [] : riders;
+        this.hud.tags.update(engine.world.camera, this.env, tagged, this.names, client.renderTick() / race.tickHz, dt);
+      }
       if (this.seasonChange && !this.seasonChange.active) this.seasonChange = null;
     }
     const me = riders.find((r) => r.isMe);
+    race.wrongWay = this.wrongWay.update(race, me);
     const events = parseEvents(client.takeEventsJson());
     this.hud.events(events, client.slot(), race);
     const audible = this.shown && !this.seasonChange?.active;
     this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    this.hud.update(
+    this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    this.board.update({
       race,
-      (me?.speed ?? 0) * 3.6,
-      me ? !me.grounded : false,
-      () => parseStandings(client.standingsJson()),
-      this.names,
+      mySlot: client.slot(),
+      standings: () => parseStandings(client.standingsJson()),
+      riders: this.riders,
       gp,
-    );
+    });
     this.minimap?.update(riders, nextBuoy);
     this.updateDebug(now);
   }
@@ -548,6 +580,7 @@ export class RaceSession implements Stage {
 
   stop(): void {
     this.stopped = true;
+    this.joining(null);
     if (this.timer) clearInterval(this.timer);
     this.seasonChange?.cancel();
     this.sfx.stop();

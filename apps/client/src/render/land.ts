@@ -6,6 +6,15 @@ import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
 import { Fn, float, fract, fwidth, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 
+/** Distance from (x, z) to a piece of land's shore (negative inside it). */
+export function landDistance(l: LandData, x: number, z: number): number {
+  const abx = l.bx - l.ax;
+  const abz = l.bz - l.az;
+  const len2 = abx * abx + abz * abz;
+  const t = len2 > 1e-6 ? Math.min(1, Math.max(0, ((x - l.ax) * abx + (z - l.az) * abz) / len2)) : 0;
+  return Math.hypot(x - (l.ax + abx * t), z - (l.az + abz * t)) - l.radius;
+}
+
 /** Seeded noise in [0, 1). */
 function rng(seed: number): () => number {
   let s = seed >>> 0 || 1;

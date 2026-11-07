@@ -1,0 +1,105 @@
+/* The end of a Tilt (see screens/podium.tsx): the champion's name standing
+   on the scene, the final standings on paper, the way back. */
+
+/* The card over the swap: the whole year's colours. */
+.season-change.season-year {
+  background: linear-gradient(200deg, #2b3fd0, #c24a1c 38%, #d4262f 66%, #24804a);
+}
+
+.podium-screen {
+  pointer-events: none;
+}
+.podium-screen .btn {
+  pointer-events: auto;
+}
+.podium-title {
+  position: absolute;
+  left: var(--margin-x);
+  top: var(--margin-y);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  max-width: 1080px;
+  color: rgb(246 241 231 / 0.97);
+}
+.podium-year {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: var(--fs-label);
+  font-weight: 760;
+  font-stretch: 112%;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 16px rgb(24 16 8 / 0.35);
+}
+.podium-year::before {
+  content: "";
+  width: 8px;
+  height: 32px;
+  background: currentColor;
+  transform: skewX(-23.4deg);
+}
+.podium-title b {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--fs-display);
+  line-height: 0.86;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow: 0 6px 40px rgb(24 16 8 / 0.3);
+}
+.podium-champion {
+  padding: 0 24px;
+  background: var(--accent);
+  box-shadow: var(--lift);
+  color: var(--on-accent);
+  font-size: var(--fs-nav);
+  line-height: 60px;
+  font-weight: 800;
+  font-stretch: 118%;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.podium-standings {
+  animation-delay: 1.6s !important;
+  position: absolute;
+  right: var(--margin-x);
+  top: 0;
+  bottom: 0;
+  width: 600px;
+  height: fit-content;
+  margin: auto 0;
+  padding: 28px 0 12px;
+  gap: 0;
+}
+.podium-standings .panel-title {
+  margin: 0 var(--pad);
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--ink);
+}
+.podium-rows .board-row {
+  grid-template-columns: 72px 1fr 96px;
+  height: 60px;
+  padding-right: var(--pad);
+}
+.podium-rows .board-row.top .c-place {
+  font-size: 36px;
+}
+.podium-actions {
+  animation-delay: 2.2s !important;
+  position: absolute;
+  left: var(--margin-x);
+  bottom: var(--margin-y);
+}
+.podium-actions .btn {
+  min-width: 320px;
+  min-height: 72px;
+  box-shadow: var(--lift);
+}

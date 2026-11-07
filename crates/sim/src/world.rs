@@ -6,7 +6,7 @@ use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
 use crate::surface::{Surface, SurfaceKind};
-use crate::{jetski, snowboard};
+use crate::{buoy, jetski, snowboard};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
@@ -218,6 +218,7 @@ impl World {
         let holding = self.race.phase == Phase::Countdown;
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
+            buoy::bump(r, course, &self.surface, next);
             let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
             if course.sport == Sport::Snowboard
                 && impact.is_some_and(|i| {

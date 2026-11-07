@@ -3,6 +3,7 @@
 import type { CourseData } from "./render/course.ts";
 import type { GateData, ObstacleData, RunData, RunPoint, TableData } from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
+import type { RosterName } from "./ui/results.ts";
 
 /** A course: the summer bay (jetski) or the winter mountain run (snowboard). */
 export type CourseInfo = { sport: "jetski"; bay: CourseData } | { sport: "snow"; run: RunData };
@@ -23,6 +24,16 @@ export function parseStandings(json: string): StandingView[] {
     tricks: num(o, "tricks"),
     points: num(o, "points"),
   }));
+}
+
+/** Riders' names by seat, and which of them are bots. */
+export function parseRosterNames(json: string): Map<number, RosterName> {
+  const out = new Map<number, RosterName>();
+  for (const o of list(JSON.parse(json))) {
+    if (typeof o.slot === "number" && typeof o.name === "string")
+      out.set(o.slot, { name: o.name, bot: o.bot === true });
+  }
+  return out;
 }
 
 /** Tilt points by seat. */
@@ -132,6 +143,9 @@ function parseBay(o: Obj): CourseData {
     breakwaterRadius: num(o, "breakwaterRadius"),
     outerLimit: num(o, "outerLimit"),
     rampSink: num(o, "rampSink"),
+    buoyRadius: num(o, "buoyRadius"),
+    buoyHeight: num(o, "buoyHeight"),
+    riderRadius: num(o, "riderRadius"),
     start: { x: num(start, "x"), z: num(start, "z"), yaw: num(start, "yaw") },
     buoys: list(o.buoys).map((b) => ({
       x: num(b, "x"),
