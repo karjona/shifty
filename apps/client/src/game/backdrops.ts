@@ -25,12 +25,13 @@ import type { Appearance, Sport } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Avatar } from "../render/avatar.ts";
 import { Bay } from "../render/bay.ts";
-import { CLUB, buildClub } from "../render/club.ts";
-import { SUN_DIR, SUN_STRENGTH, celify, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
+import { CLUB, HANDRAIL, buildClub } from "../render/club.ts";
+import { SUN_DIR, SUN_STRENGTH, celify, inkId, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
 import { CelPost } from "../render/cel/post.ts";
 import { PIXEL_AT_1M } from "../render/cel/rider.ts";
 import { devParams } from "../dev-params.ts";
 import type { Engine, Stage } from "./engine.ts";
+import { quietly } from "../loading.ts";
 import { PALETTE, accentBetween, seasonAt, setAccent } from "./seasons.ts";
 import { parseCourse } from "../wasm-json.ts";
 
@@ -126,6 +127,74 @@ class Flyover implements Stage {
   }
 }
 
+/**
+ * How the main menu's colours frame your rider: close, from the knees
+ * up, as a fighting game's menu does (`hero`), whole (`body`), or the
+ * face (`face`).
+ */
+export type RiderShot = "hero" | "body" | "face";
+
+/** A box on screen, in fractions of the window (0-1 from the top left). */
+export interface ScreenBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** Where the rider stands when the screen gives no space of its own: the left half. */
+const LEFT_HALF: ScreenBox = { left: 0.04, right: 0.52, top: 0.14, bottom: 0.96 };
+
+/** Where the key light stands, from the rider's middle (m): the camera's left, so the rider turns half to shade. */
+const KEY_OFFSET = new THREE.Vector3(-4, 4.5, 3.5);
+/** Half the key light's shadow box (m): the rider, whatever their height, and no more. */
+const KEY_BOX = 1.3;
+
+/** A framing: the span of the rider shown (m from the ground), the rows of the window it fills, the column it stands
+ * on (fractions of the window), and how the rider turns (their yaw, and how far it sways). */
+interface Framing {
+  lo: number;
+  hi: number;
+  top: number;
+  bottom: number;
+  across: number;
+  yaw: number;
+  sway: number;
+}
+
+const FRAMING = ["lo", "hi", "top", "bottom", "across", "yaw", "sway"] as const satisfies readonly (keyof Framing)[];
+
+/** The framing of a shot in `box`, for a rider `h` metres tall. */
+function framingOf(shot: RiderShot, box: ScreenBox, h: number): Framing {
+  const across = (box.left + box.right) / 2;
+  const tall = box.bottom - box.top;
+  if (shot === "face") {
+    // Head and shoulders fill most of the space, the head toward its top.
+    return {
+      lo: h - 0.34,
+      hi: h + 0.04,
+      top: box.top + tall * 0.06,
+      bottom: box.top + tall * 0.8,
+      across,
+      yaw: 0.15,
+      sway: 0.1,
+    };
+  }
+  if (shot === "hero") {
+    // Head near the top of the space, cut at the knees by the bottom of the window.
+    return { lo: h * 0.3, hi: h + 0.07, top: box.top + tall * 0.02, bottom: 1, across, yaw: 0.3, sway: 0.14 };
+  }
+  return {
+    lo: -0.04,
+    hi: h + 0.1,
+    top: box.top + tall * 0.02,
+    bottom: box.bottom - tall * 0.01,
+    across,
+    yaw: 0.35,
+    sway: 0.3,
+  };
+}
+
 /** Your rider on a field of the seasons' colours, drifting from one season to the next. */
 class SeasonField implements Stage {
   private engine: Engine | null = null;
@@ -181,10 +250,21 @@ class SeasonField implements Stage {
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.6));
     const key = new THREE.DirectionalLight(0xfff2e0, 2.4);
-    // Keyed from the camera's left, so the rider turns half to shade (the rim light is the material's).
-    key.position.set(-4, 4.5, 3.5);
     key.castShadow = true;
-    this.scene.add(key);
+    // A shadow box just round the rider (it follows them, see `frame`): texels of a millimetre or so, and
+    // lookups lifted off the surface, so the shade the arms and the hair cast holds still as the rider moves.
+    key.shadow.mapSize.set(2048, 2048);
+    Object.assign(key.shadow.camera, {
+      left: -KEY_BOX,
+      right: KEY_BOX,
+      top: KEY_BOX,
+      bottom: -KEY_BOX,
+      near: 1,
+      far: 14,
+    });
+    key.shadow.normalBias = 0.012;
+    key.shadow.bias = -0.0004;
+    this.scene.add(key, key.target);
     this.key = key;
     // A soft shadow under the rider.
     const shadowMat = new THREE.MeshBasicNodeMaterial({
@@ -229,13 +309,26 @@ class SeasonField implements Stage {
     }
   }
 
-  /** Frames the whole rider, or their face (the creator, on face parts). */
-  setFocus(focus: "body" | "face"): void {
-    this.focus = focus;
+  private shot: RiderShot = "body";
+  private space: (() => ScreenBox | null) | null = null;
+  /** The framing on screen, easing toward the shot's. */
+  private framing: Framing | null = null;
+
+  /** Frames the rider for `shot`, in the free space on screen `space` gives (the left half without one). */
+  setShot(shot: RiderShot, space: (() => ScreenBox | null) | null): void {
+    this.shot = shot;
+    this.space = space;
   }
 
-  private focus: "body" | "face" = "body";
-  private zoom = 0;
+  /** Eases the framing toward the shot's (snaps to it at first). */
+  private reframe(dt: number): Framing {
+    const want = framingOf(this.shot, this.space?.() ?? LEFT_HALF, this.avatar?.height ?? 1.78);
+    const f = this.framing;
+    if (!f) return (this.framing = want);
+    const k = 1 - Math.exp(-dt * 4);
+    for (const key of FRAMING) f[key] += (want[key] - f[key]) * k;
+    return f;
+  }
 
   frame(now: number, dt: number): void {
     const engine = this.engine;
@@ -252,26 +345,30 @@ class SeasonField implements Stage {
       this.accentAt = now;
       setAccent(accentBetween(s.from, s.to, s.mix));
     }
-    // The rider stands left of centre, turning slowly in three-quarter view.
-    const w = innerWidth;
-    const h = innerHeight;
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
-    // Closing in on the face eases in and out.
-    this.zoom += ((this.focus === "face" ? 1 : 0) - this.zoom) * (1 - Math.exp(-dt * 4));
-    const z = this.zoom * this.zoom * (3 - 2 * this.zoom);
-    const distance = 6.4 - z * 4.9;
-    const halfW = Math.tan((this.camera.fov * Math.PI) / 360) * distance * this.camera.aspect;
-    this.rider.position.set(-halfW * 0.5, 0, 0);
-    this.rider.rotation.y = 0.35 * (1 - z) + Math.sin(this.t * 0.25) * 0.3 * (1 - z * 0.6);
+    // A level camera, placed so the framed span of the rider fills its rows of the window, on its column.
+    const aspect = innerWidth / innerHeight;
+    if (this.camera.aspect !== aspect) {
+      this.camera.aspect = aspect;
+      this.camera.updateProjectionMatrix();
+    }
+    const f = this.reframe(dt);
+    const tan = Math.tan((this.camera.fov * Math.PI) / 360);
+    const yTop = 1 - 2 * f.top;
+    const yBottom = 1 - 2 * f.bottom;
+    const distance = (f.hi - f.lo) / ((yTop - yBottom) * tan);
+    const x = -(2 * f.across - 1) * distance * tan * aspect;
+    const y = f.hi - yTop * distance * tan;
+    this.camera.position.set(x, y, distance);
+    this.camera.lookAt(x, y, 0);
+    // Turning slowly in three-quarter view.
+    this.rider.rotation.y = f.yaw + Math.sin(this.t * 0.25) * f.sway;
     this.avatar?.update(dt);
-    const lookY = 0.85 + z * 0.62;
-    this.camera.position.set(0, 0.95 + z * 0.52, distance);
-    this.camera.lookAt(0, lookY, 0);
     this.post ??= new CelPost(engine.world.renderer, this.scene, this.camera);
     const k = this.key;
+    k.target.position.set(0, (this.avatar?.height ?? 1.78) / 2, 0);
+    k.position.copy(k.target.position).add(KEY_OFFSET);
     SUN_STRENGTH.value = (k.color.r + k.color.g + k.color.b) * k.intensity;
-    SUN_DIR.value.copy(k.position).normalize();
+    SUN_DIR.value.copy(KEY_OFFSET).normalize();
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
     this.post.render();
   }
@@ -284,7 +381,6 @@ class Club implements Stage {
   private engine: Engine | null = null;
   private group = celifyClub(buildClub());
   private avatars: Avatar[] = [];
-  private t = 0;
   private count = 1;
 
   private you: { appearance: Appearance; sport: Sport } | null = null;
@@ -328,16 +424,44 @@ class Club implements Stage {
   start(engine: Engine): void {
     this.engine = engine;
     setAccent(SUMMER_ACCENT);
-    if (!engine.render) return;
-    engine.world.setEnvironment(bay(engine));
+    if (engine.render) this.attach(engine);
+  }
+
+  /** Puts the terrace and its riders in the world, over the bay. */
+  private attach(engine: Engine): void {
+    const world = engine.world;
+    world.setEnvironment(bay(engine));
     // A key from the camera's left, so the riders turn half to shade.
     const k = HERO_VIEW.key;
-    engine.world.setSunOffset(k.x, k.y, k.z);
-    const shadow = engine.world.sunLight.shadow.camera;
-    Object.assign(shadow, { left: -10, right: 10, top: 10, bottom: -10 });
-    shadow.updateProjectionMatrix();
-    engine.world.scene.add(this.group);
+    world.setSunOffset(k.x, k.y, k.z);
+    world.setShadowBox(10);
+    world.scene.add(this.group);
     this.place();
+  }
+
+  private preloaded = false;
+
+  /**
+   * Sets the terrace up in the world and dresses your rider, ahead of the
+   * mode select: only while the stage on screen draws a scene of its own
+   * (the world's is free to set up meanwhile).
+   */
+  async preload(engine: Engine): Promise<void> {
+    const world = engine.world;
+    const host = engine.current;
+    if (this.preloaded || world.environment !== null) return;
+    this.preloaded = true;
+    this.engine = engine;
+    quietly(() => this.attach(engine));
+    await engine.warm(() => world.compile(), false);
+    await Promise.race([this.loaded(), new Promise((resolve) => setTimeout(resolve, 15_000))]);
+    // Your rider's art compiled for the stage on screen when it arrived: compile it for the terrace too.
+    await engine.warm(() => world.compile(this.group), false);
+    if (engine.current === this) return;
+    this.group.removeFromParent();
+    world.setShadowBox();
+    // (Unless another stage now draws the world.)
+    if (engine.current === host) world.clearEnvironment();
   }
 
   compile(root?: THREE.Object3D): Promise<void> {
@@ -351,15 +475,15 @@ class Club implements Stage {
   frame(now: number, dt: number): void {
     const engine = this.engine;
     if (!engine?.render) return;
-    this.t += dt;
     for (const a of this.avatars) a.update(dt);
     this.closeUp += ((this.wantCloseUp ? 1 : 0) - this.closeUp) * (1 - Math.exp(-dt * 3));
-    const h = heroView(this.t, this.closeUp * this.closeUp * (3 - 2 * this.closeUp));
+    const h = heroView(this.closeUp * this.closeUp * (3 - 2 * this.closeUp));
     engine.world.renderFrom(h.eye, h.look, now / 1000, dt, h.fov);
   }
 
   stop(): void {
     this.group.removeFromParent();
+    this.engine?.world.setShadowBox();
     this.engine?.world.clearEnvironment();
   }
 }
@@ -392,15 +516,18 @@ function heroSpots(): { x: number; z: number; yaw: number }[] {
   return [spot(0, 0, 0.45), spot(-1.1, 1.3, 0.2), spot(1.2, 1.5, -0.3), spot(-2.2, 2.6, 0.1)];
 }
 
-/** The hero view at time `t`; `close` (0-1) closes in on the rider (the pro shop). */
-function heroView(t: number, close = 0): { eye: THREE.Vector3; look: THREE.Vector3; fov: number } {
+/**
+ * The hero view; `close` (0-1) closes in on the rider (the pro shop). The
+ * camera holds still, as a character select's does: the riders move, and
+ * the terrace's long straight edges stay put (a drifting camera makes their
+ * pixel steps crawl along them).
+ */
+function heroView(close = 0): { eye: THREE.Vector3; look: THREE.Vector3; fov: number } {
   const { at, fwd, right, dist, fov } = HERO_VIEW;
-  const sway = Math.sin(t * 0.3) * 0.08;
   const eye = at
     .clone()
     .addScaledVector(fwd, -(dist - close * 1.6))
-    .addScaledVector(right, sway)
-    .add(new THREE.Vector3(0, 0.82 + close * 0.45 + Math.sin(t * 0.5) * 0.02, 0));
+    .add(new THREE.Vector3(0, 0.82 + close * 0.45, 0));
   // Looking past the rider's left shoulder puts them left of centre.
   const look = at
     .clone()
@@ -411,6 +538,9 @@ function heroView(t: number, close = 0): { eye: THREE.Vector3; look: THREE.Vecto
 
 function celifyClub(g: THREE.Group): THREE.Group {
   celify(g, (m) => {
+    // The handrail sits on its posts a few centimetres proud of them: too little for the ink pass to always see
+    // from depth as the camera sways, so it is inked as a thing of its own and the line under it holds.
+    if (m.name === HANDRAIL) return { id: inkId(HANDRAIL) };
     // The terrace's paving: square slabs with grout, each a touch different.
     if (m.color.getHex() !== 0xe9dcc2) return {};
     const colorNode = Fn(() => {
@@ -449,9 +579,9 @@ export function setMenuRider(appearance: Appearance, sport: Sport): void {
   (field ??= new SeasonField()).setRider(appearance, sport);
 }
 
-/** Frames your rider whole or close on the face (main menu backdrop). */
-export function setMenuFocus(focus: "body" | "face"): void {
-  (field ??= new SeasonField()).setFocus(focus);
+/** Frames your rider on the main menu's colours for `shot`, in the free space on screen `space` gives. */
+export function setMenuShot(shot: RiderShot, space: (() => ScreenBox | null) | null): void {
+  (field ??= new SeasonField()).setShot(shot, space);
 }
 
 /** Frames your rider up close on the club's terrace (the pro shop). */
@@ -462,6 +592,14 @@ export function setClubCloseUp(on: boolean): void {
 /** Dresses your rider on the club's terrace. */
 export function setClubRider(appearance: Appearance, sport: Sport): void {
   (club ??= new Club()).setYou(appearance, sport);
+}
+
+/** Gets the club's terrace ready behind the screen on show, with your rider on it, so the mode select comes up at once. */
+export function preloadClub(engine: Engine, appearance: Appearance): void {
+  const c = (club ??= new Club());
+  if (engine.current === c) return;
+  quietly(() => c.setYou(appearance, "summer"));
+  void engine.preload(c);
 }
 
 /** Sets how many riders stand on the club's terrace. */

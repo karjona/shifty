@@ -29,6 +29,11 @@ export class Avatar {
     return this.figure.ready;
   }
 
+  /** How tall the rider stands (m). */
+  get height(): number {
+    return this.figure.height;
+  }
+
   /** Dresses the avatar (rebuilt only when something changed). */
   set(appearance: Appearance, sport: Sport): void {
     this.figure.set(appearance, sport);

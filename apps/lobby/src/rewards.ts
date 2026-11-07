@@ -1,8 +1,8 @@
 // Credits for racing. Online races pay by finishing place, plus style (trick
-// points, capped) and a bonus for finishing a Grand Prix. Matchmaking
+// points, capped) and a bonus for finishing a Tilt. Matchmaking
 // always pays (even when bots fill the seats); a private room pays only
 // races with two or more people in them; single player never pays. Rewards
-// are tuned so a full Grand Prix earns about a fifth of an average item.
+// are tuned so a full Tilt earns about a fifth of an average item.
 import { sql } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { ledger, player } from "./db/schema.ts";
@@ -13,7 +13,7 @@ export const PLACE_CREDITS = [100, 85, 72, 62, 54, 47, 41, 36] as const;
 /** Trick points per credit, and the most style pays in one race. */
 export const STYLE_POINTS_PER_CREDIT = 25;
 export const STYLE_CAP = 80;
-/** For finishing the last race of a Grand Prix. */
+/** For finishing the last race of a Tilt. */
 export const GRAND_PRIX_BONUS = 80;
 
 export interface Payout {

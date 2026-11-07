@@ -115,9 +115,13 @@ export class Bay implements Environment {
     this.group.add(this.gulls.group);
   }
 
+  private fog: THREE.Fog | null = null;
+
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     scene.background = SKY.fog;
-    scene.fog = new THREE.Fog(SKY.fog, 140, 700);
+    // (One fog for the bay: a new one would rebuild every shader that draws in it.)
+    this.fog ??= new THREE.Fog(SKY.fog, 140, 700);
+    scene.fog = this.fog;
     hemi.color.set(0xfff4e0);
     hemi.groundColor.set(0x2a6f8f);
     hemi.intensity = 1.2;

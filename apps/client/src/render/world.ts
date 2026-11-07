@@ -133,6 +133,8 @@ const OUTLINE_FAR = 45;
 const REFLECT_FAR = 30;
 /** Riders further than this (m) from the camera's rider are outside the sun's shadow box. */
 const SHADOW_REACH = 45;
+/** Half the sun's shadow box in a race (m). */
+const SHADOW_BOX = 40;
 
 /** Shows or hides an element, touching the page only when that changes. */
 function setDisplay(el: HTMLElement, on: boolean): void {
@@ -210,7 +212,9 @@ export class World {
     this.sun.shadow.autoUpdate = false;
     // Shadows come from everything, whichever camera's view draws them.
     this.sun.shadow.camera.layers.enable(UNREFLECTED);
-    Object.assign(this.sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 160;
+    this.setShadowBox();
     this.scene.add(this.hemi, this.sun, this.sun.target);
     this.cel = new CelPost(this.renderer, this.scene, this.camera);
     addEventListener("resize", () => this.resize());
@@ -255,6 +259,22 @@ export class World {
   /** Compiles what the scene (or `root`, about to join it) needs to be drawn (see `CelPost.compile`). */
   compile(root: THREE.Object3D = this.scene): Promise<void> {
     return this.cel.compile(root, this.env?.reflects ?? false);
+  }
+
+  /**
+   * Sizes the sun's shadow box round what it follows (half its width, m):
+   * smaller boxes give finer shadows. Lookups lift off the surface by a
+   * couple of the shadow map's texels, so shade holds still on moving
+   * riders instead of breaking into specks.
+   */
+  setShadowBox(half = SHADOW_BOX): void {
+    const shadow = this.sun.shadow;
+    Object.assign(shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+    shadow.camera.updateProjectionMatrix();
+    const texel = (2 * half) / shadow.mapSize.x;
+    shadow.normalBias = texel * 2;
+    // (Depth runs from the camera's near to its far: a texel's worth of it.)
+    shadow.bias = -texel / (shadow.camera.far - shadow.camera.near);
   }
 
   /** The sun, for stages that light their own shots. */
@@ -326,8 +346,7 @@ export class World {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
     }
-    this.sun.target.position.copy(look);
-    this.sun.position.copy(look).add(this.sunOffset);
+    this.aimSun(look);
     this.env?.update({
       riders: [],
       models: this.models,
@@ -538,11 +557,38 @@ export class World {
       this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-dt * 3));
       this.camera.updateProjectionMatrix();
     }
-    this.sun.target.position.set(me.x, me.y, me.z);
-    this.sun.position.copy(this.sun.target.position).add(this.sunOffset);
+    this.aimSun(this.sunAt.set(me.x, me.y, me.z));
   }
 
   private sunOffset = new THREE.Vector3(30, 60, 15);
+  private sunAt = new THREE.Vector3();
+  /** The shadow box's axes: back toward the sun, and across the light (its camera's x and y). */
+  private sunBack = new THREE.Vector3();
+  private sunAcross = new THREE.Vector3();
+  private sunUp = new THREE.Vector3();
+
+  /**
+   * Points the sun (and its shadow box) at `at`, moved to whole texels of
+   * the shadow map across the light: as the box follows the camera or a
+   * rider, the map's grid stays put on the world and shadow edges don't
+   * crawl.
+   */
+  private aimSun(at: THREE.Vector3): void {
+    const shadow = this.sun.shadow;
+    const texel = (shadow.camera.right - shadow.camera.left) / shadow.mapSize.x;
+    // The shadow camera looks back down the offset, its up as near the world's as it can be (as `lookAt` does).
+    const back = this.sunBack.copy(this.sunOffset).normalize();
+    const across = this.sunAcross.set(0, 1, 0).cross(back).normalize();
+    const up = this.sunUp.copy(back).cross(across);
+    const target = this.sun.target.position.copy(at);
+    // (A sun straight overhead has no such axes: it isn't snapped.)
+    if (across.lengthSq() > 0.5)
+      for (const axis of [across, up]) {
+        const d = at.dot(axis);
+        target.addScaledVector(axis, Math.round(d / texel) * texel - d);
+      }
+    this.sun.position.copy(target).add(this.sunOffset);
+  }
 
   /** Where the sun shines from, relative to the rider it follows (and casts shadows around). */
   setSunOffset(x: number, y: number, z: number): void {

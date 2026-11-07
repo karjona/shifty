@@ -1,5 +1,5 @@
 // A race on screen: the connection to the race server, the netcode client
-// (WASM), the world drawn from its prediction, and the HUD. A Grand Prix
+// (WASM), the world drawn from its prediction, and the HUD. A Tilt
 // moves from course to course in the same session, with a short season
 // change in between.
 import { type Appearance, botAppearance, decodeAppearance } from "@shifty/rider";
@@ -443,7 +443,7 @@ export class RaceSession implements Stage {
           this.showHud(true);
         });
       } else {
-        // A Grand Prix moves on: the season changes, and the new course
+        // A Tilt moves on: the season changes, and the new course
         // comes up behind the change.
         this.seasonChange?.finish();
         this.showHud(false);

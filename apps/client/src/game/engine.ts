@@ -16,6 +16,8 @@ export interface Stage {
   compile?(root?: THREE.Object3D): Promise<void>;
   /** Resolves once what it shows has arrived and gone on (a rider's art). */
   loaded?(): Promise<void>;
+  /** Gets ready to show later, behind the stage on screen (see `Engine.preload`). */
+  preload?(engine: Engine): Promise<void>;
   frame(now: number, dt: number): void;
   stop(): void;
 }
@@ -82,6 +84,8 @@ export class Engine {
   /** ...of them, the ones that hold drawing (a stage's): nothing is drawn while there are any. */
   private holding = 0;
   private warmed: Promise<void> = Promise.resolve();
+  /** Resolves once what the stage on screen shows is in (its shaders compiled, its art on). */
+  private arriving: Promise<void> = Promise.resolve();
   /** When the current run of frames without a stall began (null: none is running). */
   private smoothSince: number | null = null;
   private settling: Settling[] = [];
@@ -163,14 +167,35 @@ export class Engine {
    */
   private async prepare(stage: Stage): Promise<void> {
     const late = new Promise<void>((resolve) => setTimeout(resolve, LOAD_MAX_MS));
-    await whileLoading(
+    const arriving = whileLoading(
       (async () => {
         if (this.render && stage.compile) await this.warm(() => stage.compile!());
         await Promise.race([stage.loaded?.(), late]);
       })(),
     );
+    this.arriving = arriving.catch(() => {});
+    await arriving;
     await this.settled();
     booted();
+  }
+
+  /**
+   * Gets `stage` ready to show later (its scene built, its art in, its
+   * shaders compiled), in the background once what is on screen is in, so
+   * going to it is instant. At boot this starts under the boot screen, which
+   * then waits for frames to run smoothly again.
+   */
+  async preload(stage: Stage): Promise<void> {
+    await this.arrived();
+    if (!this.render || this.stage === null || this.stage === stage || !stage.preload) return;
+    await stage.preload(this);
+  }
+
+  /** Resolves once what the stage on screen shows is in (whichever stage is on screen by then). */
+  private async arrived(): Promise<void> {
+    const arriving = this.arriving;
+    await arriving;
+    if (arriving !== this.arriving) await this.arrived();
   }
 
   /** Compiles what `root` needs, for the stage on screen (the world's scene if it has none of its own). */

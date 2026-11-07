@@ -26,7 +26,7 @@ export interface JoinClaims {
   surface: number;
   /** 0 = the summer bay (jetski), 1 = the winter mountain (snowboard). */
   course: number;
-  /** Every course of the room, in order (a Grand Prix); empty = just `course`. */
+  /** Every course of the room, in order (a Tilt); empty = just `course`. */
   events: number[];
 }
 

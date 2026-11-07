@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { setMenuRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
+import { useRiderShot } from "../hooks.ts";
 import { hexColour, itemLabel } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Panel, Picker } from "../ui.tsx";
@@ -29,6 +30,7 @@ export function Wardrobe() {
   const [sport, setSport] = useState<Sport>("summer");
   const [a, setA] = useState<Appearance | null>(rider?.appearance ?? null);
   const [busy, setBusy] = useState(false);
+  const space = useRiderShot("body");
   useEffect(() => {
     if (a) setMenuRider(a, sport);
   }, [a, sport]);
@@ -59,7 +61,7 @@ export function Wardrobe() {
   return (
     <main className="menu-body home">
       <div className="home-left">
-        <div className="rider-space" aria-hidden="true" />
+        <div className="rider-space" aria-hidden="true" ref={space} />
       </div>
       <div className="home-right">
         <Panel title={t.wardrobe.title} className="wardrobe">

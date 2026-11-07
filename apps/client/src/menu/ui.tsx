@@ -14,6 +14,8 @@ import { labelOf, useT } from "../i18n/index.ts";
 import type { Player } from "./api.ts";
 import { useAction, useAutoFocus, useDevice } from "./hooks.ts";
 import { type GlyphAction, KeyGlyph, PadGlyph } from "./glyphs.tsx";
+import { ChevronLeft } from "./icons.tsx";
+import { nav } from "./nav.ts";
 
 /** The button that does `action` on the device in use (nothing for the mouse). */
 export function Glyph({ action }: { action: GlyphAction }) {
@@ -289,22 +291,37 @@ export function SocialCard({ player, onClick }: { player: Player; onClick?: () =
 /** What the buttons do, in the corner. */
 export function Hints({ items }: { items: [GlyphAction, string][] }) {
   const { device } = useDevice();
-  if (device === "mouse") return null;
+  // The mouse picks and plays with what is on screen: what it can't reach otherwise is going back.
+  const shown = device === "mouse" ? items.filter(([action]) => action === "back") : items;
+  if (shown.length === 0) return null;
   return (
     <div className="hints">
-      {items.map(([action, label]) => (
-        <span key={action}>
-          {action === "prev" ? (
+      {shown.map(([action, label]) => {
+        const glyph =
+          action === "prev" ? (
             <span className="pair">
               <Glyph action="prev" />
               <Glyph action="next" />
             </span>
           ) : (
             <Glyph action={action} />
-          )}
-          {label}
-        </span>
-      ))}
+          );
+        // "Select" picks what has the focus; the others are buttons too (out of the stick's way: B, Esc...).
+        if (action === "confirm")
+          return (
+            <span key={action}>
+              {glyph}
+              {label}
+            </span>
+          );
+        return (
+          <button key={action} type="button" tabIndex={-1} className="hint" onClick={() => nav.fire(action)}>
+            {device === "mouse" && action === "back" && <ChevronLeft />}
+            {glyph}
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

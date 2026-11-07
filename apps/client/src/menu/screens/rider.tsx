@@ -21,10 +21,10 @@ import {
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { setMenuFocus, setMenuRider, showMenuRider } from "../../game/backdrops.ts";
+import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
+import { useAction, useAutoFocus, useBackdrop, useRiderShot } from "../hooks.ts";
 import { hexColour } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Panel, Picker } from "../ui.tsx";
@@ -65,12 +65,11 @@ export function RiderScreen() {
     () => saved ?? { look: randomLook(Math.random), outfits: defaultOutfits("male") },
   );
   const [busy, setBusy] = useState(false);
+  const [focus, setFocus] = useState<"body" | "face">("body");
+  const space = useRiderShot(focus);
   useAutoFocus();
 
-  useEffect(() => {
-    showMenuRider(true);
-    return () => setMenuFocus("body");
-  }, []);
+  useEffect(() => showMenuRider(true), []);
   useEffect(() => setMenuRider(a, "summer"), [a]);
 
   const leave = () => void navigate({ to: "/", search: { tab: "collection" } });
@@ -104,7 +103,7 @@ export function RiderScreen() {
     <div className="screen rider-screen">
       <TopBar title={t.rider.title} kicker={t.menu.collection} sub={t.rider.body} />
       <main className="menu-body creator">
-        <div className="rider-space" aria-hidden="true" />
+        <div className="rider-space" aria-hidden="true" ref={space} />
         <div className="creator-side">
           <Panel className="creator-panel">
             <div className="creator-rows numbered">
@@ -113,7 +112,7 @@ export function RiderScreen() {
                 autoFocus
                 value={a.look.body}
                 onChange={(body) => setLook({ ...a.look, body, facialHair: body === "male" ? a.look.facialHair : 0 })}
-                onFocus={() => setMenuFocus("body")}
+                onFocus={() => setFocus("body")}
                 options={(["male", "female"] as const).map((b) => ({ value: b, label: t.rider.bodies[b] }))}
               />
               {PARTS.filter((p) => partApplies(a.look.body, p)).map((part) => (
@@ -122,7 +121,7 @@ export function RiderScreen() {
                   label={t.rider.parts[part]}
                   value={a.look[part]}
                   onChange={(v) => setPart(part, v)}
-                  onFocus={() => setMenuFocus(FACE.has(part) ? "face" : "body")}
+                  onFocus={() => setFocus(FACE.has(part) ? "face" : "body")}
                   options={Array.from({ length: PRESETS[part] }, (_, v) => {
                     const swatch = SWATCHES[part]?.[v];
                     return {

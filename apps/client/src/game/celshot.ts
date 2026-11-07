@@ -45,9 +45,7 @@ export async function celshot(params: URLSearchParams): Promise<void> {
   const pose = params.get("pose") ?? "crossed";
   let t = 0;
   // A tighter shadow frustum round the rider: crisp shade edges from the cap and arms.
-  const shadow = world.sunLight.shadow.camera;
-  Object.assign(shadow, { left: -6, right: 6, top: 6, bottom: -6 });
-  shadow.updateProjectionMatrix();
+  world.setShadowBox(6);
   void world.renderer.setAnimationLoop((now: number) => {
     t += 1 / 60;
     const time = frozen ?? Math.floor(t * ON_TWOS) / ON_TWOS;

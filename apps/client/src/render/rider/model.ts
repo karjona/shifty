@@ -168,6 +168,11 @@ export class RiderFigure {
     return this.group.scale.x;
   }
 
+  /** How tall the rider stands (m). */
+  get height(): number {
+    return ART_HEIGHT * this.group.scale.x;
+  }
+
   /** A look's meshes, bound to a rig (this figure's, if the body is the same), not shown yet. */
   private build(look: Look, assets: ModelAsset[], wearing: Worn[], overlays: FaceOverlays): Built | null {
     const [body] = assets;

@@ -25,6 +25,9 @@ function block(w: number, h: number, d: number, m: THREE.Material, x: number, y:
   return mesh;
 }
 
+/** The name of the balustrade's handrail material. */
+export const HANDRAIL = "club.handrail";
+
 /** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
@@ -51,14 +54,16 @@ export function buildClub(): THREE.Group {
   // Steps down to the water on the east side.
   for (let i = 0; i < 6; i++) g.add(block(3, floor + 6 - i * 0.9, 1.1, stone, x + 16, -6, z - 4 + i * 1.1));
 
-  // The balustrade along the front and the sides.
+  // The balustrade along the front and the sides: a handrail (its own material, inked apart from the posts) on posts.
   const rail = mat(WHITE, 0.6);
+  rail.name = HANDRAIL;
+  const post = mat(WHITE, 0.6);
   const front = z - 9;
   g.add(block(29, 0.12, 0.3, rail, x, floor + 0.95, front));
-  for (let px = -14; px <= 14; px += 0.7) g.add(block(0.14, 0.95, 0.14, rail, x + px, floor, front));
+  for (let px = -14; px <= 14; px += 0.7) g.add(block(0.14, 0.95, 0.14, post, x + px, floor, front));
   for (const side of [-1, 1]) {
     g.add(block(0.3, 0.12, 10, rail, x + side * 14.6, floor + 0.95, z - 4));
-    for (let pz = -9; pz <= 1; pz += 0.7) g.add(block(0.14, 0.95, 0.14, rail, x + side * 14.6, floor, z + pz));
+    for (let pz = -9; pz <= 1; pz += 0.7) g.add(block(0.14, 0.95, 0.14, post, x + side * 14.6, floor, z + pz));
   }
 
   // The clubhouse: two white storeys with an arcade, a terracotta roof.

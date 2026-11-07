@@ -1597,18 +1597,43 @@ a {
   bottom: var(--margin-y);
   display: flex;
   align-items: center;
-  gap: 32px;
   height: 64px;
-  padding: 0 24px;
   background: var(--paper);
   box-shadow: var(--lift);
   font-size: var(--fs-body);
   font-weight: 560;
 }
-.hints > span {
+/* Each hint carries its share of the bar's spacing, so a hovered one fills to the bar's edges. */
+.hints > span,
+.hints > .hint {
   display: inline-flex;
   align-items: center;
   gap: 12px;
+  height: 100%;
+  padding: 0 16px;
+}
+.hints > :first-child {
+  padding-left: 24px;
+}
+.hints > :last-child {
+  padding-right: 24px;
+}
+/* Hints for actions are buttons too (the mouse's way back): they fill like a focused row. */
+.hint {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.hint:hover {
+  --glyph-ink: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.hint svg {
+  width: 28px;
+  height: 28px;
 }
 .hints .pair {
   display: inline-flex;
@@ -1698,7 +1723,7 @@ a {
   animation: axis-rock 0.7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
 }
 
-/* --- the season card: between Grand Prix races, and over a course while it loads --- */
+/* --- the season card: between Tilt races, and over a course while it loads --- */
 
 .season-change {
   position: fixed;

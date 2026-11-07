@@ -1,7 +1,7 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
 // ticket from the dev server (see vite.config.ts). The netcode e2e tests
 // use it too. URL options: name, room, bots, event (snow, or gp for the
-// Grand Prix), surface, pid, render=0, autopilot=1, scale, water.
+// Tilt), surface, pid, render=0, autopilot=1, scale, water.
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";

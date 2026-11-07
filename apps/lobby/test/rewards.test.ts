@@ -40,7 +40,7 @@ void test("a private room pays only with two or more people in the race", () => 
   assert.equal(payouts(pair, m, new Set(["a", "b"]), 1).length, 2);
 });
 
-void test("the last race of a Grand Prix pays the bonus; strangers and other modes get nothing", () => {
+void test("the last race of a Tilt pays the bonus; strangers and other modes get nothing", () => {
   const m = { id: "m_1", mode: "matchmaking", event: "gp" };
   const first = payouts(report([entry("a", 1)], 0), m, new Set(["a"]), 2);
   const last = payouts(report([entry("a", 1), entry("x", 2)], 1), m, new Set(["a"]), 2);
@@ -52,13 +52,13 @@ void test("the last race of a Grand Prix pays the bonus; strangers and other mod
   assert.deepEqual(payouts(report([entry("a", 1)]), { id: "s", mode: "single", event: "gp" }, new Set(["a"]), 2), []);
 });
 
-void test("an average Grand Prix earns about a fifth of an average item", () => {
+void test("an average Tilt earns about a fifth of an average item", () => {
   const mid = (PLACE_CREDITS[3] + PLACE_CREDITS[4]) / 2;
   const perGrandPrix = 2 * (mid + 40) + GRAND_PRIX_BONUS;
   const priced = ITEMS.filter((i) => i.price > 0);
   const average = priced.reduce((s, i) => s + i.price, 0) / priced.length;
   const grandPrix = average / perGrandPrix;
-  assert.ok(grandPrix > 4 && grandPrix < 6, `an item takes ${grandPrix.toFixed(1)} Grand Prix`);
+  assert.ok(grandPrix > 4 && grandPrix < 6, `an item takes ${grandPrix.toFixed(1)} Tilts`);
 });
 
 void test("a rider can only wear what they own, in the right slots", () => {

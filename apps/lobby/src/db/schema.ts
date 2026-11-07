@@ -273,7 +273,7 @@ export const matchPlayer = pgTable(
 
 /**
  * One rider's result in one race of a match, as reported by the race
- * server. `round` counts Grand Prix runs in the same room; a deleted
+ * server. `round` counts Tilt runs in the same room; a deleted
  * account keeps its results, without the user.
  */
 export const raceResult = pgTable(
@@ -291,7 +291,7 @@ export const raceResult = pgTable(
     /** Race time; null if the rider didn't finish. */
     timeMs: integer("time_ms"),
     trickPoints: integer("trick_points").notNull().default(0),
-    /** Grand Prix points after this race (Grand Prix rooms only). */
+    /** Tilt points after this race (Tilt rooms only). */
     gpPoints: integer("gp_points"),
     createdAt: createdAt(),
   },

@@ -1,4 +1,4 @@
-// Matchmaking for the Grand Prix: players queue over a WebSocket; a race
+// Matchmaking for the Tilt: players queue over a WebSocket; a race
 // starts as soon as four are waiting, or when the first in line has waited
 // long enough (bots fill the empty seats). One instance (named "gp").
 import { DurableObject } from "cloudflare:workers";
