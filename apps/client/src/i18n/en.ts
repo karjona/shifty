@@ -7,7 +7,8 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
-    soundLocked: "Click or press any key for sound",
+    soundLocked: "Click, tap or press any key for sound",
+    rotate: "Turn your screen sideways to play",
     retry: "Try again",
     close: "Close",
     cancel: "Cancel",
@@ -233,6 +234,20 @@ export const en = {
     controls: "Controls",
     controlsBody:
       "Menus: stick or d-pad to move, A / ✕ to pick, B / ○ to go back, LB / RB to change tabs. Keyboard: arrows, Enter, Esc, Q / E.",
+    touch: "Touch screen",
+    touchBody:
+      "The stick comes to your left thumb wherever it lands. Your right thumb holds the buttons: slide from one to another without lifting.",
+    gas: "Jetski gas",
+    gasAuto: "Always on",
+    gasHold: "Hold to go",
+    screen: "Full screen",
+    fullscreen: "Full screen",
+    on: "On",
+    off: "Off",
+    homeScreen:
+      "For the whole screen on an iPhone, add Shifty to your Home Screen: tap Share, then Add to Home Screen, and open it from there.",
+    install: "Install Shifty",
+    installBody: "Install it as an app: the whole screen, one tap away.",
     account: "Account",
     signedInAs: (who: string) => `Logged in as ${who}`,
     logout: "Log out",
@@ -316,6 +331,25 @@ export const en = {
         "Stick: steer · up (or RT) tuck · down (or LT) sit back and brake",
         "Hold A to load a jump, let go at the lip · in the air: X + stick spins and flips, B grabs",
         "Keyboard: WASD steer, tuck, brake · Space jump · J / Shift spin · K / E grab",
+        "Land flat on the board, along the slope, and let go of the grab first!",
+      ],
+    },
+    /** The touch screen's buttons. */
+    touch: { trick: "Trick", roll: "Roll", stunt: "Stunt", jump: "Jump", grab: "Grab", gas: "Gas", brake: "Brake" },
+    helpTouch: {
+      jetski: [
+        "Left thumb: steer and lean (pull back on a crest to fly). The gas is always on: hold Brake to slow down.",
+        "In the air: hold Trick and push the stick to spin and flip, Roll to barrel-roll, Stunt for a stunt. Slide between them without lifting, and let go in time to land!",
+        "Pass red buoys on your right, green ones on your left.",
+      ],
+      jetskiHold: [
+        "Left thumb: steer and lean (pull back on a crest to fly). Hold Gas to go, Brake to slow down.",
+        "In the air: hold Trick and push the stick to spin and flip, Roll to barrel-roll, Stunt for a stunt. Slide between them without lifting, and let go in time to land!",
+        "Pass red buoys on your right, green ones on your left.",
+      ],
+      snow: [
+        "Left thumb: steer · up to tuck · down to sit back and brake",
+        "Hold Jump to load a jump, let go at the lip · in the air: hold Trick and push the stick to spin and flip, Grab to grab",
         "Land flat on the board, along the slope, and let go of the grab first!",
       ],
     },

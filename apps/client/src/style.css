@@ -7,7 +7,30 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: #a8d8f0;
+}
+/* Touch screens: no double-tap zoom, no grey flash on a tap, no text
+   inflated on a phone held sideways, and no loupe or selection from a
+   finger held still (except where there's something to type or copy). */
+html {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (pointer: coarse) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input,
+  textarea,
+  .room-code {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }
 #app canvas {
   display: block;

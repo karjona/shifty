@@ -1,7 +1,7 @@
-// Menu navigation for controller, keyboard and mouse alike. Everything
+// Menu navigation for controller, keyboard, mouse and touch alike. Everything
 // that can be picked carries `data-nav`; the stick, the d-pad and the
 // arrow keys move the browser's focus to the nearest one in that
-// direction, and the mouse focuses what it hovers. A / ✕ / Enter press the
+// direction, the mouse focuses what it hovers, and a finger taps. A / ✕ / Enter press the
 // focused element. The other buttons are actions screens subscribe to:
 // back (B / ○ / Esc), play (Y / △ / P), the tabs (LB RB / L1 R1 / Q E) and
 // the menu (Start / Options). Each move and action makes its sound.
@@ -12,7 +12,12 @@
 import { uiSound } from "../audio/ui.ts";
 
 export type Action = "back" | "play" | "prev" | "next" | "menu";
-export type Device = "keyboard" | "mouse" | "gamepad";
+export type Device = "keyboard" | "mouse" | "gamepad" | "touch";
+
+/** The mouse and a finger pick what's on screen: no button glyphs for them. */
+export function pointing(device: Device): boolean {
+  return device === "mouse" || device === "touch";
+}
 export type Pad = "xbox" | "playstation" | "nintendo";
 type Dir = "up" | "down" | "left" | "right";
 
@@ -102,7 +107,7 @@ function nearest(from: HTMLElement, dir: Dir, list: HTMLElement[]): HTMLElement 
 }
 
 class Nav {
-  device: Device = "mouse";
+  device: Device = matchMedia("(pointer: coarse)").matches ? "touch" : "mouse";
   pad: Pad = "xbox";
   /** Off while racing: the controller drives the rider, only Start reaches the menus. */
   enabled = true;
@@ -116,7 +121,15 @@ class Nav {
   private wasPressed = new Set<number>();
 
   constructor() {
+    document.documentElement.dataset.input = this.device;
     addEventListener("keydown", (e) => this.key(e), true);
+    addEventListener(
+      "pointerdown",
+      (e) => {
+        if (e.pointerType === "touch" || e.pointerType === "pen") this.setDevice("touch");
+      },
+      { capture: true, passive: true },
+    );
     addEventListener("pointermove", (e) => {
       if (e.pointerType === "mouse" && (e.movementX !== 0 || e.movementY !== 0)) this.setDevice("mouse");
     });

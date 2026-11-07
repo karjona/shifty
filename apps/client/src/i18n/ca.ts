@@ -7,7 +7,8 @@ export const ca: Messages = {
     play: "Juga",
     tabs: "Pestanyes",
     loading: "Carregant…",
-    soundLocked: "Fes clic o prem una tecla per activar el so",
+    soundLocked: "Fes clic, toca la pantalla o prem una tecla per activar el so",
+    rotate: "Posa la pantalla en horitzontal per jugar",
     retry: "Torna-ho a provar",
     close: "Tanca",
     cancel: "Cancel·la",
@@ -233,6 +234,20 @@ export const ca: Messages = {
     controls: "Controls",
     controlsBody:
       "Menús: estic o creueta per moure't, A / ✕ per triar, B / ○ per tornar, LB / RB per canviar de pestanya. Teclat: fletxes, Retorn, Esc, Q / E.",
+    touch: "Pantalla tàctil",
+    touchBody:
+      "L'estic apareix sota el polze esquerre, allà on el posis. El polze dret va als botons: llisca d'un a l'altre sense aixecar-lo.",
+    gas: "Gas de la moto",
+    gasAuto: "Sempre a fons",
+    gasHold: "Mantén per accelerar",
+    screen: "Pantalla completa",
+    fullscreen: "Pantalla completa",
+    on: "Sí",
+    off: "No",
+    homeScreen:
+      "Per jugar a pantalla completa en un iPhone, afegeix Shifty a la pantalla d'inici: toca Comparteix, després Afegeix a la pantalla d'inici, i obre'l des d'allà.",
+    install: "Instal·la Shifty",
+    installBody: "Instal·la'l com una app: a pantalla completa, a un toc.",
     account: "Compte",
     signedInAs: (who: string) => `Has entrat com a ${who}`,
     logout: "Tanca la sessió",
@@ -315,6 +330,25 @@ export const ca: Messages = {
         "Estic: girar · amunt (o RT) ajupir-te · avall (o LT) tirar-te enrere i frenar",
         "Mantén A per carregar el salt i deixa'l anar a la vora · a l'aire: X + estic girs i tombarelles, B grabs",
         "Teclat: WASD girar, ajupir-te, frenar · Espai saltar · J / Maj girs · K / E grab",
+        "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
+      ],
+    },
+    /** The touch screen's buttons. */
+    touch: { trick: "Truc", roll: "Tonell", stunt: "Acrobàcia", jump: "Salt", grab: "Grab", gas: "Gas", brake: "Fre" },
+    helpTouch: {
+      jetski: [
+        "Polze esquerre: girar i inclinar-te (estira enrere en una cresta per volar). El gas va sempre a fons: mantén Fre per frenar.",
+        "A l'aire: mantén Truc i mou l'estic per fer girs i tombarelles, Tonell per a un tonell, Acrobàcia per a una acrobàcia. Llisca d'un a l'altre sense aixecar el dit, i deixa'l anar a temps per aterrar!",
+        "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
+      ],
+      jetskiHold: [
+        "Polze esquerre: girar i inclinar-te (estira enrere en una cresta per volar). Mantén Gas per accelerar i Fre per frenar.",
+        "A l'aire: mantén Truc i mou l'estic per fer girs i tombarelles, Tonell per a un tonell, Acrobàcia per a una acrobàcia. Llisca d'un a l'altre sense aixecar el dit, i deixa'l anar a temps per aterrar!",
+        "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
+      ],
+      snow: [
+        "Polze esquerre: girar · amunt ajupir-te · avall tirar-te enrere i frenar",
+        "Mantén Salt per carregar el salt i deixa'l anar a la vora · a l'aire: mantén Truc i mou l'estic per fer girs i tombarelles, Grab per a un grab",
         "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
       ],
     },

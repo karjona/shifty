@@ -1,8 +1,9 @@
 // A race from the menus: the race takes the screen and the controller;
-// Start / Esc opens the race menu over it (online races don't pause). A
-// Tilt ends on its podium.
+// Start / Esc (or the button in the corner, or the browser's back) opens
+// the race menu over it (online races don't pause). A Tilt ends on its
+// podium.
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
 import type { PodiumData } from "../../game/podium.ts";
@@ -11,7 +12,9 @@ import { useT } from "../../i18n/index.ts";
 import { type PendingRace, fetchMe, meQuery, takePendingRace } from "../api.ts";
 import { toast } from "../toast.tsx";
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
-import { nav } from "../nav.ts";
+import { MenuIcon } from "../icons.tsx";
+import { nav, pointing } from "../nav.ts";
+import { touchSettings } from "../../touch/device.ts";
 import { Button, Glyph } from "../ui.tsx";
 import { PodiumScreen } from "./podium.tsx";
 import { VERSION } from "../../version.ts";
@@ -32,7 +35,12 @@ export function RaceScreen() {
   const [menu, setMenu] = useState(false);
   const [status, setStatus] = useState("");
   const [failed, setFailed] = useState(false);
-  const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow"; watching: boolean } | null>(null);
+  const [view, setView] = useState<{
+    racePhase: number;
+    sport: "jetski" | "snow";
+    watching: boolean;
+    touch: boolean;
+  } | null>(null);
   const { device } = useDevice();
   const [podium, setPodium] = useState<PodiumData | null>(null);
   const queryClient = useQueryClient();
@@ -99,7 +107,7 @@ export function RaceScreen() {
     if (!session) return undefined;
     const id = setInterval(() => {
       const { phase, racePhase, sport, watching } = session.state;
-      setView(phase === 1 ? { racePhase, sport, watching } : null);
+      setView(phase === 1 ? { racePhase, sport, watching, touch: session.state.device === "touch" } : null);
     }, 250);
     return () => clearInterval(id);
   }, [session]);
@@ -112,6 +120,16 @@ export function RaceScreen() {
   }, [menu, failed, outdated, podium, session]);
 
   useAction("menu", () => setMenu((m) => !m), !outdated && podium === null);
+  // The browser's back (a swipe in from the screen's edge on a phone) opens the race menu instead of leaving.
+  useBlocker({
+    shouldBlockFn: ({ action }) => {
+      if (action === "PUSH" || action === "REPLACE") return false;
+      setMenu(true);
+      return true;
+    },
+    disabled: outdated || failed || podium !== null,
+    enableBeforeUnload: false,
+  });
   useAction("back", () => (failed || outdated ? back() : setMenu(false)), menu || failed || outdated);
   useAutoFocus();
 
@@ -142,20 +160,31 @@ export function RaceScreen() {
       {view && (BEFORE_COUNTDOWN.has(view.racePhase) || menu) && (
         <div className={`race-help ${menu ? "in-menu" : ""}`}>
           <b>{t.race.controls}</b>
-          {t.race.help[view.sport].map((line) => (
+          {(view.touch
+            ? t.race.helpTouch[view.sport === "jetski" && touchSettings().gas === "hold" ? "jetskiHold" : view.sport]
+            : t.race.help[view.sport]
+          ).map((line) => (
             <span key={line}>{line}</span>
           ))}
         </div>
       )}
       {!menu && !failed && (
         <div className="race-menu-hint">
-          {view?.watching && device !== "mouse" && (
-            <span className="race-camera">
+          {view?.watching && (
+            <button type="button" tabIndex={-1} className="race-camera" onClick={() => session?.nextCamera()}>
               <Glyph action="play" />
               {t.race.camera}
-            </span>
+            </button>
           )}
-          <Glyph action="menu" />
+          <button
+            type="button"
+            tabIndex={-1}
+            className="race-menu-button"
+            aria-label={t.race.menu}
+            onClick={() => setMenu(true)}
+          >
+            {pointing(device) ? <MenuIcon /> : <Glyph action="menu" />}
+          </button>
         </div>
       )}
       {(menu || failed) && (

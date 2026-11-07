@@ -20,6 +20,10 @@ declare global {
       /** The course is built and drawn (its loading card is coming off). */
       ready(): boolean;
       setInput(v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null): void;
+      /** What the rider got last frame, from whichever device. */
+      input(): { steer: number; throttle: number; lean: number; buttons: number } | null;
+      /** The touch screen's stick and buttons are on screen. */
+      touchControls(): boolean;
       /** Holds the intro's camera this many seconds in (null: the race's own). */
       introAt(seconds: number | null): void;
       /** Holds the television camera of that name (null: the director's); says which there are and which is on. */

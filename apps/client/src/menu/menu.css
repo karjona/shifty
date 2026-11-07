@@ -1554,20 +1554,37 @@ a {
   top: var(--margin-y);
   right: var(--margin-x);
   display: flex;
-  padding: 10px;
+  pointer-events: auto;
   background: var(--paper);
   box-shadow: var(--lift);
   color: var(--ink);
+}
+.race-menu-hint button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.race-menu-hint .race-menu-button {
+  justify-content: center;
+  min-width: 56px;
+}
+.race-menu-hint .race-menu-button .icon {
+  width: 32px;
+  height: 32px;
 }
 .race-menu-hint .glyph {
   --glyph-ink: var(--paper);
 }
 .race-menu-hint .race-camera {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-right: 14px;
-  padding-right: 14px;
+  padding: 10px 18px 10px 14px;
   border-right: 1px solid var(--rule);
   font-size: var(--fs-label);
   font-weight: 650;
@@ -2132,4 +2149,83 @@ a {
     animation-delay: 0ms !important;
     transition-duration: 1ms !important;
   }
+}
+
+/* --- compact: a phone on its side (scale.ts sets data-compact and lays the
+   canvas out about 640 tall). Screens that still run long scroll. --- */
+
+:root[data-compact] {
+  --fs-nav: 24px;
+  --fs-head: 36px;
+  --fs-title: 52px;
+  --fs-display: 96px;
+  --margin-x: 40px;
+  --margin-y: 24px;
+  --gap: 16px;
+  --pad: 24px;
+  --col-r: 600px;
+}
+:root[data-compact] .screen {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+:root[data-compact] .tab {
+  padding: 0 14px;
+}
+:root[data-compact] .tab.on::after {
+  left: 14px;
+  right: 14px;
+}
+/* No room beside the tabs: the main menu's columns start below them. */
+:root[data-compact] .main-menu .home {
+  top: calc(var(--margin-y) + 72px + 64px + 2 * var(--gap));
+}
+/* Home's column scrolls on its own (the rider keeps the left), with room
+   for the panels' shadows. */
+:root[data-compact] .home-right {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -24px;
+  padding: 2px 24px 24px;
+  scrollbar-width: none;
+}
+:root[data-compact] .home-right > * {
+  flex-shrink: 0;
+}
+/* The mode select keeps Play in sight: its panel scrolls instead. */
+:root[data-compact] .mode-tabs .tab {
+  height: 56px;
+}
+:root[data-compact] .mode-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+/* Dialogs keep their buttons in sight: the body scrolls. */
+:root[data-compact] .modal {
+  max-height: 94%;
+  overflow: hidden;
+  padding: 24px 32px;
+}
+:root[data-compact] .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -32px;
+  padding: 0 32px;
+  scrollbar-width: none;
+}
+/* The race menu moves aside for the controls' help. */
+:root[data-compact] .race-menu {
+  justify-items: end;
+  padding: 0 var(--margin-x);
+}
+/* Title panels keep to the left column, and to their title. */
+:root[data-compact] .title-panel {
+  max-width: calc(100% - var(--col-r) - var(--gap));
+  padding: 16px var(--pad);
+}
+:root[data-compact] .title-panel .muted {
+  display: none;
 }
