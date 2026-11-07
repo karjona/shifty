@@ -1,7 +1,8 @@
 use crate::MAX_RIDERS;
+use crate::conditions::{Conditions, Event};
 use crate::course::{Course, CourseId, Frame, Line, Sport};
 use crate::input::Input;
-use crate::math::{Vec3, cos, sin};
+use crate::math::{Vec3, clamp, cos, sin};
 use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
@@ -126,6 +127,9 @@ pub struct World {
     /// *after* tick `tick` (tick 0 = initial state).
     pub tick: u32,
     pub course: CourseId,
+    /// The season, weather and time of day the race is run in. Not part of
+    /// snapshots' rider state: it is set with the course for each race.
+    pub conditions: Conditions,
     pub surface: Surface,
     pub race: Race,
     pub riders: [Option<Rider>; MAX_RIDERS],
@@ -137,10 +141,12 @@ pub struct World {
 pub type Inputs = [Option<Input>; MAX_RIDERS];
 
 impl World {
+    /// A world on a course in its sport's home conditions.
     pub fn new(course: CourseId, surface: Surface) -> Self {
         Self {
             tick: 0,
             course,
+            conditions: Conditions::home(course.sport()),
             surface,
             race: Race::new(0),
             riders: [None; MAX_RIDERS],
@@ -148,9 +154,58 @@ impl World {
         }
     }
 
-    /// A world on a course, with the course's sea.
+    /// A world on a course, with the course's sea, in its sport's home
+    /// conditions.
     pub fn on_course(course: CourseId, kind: SurfaceKind, seed: u32) -> Self {
         Self::new(course, course.course().surface(kind, seed))
+    }
+
+    /// A world for one race of a plan: its course, its sea and its conditions.
+    pub fn for_event(event: Event, kind: SurfaceKind, seed: u32) -> Self {
+        let mut w = Self::on_course(event.course, kind, seed);
+        w.conditions = event.conditions;
+        w
+    }
+
+    /// The race raced in this world.
+    pub fn event(&self) -> Event {
+        Event {
+            course: self.course,
+            conditions: self.conditions,
+        }
+    }
+
+    /// How far along the race its weather has come, 0 at the start to 1 at
+    /// the finish: on a loop by the race clock against a par pace (the
+    /// weather is the same all round the loop), on a run by where `(x, z)`
+    /// is down it.
+    pub fn weather_progress(&self, x: f32, z: f32) -> f32 {
+        let course = self.course();
+        if course.looped() {
+            let racing = match self.race.phase {
+                Phase::Racing => self.race.elapsed(self.tick),
+                Phase::Results => return 1.0,
+                Phase::Grid | Phase::Intro | Phase::Countdown => 0,
+            };
+            let par = f32::from(course.laps) * course.length() / crate::conditions::LOOP_PAR_SPEED;
+            return clamp(racing as f32 * crate::DT / par, 0.0, 1.0);
+        }
+        let Some(run) = course.run() else {
+            return 0.0;
+        };
+        let s = course.project(x, z).0;
+        clamp(
+            (s - course.start_s) / (run.finish_s - course.start_s),
+            0.0,
+            1.0,
+        )
+    }
+
+    /// How far the weather has turned at `(x, z)` now (0 = `weather`,
+    /// 1 = `turns`).
+    pub fn weather_turn(&self, x: f32, z: f32) -> f32 {
+        let course = self.course();
+        crate::conditions::turn_blend(self.weather_progress(x, z), course.looped(), course.laps)
     }
 
     pub fn course(&self) -> &'static Course {

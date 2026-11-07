@@ -8,6 +8,7 @@
 pub mod bot;
 pub mod buoy;
 pub mod circuit;
+pub mod conditions;
 pub mod course;
 pub mod input;
 pub mod jetski;
@@ -20,6 +21,7 @@ pub mod snowboard;
 pub mod surface;
 pub mod world;
 
+pub use conditions::{Conditions, Season, Weather};
 pub use course::{Course, CourseId, Sport};
 pub use input::{Input, buttons};
 pub use math::Vec3;

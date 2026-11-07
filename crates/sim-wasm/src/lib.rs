@@ -38,7 +38,7 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 24] = [
+pub const RACE_FIELDS: [&str; 28] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -63,6 +63,10 @@ pub const RACE_FIELDS: [&str; 24] = [
     "eventCount",
     "gpVersion",
     "autopilot",
+    "season",
+    "weather",
+    "turns",
+    "time",
 ];
 
 #[wasm_bindgen]
@@ -295,6 +299,10 @@ impl WasmClient {
             f64::from(self.inner.event_count()),
             f64::from(self.inner.gp_version()),
             f64::from(u8::from(autopilot)),
+            f64::from(world.conditions.season as u8),
+            f64::from(world.conditions.weather as u8),
+            f64::from(world.conditions.turns as u8),
+            f64::from(world.conditions.time),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -379,7 +387,24 @@ impl WasmClient {
         serde_json::Value::Array(list).to_string()
     }
 
-    /// 0 = jetski (summer), 1 = snowboard (winter).
+    /// The race's conditions: `[season, weather, turns, time]` (wire
+    /// numbers, see `sim::conditions`).
+    pub fn conditions(&self) -> Vec<u8> {
+        self.inner.conditions().to_bytes().to_vec()
+    }
+
+    /// The weather at `(x, z)`: `[progress, turn]`. `progress` is how far
+    /// along the race it has come (0 at the start, 1 at the finish: on a
+    /// loop by the race clock, on a run by where `(x, z)` is down it);
+    /// `turn` how far it has turned (0 = `weather`, 1 = `turns`). One call a
+    /// frame, for the camera.
+    #[wasm_bindgen(js_name = weatherAt)]
+    pub fn weather_at(&self, x: f32, z: f32) -> Vec<f32> {
+        let world = self.inner.predicted_world();
+        vec![world.weather_progress(x, z), world.weather_turn(x, z)]
+    }
+
+    /// 0 = jetski, 1 = snowboard.
     pub fn sport(&self) -> u8 {
         match self.inner.predicted_world().course().sport {
             Sport::Jetski => 0,
@@ -675,7 +700,8 @@ pub struct Scenery {
 
 #[wasm_bindgen]
 impl Scenery {
-    /// `course`: a `sim::CourseId` (0 = the bay, 1 = the mountain, 2 = the cape).
+    /// `course`: a `sim::CourseId` (0 = the bay, 1 = the mountain, 2 = the
+    /// cape), in its sport's home conditions (see `setConditions`).
     #[wasm_bindgen(constructor)]
     pub fn new(course: u8, surface_kind: u8, seed: u32) -> Self {
         let course = CourseId::from_u8(course).unwrap_or(CourseId::Oval);
@@ -688,6 +714,22 @@ impl Scenery {
     #[wasm_bindgen(js_name = courseJson)]
     pub fn course_json(&self) -> String {
         course_json_on(&self.world)
+    }
+
+    /// Sets the conditions it is drawn in (`[season, weather, turns, time]`;
+    /// bytes out of range are ignored).
+    #[wasm_bindgen(js_name = setConditions)]
+    pub fn set_conditions(&mut self, bytes: &[u8]) {
+        if let [a, b, c, d] = *bytes
+            && let Some(conditions) = sim::Conditions::from_bytes([a, b, c, d])
+        {
+            self.world.conditions = conditions;
+        }
+    }
+
+    /// Its conditions: `[season, weather, turns, time]`.
+    pub fn conditions(&self) -> Vec<u8> {
+        self.world.conditions.to_bytes().to_vec()
     }
 
     #[wasm_bindgen(js_name = waveParams)]

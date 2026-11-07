@@ -7,8 +7,8 @@ import type { CameraShot, Environment } from "../render/world.ts";
 import type { RaceView } from "../ui/hud.ts";
 import { IntroCard, type IntroFacts } from "../ui/intro-card.ts";
 import type { CourseInfo } from "../wasm-json.ts";
+import { type Conditions, circuitName, clockTime, eventKey, timeOfDay } from "./conditions.ts";
 import { Flyover } from "./flyover.ts";
-import { seasonOf } from "./season-change.ts";
 import { PALETTE } from "./seasons.ts";
 
 /** `sim::Phase`: waiting on the grid, and the intro. */
@@ -21,13 +21,14 @@ const CARD_LEAVES = 1.6;
 const PINNED_SECONDS = 7;
 
 /** The race as the intro needs it. */
-export type IntroRace = RaceView & { course: number; eventIndex: number; eventCount: number };
+export type IntroRace = RaceView & { course: number; conditions: Conditions; eventIndex: number; eventCount: number };
 
 export class RaceIntro {
   private card: IntroCard;
   private flyover: Flyover | null = null;
   private info: CourseInfo | null = null;
-  private course = -1;
+  /** The race on screen (`eventKey`). */
+  private event = "";
   /** What the card says now (course, race of the plan, language). */
   private said = "";
   /** Dev: the intro's camera held this many seconds in, whatever the race is doing (test shots). */
@@ -37,9 +38,9 @@ export class RaceIntro {
     this.card = new IntroCard(root);
   }
 
-  /** The course on screen, once it is built. */
-  setCourse(course: number, info: CourseInfo, env: Environment): void {
-    this.course = course;
+  /** The race on screen (`eventKey`), once its course is built. */
+  setCourse(event: string, info: CourseInfo, env: Environment): void {
+    this.event = event;
     this.info = info;
     this.flyover = new Flyover(info, env);
   }
@@ -61,7 +62,7 @@ export class RaceIntro {
       this.card.show(!covered && this.pinned < PINNED_SECONDS - CARD_LEAVES);
       return flyover.intro(this.pinned, PINNED_SECONDS);
     }
-    if (!drawn || !flyover || race.course !== this.course || !RaceIntro.active(race.phase)) {
+    if (!drawn || !flyover || eventKey(race.course, race.conditions) !== this.event || !RaceIntro.active(race.phase)) {
       this.card.show(false);
       return null;
     }
@@ -79,12 +80,18 @@ export class RaceIntro {
   private describe(race: IntroRace): void {
     const info = this.info;
     const m = messages();
-    const key = `${race.course}:${race.eventIndex}:${race.eventCount}:${m.intro.waiting}`;
+    const c = race.conditions;
+    const key = `${eventKey(race.course, c)}:${race.eventIndex}:${race.eventCount}:${m.intro.waiting}`;
     if (!info || key === this.said) return;
     this.said = key;
     const i = m.intro;
-    const season = seasonOf(race.course);
-    const rows: IntroFacts["rows"] = [[i.season, m.seasons[season]]];
+    const season = c.season;
+    const weather = c.weather === c.turns ? m.weathers[c.weather] : i.turns(m.weathers[c.weather], m.weathers[c.turns]);
+    const rows: IntroFacts["rows"] = [
+      [i.season, m.seasons[season]],
+      [i.weather, weather],
+      [i.time, `${m.timesOfDay[timeOfDay(c)]} · ${clockTime(c.time)}`],
+    ];
     if (info.sport === "snow") {
       rows.push([i.run, i.km((info.run.finishS - info.run.startS) / 1000)]);
       rows.push([i.checkpoints, String(info.run.checkpoints.length)]);
@@ -94,7 +101,7 @@ export class RaceIntro {
     }
     this.card.set({
       kicker: race.eventCount > 1 ? i.tilt(race.eventIndex + 1, race.eventCount) : m.place,
-      title: info.sport === "snow" ? i.courses.mountain : i.courses[info.bay.place],
+      title: circuitName(race.course, info.sport),
       subtitle: race.eventCount > 1 ? `${i.sports[info.sport]} · ${m.place}` : i.sports[info.sport],
       rows,
       accent: `#${PALETTE[season].accent.toString(16).padStart(6, "0")}`,

@@ -14,7 +14,7 @@
 // is a few numbers, never a new shader.
 import * as THREE from "three/webgpu";
 import { Fn, attribute, color, float, fract, fwidth, mix, normalWorld, positionWorld, smoothstep, uniform } from "three/tsl";
-import type { Season } from "../game/season-change.ts";
+import type { Season } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
 import type { BobbingBatch } from "./bobbing.ts";
 import { noise3 } from "./cel/terrain.ts";
@@ -729,18 +729,13 @@ export class CapeScenery implements WaterScenery {
   }
 }
 
-export interface CapeOptions extends BayOptions {
-  /** The race's season (summer if not given). */
-  season?: Season;
-}
-
 /** The cape: the water courses' environment (see bay.ts) with the cape's land round it. */
 export class Cape extends Bay {
   /** The land's height (what hides a rider from a camera). */
   readonly land: CoastGround;
 
-  constructor(opts: CapeOptions) {
-    const scenery = new CapeScenery(opts.course, opts.season ?? "summer");
+  constructor(opts: BayOptions) {
+    const scenery = new CapeScenery(opts.course, opts.conditions?.season ?? "summer");
     super({ ...opts, scenery });
     this.land = scenery.ground;
   }

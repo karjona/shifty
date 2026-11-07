@@ -3,10 +3,10 @@
 // leaves the view to the race behind it. On the results, the scoreboard:
 // the race, and in a Tilt the points it gave and the standings so far
 // (who moved up or down). Plain DOM like the rest of the HUD, rebuilt only
-// when what it shows changes. Its accent follows the course's season.
+// when what it shows changes. Its accent follows the race's season.
 import "./results.css";
 import { messages } from "../i18n/index.ts";
-import { seasonOf } from "../game/season-change.ts";
+import type { Season } from "../game/conditions.ts";
 import { PALETTE, setAccent } from "../game/seasons.ts";
 import { type GrandPrixView, type RaceView, type StandingView, formatTime, ordinal } from "./hud.ts";
 
@@ -29,6 +29,7 @@ export interface RosterName {
 
 export interface BoardRace extends RaceView {
   course: number;
+  season: Season;
   eventIndex: number;
   eventCount: number;
 }
@@ -95,7 +96,7 @@ export class Scoreboard {
   private towerAt = 0;
   private boardKey = "";
   private countdown: HTMLElement | null = null;
-  private course = -1;
+  private season: Season | null = null;
   /** Riders the tower last showed finished (their row flashes as they come in). */
   private finished = new Set<number>();
   /** The Tilt's points as they stood before this race's results. */
@@ -124,9 +125,9 @@ export class Scoreboard {
 
   update(input: BoardInput): void {
     const { race, gp } = input;
-    if (race.course !== this.course) {
-      this.course = race.course;
-      setAccent(PALETTE[seasonOf(race.course)].accent);
+    if (race.season !== this.season) {
+      this.season = race.season;
+      setAccent(PALETTE[race.season].accent);
     }
     this.lastRace = race.eventCount > 1 && race.eventIndex >= race.eventCount - 1;
     const results = race.phase === RESULTS;
@@ -255,7 +256,7 @@ export class Scoreboard {
     const hz = race.tickHz;
     const best = bestTime(list);
     const last = race.eventIndex >= race.eventCount - 1;
-    const season = messages().seasons[seasonOf(race.course)];
+    const season = messages().seasons[race.season];
     const won = new Map(tilt?.map((r) => [r.slot, r.won]) ?? []);
     const style = !race.looped || list.some((s) => s.points > 0);
     // Summer: buoys missed, tricks (and style, once tricks score); winter: tricks and style.

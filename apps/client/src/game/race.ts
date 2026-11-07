@@ -1,9 +1,9 @@
 // A race on screen: the connection to the race server, the netcode client
 // (WASM), the world drawn from its prediction, and the HUD. A Tilt
-// moves from course to course in the same session, with a short season
-// change in between. Each race starts with its intro (see intro.ts), once
+// moves from race to race (a circuit in its conditions) in the same
+// session, with a short season change in between. Each race starts with its intro (see intro.ts), once
 // every screen has told the server its course is on show.
-import { type Appearance, botAppearance, decodeAppearance } from "@shifty/rider";
+import { type Appearance, SEASONS, SPORT_SEASONS, botAppearance, circuit, decodeAppearance } from "@shifty/rider";
 import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
 import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
@@ -23,10 +23,11 @@ import { WrongWay } from "../ui/wrong-way.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { Broadcast, onAir } from "./broadcast.ts";
+import { type Conditions, type Season, WEATHERS, eventKey, homeConditions } from "./conditions.ts";
 import { disposeTree } from "./dispose.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
-import { SeasonCard, SeasonChange, seasonOf } from "./season-change.ts";
+import { SeasonCard, SeasonChange } from "./season-change.ts";
 import { TouchControls } from "../touch/controls.ts";
 import { canTouch, keepAwake, touchScreen } from "../touch/device.ts";
 
@@ -71,6 +72,8 @@ export interface RaceState {
   racePhase: number;
   sport: "jetski" | "snow";
   course: number;
+  /** The race's season, weather and time of day (null before the first snapshot). */
+  conditions: Conditions | null;
   eventIndex: number;
   eventCount: number;
   /** The plan is over: the last race's results are done. */
@@ -107,16 +110,27 @@ function parseRoster(json: string, seed: number): { names: Map<number, string>; 
   return { names, looks };
 }
 
-/** The first course of a ticket's plan, from its claims (readable; only the race server checks them). */
-function ticketCourse(token: string): number {
+/**
+ * The season of a ticket's first race as far as its claims tell (they are
+ * readable; only the race server checks them): a Tilt starts in summer, a
+ * race may name its season or its circuit. The race server draws the rest,
+ * so this is the season card's first guess until the race is known.
+ */
+function ticketSeason(token: string): Season {
   try {
     const part = (token.split(".")[0] ?? "").replaceAll("-", "+").replaceAll("_", "/");
     const json = new TextDecoder().decode(Uint8Array.from(atob(part), (c) => c.charCodeAt(0)));
     const claims: unknown = JSON.parse(json);
-    const course: unknown = typeof claims === "object" && claims !== null ? Reflect.get(claims, "course") : null;
-    return typeof course === "number" ? course : 0;
+    if (typeof claims !== "object" || claims === null || Reflect.get(claims, "tilt") === true) return "summer";
+    const races: unknown = Reflect.get(claims, "races");
+    const race: unknown = Array.isArray(races) ? races[0] : null;
+    const pick = (k: string): unknown => (typeof race === "object" && race !== null ? Reflect.get(race, k) : null);
+    const season = SEASONS[Number(pick("season"))];
+    if (season) return season;
+    const sport = circuit(Number(pick("course")))?.sport;
+    return sport ? (SPORT_SEASONS[sport][0] ?? "summer") : "summer";
   } catch {
-    return 0;
+    return "summer";
   }
 }
 
@@ -160,7 +174,9 @@ export class RaceSession implements Stage {
   private rosterVersion = -1;
   private gpVersion = -1;
   private gpPoints = new Map<number, number>();
-  private course = -1;
+  /** The race on screen (`eventKey`; empty: none yet). */
+  private event = "";
+  private conditions: Conditions = homeConditions("jetski");
   private sport: "jetski" | "snow" = "jetski";
   private closedReason = "";
   private joined = false;
@@ -188,6 +204,7 @@ export class RaceSession implements Stage {
     racePhase: 0,
     sport: "jetski",
     course: -1,
+    conditions: null,
     eventIndex: 0,
     eventCount: 1,
     over: false,
@@ -236,8 +253,7 @@ export class RaceSession implements Stage {
     }
     this.sleep = keepAwake();
     if (this.opts.render ?? engine.render) {
-      const first = ticketCourse(this.opts.ticket.token);
-      this.card = new SeasonCard(seasonOf(first), false, first);
+      this.card = new SeasonCard(ticketSeason(this.opts.ticket.token), false);
       this.card.loading = true;
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
@@ -350,11 +366,24 @@ export class RaceSession implements Stage {
     return out;
   }
 
-  private readRace(): RaceView & { course: number; eventIndex: number; eventCount: number; gpVersion: number } {
+  private readRace(): RaceView & {
+    course: number;
+    conditions: Conditions;
+    season: Season;
+    eventIndex: number;
+    eventCount: number;
+    gpVersion: number;
+  } {
     const client = this.client!;
     const keys = raceFields();
     const view = new Float64Array(this.engine!.wasm.memory.buffer, client.updateRace(), keys.length);
     const f = (key: string) => view[keys.indexOf(key)] ?? 0;
+    const conditions: Conditions = {
+      season: SEASONS[f("season")] ?? "summer",
+      weather: WEATHERS[f("weather")] ?? "clear",
+      turns: WEATHERS[f("turns")] ?? "clear",
+      time: f("time"),
+    };
     return {
       phase: f("phase"),
       phaseStart: f("phaseStart"),
@@ -376,6 +405,8 @@ export class RaceSession implements Stage {
       gates: f("gates"),
       looped: f("looped") === 1,
       course: f("course"),
+      conditions,
+      season: conditions.season,
       eventIndex: f("eventIndex"),
       eventCount: f("eventCount") || 1,
       gpVersion: f("gpVersion"),
@@ -408,12 +439,17 @@ export class RaceSession implements Stage {
     this.ready = false;
     this.shown = false;
     const old = this.env;
+    const conditions = this.conditions;
     if (course.sport === "snow") {
-      this.env = new Mountain(course.run, {
-        ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
-        grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
-        heights: (points) => client.heightsAt(points),
-      });
+      this.env = new Mountain(
+        course.run,
+        {
+          ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
+          grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
+          heights: (points) => client.heightsAt(points),
+        },
+        conditions,
+      );
       engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {
@@ -422,13 +458,15 @@ export class RaceSession implements Stage {
         topSpeed: client.topSpeed(),
         waves: client.waveParams(),
         course: course.bay,
+        conditions,
       };
-      this.env = course.bay.place === "cape" ? new Cape({ ...water, season: seasonOf(this.course) }) : new Bay(water);
+      this.env = course.bay.place === "cape" ? new Cape(water) : new Bay(water);
       engine.world.setSunOffset(30, 60, 15);
       this.minimap = new Minimap(this.mapRoot, course.bay);
     }
     engine.world.setEnvironment(this.env);
-    this.intro?.setCourse(this.course, course, this.env);
+    engine.world.weatherAt = (x, z) => client.weatherAt(x, z);
+    this.intro?.setCourse(this.event, course, this.env);
     this.tv?.setCourse(course, this.env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
     if (old) disposeTree(old.group);
     const env = this.env;
@@ -496,6 +534,7 @@ export class RaceSession implements Stage {
       racePhase: race.phase,
       sport: this.sport,
       course: race.course,
+      conditions: race.conditions,
       eventIndex: race.eventIndex,
       eventCount: race.eventCount,
     });
@@ -503,16 +542,18 @@ export class RaceSession implements Stage {
     else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
       this.state.over = true;
       const rows = this.board.final(this.gpPoints);
-      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.course));
+      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.conditions.season));
     }
     this.readRoster(engine, client);
-    if (race.course !== this.course) {
-      const first = this.course === -1;
-      this.course = race.course;
+    const event = eventKey(race.course, race.conditions);
+    if (event !== this.event) {
+      const first = this.event === "";
+      this.event = event;
+      this.conditions = race.conditions;
       if (first || !render) {
         const card = this.card;
         if (card) {
-          card.season = seasonOf(race.course);
+          card.season = race.season;
           card.course = race.course;
         }
         void this.setCourse(engine, client, render).finally(() => {
@@ -528,7 +569,7 @@ export class RaceSession implements Stage {
         this.covered = true;
         this.seasonChange = new SeasonChange(
           engine,
-          seasonOf(race.course),
+          race.season,
           () => this.setCourse(engine, client, render),
           () => {
             this.covered = false;
@@ -546,7 +587,7 @@ export class RaceSession implements Stage {
     // server can start the race as far as this screen goes. (After a
     // race's results, the grid waits for the plan's next course.)
     if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
-    const current = race.course === this.course && race.eventIndex !== this.resultsEvent;
+    const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
     const hud = !this.covered && !RaceIntro.active(race.phase);
@@ -682,6 +723,7 @@ export class RaceSession implements Stage {
     this.touch?.dispose();
     this.sleep?.();
     this.opts.hud.replaceChildren();
+    if (this.engine) this.engine.world.weatherAt = null;
     if (this.env && this.engine) {
       this.engine.world.clearEnvironment();
       disposeTree(this.env.group);

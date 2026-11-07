@@ -38,6 +38,7 @@ import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
 import { celify } from "./cel/material.ts";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
@@ -460,7 +461,12 @@ export class Mountain implements Environment {
   private wind = { x: 0.6, z: -0.3 };
   private random = rng(77);
 
-  constructor(run: RunData, terrain: Terrain) {
+  /** The season, weather and time of day it is drawn in. */
+  readonly conditions: Conditions;
+
+  /** `conditions`: the race's (a clear winter noon if left out). */
+  constructor(run: RunData, terrain: Terrain, conditions?: Conditions) {
+    this.conditions = conditions ?? homeConditions("snow");
     this.run = run;
     this.terrain = terrain;
     this.buildSnow();

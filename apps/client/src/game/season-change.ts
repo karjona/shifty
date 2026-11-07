@@ -6,9 +6,11 @@
 import * as THREE from "three/webgpu";
 import { messages } from "../i18n/index.ts";
 import { holdLoading } from "../loading.ts";
+import { circuit } from "@shifty/rider";
+import { type Season, circuitName } from "./conditions.ts";
 import type { Engine } from "./engine.ts";
 
-export type Season = "summer" | "fall" | "winter" | "spring";
+export type { Season } from "./conditions.ts";
 
 /** Seconds the camera lifts before the courses swap. */
 const LIFT = 1.2;
@@ -17,20 +19,10 @@ const HOLD = 1.8;
 /** The card's fade (see .season-change in menu.css). */
 const FADE_MS = 900;
 
-/** The season of a course (`sim::CourseId`). */
-export function seasonOf(course: number): Season {
-  return course === 1 ? "winter" : "summer";
-}
-
-/** Which circuit a course is (`sim::CourseId`), for its name. */
-export function circuitOf(course: number): "bay" | "mountain" | "cape" {
-  return course === 1 ? "mountain" : course === 2 ? "cape" : "bay";
-}
-
 /** What the card says under the season: the circuit, if known, and the place. */
 function where(course: number | null): string {
   const m = messages();
-  return course === null ? m.place : `${m.intro.courses[circuitOf(course)]} · ${m.place}`;
+  return course === null ? m.place : `${circuitName(course, circuit(course)?.sport ?? "jetski")} · ${m.place}`;
 }
 
 /** The card itself, under the menus (the race menu, the status): up until `hide`. */

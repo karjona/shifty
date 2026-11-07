@@ -18,6 +18,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { SKY, clouds, skyDome } from "./cel/sky.ts";
@@ -68,6 +69,8 @@ export interface BayOptions {
   course: CourseData;
   /** The land and backdrop round the course (the bay's coast if none). */
   scenery?: WaterScenery;
+  /** The race's season, weather and time of day (a clear summer noon if left out). */
+  conditions?: Conditions;
 }
 
 /** What stands round a water course besides the course itself: land, towns, the backdrop. */
@@ -86,6 +89,8 @@ export class Bay implements Environment {
   readonly camera = CAMERA;
   readonly topSpeed: number;
   readonly reflects: boolean;
+  /** The season, weather and time of day it is drawn in. */
+  readonly conditions: Conditions;
 
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
@@ -103,6 +108,7 @@ export class Bay implements Environment {
   private scenery: WaterScenery | null;
 
   constructor(opts: BayOptions) {
+    this.conditions = opts.conditions ?? homeConditions("jetski");
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
     this.scenery = opts.scenery ?? null;

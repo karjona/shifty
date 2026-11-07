@@ -17,7 +17,19 @@ mod tests {
     }
 
     fn full_snapshot_on(course: CourseId) -> Snapshot {
-        let mut world = World::on_course(course, SurfaceKind::Swells, 9);
+        let mut world = World::for_event(
+            sim::conditions::Event {
+                course,
+                conditions: sim::Conditions {
+                    season: sim::Season::Fall,
+                    weather: sim::Weather::Storm,
+                    turns: sim::Weather::Rain,
+                    time: 100,
+                },
+            },
+            SurfaceKind::Swells,
+            9,
+        );
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }
@@ -33,6 +45,7 @@ mod tests {
             echo_hold_ms: 12,
             race: world.race,
             course: world.course,
+            conditions: world.conditions,
             event_index: 1,
             event_count: 2,
             events: events_for_snapshot(
@@ -82,6 +95,33 @@ mod tests {
             let decoded = ServerMsg::decode(&ServerMsg::Snapshot(snap.clone()).encode()).unwrap();
             assert_eq!(decoded, ServerMsg::Snapshot(snap));
         }
+    }
+
+    #[test]
+    fn welcome_carries_the_race() {
+        let w = Welcome {
+            version: PROTOCOL_VERSION,
+            slot: 3,
+            tick_hz: 60,
+            snapshot_interval: 2,
+            max_riders: 8,
+            course: CourseId::Mountain,
+            conditions: sim::Conditions {
+                season: sim::Season::Spring,
+                weather: sim::Weather::Windy,
+                turns: sim::Weather::Clear,
+                time: 50,
+            },
+            surface_kind: SurfaceKind::Swells,
+            surface_seed: 77,
+            server_tick: 1234,
+            echo_client_time: 5,
+        };
+        let msg = ServerMsg::Welcome(w);
+        assert_eq!(ServerMsg::decode(&msg.encode()).unwrap(), msg);
+        let mut bytes = msg.encode();
+        bytes[8] = 9; // season
+        assert!(ServerMsg::decode(&bytes).is_err());
     }
 
     #[test]
