@@ -56,7 +56,7 @@ interface Grid {
 
 /**
  * Round the grid from in front of it (angle 0, along the riders' heading) to
- * behind it (π), coming closer, looking at the riders.
+ * behind and above it (π), coming closer, looking at the riders.
  */
 function round(seconds: number, grid: Grid, ground: (x: number, z: number) => number, chaseFov: number): Shot {
   const fx = Math.sin(grid.yaw);
@@ -66,11 +66,12 @@ function round(seconds: number, grid: Grid, ground: (x: number, z: number) => nu
     at(u, pose) {
       const k = glide(u);
       const a = lerp(0.45, Math.PI, k);
-      const r = lerp(24, 13, k);
+      const r = lerp(24, 16, k);
       // Forward, and the riders' right (-fz, fx), scaled round the circle.
       const x = grid.centre.x + (fx * Math.cos(a) - fz * Math.sin(a)) * r;
       const z = grid.centre.z + (fz * Math.cos(a) + fx * Math.sin(a)) * r;
-      const y = Math.max(grid.centre.y + lerp(3.5, 5, k), ground(x, z) + CLEARANCE);
+      // Rising behind the grid, so the way down into the chase camera passes over the riders.
+      const y = Math.max(grid.centre.y + lerp(3.5, 9, k), ground(x, z) + CLEARANCE);
       pose.eye.set(x, y, z);
       pose.look.set(grid.centre.x + fx * 4 * k, grid.centre.y + 1, grid.centre.z + fz * 4 * k);
       pose.fov = lerp(48, chaseFov, k);
