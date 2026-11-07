@@ -1,7 +1,8 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
-// ticket from the dev server (see vite.config.ts). The netcode e2e tests
-// use it too. URL options: name, room, bots, event (snow, or gp for the
-// Tilt), surface, pid, render=0, autopilot=1, scale, water.
+// ticket from the dev server (see vite.config.ts); a Tilt ends on its
+// podium. The netcode e2e tests use it too. URL options: name, room, bots,
+// event (snow, or gp for the Tilt), surface, pid, render=0, autopilot=1,
+// scale, water.
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -10,8 +11,8 @@ const HELP = {
   jetski:
     "<b>23.4° Shifty</b> · summer · prototype<br />" +
     "Gamepad: left stick steer and lean (pull back on a crest to fly) · RT throttle · LT brake<br />" +
-    "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!<br />" +
-    "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks · F1 debug<br />" +
+    "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!<br />" +
+    "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt · F1 debug<br />" +
     'Pass <b class="red">red</b> buoys with them on your right, <b class="green">green</b> on your left',
   snow:
     "<b>23.4° Shifty</b> · winter · prototype<br />" +
@@ -57,7 +58,15 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
         render: params.get("render") !== "0",
         autopilot: params.get("autopilot") === "1",
         debug: true,
-        onOver: () => location.reload(),
+        onOver: (podium) => {
+          if (!podium) {
+            location.reload();
+            return;
+          }
+          setStatus("");
+          help.hidden = true;
+          void import("./podium-dev.tsx").then((m) => m.showPodium(podium, () => location.reload()));
+        },
       }),
     );
   } catch (e) {

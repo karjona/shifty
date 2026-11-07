@@ -245,6 +245,7 @@ export class RoomLobby extends DurableObject<Env> {
           event: s.event,
           bots: s.bots,
           rider: await matchRider(this.env, race.room, me.userId),
+          humans: race.userIds.length,
         });
         return this.send(ws, { t: "ticket", ticket });
       }

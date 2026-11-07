@@ -15,6 +15,9 @@
 //! - **Rendering:** every rider is drawn from the predicted world, so what
 //!   you see is what you bump into. Corrections to other riders are smoothed
 //!   the same way as your own.
+//! - **Ready:** the caller says when its screen has a race's course loaded
+//!   (`set_ready`); every input packet repeats it, and the race waits on the
+//!   grid until every screen is ready.
 
 use protocol::{
     ClientMsg, Event, EventBody, InputPacket, MAX_INPUTS_PER_PACKET, PROTOCOL_VERSION,
@@ -24,7 +27,8 @@ use sim::bot::bot_input;
 use sim::math::{Vec3, angle_diff, wrap_angle};
 use sim::race::{EventKind, Race, Standing};
 use sim::{
-    CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Surface, SurfaceKind, TICK_HZ, World,
+    CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Sport, Surface, SurfaceKind, TICK_HZ,
+    World,
 };
 
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
@@ -95,7 +99,8 @@ pub struct RenderRider {
     pub is_me: bool,
     pub is_bot: bool,
     /// Snowboard: how loaded the jump is (0-1), the grab being held (0 =
-    /// none), and the stick (lean: + = tucked, - = sitting back).
+    /// none), and the stick (lean: + = tucked, - = sitting back). Jetski:
+    /// how far into the stunt the rider is (0-1), and the stunt (0 = none).
     pub charge: f32,
     pub grab: u8,
     pub lean: f32,
@@ -174,6 +179,8 @@ pub struct Client {
     last_snapshot_tick: Option<u32>,
     next_event_id: u16,
     pending_events: Vec<Event>,
+    /// The race (of the room's plan) this screen is ready for, plus one (0 = none).
+    ready: u8,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
@@ -214,6 +221,7 @@ impl Client {
             last_snapshot_tick: None,
             next_event_id: 0,
             pending_events: Vec::new(),
+            ready: 0,
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -266,6 +274,13 @@ impl Client {
     /// How many races the room's plan has (more than one: a Tilt).
     pub fn event_count(&self) -> u8 {
         self.event_count
+    }
+
+    /// This screen has race `event` of the room's plan (its course) loaded
+    /// and on show, or nothing yet (`None`). The server starts a race once
+    /// every screen in the room is ready for it.
+    pub fn set_ready(&mut self, event: Option<u8>) {
+        self.ready = event.map_or(0, |e| e.saturating_add(1));
     }
 
     /// Tilt points by seat (None: no rider there).
@@ -449,6 +464,7 @@ impl Client {
             event_ack: self.next_event_id,
             last_snapshot_tick: self.last_snapshot_tick.unwrap_or(0),
             client_time: Self::time16(now_ms),
+            ready: self.ready,
             first_tick: first,
             inputs,
         };
@@ -679,6 +695,7 @@ impl Client {
             return out;
         }
         let alpha = (self.accum_ms / TICK_MS).clamp(0.0, 1.0) as f32;
+        let sport = self.world.course().sport;
         for slot in 0..MAX_RIDERS {
             let is_me = slot == self.slot;
             let is_bot = matches!(
@@ -714,11 +731,22 @@ impl Client {
                     bailing: r.bailing(),
                     is_me,
                     is_bot,
-                    charge: f32::from(r.charge) / f32::from(sim::snowboard::tuning::CHARGE_TICKS),
-                    grab: if !r.grounded && r.last_input.pressed(sim::input::buttons::GRAB) {
-                        r.grab
-                    } else {
-                        0
+                    charge: match sport {
+                        Sport::Jetski => {
+                            f32::from(r.charge) / f32::from(sim::jetski::tuning::STUNT_FULL)
+                        }
+                        Sport::Snowboard => {
+                            f32::from(r.charge) / f32::from(sim::snowboard::tuning::CHARGE_TICKS)
+                        }
+                    },
+                    grab: match sport {
+                        Sport::Jetski if r.charge > 0 => r.grab,
+                        Sport::Snowboard
+                            if !r.grounded && r.last_input.pressed(sim::input::buttons::GRAB) =>
+                        {
+                            r.grab
+                        }
+                        _ => 0,
                     },
                     lean: r.last_input.lean_f(),
                     steer: r.last_input.steer_f(),

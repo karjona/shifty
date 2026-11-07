@@ -553,6 +553,7 @@ fn judge(r: &mut Rider, input: Input, setup: Setup, n: Vec3, impact: f32) -> Opt
         flip,
         roll: 0,
         grab: if grab_ticks > 0 { grab } else { 0 },
+        stunt: 0,
         grab_ticks,
         points: points(spin, flip, grab_ticks),
     });
@@ -591,11 +592,12 @@ mod tests {
     use crate::race::{self, EventKind, Phase, SimEvent};
     use crate::{CourseId, Inputs, MAX_RIDERS, SurfaceKind, World};
 
-    /// A mountain world with one rider free riding (the room never moves on
+    /// A mountain world with one rider riding free (the room never moves on
     /// to a race unless the test lets it).
     fn world() -> World {
         let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
         w.spawn(0);
+        w.ride_free();
         w
     }
 
@@ -631,13 +633,12 @@ mod tests {
         Input::from_analog(steer, 0.0, lean, buttons)
     }
 
-    /// Steps the world with `drive` choosing rider 0's input, holding the
-    /// room in free ride. Returns the events.
+    /// Steps the world with `drive` choosing rider 0's input. Returns the
+    /// events.
     fn run(w: &mut World, ticks: u32, mut drive: impl FnMut(&World) -> Input) -> Vec<SimEvent> {
         let mut inputs: Inputs = [None; MAX_RIDERS];
         let mut events = Vec::new();
         for _ in 0..ticks {
-            w.race.phase_tick = w.tick;
             inputs[0] = Some(drive(w));
             events.extend(w.step(&inputs));
         }
@@ -1018,10 +1019,10 @@ mod tests {
         for slot in 1..MAX_RIDERS {
             w.spawn(slot);
         }
+        w.ride_free();
         let mut rng = crate::math::Pcg32::new(7);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for _ in 0..60 * 40 {
-            w.race.phase_tick = w.tick;
             for i in inputs.iter_mut() {
                 *i = Some(Input::from_analog(
                     rng.range(-1.0, 1.0),
@@ -1050,6 +1051,7 @@ mod tests {
         for slot in 0..MAX_RIDERS {
             w.spawn(slot);
         }
+        w.start_intro();
         let mut inputs: Inputs = [None; MAX_RIDERS];
         let mut checkpoints = 0;
         let mut finishes = Vec::new();
@@ -1090,27 +1092,110 @@ mod tests {
             }
             w.step(&inputs);
         }
-        assert_eq!(w.race.phase, Phase::Warmup);
+        assert_eq!(w.race.phase, Phase::Grid);
     }
 
     #[test]
-    fn the_countdown_holds_riders_at_the_top() {
+    fn riders_wait_at_the_top_until_the_start() {
         let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
         w.spawn(0);
         w.spawn(5);
         let mut inputs: Inputs = [None; MAX_RIDERS];
-        for _ in 0..race::tuning::WARMUP_TICKS + 30 {
-            inputs[0] = Some(Input::from_analog(0.3, 0.0, 1.0, 0));
-            inputs[5] = Some(Input::from_analog(-0.3, 0.0, 1.0, 0));
+        let mut ride = |w: &mut World, ticks: u32| {
+            for _ in 0..ticks {
+                inputs[0] = Some(Input::from_analog(0.3, 0.0, 1.0, buttons::JUMP));
+                inputs[5] = Some(Input::from_analog(-0.3, 0.0, 1.0, 0));
+                w.step(&inputs);
+            }
+            for slot in [0, 5] {
+                let r = w.riders[slot].unwrap();
+                let spot = w.course().grid_spot(slot);
+                assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
+                assert!((r.pos.y - RUN.height(spot.x, spot.z)).abs() < 0.01);
+                assert!(r.race.racing && r.speed() == 0.0);
+            }
+        };
+        ride(&mut w, 60 * 20);
+        assert_eq!(w.race.phase, Phase::Grid);
+        w.start_intro();
+        ride(&mut w, race::tuning::INTRO_TICKS + 30);
+        assert_eq!(w.race.phase, Phase::Countdown);
+    }
+
+    #[test]
+    fn finishers_pull_up_in_the_finish_area_whatever_their_players_do() {
+        let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+        for slot in 0..MAX_RIDERS {
+            w.spawn(slot);
+        }
+        w.start_intro();
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        for _ in 0..race::tuning::INTRO_TICKS + race::tuning::COUNTDOWN_TICKS {
             w.step(&inputs);
         }
-        assert_eq!(w.race.phase, Phase::Countdown);
-        for slot in [0, 5] {
+        assert_eq!(w.race.phase, Phase::Racing);
+        // Everyone on the final pitch, the last of them far enough back to
+        // keep the race on while the others stand in the finish area.
+        let finish_gate = (w.course().gate_count() - 1) as u8;
+        for slot in 0..MAX_RIDERS {
+            let back = if slot == 7 {
+                600.0
+            } else {
+                30.0 + slot as f32 * 7.0
+            };
+            let lane = ((slot % 4) as f32 - 1.5) * 4.0;
+            place(&mut w, slot, RUN.finish_s - back, lane, 14.0 + slot as f32);
+            let r = w.riders[slot].as_mut().unwrap();
+            r.race.lap = 1;
+            r.race.next_gate = finish_gate;
+        }
+        let mut rng = crate::math::Pcg32::new(11);
+        let mut hopped = [false; MAX_RIDERS];
+        for _ in 0..60 * 15 {
+            for (slot, i) in inputs.iter_mut().enumerate() {
+                // Through the finish, players mash the stick and buttons.
+                *i = Some(if w.riders[slot].unwrap().race.finished() {
+                    Input::from_analog(
+                        rng.range(-1.0, 1.0),
+                        0.0,
+                        rng.range(-1.0, 1.0),
+                        (rng.next_u32() & 0xFF) as u8,
+                    )
+                } else {
+                    bot_input(&w, slot)
+                });
+            }
+            w.step(&inputs);
+            for (slot, r) in w.riders.iter().enumerate() {
+                let r = r.unwrap();
+                let (s, _) = RUN.project(r.pos.x, r.pos.z);
+                if !r.grounded && s > RUN.finish_s + 12.0 {
+                    hopped[slot] = true;
+                }
+            }
+        }
+        assert_eq!(
+            w.race.phase,
+            Phase::Racing,
+            "the last rider is still on the way"
+        );
+        let mut spots: Vec<(f32, f32)> = Vec::new();
+        for slot in 0..7 {
             let r = w.riders[slot].unwrap();
-            let spot = w.course().grid_spot(slot);
-            assert!((r.pos.x - spot.x).abs() < 0.01 && (r.pos.z - spot.z).abs() < 0.01);
-            assert!((r.pos.y - RUN.height(spot.x, spot.z)).abs() < 0.01);
-            assert!(r.race.racing && r.speed() == 0.0);
+            let (s, offset) = RUN.project(r.pos.x, r.pos.z);
+            assert!(r.race.finished(), "{slot}: {r:?}");
+            assert!(r.grounded && !r.bailing(), "{slot}: {r:?}");
+            assert!(r.speed() < 0.5, "{slot} still moving: {r:?}");
+            assert!(
+                (RUN.finish_s + 12.0..RUN.finish_s + 60.0).contains(&s),
+                "{slot} pulled up at {s}"
+            );
+            assert!(hopped[slot], "{slot} never hopped");
+            for (s2, o2) in &spots {
+                let apart = (s - s2).abs().max((offset - o2).abs());
+                assert!(apart > 2.0, "{slot} stopped on top of another rider");
+            }
+            spots.push((s, offset));
         }
     }
 }

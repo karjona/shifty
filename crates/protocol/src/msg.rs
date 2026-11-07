@@ -9,6 +9,9 @@
 //!   against an acknowledged baseline without changing the wire format.
 //! - Important events carry IDs and are resent in every snapshot until the
 //!   client acknowledges them.
+//! - Client state the server must not miss (the course loaded and on
+//!   screen) rides in every input packet, so it arrives with the next one
+//!   that gets through.
 
 use sim::input::Input;
 use sim::math::Vec3;
@@ -19,7 +22,7 @@ use sim::{CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 11;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -74,6 +77,10 @@ pub struct InputPacket {
     pub last_snapshot_tick: u32,
     /// Client clock in ms (wrapping), echoed back to measure round-trip time.
     pub client_time: u16,
+    /// The race of the room's plan whose course this screen has loaded and
+    /// shows, plus one (0 = none yet). The race waits on the grid until
+    /// every screen is ready.
+    pub ready: u8,
     /// Tick of `inputs[0]`; `inputs[i]` is for tick `first_tick + i`.
     pub first_tick: u32,
     pub inputs: Vec<Input>,
@@ -109,6 +116,7 @@ impl ClientMsg {
                 w.u16(p.event_ack);
                 w.u32(p.last_snapshot_tick);
                 w.u16(p.client_time);
+                w.u8(p.ready);
                 w.u32(p.first_tick);
                 w.u8(p.inputs.len() as u8);
                 for i in &p.inputs {
@@ -144,6 +152,7 @@ impl ClientMsg {
                 let event_ack = r.u16()?;
                 let last_snapshot_tick = r.u32()?;
                 let client_time = r.u16()?;
+                let ready = r.u8()?;
                 let first_tick = r.u32()?;
                 let n = r.u8()? as usize;
                 if n > MAX_INPUTS_PER_PACKET {
@@ -157,6 +166,7 @@ impl ClientMsg {
                     event_ack,
                     last_snapshot_tick,
                     client_time,
+                    ready,
                     first_tick,
                     inputs,
                 }))

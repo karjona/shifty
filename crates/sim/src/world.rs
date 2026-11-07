@@ -6,7 +6,7 @@ use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
 use crate::surface::{Surface, SurfaceKind};
-use crate::{jetski, snowboard};
+use crate::{bot, buoy, jetski, snowboard};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
@@ -39,10 +39,14 @@ pub struct Rider {
     pub air_spin: f32,
     /// Ticks left down after a bail (0 = riding).
     pub bail_ticks: u8,
-    /// Snowboard: ticks the jump has been loaded (crouched) for.
+    /// Snowboard: ticks the jump has been loaded (crouched) for. Jetski:
+    /// how far into a stunt the rider is (0 = riding, up to
+    /// `jetski::tuning::STUNT_FULL`).
     pub charge: u8,
     /// Snowboard: the grab of this jump (see `snowboard::grabs`; 0 = none
-    /// yet), and how long grabs have been held in it.
+    /// yet), and how long grabs have been held in it. Jetski: the stunt of
+    /// this jump (see `jetski::stunts`), and how long it has been held all
+    /// the way in.
     pub grab: u8,
     pub grab_ticks: u8,
     /// Snowboard: ticks left wobbling after a sketchy landing (0 = steady).
@@ -161,14 +165,15 @@ impl World {
         }
     }
 
-    /// Places a rider at its grid spot, at rest. Riders who arrive during
-    /// the countdown join the race; at any other time they ride free until
-    /// the next one.
+    /// Places a rider at its grid spot, at rest. Riders who arrive before
+    /// the start (on the grid, in the intro or the countdown) line up for
+    /// the race; during the race or its results they ride free until the
+    /// next one.
     pub fn spawn(&mut self, slot: usize) {
         let spot = self.course().grid_spot(slot);
         let y = self.rest_height(spot.x, spot.z);
         let mut r = Rider::at(spot, y);
-        if self.race.phase == Phase::Countdown {
+        if self.race.phase.before_start() {
             r.race = Progress::lined_up();
         }
         self.riders[slot] = Some(r);
@@ -178,10 +183,29 @@ impl World {
         self.riders[slot] = None;
     }
 
-    /// Starts a fresh warm-up from now: nobody is lined up, laps and gates
-    /// start over (meters are kept).
-    pub fn restart_warmup(&mut self) {
+    /// Starts the race over from now: everyone back on the grid, waiting
+    /// for the intro (see `start_intro`).
+    pub fn restart(&mut self) {
         self.race = Race::new(self.tick);
+        self.line_up();
+    }
+
+    /// Ends the wait on the grid (every screen is ready, or the wait is
+    /// over): the intro starts now, then the countdown and the race follow
+    /// by themselves. Only the server calls this; clients learn it from
+    /// snapshots.
+    pub fn start_intro(&mut self) {
+        if self.race.phase == Phase::Grid {
+            self.race = Race {
+                phase: Phase::Intro,
+                phase_tick: self.tick,
+            };
+        }
+    }
+
+    /// Takes every rider out of the race to ride free: not held on the grid,
+    /// and nothing they do counts (tools and tests).
+    pub fn ride_free(&mut self) {
         for r in self.riders.iter_mut().flatten() {
             r.race = Progress {
                 meter: r.race.meter,
@@ -190,18 +214,45 @@ impl World {
         }
     }
 
-    /// Advance one fixed tick. Riders without an input repeat their last one.
-    /// Returns what happened worth telling players about (buoys, laps...).
+    /// Whether a seat's rider rides on autopilot: out of the race, its
+    /// inputs come from `bot` instead of its player, and it passes through
+    /// riders still racing. That is a rider through the finish (for the
+    /// rest of the race), one who joined mid-race (until the next one), and
+    /// everyone on the results.
+    pub fn on_autopilot(&self, slot: usize) -> bool {
+        let Some(r) = &self.riders[slot] else {
+            return false;
+        };
+        match self.race.phase {
+            Phase::Racing => r.race.finished() || !r.race.racing,
+            Phase::Results => true,
+            Phase::Grid | Phase::Intro | Phase::Countdown => false,
+        }
+    }
+
+    /// Advance one fixed tick. Riders without an input repeat their last
+    /// one; riders on autopilot ignore theirs. Returns what happened worth
+    /// telling players about (buoys, laps...).
     pub fn step(&mut self, inputs: &Inputs) -> Vec<SimEvent> {
         let tick = self.tick;
         let next = tick.wrapping_add(1);
         let course = self.course();
         let mut events = Vec::new();
         let mut s_prev = [0.0f32; MAX_RIDERS];
+        let mut auto = [false; MAX_RIDERS];
+        let mut auto_inputs: Inputs = [None; MAX_RIDERS];
+        for slot in 0..MAX_RIDERS {
+            if self.on_autopilot(slot) {
+                auto[slot] = true;
+                auto_inputs[slot] = Some(bot::bot_input(self, slot));
+            }
+        }
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             if let Some(r) = rider {
                 s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
-                let input = inputs[slot].map_or(r.last_input, Input::sanitized);
+                let input = auto_inputs[slot]
+                    .or(inputs[slot])
+                    .map_or(r.last_input, Input::sanitized);
                 let setup = self.setups[slot].sanitized();
                 let landing = match course.line {
                     Line::Stadium(_) => {
@@ -214,10 +265,11 @@ impl World {
                 }
             }
         }
-        self.resolve_collisions();
-        let holding = self.race.phase == Phase::Countdown;
+        self.resolve_collisions(&auto);
+        let holding = self.race.phase.before_start();
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
+            buoy::bump(r, course, &self.surface, next);
             let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
             if course.sport == Sport::Snowboard
                 && impact.is_some_and(|i| {
@@ -296,27 +348,24 @@ impl World {
             return;
         }
         let next = match self.race.phase {
-            Phase::Warmup => Phase::Countdown,
+            Phase::Grid => Phase::Intro,
+            Phase::Intro => Phase::Countdown,
             Phase::Countdown => Phase::Racing,
             Phase::Racing => Phase::Results,
-            Phase::Results => Phase::Warmup,
+            Phase::Results => Phase::Grid,
         };
         self.race = Race {
             phase: next,
             phase_tick: self.tick,
         };
-        match next {
-            Phase::Countdown => self.line_up(),
-            Phase::Warmup => {
-                for r in self.riders.iter_mut().flatten() {
-                    r.race.racing = false;
-                }
-            }
-            _ => {}
+        // The countdown starts everyone clean from their spot, whatever they
+        // did while held.
+        if matches!(next, Phase::Grid | Phase::Countdown) {
+            self.line_up();
         }
     }
 
-    /// Everyone to the grid for a new race.
+    /// Everyone to the grid, lined up for the race.
     fn line_up(&mut self) {
         let course = self.course();
         for slot in 0..MAX_RIDERS {
@@ -370,11 +419,15 @@ impl World {
     }
 
     /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
-    /// slot order so every machine gets the same result.
-    fn resolve_collisions(&mut self) {
+    /// slot order so every machine gets the same result. Riders on autopilot
+    /// (`auto`) only bump each other.
+    fn resolve_collisions(&mut self, auto: &[bool; MAX_RIDERS]) {
         let radius = self.course().sport.rider_radius();
         for i in 0..MAX_RIDERS {
             for j in (i + 1)..MAX_RIDERS {
+                if auto[i] != auto[j] {
+                    continue;
+                }
                 let (Some(a), Some(b)) = (self.riders[i], self.riders[j]) else {
                     continue;
                 };

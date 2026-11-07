@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { decodePng, distinctColours } from "./png.ts";
 
 const joined = (p: Page) => p.waitForFunction(() => window.__shifty?.phase() === 1, null, { timeout: 20_000 });
+/** The race is on: past the grid, the intro and the countdown (`sim::Phase::Racing`). */
+const racing = (p: Page) => p.waitForFunction(() => window.__shifty.race().phase === 2, null, { timeout: 30_000 });
 
 /**
  * How far Bea's view of Ana is from where Ana really is, in metres (on the
@@ -42,10 +44,12 @@ test("two players race in one room", async ({ browser }) => {
     .poll(() => a.evaluate(() => Object.values(window.__shifty.names()).toSorted()))
     .toEqual(["Ana", "Bea", "🤖 Bot 7", "🤖 Bot 8"]);
   await expect.poll(() => b.evaluate(() => window.__shifty.riders().length)).toBe(4);
-  // The first player in starts a warm-up before the race on the oval.
+  // Everyone lines up on the grid; once every screen is ready, the intro
+  // and the countdown run (riders held still), then the race on the oval.
   const race = await a.evaluate(() => window.__shifty.race());
-  expect(race.phase).toBe(0);
+  expect([0, 4, 1]).toContain(race.phase);
   expect(race.laps).toBe(3);
+  await Promise.all([racing(a), racing(b)]);
 
   // Ana drives down the first straight; Bea draws her in the present
   // (predicted), so both screens agree on where Ana is right now.
@@ -87,6 +91,7 @@ test("two players ride the winter mountain", async ({ browser }) => {
   const a = await open("Ana");
   const b = await open("Bea");
   expect(await a.evaluate(() => window.__shifty.sport())).toBe("snow");
+  await Promise.all([racing(a), racing(b)]);
   const top = await a.evaluate(() => window.__shifty.riders().find((r) => r.isMe)!);
 
   // Ana tucks down the start ramp; Bea sees her where she is.

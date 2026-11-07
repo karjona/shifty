@@ -61,3 +61,24 @@ void test("a ticket carries the rider's appearance and setups", async () => {
   );
   assert.equal(ticket.token, RIDER_TOKEN);
 });
+
+/** A Tilt for three people; `token.rs` verifies this one too. */
+const HUMANS_TOKEN =
+  "eyJ2IjoxLCJhdWQiOiJyYWNlLmV4YW1wbGU6NDQzIiwicm9vbSI6Im1fdGVzdCIsInBpZCI6InVzZXJfMSIsIm5hbWUiOiJMb3JkIEt5bGlhbiMwMDQyIiwiZXhwIjoxMDAwNjAwLCJpYXQiOjEwMDAwMDAsImJvdHMiOjUsInN1cmZhY2UiOjEsImNvdXJzZSI6MCwiZXZlbnRzIjpbMCwxXSwiaHVtYW5zIjozfQ.GisI8PPr26yGWDatniD0Cfb_Sd978ZlgfunycDWm2rcxn--37s3Jur7AEo_VYNzipROuAHDJLHiwtYtVpllMBQ";
+
+void test("a ticket tells the race server how many people are coming", async () => {
+  const ticket = await mintTicket(
+    SEED,
+    {
+      server: { addr: "race.example:443", version: "1.2.3", certHashes: [] },
+      room: "m_test",
+      pid: "user_1",
+      name: "Lord Kylian#0042",
+      event: "gp",
+      bots: 5,
+      humans: 3,
+    },
+    1_000_000 * 1000,
+  );
+  assert.equal(ticket.token, HUMANS_TOKEN);
+});

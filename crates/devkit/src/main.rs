@@ -2,8 +2,8 @@
 //!
 //! ```text
 //! devkit determinism [ticks]            native determinism hash
-//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--surface 1] [--course 0] [--pid p]
-//! devkit bots [--server localhost:4433] [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0]
+//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--humans 0] [--surface 1] [--course 0] [--pid p]
+//! devkit bots [--server localhost:4433] [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0] [--humans 0] [--loading 0]
 //! ```
 //!
 //! Tokens are signed with the dev lobby key in `.dev/lobby-key.json` (created
@@ -110,6 +110,7 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         exp: now_unix() + 10 * 60,
         iat: now_unix(),
         bots: m.get("bots").map_or(Ok(0), |b| b.parse())?,
+        humans: m.get("humans").map_or(Ok(0), |b| b.parse())?,
         surface: m.get("surface").map_or(Ok(1), |b| b.parse())?,
         course: m.get("course").map_or(Ok(0), |b| b.parse())?,
         events: m.get("events").map_or(Ok(vec![]), |list| {
@@ -149,7 +150,9 @@ async fn main() -> Result<()> {
 }
 
 /// Headless players: real `client_core::Client`s over real WebTransport,
-/// with optional artificial lag and loss. Prints their netcode stats.
+/// with optional artificial lag and loss. They have nothing to load, so
+/// they are ready for every race at once, or after `--loading` seconds (a
+/// slow screen holding the grid). Prints their netcode stats.
 async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
     let server = m
         .get("server")
@@ -166,6 +169,7 @@ async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
     let seconds: u64 = m.get("seconds").map_or(Ok(20), |c| c.parse())?;
     let lag_ms: f64 = m.get("lag-ms").map_or(Ok(0.0), |c| c.parse())?;
     let loss: f64 = m.get("loss").map_or(Ok(0.0), |c| c.parse())?;
+    let loading: f64 = m.get("loading").map_or(Ok(0.0), |c| c.parse())?;
     let key = load_dev_key()?;
     let mut tasks = Vec::new();
     for i in 0..count {
@@ -176,7 +180,7 @@ async fn run_bots(m: &HashMap<String, String>) -> Result<()> {
             .await
             .with_context(|| format!("connecting to {url}"))?;
         tasks.push(tokio::spawn(async move {
-            run_bot(i, session, token, seconds, lag_ms, loss).await
+            run_bot(i, session, token, seconds, lag_ms, loss, loading).await
         }));
     }
     let mut failed = false;
@@ -218,6 +222,7 @@ async fn run_bot(
     seconds: u64,
     lag_ms: f64,
     loss: f64,
+    loading: f64,
 ) -> Result<()> {
     // Datagrams in, on their own task; this loop owns the client.
     let (in_tx, mut rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
@@ -251,6 +256,8 @@ async fn run_bot(
                 }
                 let steer = ((now / 900.0 + i as f64).sin() * 0.7) as f32;
                 let lean = ((now / 1300.0 + i as f64).cos() * 0.8) as f32;
+                let loaded = now >= loading * 1000.0;
+                client.set_ready(loaded.then(|| client.event_index()));
                 client.update(now, Input::from_analog(steer, 1.0, lean, 0));
                 for p in client.take_outgoing() {
                     if f64::from(rng.next_f32()) >= loss {
@@ -274,8 +281,8 @@ async fn run_bot(
             _ = report.tick() => {
                 let s = client.stats();
                 println!(
-                    "bot {i}: {:?} slot={:?} rtt={:.0}ms lead={} scale={:.3} tick={} snaps={} mispredict={} lastErr={:.3}m resyncs={} snapBytes={}",
-                    client.phase(), client.slot(), s.rtt_ms, s.input_lead, s.time_scale, s.predicted_tick,
+                    "bot {i}: {:?} slot={:?} race={:?} rtt={:.0}ms lead={} scale={:.3} tick={} snaps={} mispredict={} lastErr={:.3}m resyncs={} snapBytes={}",
+                    client.phase(), client.slot(), client.race().phase, s.rtt_ms, s.input_lead, s.time_scale, s.predicted_tick,
                     s.snapshots, s.mispredictions, s.last_correction_m, s.resyncs, s.last_snapshot_bytes
                 );
             }

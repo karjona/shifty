@@ -7,7 +7,7 @@ export const BUTTON_TRICK = 1;
 export const BUTTON_ROLL = 2;
 /** Snowboard: hold to crouch, let go to pop. */
 export const BUTTON_JUMP = 4;
-/** Snowboard, in the air: grab the board (the stick picks the grab). */
+/** In the air: grab the board, or on a jetski hold a stunt (the stick picks which as it goes down). */
 export const BUTTON_GRAB = 8;
 
 export interface FrameInput {
@@ -40,9 +40,13 @@ export class InputReader {
   sport: "jetski" | "snow" = "jetski";
   /** Test hook: when set, overrides real input. */
   forced: Partial<FrameInput> | null = null;
+  /** The camera button (Y / △ on a pad, P on the keyboard): went down since last asked, and is down on the pad. */
+  private cameraPressed = false;
+  private cameraHeld = false;
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement) return;
+    if (e.code === "KeyP" && !e.repeat) this.cameraPressed = true;
     if (["Space", "ShiftLeft", "ShiftRight", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
       e.preventDefault();
     this.keys.add(e.code);
@@ -60,6 +64,18 @@ export class InputReader {
     removeEventListener("keydown", this.onKeyDown);
     removeEventListener("keyup", this.onKeyUp);
     removeEventListener("blur", this.onBlur);
+  }
+
+  /** Whether the camera button went down since the last call (once a frame). */
+  takeCamera(): boolean {
+    let held = false;
+    for (const pad of navigator.getGamepads()) {
+      if (pad?.connected && pad.buttons[3]?.pressed === true) held = true;
+    }
+    const pressed = this.cameraPressed || (held && !this.cameraHeld);
+    this.cameraHeld = held;
+    this.cameraPressed = false;
+    return pressed;
   }
 
   read(dt: number): FrameInput {
@@ -89,6 +105,7 @@ export class InputReader {
       };
     }
     // WASD drives; the arrows steer and lean (two hands, like a stick).
+    // Space spins and flips, Shift barrel-rolls, E or K stunts.
     const steer = (k("KeyD", "ArrowRight") ? 1 : 0) - (k("KeyA", "ArrowLeft") ? 1 : 0);
     const lean = (k("ArrowUp") ? 1 : 0) - (k("ArrowDown") ? 1 : 0);
     this.keySteer = ramp(this.keySteer, steer, dt);
@@ -97,7 +114,10 @@ export class InputReader {
       steer: this.keySteer,
       throttle: (k("KeyW") ? 1 : 0) - (k("KeyS") ? 1 : 0),
       lean: this.keyLean,
-      buttons: (k("Space") ? BUTTON_TRICK : 0) | (k("ShiftLeft", "ShiftRight") ? BUTTON_ROLL : 0),
+      buttons:
+        (k("Space") ? BUTTON_TRICK : 0) |
+        (k("ShiftLeft", "ShiftRight") ? BUTTON_ROLL : 0) |
+        (k("KeyE", "KeyK") ? BUTTON_GRAB : 0),
     };
   }
 
@@ -121,7 +141,9 @@ export class InputReader {
         if (!active && this.lastDevice === "keyboard") return null;
         return { steer, throttle: 0, lean: Math.max(-1, Math.min(1, lean + rt - lt)), buttons };
       }
-      const buttons = (held(0) ? BUTTON_TRICK : 0) | (held(1) ? BUTTON_ROLL : 0);
+      // A or RB spins and flips (as on the board), X barrel-rolls, B or LB stunts (the board's grab).
+      const buttons =
+        (held(0) || held(5) ? BUTTON_TRICK : 0) | (held(2) ? BUTTON_ROLL : 0) | (held(1) || held(4) ? BUTTON_GRAB : 0);
       const active = steer !== 0 || lean !== 0 || rt > 0.05 || lt > 0.05 || buttons !== 0;
       if (!active && this.lastDevice === "keyboard") return null;
       return { steer, throttle: rt - lt, lean, buttons };

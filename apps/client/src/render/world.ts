@@ -25,9 +25,9 @@ export interface RiderView {
   vx: number;
   vy: number;
   vz: number;
-  /** Snowboard: how loaded the jump is (0-1). */
+  /** Snowboard: how loaded the jump is (0-1). Jetski: how far into the stunt the rider is (0-1). */
   charge: number;
-  /** Snowboard: the grab being held (0 = none). */
+  /** Snowboard: the grab being held (0 = none). Jetski: the stunt (0 = none). */
   grab: number;
   /** The stick: lean (+ = forward/tuck, - = back) and steer. */
   lean: number;
@@ -85,6 +85,22 @@ export interface CameraTuning {
   tilt: number;
 }
 
+/**
+ * A camera placed by hand (the intro's fly-over, the television cameras),
+ * blended with the chase camera behind your rider: `chase` 0 is all the
+ * shot, 1 all the chase.
+ */
+export interface CameraShot {
+  eye: THREE.Vector3;
+  look: THREE.Vector3;
+  fov: number;
+  chase: number;
+  /** Horizon tilt (rad). */
+  roll?: number;
+  /** The rider the shot is about, if not yours: shadows fall round it. */
+  focus?: THREE.Vector3;
+}
+
 /** What surrounds the riders: sky, light, ground or water, scenery and effects. */
 export interface Environment {
   readonly group: THREE.Group;
@@ -135,12 +151,8 @@ const REFLECT_FAR = 30;
 const SHADOW_REACH = 45;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
-
-/** Shows or hides an element, touching the page only when that changes. */
-function setDisplay(el: HTMLElement, on: boolean): void {
-  const display = on ? "block" : "none";
-  if (el.style.display !== display) el.style.display = display;
-}
+/** The field of view (degrees) the distances above are for: a narrower one brings riders that much closer. */
+const DETAIL_FOV = 55;
 
 /** An angle wrapped to (-π, π]. */
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -160,14 +172,12 @@ export class World {
   private sun: THREE.DirectionalLight;
   private hemi: THREE.HemisphereLight;
   private env: Environment | null = null;
-  private riders = new Map<number, { model: RiderModel; label: HTMLDivElement }>();
   private models = new Map<number, RiderModel>();
   private camLook = new THREE.Vector3();
   private frustum = new THREE.Frustum();
   private viewProjection = new THREE.Matrix4();
   /** Around a rider: the figure, and the shadow it throws. */
   private bounds = new THREE.Sphere(new THREE.Vector3(), RIDER_REACH);
-  private tag = new THREE.Vector3();
   private seen = new Set<number>();
   /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
@@ -177,6 +187,7 @@ export class World {
   private camTilt = 0;
   private camLookY = 0;
   private camFloor = 0;
+  private camFov = 55;
   /** Landing jolt: a dip on a spring (m, m/s) and a shake that dies away. */
   private camDip = 0;
   private camDipV = 0;
@@ -185,14 +196,12 @@ export class World {
   private camWasBailing = false;
   private camLastVy = 0;
   private camReady = false;
-  private labels: HTMLElement;
   /** The frame: the scene, inked. */
   readonly cel: CelPost;
   /** What each seat's rider looks like, as told by the race server. */
   private appearances = new Map<number, Appearance | null>();
 
-  constructor(container: HTMLElement, labels: HTMLElement) {
-    this.labels = labels;
+  constructor(container: HTMLElement) {
     // Dev: `?webgl` forces the WebGL2 fallback (browsers without WebGPU).
     const webgl = import.meta.env.DEV && devParams.has("webgl");
     // No multisampling: the frame is drawn into the ink pass's targets, and FXAA smooths it.
@@ -286,12 +295,10 @@ export class World {
   setAppearance(slot: number, appearance: Appearance | null): void {
     if (JSON.stringify(this.appearances.get(slot) ?? null) === JSON.stringify(appearance)) return;
     this.appearances.set(slot, appearance);
-    const r = this.riders.get(slot);
+    const r = this.models.get(slot);
     if (r) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
-      this.riders.delete(slot);
+      this.scene.remove(r.mesh);
+      r.dispose?.();
       this.models.delete(slot);
     }
   }
@@ -304,12 +311,10 @@ export class World {
     env.light(this.scene, this.sun, this.hemi);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();
-    for (const r of this.riders.values()) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
+    for (const r of this.models.values()) {
+      this.scene.remove(r.mesh);
+      r.dispose?.();
     }
-    this.riders.clear();
     this.models.clear();
     this.camReady = false;
   }
@@ -318,12 +323,10 @@ export class World {
   clearEnvironment(): void {
     if (this.env) this.scene.remove(this.env.group);
     this.env = null;
-    for (const r of this.riders.values()) {
-      this.scene.remove(r.model.mesh);
-      r.model.dispose?.();
-      r.label.remove();
+    for (const r of this.models.values()) {
+      this.scene.remove(r.mesh);
+      r.dispose?.();
     }
-    this.riders.clear();
     this.models.clear();
     this.camReady = false;
   }
@@ -364,26 +367,24 @@ export class World {
   /** Puts these seats' riders in the scene ahead of drawing them (so they warm up with the course). */
   addRiders(slots: number[]): RiderModel[] {
     const env = this.env;
-    return env ? slots.map((slot) => this.rider(env, slot).model) : [];
+    return env ? slots.map((slot) => this.rider(env, slot)) : [];
   }
 
-  private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
-    let r = this.riders.get(slot);
-    if (r) return r;
-    const model = env.makeRider(slot, this.appearances.get(slot) ?? null);
+  private rider(env: Environment, slot: number): RiderModel {
+    let model = this.models.get(slot);
+    if (model) return model;
+    model = env.makeRider(slot, this.appearances.get(slot) ?? null);
     this.scene.add(model.mesh);
-    const label = document.createElement("div");
-    label.className = "label";
-    label.style.display = "none";
-    this.labels.append(label);
-    r = { model, label };
-    this.riders.set(slot, r);
     this.models.set(slot, model);
-    return r;
+    return model;
   }
 
-  /** Draw a frame. `tick` is the fractional sim tick to show (water, snowfall). */
-  render(riders: RiderView[], names: Map<number, string>, tick: number, dt: number, nextBuoy: number | null): void {
+  /**
+   * Draw a frame. `tick` is the fractional sim tick to show (water,
+   * snowfall); `shot` places the camera by hand instead of (or on its way
+   * into) the chase camera.
+   */
+  render(riders: RiderView[], tick: number, dt: number, nextBuoy: number | null, shot: CameraShot | null = null): void {
     const env = this.env;
     if (!env) {
       this.draw();
@@ -392,38 +393,26 @@ export class World {
     const t = tick * DT;
     const me = riders.find((r) => r.isMe);
     if (me) this.followCamera(env, me, t, dt);
+    if (shot) this.applyShot(shot, me);
     this.camera.updateMatrixWorld();
     this.frustum.setFromProjectionMatrix(
       this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
     );
     this.seen.clear();
+    const focus = shot?.focus ?? (me ? this.focusAt.set(me.x, me.y, me.z) : null);
     for (const r of riders) {
       this.seen.add(r.slot);
-      const { model, label } = this.rider(env, r.slot);
+      const model = this.rider(env, r.slot);
       model.update(r, dt);
       const shown = r.isMe || this.inView(model.mesh.position);
       model.mesh.visible = shown;
       if (shown) {
-        this.detail(model.mesh, r, me);
+        this.detail(model.mesh, r, focus);
         model.mesh.updateMatrixWorld();
       }
-      // Name tags for the other riders only.
-      const name = names.get(r.slot) ?? `#${r.slot + 1}`;
-      if (label.textContent !== name) label.textContent = name;
-      const p = this.tag.copy(model.mesh.position);
-      p.y += 2.2;
-      p.project(this.camera);
-      const visible = shown && !r.isMe && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
-      setDisplay(label, visible);
-      if (visible) {
-        label.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
-      }
     }
-    for (const [slot, r] of this.riders) {
-      if (!this.seen.has(slot)) {
-        r.model.mesh.visible = false;
-        setDisplay(r.label, false);
-      }
+    for (const [slot, model] of this.models) {
+      if (!this.seen.has(slot)) model.mesh.visible = false;
     }
 
     env.update({
@@ -439,6 +428,37 @@ export class World {
     this.draw();
   }
 
+  private focusAt = new THREE.Vector3();
+  private shotEye = new THREE.Vector3();
+  private shotLook = new THREE.Vector3();
+  private shotUp = new THREE.Vector3();
+  private shotRider = new THREE.Vector3();
+
+  /** Moves the camera from the chase camera's place toward a shot's (see `CameraShot`). */
+  private applyShot(shot: CameraShot, me: RiderView | undefined): void {
+    const k = me ? Math.min(1, Math.max(0, shot.chase)) : 0;
+    const cam = this.camera;
+    const eye = this.shotEye.copy(shot.eye).lerp(cam.position, k);
+    const look = this.shotLook.copy(shot.look).lerp(this.camLook, k);
+    const up = this.shotUp.set(0, 1, 0);
+    if (shot.roll) {
+      // Lean the up vector across the view: right is the view direction crossed with up.
+      const across = this.shotRider.copy(look).sub(eye).cross(up).normalize();
+      up.multiplyScalar(Math.cos(shot.roll)).addScaledVector(across, Math.sin(shot.roll));
+    }
+    up.lerp(cam.up, k).normalize();
+    cam.position.copy(eye);
+    cam.up.copy(up);
+    cam.lookAt(look);
+    this.camLook.copy(look);
+    const fov = shot.fov + (this.camFov - shot.fov) * k;
+    if (Math.abs(fov - cam.fov) > 0.01) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+    this.aimSun(this.sunAt.copy(shot.look).lerp(me ? this.shotRider.set(me.x, me.y, me.z) : shot.look, k));
+  }
+
   /** Whether a rider at `p` (or the shadow it casts) can be in the picture. */
   private inView(p: THREE.Vector3): boolean {
     this.bounds.center.copy(p);
@@ -449,15 +469,15 @@ export class World {
   /**
    * How much of a rider is drawn: the outline only close enough to show
    * (the ink pass draws the silhouette further away), a reflection only
-   * close by, and a shadow only inside the sun's shadow box around the
-   * camera's rider.
+   * close by (as it looks: a long lens brings riders closer), and a shadow
+   * only inside the sun's shadow box around the rider the camera is on.
    */
-  private detail(mesh: THREE.Object3D, r: RiderView, me: RiderView | undefined): void {
-    const distance = this.camera.position.distanceTo(mesh.position);
+  private detail(mesh: THREE.Object3D, r: RiderView, focus: THREE.Vector3 | null): void {
+    const zoom = Math.min(1, Math.tan((this.camera.fov * Math.PI) / 360) / Math.tan((DETAIL_FOV * Math.PI) / 360));
+    const distance = this.camera.position.distanceTo(mesh.position) * zoom;
     const far = distance > OUTLINE_FAR;
     const reflected = distance < REFLECT_FAR;
-    const focus = me ?? r;
-    const shadow = Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
+    const shadow = !focus || Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
     mesh.traverse((o) => {
       const data = o.userData as { outline?: boolean; castsShadow?: boolean; reflects?: boolean };
       if (data.outline) o.visible = !far;
@@ -490,6 +510,7 @@ export class World {
       this.camBack = c.back;
       this.camLookY = me.y;
       this.camFloor = env.ground(me.x, me.z, t) + c.clearance;
+      this.camFov = c.fov;
       this.camReady = true;
     }
     this.jolt(me, dt);
@@ -553,8 +574,9 @@ export class World {
     }
     this.camera.lookAt(this.camLook);
     const fov = c.fov + Math.min(1, me.speed / env.topSpeed) * c.fovSpeed + this.camAir * c.fovAir;
-    if (Math.abs(fov - this.camera.fov) > 0.05) {
-      this.camera.fov += (fov - this.camera.fov) * (1 - Math.exp(-dt * 3));
+    this.camFov += (fov - this.camFov) * (1 - Math.exp(-dt * 3));
+    if (Math.abs(this.camFov - this.camera.fov) > 0.05) {
+      this.camera.fov = this.camFov;
       this.camera.updateProjectionMatrix();
     }
     this.aimSun(this.sunAt.set(me.x, me.y, me.z));

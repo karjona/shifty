@@ -205,7 +205,6 @@ pub struct RampSurface {
 }
 
 pub mod tuning {
-    pub const BUOY_RADIUS: f32 = 0.6;
     /// How far a ramp's low edge sits below the water.
     pub const RAMP_SINK: f32 = 0.3;
     /// Below the ramp deck by more than this, you hit its side instead.
@@ -218,8 +217,6 @@ pub mod tuning {
     pub const SLIDE_FRICTION: f32 = 0.5;
     pub const SOFT_WALL: f32 = 0.6;
     pub const RIDER_RADIUS: f32 = 0.9;
-    /// Riders this far above the water clear buoys.
-    pub const BUOY_HEIGHT: f32 = 1.4;
 }
 
 use tuning::*;
@@ -525,8 +522,8 @@ impl Course {
     }
 
     /// Keeps a body at `pos` with velocity `vel` on the course: out of the
-    /// breakwater, the buoys, the land and the sides of the ramps, inside the
-    /// outer limit, and (on a run) between its edges and clear of what stands
+    /// breakwater, the land and the sides of the ramps, inside the outer
+    /// limit, and (on a run) between its edges and clear of what stands
     /// on it. Returns the hardest impact (speed into the wall, m/s) on any
     /// contact.
     pub fn collide(
@@ -576,23 +573,6 @@ impl Course {
                         note(slide(pos, vel, nx, nz, min - dist));
                     }
                 }
-            }
-        }
-
-        for i in 0..self.buoys.len() {
-            let (bx, bz) = self.buoy_pos(i);
-            let dx = pos.x - bx;
-            let dz = pos.z - bz;
-            let min = BUOY_RADIUS + radius;
-            let dd = dx * dx + dz * dz;
-            if dd < min * min && pos.y < surface.height(bx, bz, tick) + BUOY_HEIGHT {
-                let dist = sqrt(dd);
-                let (nx, nz) = if dist > 1e-4 {
-                    (dx / dist, dz / dist)
-                } else {
-                    (1.0, 0.0)
-                };
-                note(push(pos, vel, nx, nz, min - dist));
             }
         }
 

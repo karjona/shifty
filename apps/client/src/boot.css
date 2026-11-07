@@ -1,6 +1,6 @@
 /* The page before the game is up: the fonts start loading with the page,
    and the boot screen (paper, the wordmark, its axis rocking) covers
-   everything until the first backdrop is ready to draw (see game/loading.ts). */
+   everything until the first backdrop is ready to draw (see loading.ts). */
 @import "@fontsource-variable/archivo/wdth.css";
 @import "@fontsource-variable/archivo/wdth-italic.css";
 
@@ -47,16 +47,52 @@
   letter-spacing: -0.02em;
 }
 
-#boot .boot-loading {
+/* The loading sign: in the bottom right corner, over everything, whenever
+   something loads (see loading.ts). Laid out on the 1920×1080 canvas, in the
+   margin under the screens' columns. */
+#loading {
   position: fixed;
-  right: 4vw;
-  bottom: 5.5vh;
-  font-size: 18px;
+  right: 72px;
+  bottom: 12px;
+  z-index: 110;
+  zoom: var(--ui-zoom, 1);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 36px;
+  padding: 0 16px 0 14px;
+  background: #f3ede1;
+  color: #1d1b17;
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.2),
+    0 12px 32px rgb(24 16 8 / 0.24),
+    0 2px 6px rgb(24 16 8 / 0.12);
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
   font-weight: 650;
   font-stretch: 112%;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #5f5a51;
+  white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 200ms ease,
+    visibility 0s 200ms;
+}
+#loading.on {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 200ms ease;
+}
+#loading::before {
+  content: "";
+  width: 5px;
+  height: 20px;
+  background: var(--accent, #2b3fd0);
+  animation: axis-rock 0.7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
 }
 
 /* Something loading: the axis rocks from 23.4° one way to 23.4° the other. */

@@ -1,10 +1,13 @@
-// Race HUD: phase banner (warm-up, countdown, results), lap / position /
-// time, the speed meter (summer) or trick score (winter), split times at
-// checkpoints and the finish (against the first rider through), and short
-// popups for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the
-// state comes from the predicted world every frame.
+// Race HUD: phase banner (countdown), lap / position / time, trick score,
+// the speed meter (summer), split times at checkpoints and the finish
+// (against the first rider through), and short popups for buoys,
+// checkpoints, laps, tricks and the finish. Plain DOM: the state comes from
+// the predicted world every frame. The standings and the results are the
+// scoreboard's (results.ts).
 
 import { messages } from "../i18n/index.ts";
+import { NameTags } from "./tags.ts";
+import { trickName } from "./tricks.ts";
 
 export interface RaceView {
   phase: number;
@@ -24,12 +27,14 @@ export interface RaceView {
   misses: number;
   tickHz: number;
   wrongWay: boolean;
-  /** Trick points this race (winter). */
+  /** Trick points this race. */
   points: number;
   /** Gates on the course (start, buoys or checkpoints, finish). */
   gates: number;
   /** Raced for laps (or one run down). */
   looped: boolean;
+  /** Your rider rides on autopilot: through the finish, joined midway, or on the results. */
+  autopilot: boolean;
 }
 
 export interface RaceEvent {
@@ -46,6 +51,7 @@ export interface RaceEvent {
   flip?: number;
   roll?: number;
   grab?: number;
+  stunt?: number;
   grabTicks?: number;
   points?: number;
   /** A trick landed badly (half points). */
@@ -70,30 +76,12 @@ export interface StandingView {
   points: number;
 }
 
-const WARMUP = 0;
 const COUNTDOWN = 1;
 const RACING = 2;
-const RESULTS = 3;
 
 /** 1st, 1.º, 1r: in the player's language. */
 export function ordinal(n: number): string {
   return messages().hud.ordinal(n);
-}
-
-const TIMES = ["", "", "Double ", "Triple ", "Quad "];
-const times = (k: number) => TIMES[Math.min(Math.abs(k), 4)] ?? "";
-
-const GRABS = ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"];
-
-/** "Backflip 360", "540 Melon", "Double barrel roll"... from signed rotation counts (spin in half turns) and a grab. */
-export function trickName(spin: number, flip: number, roll: number, grab = 0): string {
-  const parts: string[] = [];
-  if (flip !== 0) parts.push(`${times(flip)}${flip > 0 ? "backflip" : "frontflip"}`);
-  if (roll !== 0) parts.push(`${times(roll)}barrel roll`);
-  if (spin !== 0) parts.push(String(Math.abs(spin) * 180));
-  if (grab > 0) parts.push(GRABS[grab] ?? "Grab");
-  const name = parts.join(" ");
-  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 export function formatTime(ticks: number, hz: number): string {
@@ -114,27 +102,28 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, id: string, parent: H
 }
 
 export class Hud {
+  /** The other riders' name tags (set `tags.hidden` to take them off). */
+  readonly tags: NameTags;
   private banner: HTMLDivElement;
   private info: HTMLDivElement;
   private speed: HTMLDivElement;
   private meter: HTMLDivElement;
+  private gauges: HTMLDivElement;
   private popups: HTMLDivElement;
-  private results: HTMLDivElement;
-  private lastResultsKey = "";
   /** Who passed each checkpoint (and the finish) in this race, and when (race ticks). */
   private passes = new Map<string, { slot: number; ticks: number }[]>();
   private passesRace = -1;
   private split: { html: string; until: number } | null = null;
 
   constructor(root: HTMLElement) {
+    this.tags = new NameTags(root);
     this.banner = el("div", "banner", root);
     this.info = el("div", "race-info", root);
     const bottom = el("div", "hud", root);
+    this.gauges = bottom;
     this.speed = el("div", "speed", bottom);
     this.meter = el("div", "meter", bottom);
     this.popups = el("div", "popups", root);
-    this.results = el("div", "results", root);
-    this.results.hidden = true;
   }
 
   /** Show a short message in the middle of the screen. */
@@ -147,12 +136,18 @@ export class Hud {
     while (this.popups.childElementCount > 4) this.popups.firstElementChild?.remove();
   }
 
-  /** Popups for my own race events, and split times from everyone's. */
+  /** The speed and the meter (off while the race is on television). */
+  showGauges(on: boolean): void {
+    const display = on ? "" : "none";
+    if (this.gauges.style.display !== display) this.gauges.style.display = display;
+  }
+
+  /** Popups for my own race events (none on autopilot, where nothing counts), and split times from everyone's. */
   events(events: RaceEvent[], mySlot: number, race: RaceView): void {
     const m = messages().hud;
     for (const e of events) {
       if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
-      if (e.slot !== mySlot) continue;
+      if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish")) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "✓", "good");
         else this.popup(m.missedBuoy, "bad");
@@ -165,8 +160,14 @@ export class Hud {
       } else if (e.kind === "finish") {
         this.popup(m.finish(ordinal(race.place)), "big");
       } else if (e.kind === "trick") {
-        const name = trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0, e.grab ?? 0);
-        this.popup(race.looped ? `${name}!` : `${name}  +${e.points ?? 0}`, "big");
+        const name = trickName({
+          spin: e.spin ?? 0,
+          flip: e.flip ?? 0,
+          roll: e.roll ?? 0,
+          grab: e.grab ?? 0,
+          stunt: e.stunt ?? 0,
+        });
+        this.popup(`${name}  +${e.points ?? 0}`, "big");
         if (e.sketchy) this.popup(m.sketchy, "bad");
       } else if (e.kind === "sketchy") {
         this.popup(`${m.sketchy}!`, "bad");
@@ -203,25 +204,16 @@ export class Hud {
     this.split = { html, until: performance.now() + SPLIT_MS };
   }
 
-  update(
-    race: RaceView,
-    speedKmh: number,
-    airborne: boolean,
-    standings: () => StandingView[],
-    names: Map<number, string>,
-    gp: GrandPrixView | null = null,
-  ): void {
+  update(race: RaceView, speedKmh: number, airborne: boolean, gp: GrandPrixView | null = null): void {
     const m = messages().hud;
     const hz = race.tickHz;
     const left = Math.max(0, race.phaseLength - race.phaseTicks);
     let banner = "";
-    if (race.phase === WARMUP) banner = m.warmup(Math.ceil(left / hz));
-    else if (race.phase === COUNTDOWN) {
+    if (race.phase === COUNTDOWN) {
       const n = Math.ceil(left / hz);
       banner = n > 3 ? m.getReady : String(n);
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = m.go;
-    else if (race.phase === RACING && !race.racing) banner = m.freeRide;
-    else if (race.phase === RESULTS) banner = m.results(Math.ceil(left / hz));
+    else if (race.phase === RACING && !race.racing) banner = m.spectating;
     if (race.wrongWay && race.phase !== COUNTDOWN) banner = m.wrongWay;
     if (banner !== this.banner.textContent) {
       this.banner.textContent = banner;
@@ -239,9 +231,10 @@ export class Hud {
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
       const lap = Math.min(Math.max(race.lap, 1), race.laps);
+      const score = `<div><span>${m.labels.score}</span> ${race.points}</div>`;
       const first = race.looped
-        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>`
-        : `<div><span>${m.labels.score}</span> ${race.points}</div>`;
+        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>${score}`
+        : score;
       const split = this.split && performance.now() < this.split.until ? this.split.html : "";
       const event = gp ? `<div><span>${m.labels.race}</span> ${gp.index + 1}/${gp.count}</div>` : "";
       this.info.innerHTML =
@@ -262,50 +255,5 @@ export class Hud {
     } else {
       this.meter.innerHTML = "";
     }
-
-    this.results.hidden = race.phase !== RESULTS;
-    if (race.phase === RESULTS) {
-      const list = standings();
-      const key = JSON.stringify([list, gp ? [...gp.points] : null]);
-      if (key !== this.lastResultsKey) {
-        this.lastResultsKey = key;
-        const rows = list
-          .map((s) => {
-            const name = names.get(s.slot) ?? `#${s.slot + 1}`;
-            const time = s.finishTicks > 0 ? formatTime(s.finishTicks, hz) : m.table.dnf;
-            const extra = race.looped
-              ? `<td>${s.misses}</td><td>${s.tricks}</td>`
-              : `<td>${s.tricks}</td><td>${s.points}</td>`;
-            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td>${extra}</tr>`;
-          })
-          .join("");
-        const tb = m.table;
-        const heads = race.looped
-          ? `<th>${tb.missed}</th><th>${tb.tricks}</th>`
-          : `<th>${tb.tricks}</th><th>${tb.points}</th>`;
-        this.results.innerHTML =
-          `<h2>${tb.results}${gp ? ` · ${tb.race(gp.index + 1, gp.count)}` : ""}</h2>` +
-          `<table><tr><th></th><th></th><th>${tb.time}</th>${heads}</tr>${rows}</table>` +
-          (gp ? grandPrixTable(gp, names) : "");
-      }
-    }
   }
-}
-
-/** Tilt standings: everyone's points so far, best first. */
-function grandPrixTable(gp: GrandPrixView, names: Map<number, string>): string {
-  const rows = [...gp.points]
-    .toSorted((a, b) => b[1] - a[1] || a[0] - b[0])
-    .map(
-      ([slot, points], i) =>
-        `<tr><td>${ordinal(i + 1)}</td><td>${escapeHtml(names.get(slot) ?? `#${slot + 1}`)}</td><td>${points}</td></tr>`,
-    )
-    .join("");
-  const tb = messages().hud.table;
-  const title = gp.index + 1 === gp.count ? tb.gpFinal : tb.gp;
-  return `<h2>${title}</h2><table class="gp"><tr><th></th><th></th><th>${tb.points}</th></tr>${rows}</table>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }

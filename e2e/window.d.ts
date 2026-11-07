@@ -20,6 +20,10 @@ declare global {
       /** The course is built and drawn (its loading card is coming off). */
       ready(): boolean;
       setInput(v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null): void;
+      /** Holds the intro's camera this many seconds in (null: the race's own). */
+      introAt(seconds: number | null): void;
+      /** Holds the television camera of that name (null: the director's); says which there are and which is on. */
+      tv(camera?: string | null): { cameras: string[]; on: string | null };
       net: { lagMs: number; jitterMs: number; lossPct: number };
     };
   }

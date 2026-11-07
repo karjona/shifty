@@ -275,6 +275,7 @@ mod tests {
             exp: u64::MAX,
             iat,
             bots: 0,
+            humans: 0,
             surface: 0,
             course: 0,
             events: vec![0],

@@ -67,6 +67,7 @@ fn profile() {
 fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
     w.spawn(0);
+    w.ride_free();
     let mut r = w.riders[0].unwrap();
     let f = RUN.centerline(s0);
     r.pos.x = f.x;
@@ -79,8 +80,6 @@ fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     let mut out = Vec::new();
     let mut falls = 0;
     for t in 0..secs * 60 {
-        // Free riding: never let the room move on to a race.
-        w.race.phase_tick = w.tick;
         let r = w.riders[0].unwrap();
         let (s, _) = RUN.project(r.pos.x, r.pos.z);
         let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(0.0);
@@ -136,6 +135,7 @@ fn jumps() {
         for pop in [false, true] {
             let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
             w.spawn(0);
+            w.ride_free();
             let mut r = w.riders[0].unwrap();
             let f = RUN.centerline(lip - 120.0);
             let (x, z) = f.at_offset(offset);
@@ -152,7 +152,6 @@ fn jumps() {
             let mut distance = 0.0;
             let mut outcome = String::from("-");
             for _ in 0..60 * 12 {
-                w.race.phase_tick = w.tick;
                 let r = w.riders[0].unwrap();
                 let (s, _) = RUN.project(r.pos.x, r.pos.z);
                 let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(offset);
@@ -222,6 +221,7 @@ fn race(seed: u32) {
     for slot in 0..MAX_RIDERS {
         w.spawn(slot);
     }
+    w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut falls = [0u32; MAX_RIDERS];
     let mut max_speed = [0.0f32; MAX_RIDERS];

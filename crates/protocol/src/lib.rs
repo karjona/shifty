@@ -90,6 +90,7 @@ mod tests {
             event_ack: 7,
             last_snapshot_tick: 100,
             client_time: 55,
+            ready: 2,
             first_tick: 90,
             inputs: vec![Input::from_analog(-1.0, 1.0, 1.0, 0xFF); MAX_INPUTS_PER_PACKET],
         });
@@ -112,7 +113,7 @@ mod tests {
             let _ = ClientMsg::decode(&buf);
         }
         // Too many inputs is refused.
-        let mut bad = vec![kind::INPUTS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 200];
+        let mut bad = vec![kind::INPUTS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 200];
         bad.extend(std::iter::repeat_n(0, 600));
         assert!(ClientMsg::decode(&bad).is_err());
     }

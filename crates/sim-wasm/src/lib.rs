@@ -38,7 +38,7 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 23] = [
+pub const RACE_FIELDS: [&str; 24] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -62,6 +62,7 @@ pub const RACE_FIELDS: [&str; 23] = [
     "eventIndex",
     "eventCount",
     "gpVersion",
+    "autopilot",
 ];
 
 #[wasm_bindgen]
@@ -91,6 +92,13 @@ impl WasmClient {
     #[wasm_bindgen(js_name = handlePacket)]
     pub fn handle_packet(&mut self, bytes: &[u8], now_ms: f64) {
         self.inner.handle_packet(bytes, now_ms);
+    }
+
+    /// This screen has race `event` of the room's plan loaded and on show
+    /// (negative: not yet). The race waits on the grid for every screen.
+    #[wasm_bindgen(js_name = setReady)]
+    pub fn set_ready(&mut self, event: i32) {
+        self.inner.set_ready(u8::try_from(event).ok());
     }
 
     /// Advance the clock with this frame's input (analog values in [-1, 1]).
@@ -252,13 +260,16 @@ impl WasmClient {
             .and_then(|s| standings.iter().find(|st| usize::from(st.slot) == s))
             .map_or(0, |st| st.place);
         let p = me.map(|r| r.race).unwrap_or_default();
+        let autopilot = self.inner.slot().is_some_and(|s| world.on_autopilot(s));
         // Moving against the course (not just pointing: spins don't count).
-        let wrong_way = me.is_some_and(|r| {
-            let course = world.course();
-            let s = course.project(r.pos.x, r.pos.z).0;
-            let heading = sim::math::atan2(r.vel.x, r.vel.z);
-            r.speed() > 4.0 && sim::math::angle_diff(course.centerline(s).yaw, heading).abs() > 2.0
-        });
+        let wrong_way = !autopilot
+            && me.is_some_and(|r| {
+                let course = world.course();
+                let s = course.project(r.pos.x, r.pos.z).0;
+                let heading = sim::math::atan2(r.vel.x, r.vel.z);
+                r.speed() > 4.0
+                    && sim::math::angle_diff(course.centerline(s).yaw, heading).abs() > 2.0
+            });
         let v = [
             f64::from(race.phase as u8),
             f64::from(race.phase_tick),
@@ -283,6 +294,7 @@ impl WasmClient {
             f64::from(self.inner.event_index()),
             f64::from(self.inner.event_count()),
             f64::from(self.inner.gp_version()),
+            f64::from(u8::from(autopilot)),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -326,8 +338,8 @@ impl WasmClient {
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
     /// `finish` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
-    /// `grab`, `grabTicks`, `points`, `sketchy`), `sketchy` (a plain jump
-    /// landed badly) or `bail`.
+    /// `grab`, `stunt`, `grabTicks`, `points`, `sketchy`), `sketchy` (a
+    /// plain jump landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
     pub fn take_events_json(&mut self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -355,6 +367,7 @@ impl WasmClient {
                     "flip": t.flip,
                     "roll": t.roll,
                     "grab": t.grab,
+                    "stunt": t.stunt,
                     "grabTicks": t.grab_ticks,
                     "points": t.points,
                     "sketchy": sketchy,
@@ -569,6 +582,9 @@ fn course_json_on(world: &World) -> String {
             out["radius"] = json!(st.radius);
             out["breakwaterRadius"] = json!(st.breakwater_radius);
             out["outerLimit"] = json!(st.outer_limit);
+            out["buoyRadius"] = json!(sim::buoy::tuning::RADIUS);
+            out["buoyHeight"] = json!(sim::buoy::tuning::HEIGHT);
+            out["riderRadius"] = json!(c.sport.rider_radius());
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);

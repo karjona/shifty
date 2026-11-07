@@ -29,6 +29,7 @@ fn run(
 ) -> Run {
     let mut w = World::new(CourseId::Oval, surface);
     w.spawn(0);
+    w.ride_free();
     let mut r = w.riders[0].unwrap();
     r.yaw = heading;
     let start = OVAL.centerline(150.0).at_offset(-20.0);
@@ -61,7 +62,7 @@ fn run(
         w.step(&inputs);
         let mut r = w.riders[0].unwrap();
         // Stay in the open water of the first straight, clear of the walls:
-        // jump back (the sea is endless anyway). And never start a race.
+        // jump back (the sea is endless anyway).
         let before = (r.pos.x, r.pos.z);
         if r.pos.x.abs() > 130.0 {
             r.pos.x -= 260.0 * r.pos.x.signum();
@@ -70,9 +71,6 @@ fn run(
             r.pos.z -= 58.0;
         } else if r.pos.z < -80.0 {
             r.pos.z += 58.0;
-        }
-        if w.race.phase != sim::Phase::Warmup {
-            w.restart_warmup();
         }
         since_jump += 1;
         if before != (r.pos.x, r.pos.z) {
@@ -137,6 +135,7 @@ fn main() {
     // Flat water: draft and settling.
     let mut w = World::new(CourseId::Oval, Surface::flat());
     w.spawn(0);
+    w.ride_free();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     inputs[0] = Some(Input::default());
     for _ in 0..120 {
@@ -224,6 +223,7 @@ fn main() {
 fn turning() {
     let mut w = World::new(CourseId::Oval, Surface::flat());
     w.spawn(0);
+    w.ride_free();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     inputs[0] = Some(Input::from_analog(0.0, 1.0, 0.0, 0));
     for _ in 0..60 * 8 {
@@ -256,82 +256,143 @@ fn turning() {
     );
 }
 
-/// Off the first ramp at near top speed (pulling back up it): airtime, and
-/// for each trick (held to three quarters of a turn, then released) how long
-/// a full turn takes and how it lands.
+/// Off the first ramp at near top speed (pulling back up it): airtime; for
+/// each rotation (held to three quarters of a turn, then released) how long
+/// a full turn takes and how it lands; how much air each stunt needs at the
+/// least and how it scores held as long as the ramp allows; and combos.
 fn tricks() {
+    use sim::jetski::{Stunt, stunts, tuning as jet};
     use sim::math::{TAU, Vec3};
     use sim::race::EventKind;
     use sim::{Rider, buttons};
-    let jump = |in_air: &dyn Fn(&Rider) -> Input| {
+    struct Jump {
+        air: u32,
+        turned: Option<u32>,
+        result: String,
+    }
+    let jump = |in_air: &dyn Fn(&Rider, u32) -> Input| {
         let ramp = OVAL.ramps[0];
         let mut w = World::new(CourseId::Oval, Surface::flat());
         w.spawn(0);
+        w.ride_free();
         let f = OVAL.centerline(ramp.s - 40.0);
         let (x, z) = f.at_offset(ramp.offset);
         let mut r = w.riders[0].unwrap();
-        r.pos = Vec3::new(x, -sim::jetski::tuning::DRAFT, z);
+        r.pos = Vec3::new(x, -jet::DRAFT, z);
         r.yaw = f.yaw;
-        r.vel = r.forward() * sim::jetski::tuning::MAX_SPEED * 0.9;
+        r.vel = r.forward() * jet::MAX_SPEED * 0.9;
         r.race.next_gate = 9;
         r.quantize();
         w.riders[0] = Some(r);
         let mut inputs: Inputs = [None; MAX_RIDERS];
-        let (mut air, mut turned, mut result) = (0u32, None, "no trick");
+        let mut j = Jump {
+            air: 0,
+            turned: None,
+            result: "no trick".to_owned(),
+        };
         for t in 0..60 * 5 {
             let r = w.riders[0].unwrap();
             inputs[0] = Some(if r.grounded {
                 Input::from_analog(0.0, 1.0, -1.0, 0)
             } else {
-                air += 1;
-                in_air(&r)
+                j.air += 1;
+                in_air(&r, j.air)
             });
             let spun = r.air_spin.abs().max(r.pitch.abs()).max(r.roll.abs());
-            if turned.is_none() && !r.grounded && spun >= TAU {
-                turned = Some(air);
+            if j.turned.is_none() && !r.grounded && spun >= TAU {
+                j.turned = Some(j.air);
             }
             for e in w.step(&inputs) {
                 match e.kind {
-                    EventKind::Trick { .. } => result = "clean",
-                    EventKind::Bail => result = "bail",
+                    EventKind::Trick { trick, .. } => {
+                        j.result = format!("clean, {} pts", trick.points);
+                    }
+                    EventKind::Bail => j.result = "bail".to_owned(),
                     _ => {}
                 }
             }
-            if air > 0 && w.riders[0].unwrap().grounded && t > 60 {
+            if j.air > 0 && w.riders[0].unwrap().grounded && t > 60 {
                 break;
             }
         }
-        (air, turned, result)
+        j
     };
-    let (air, _, _) = jump(&|_| Input::from_analog(0.0, 1.0, 0.0, 0));
+    let air = jump(&|_, _| Input::from_analog(0.0, 1.0, 0.0, 0)).air;
     println!("ramp jump: {:.2}s in the air", air as f32 / 60.0);
-    let held = |b: u8, steer: f32, lean: f32, angle: fn(&Rider) -> f32| {
-        move |r: &Rider| {
+
+    type Angle = fn(&Rider) -> f32;
+    let rotations: [(&str, u8, f32, f32, Angle); 4] = [
+        ("360", buttons::TRICK, 1.0, 0.0, |r| r.air_spin),
+        ("backflip", buttons::TRICK, 0.0, -1.0, |r| r.pitch),
+        ("frontflip", buttons::TRICK, 0.0, 1.0, |r| r.pitch),
+        ("barrel roll", buttons::ROLL, -1.0, 0.0, |r| r.roll),
+    ];
+    for (name, b, steer, lean, angle) in rotations {
+        let j = jump(&|r, _| {
             if angle(r).abs() < 0.75 * TAU {
                 Input::from_analog(steer, 1.0, lean, b)
             } else {
                 Input::from_analog(0.0, 1.0, 0.0, 0)
             }
-        }
-    };
-    for (name, b, steer, lean, angle) in [
-        (
-            "spin",
-            buttons::TRICK,
-            1.0,
-            0.0,
-            (|r: &Rider| r.air_spin) as fn(&Rider) -> f32,
-        ),
-        ("backflip", buttons::TRICK, 0.0, -1.0, |r: &Rider| r.pitch),
-        ("barrel roll", buttons::ROLL, -1.0, 0.0, |r: &Rider| r.roll),
-    ] {
-        let (_, turned, result) = jump(&held(b, steer, lean, angle));
-        match turned {
+        });
+        match j.turned {
             Some(t) => println!(
-                "  {name}: full turn after {:.2}s, {result}",
-                t as f32 / 60.0
+                "  {name}: full turn after {:.2}s, {}",
+                t as f32 / 60.0,
+                j.result
             ),
-            None => println!("  {name}: never made a full turn, {result}"),
+            None => println!("  {name}: never made a full turn, {}", j.result),
         }
+    }
+
+    // Stunts: pressed on the first tick in the air with the stick that picks
+    // them, let go just in time to be back for the landing.
+    let stunt_list = [
+        ("no hander", stunts::NO_HANDER, 0.0, 0.0),
+        ("handstand", stunts::HANDSTAND, 0.0, 1.0),
+        ("superman", stunts::SUPERMAN, 0.0, -1.0),
+        ("nac-nac", stunts::NAC_NAC, -1.0, 0.0),
+        ("can-can", stunts::CAN_CAN, 1.0, 0.0),
+    ];
+    let ticks = |reach: u8| u32::from(jet::STUNT_FULL).div_ceil(u32::from(reach));
+    let back = |id: u8| ticks(Stunt::of(id).reach_out);
+    for (name, id, steer, lean) in stunt_list {
+        let st = Stunt::of(id);
+        let least = ticks(st.reach_in) + u32::from(jet::MIN_STUNT_TICKS) + back(id);
+        let let_go = air.saturating_sub(back(id) + 2);
+        let j = jump(&|_, t| {
+            if t < let_go {
+                Input::from_analog(steer, 1.0, lean, buttons::GRAB)
+            } else {
+                Input::from_analog(0.0, 1.0, 0.0, 0)
+            }
+        });
+        let late = jump(&|_, _| Input::from_analog(steer, 1.0, lean, buttons::GRAB));
+        println!(
+            "  {name}: {:.2}s in, {:.2}s back, needs {:.2}s of air; off the ramp {}, held to the landing {}",
+            ticks(st.reach_in) as f32 / 60.0,
+            back(id) as f32 / 60.0,
+            least as f32 / 60.0,
+            j.result,
+            late.result
+        );
+    }
+
+    // Combos: the stunt first (its stick), then the rotation with both held.
+    for (stunt, rotation) in [(2, 0), (0, 1), (3, 3), (1, 0)] {
+        let (stunt_name, id, ss, sl) = stunt_list[stunt];
+        let (rot_name, b, steer, lean, angle) = rotations[rotation];
+        let let_go = air.saturating_sub(back(id) + 2);
+        let j = jump(&|r, t| {
+            let held = if t < let_go { buttons::GRAB } else { 0 };
+            if t == 1 {
+                Input::from_analog(ss, 1.0, sl, buttons::GRAB)
+            } else if angle(r).abs() < 0.75 * TAU {
+                Input::from_analog(steer, 1.0, lean, b | held)
+            } else {
+                Input::from_analog(0.0, 1.0, 0.0, held)
+            }
+        });
+        println!("  {rot_name} + {stunt_name}: {}", j.result);
     }
 }

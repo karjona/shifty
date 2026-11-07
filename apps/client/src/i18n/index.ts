@@ -37,13 +37,14 @@ export function messages(): Messages {
   return MESSAGES[locale];
 }
 
-const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
+/** Calls `listener` whenever the language changes (outside React). */
+export function onLocale(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 export function useLocale(): Locale {
-  return useSyncExternalStore(subscribe, getLocale);
+  return useSyncExternalStore(onLocale, getLocale);
 }
 
 /** The current language's messages; re-renders when it changes. */

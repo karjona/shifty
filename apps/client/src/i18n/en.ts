@@ -7,6 +7,7 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
+    soundLocked: "Click or press any key for sound",
     retry: "Try again",
     close: "Close",
     cancel: "Cancel",
@@ -227,6 +228,8 @@ export const en = {
     water: "Water",
     waterSea: "Full",
     waterBasic: "Basic (faster)",
+    sound: "Sound",
+    volume: { master: "Master", effects: "Effects", music: "Music" },
     controls: "Controls",
     controlsBody:
       "Menus: stick or d-pad to move, A / ✕ to pick, B / ○ to go back, LB / RB to change tabs. Keyboard: arrows, Enter, Esc, Q / E.",
@@ -289,6 +292,8 @@ export const en = {
   },
   race: {
     menu: "Race menu",
+    /** Cut to another television camera. */
+    camera: "Camera",
     resume: "Back to the race",
     leave: "Leave the race",
     noPause: "Online races don't pause.",
@@ -303,8 +308,8 @@ export const en = {
     help: {
       jetski: [
         "Stick: steer and lean (pull back on a crest to fly) · RT throttle · LT brake",
-        "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!",
-        "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks",
+        "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!",
+        "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt",
         "Pass red buoys on your right, green ones on your left.",
       ],
       snow: [
@@ -327,11 +332,9 @@ export const en = {
     },
   },
   hud: {
-    warmup: (s: number) => `WARM-UP · race in ${s}`,
     getReady: "GET READY",
     go: "GO!",
-    freeRide: "Free ride · next race soon",
-    results: (s: number) => `RESULTS · next race in ${s}`,
+    spectating: "Spectating · next race soon",
     wrongWay: "WRONG WAY",
     maxPower: "✓ MAX POWER",
     missedBuoy: "MISSED BUOY",
@@ -342,22 +345,58 @@ export const en = {
     sketchy: "SKETCHY",
     bail: "BAIL!",
     labels: { lap: "LAP", score: "SCORE", pos: "POS", time: "TIME", split: "SPLIT", race: "RACE", power: "POWER" },
-    table: {
-      results: "Results",
-      race: (i: number, n: number) => `race ${i}/${n}`,
-      time: "time",
-      missed: "missed",
-      tricks: "tricks",
-      points: "points",
-      dnf: "DNF",
-      gp: "The Tilt",
-      gpFinal: "The Tilt · final standings",
-    },
     ordinal: (n: number) => {
       const s = ["th", "st", "nd", "rd"];
       const v = n % 100;
       return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
     },
+  },
+  intro: {
+    courses: { bay: "The Bay", mountain: "The Mountain Run" },
+    sports: { jetski: "Jetski", snow: "Snowboard" },
+    tilt: (i: number, n: number) => `The Tilt · race ${i} of ${n}`,
+    season: "Season",
+    laps: "Laps",
+    lap: "Lap",
+    run: "Run",
+    checkpoints: "Checkpoints",
+    metres: (m: number) => `${Math.round(m).toLocaleString("en")} m`,
+    km: (km: number) => `${km.toLocaleString("en", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`,
+    waiting: "Waiting for the other riders",
+  },
+  tricks: {
+    backflip: "Backflip",
+    frontflip: "Frontflip",
+    barrelRoll: "Barrel roll",
+    /** A rotation done `n` times in one jump: "Double backflip". */
+    times: (n: number, trick: string) =>
+      n < 2 ? trick : `${["Double", "Triple"][n - 2] ?? "Quad"} ${trick.toLowerCase()}`,
+    /** Snowboard grabs, by id (0 = none). */
+    grabs: ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"],
+    /** Jetski stunts, by id (0 = none). */
+    stunts: ["", "No hander", "Handstand", "Superman", "Nac-nac", "Can-can"],
+  },
+  results: {
+    title: "Results",
+    race: (i: number, n: number) => `Race ${i} of ${n}`,
+    standings: "Standings",
+    finished: "Finished",
+    racing: "Racing",
+    lap: (lap: number, laps: number) => `Lap ${lap}/${laps}`,
+    dnf: "DNF",
+    cols: { time: "Time", missed: "Missed", tricks: "Tricks", style: "Style", tilt: "Tilt", points: "Points" },
+    tilt: "The Tilt",
+    after: (i: number, n: number) => `After race ${i} of ${n}`,
+    final: "Final",
+    next: "Next race in",
+    podium: "Podium in",
+    back: "Back in",
+  },
+  podium: {
+    card: "The Tilt",
+    champion: (_female: boolean) => "Champion of the Tilt",
+    standings: "Final standings",
+    continue: "Continue",
   },
   about: {
     title: "About",

@@ -131,6 +131,10 @@ export interface BoardRide {
   lift: number;
 }
 
+/** How far the ankles sit toward the heel edge (m): a boot's middle is ahead of its ankle, and the boots sit
+ * centred across the board, in its bindings, with the body over them. */
+const HEEL_SIDE = 0.095;
+
 const GRAB_INDY = 1;
 const GRAB_NOSE = 2;
 const GRAB_TAIL = 3;
@@ -167,11 +171,11 @@ export function snowboardPose(a: Body, scale: number, r: BoardRide): Pose {
   // Standing with soft knees, lower as they bend; a grab pulls the board up to the hand.
   const hipY = r.deck / scale + rest(a, "hips").y - 0.18 - r.crouch * 0.42;
   // Hips sit back over the heels a little, more when crouched or sitting back.
-  const hipZ = -0.06 - r.crouch * 0.1 - Math.max(0, -r.lean) * 0.15;
+  const hipZ = -0.06 - HEEL_SIDE - r.crouch * 0.1 - Math.max(0, -r.lean) * 0.15;
   // The upper body tips toward the toes as the knees bend, upright in the air, further forward tucked.
   const tilt = 0.25 + r.crouch * 0.55 + r.lean * 0.5 + (r.grab ? 0.4 : 0);
   const legs = both((side): Step => ({
-    target: v3((side * r.stance) / scale, deck + ankle, 0.02 / scale),
+    target: v3((side * r.stance) / scale, deck + ankle, (0.02 - HEEL_SIDE) / scale),
     bend: v3(0, 0, 1),
     // Duck stance: both toes turned out a little.
     toes: v3(side * 0.3, 0, 1).normalize(),
@@ -179,8 +183,8 @@ export function snowboardPose(a: Body, scale: number, r: BoardRide): Pose {
   }));
   const arms = both((side): Reach => {
     // Riding: front hand toward the nose, back hand low by the hip. In the air: out wide for balance.
-    const ride = v3(side * 0.45, hipY - 0.05 + (side > 0 ? 0.15 : 0), 0.22);
-    const wide = v3(side * 0.85, 0.42 + hipY * 0.6 + side * r.windmill * 0.35, 0.05 + r.windmill * 0.2);
+    const ride = v3(side * 0.45, hipY - 0.05 + (side > 0 ? 0.15 : 0), 0.22 - HEEL_SIDE);
+    const wide = v3(side * 0.85, 0.42 + hipY * 0.6 + side * r.windmill * 0.35, 0.05 - HEEL_SIDE + r.windmill * 0.2);
     const grab = grabTarget(r.grab, side, r.length);
     return {
       target: grab ? grab.setY(grab.y + r.lift).divideScalar(scale) : ride.lerp(wide, r.spread),
