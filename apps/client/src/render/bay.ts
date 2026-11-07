@@ -16,6 +16,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { SKY, clouds, skyDome } from "./cel/sky.ts";
@@ -64,6 +65,8 @@ export interface BayOptions {
   /** The sim's swells (`waveParams`). */
   waves: Float32Array;
   course: CourseData;
+  /** The race's season, weather and time of day (a clear summer noon if left out). */
+  conditions?: Conditions;
 }
 
 export class Bay implements Environment {
@@ -71,6 +74,8 @@ export class Bay implements Environment {
   readonly camera = CAMERA;
   readonly topSpeed: number;
   readonly reflects: boolean;
+  /** The season, weather and time of day it is drawn in. */
+  readonly conditions: Conditions;
 
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
@@ -87,6 +92,7 @@ export class Bay implements Environment {
   private gulls: Gulls | null = null;
 
   constructor(opts: BayOptions) {
+    this.conditions = opts.conditions ?? homeConditions("jetski");
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
     this.spray = new Spray(opts.topSpeed);

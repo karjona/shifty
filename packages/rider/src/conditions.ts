@@ -67,18 +67,14 @@ export const DAYLIGHT: Record<Season, readonly [number, number]> = {
 /** The start time of a named time of day in a season. */
 export function timeOf(season: Season, named: TimeOfDay): number {
   const [first, last] = DAYLIGHT[season];
-  switch (named) {
-    case "dawn":
-      return first;
-    case "morning":
-      return Math.floor((first + NOON) / 2);
-    case "noon":
-      return NOON;
-    case "afternoon":
-      return Math.floor((NOON + last) / 2);
-    case "dusk":
-      return last;
-  }
+  const times: Record<TimeOfDay, number> = {
+    dawn: first,
+    morning: Math.floor((first + NOON) / 2),
+    noon: NOON,
+    afternoon: Math.floor((NOON + last) / 2),
+    dusk: last,
+  };
+  return times[named];
 }
 
 /** The named time of day closest to a start time. */
@@ -112,7 +108,9 @@ const isInt = (v: unknown, max: number): v is number =>
  * server draws the rest).
  */
 export function cleanSpec(v: unknown): RaceSpec {
-  const o = typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {};
+  const o: Record<string, unknown> = {};
+  if (typeof v === "object" && v !== null)
+    for (const k of ["course", "season", "weather", "turns", "time"]) o[k] = Reflect.get(v, k);
   const spec: RaceSpec = {};
   const c = isInt(o.course, 256) ? circuit(o.course) : undefined;
   if (c) spec.course = c.id;

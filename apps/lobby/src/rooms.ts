@@ -29,13 +29,13 @@ export interface RoomSettings {
   race: StartedRace | null;
 }
 
-/** Stored settings, read defensively (rooms saved by older lobbies name an `event`). */
-function readSettings(v: unknown): RoomSettings | null {
-  if (!isRecord(v)) return null;
-  const s = v as unknown as RoomSettings & { event?: unknown };
-  const plan = parsePlan(s.plan) ?? legacyPlan(s.event);
-  const race = s.race && typeof s.race.seed === "number" && parsePlan(s.race.plan) ? s.race : null;
-  return { ...s, plan, race };
+/** Stored settings (rooms saved by older lobbies name an `event`, and their race no seed). */
+function readSettings(v: RoomSettings | undefined): RoomSettings | null {
+  if (!v) return null;
+  const old: unknown = Reflect.get(v, "event");
+  const plan = parsePlan(v.plan) ?? legacyPlan(old);
+  const race = v.race && typeof v.race.seed === "number" && parsePlan(v.race.plan) ? v.race : null;
+  return { ...v, plan, race };
 }
 
 interface Member {
@@ -125,7 +125,7 @@ export class RoomLobby extends DurableObject<Env> {
   private settings: RoomSettings | null | undefined;
 
   private async load(): Promise<RoomSettings | null> {
-    if (this.settings === undefined) this.settings = readSettings(await this.ctx.storage.get("settings"));
+    if (this.settings === undefined) this.settings = readSettings(await this.ctx.storage.get<RoomSettings>("settings"));
     return this.settings;
   }
 

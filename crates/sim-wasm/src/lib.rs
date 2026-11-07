@@ -393,18 +393,15 @@ impl WasmClient {
         self.inner.conditions().to_bytes().to_vec()
     }
 
-    /// How far along the race its weather has come at `(x, z)` (0 at the
-    /// start, 1 at the finish): on a loop by the race clock, on a run by
-    /// where `(x, z)` is down it. One call a frame, for the camera.
-    #[wasm_bindgen(js_name = weatherProgress)]
-    pub fn weather_progress(&self, x: f32, z: f32) -> f32 {
-        self.inner.predicted_world().weather_progress(x, z)
-    }
-
-    /// How far the weather has turned at `(x, z)` (0 = `weather`, 1 = `turns`).
-    #[wasm_bindgen(js_name = weatherTurn)]
-    pub fn weather_turn(&self, x: f32, z: f32) -> f32 {
-        self.inner.predicted_world().weather_turn(x, z)
+    /// The weather at `(x, z)`: `[progress, turn]`. `progress` is how far
+    /// along the race it has come (0 at the start, 1 at the finish: on a
+    /// loop by the race clock, on a run by where `(x, z)` is down it);
+    /// `turn` how far it has turned (0 = `weather`, 1 = `turns`). One call a
+    /// frame, for the camera.
+    #[wasm_bindgen(js_name = weatherAt)]
+    pub fn weather_at(&self, x: f32, z: f32) -> Vec<f32> {
+        let world = self.inner.predicted_world();
+        vec![world.weather_progress(x, z), world.weather_turn(x, z)]
     }
 
     /// 0 = jetski, 1 = snowboard.
