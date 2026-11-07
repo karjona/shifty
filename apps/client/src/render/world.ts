@@ -128,7 +128,9 @@ const DEFAULT_SKY = 0xa8d8f0;
 /** A rider and their shadow fit in a sphere this big around them (m). */
 const RIDER_REACH = 4.5;
 /** Riders further from the camera than this (m) are drawn without their outline. */
-const OUTLINE_FAR = 70;
+const OUTLINE_FAR = 45;
+/** Riders further from the camera than this (m) are left out of reflections. */
+const REFLECT_FAR = 30;
 /** Riders further than this (m) from the camera's rider are outside the sun's shadow box. */
 const SHADOW_REACH = 45;
 
@@ -421,11 +423,14 @@ export class World {
 
   /**
    * How much of a rider is drawn: the outline only close enough to show
-   * (the ink pass draws the silhouette further away), and a shadow only
-   * inside the sun's shadow box around the camera's rider.
+   * (the ink pass draws the silhouette further away), a reflection only
+   * close by, and a shadow only inside the sun's shadow box around the
+   * camera's rider.
    */
   private detail(mesh: THREE.Object3D, r: RiderView, me: RiderView | undefined): void {
-    const far = this.camera.position.distanceTo(mesh.position) > OUTLINE_FAR;
+    const distance = this.camera.position.distanceTo(mesh.position);
+    const far = distance > OUTLINE_FAR;
+    const reflected = distance < REFLECT_FAR;
     const focus = me ?? r;
     const shadow = Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
     mesh.traverse((o) => {
@@ -434,6 +439,8 @@ export class World {
       else if (o instanceof THREE.Mesh) {
         data.castsShadow ??= o.castShadow;
         o.castShadow = data.castsShadow && shadow;
+        o.layers.set(UNREFLECTED);
+        if (reflected) o.layers.enable(0);
       }
     });
   }
