@@ -1,8 +1,9 @@
-// Race HUD: phase banner (countdown, results), lap / position /
-// time, the speed meter (summer) or trick score (winter), split times at
-// checkpoints and the finish (against the first rider through), and short
-// popups for buoys, checkpoints, laps, tricks and the finish. Plain DOM: the
-// state comes from the predicted world every frame.
+// Race HUD: phase banner (countdown), lap / position / time, the speed
+// meter (summer) or trick score (winter), split times at checkpoints and
+// the finish (against the first rider through), and short popups for
+// buoys, checkpoints, laps, tricks and the finish. Plain DOM: the state
+// comes from the predicted world every frame. The standings and the
+// results are the scoreboard's (results.ts).
 
 import { messages } from "../i18n/index.ts";
 import { NameTags } from "./tags.ts";
@@ -73,7 +74,6 @@ export interface StandingView {
 
 const COUNTDOWN = 1;
 const RACING = 2;
-const RESULTS = 3;
 
 /** 1st, 1.º, 1r: in the player's language. */
 export function ordinal(n: number): string {
@@ -121,8 +121,6 @@ export class Hud {
   private speed: HTMLDivElement;
   private meter: HTMLDivElement;
   private popups: HTMLDivElement;
-  private results: HTMLDivElement;
-  private lastResultsKey = "";
   /** Who passed each checkpoint (and the finish) in this race, and when (race ticks). */
   private passes = new Map<string, { slot: number; ticks: number }[]>();
   private passesRace = -1;
@@ -136,8 +134,6 @@ export class Hud {
     this.speed = el("div", "speed", bottom);
     this.meter = el("div", "meter", bottom);
     this.popups = el("div", "popups", root);
-    this.results = el("div", "results", root);
-    this.results.hidden = true;
   }
 
   /** Show a short message in the middle of the screen. */
@@ -206,14 +202,7 @@ export class Hud {
     this.split = { html, until: performance.now() + SPLIT_MS };
   }
 
-  update(
-    race: RaceView,
-    speedKmh: number,
-    airborne: boolean,
-    standings: () => StandingView[],
-    names: Map<number, string>,
-    gp: GrandPrixView | null = null,
-  ): void {
+  update(race: RaceView, speedKmh: number, airborne: boolean, gp: GrandPrixView | null = null): void {
     const m = messages().hud;
     const hz = race.tickHz;
     const left = Math.max(0, race.phaseLength - race.phaseTicks);
@@ -223,7 +212,6 @@ export class Hud {
       banner = n > 3 ? m.getReady : String(n);
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = m.go;
     else if (race.phase === RACING && !race.racing) banner = m.freeRide;
-    else if (race.phase === RESULTS) banner = m.results(Math.ceil(left / hz));
     if (race.wrongWay && race.phase !== COUNTDOWN) banner = m.wrongWay;
     if (banner !== this.banner.textContent) {
       this.banner.textContent = banner;
@@ -264,50 +252,5 @@ export class Hud {
     } else {
       this.meter.innerHTML = "";
     }
-
-    this.results.hidden = race.phase !== RESULTS;
-    if (race.phase === RESULTS) {
-      const list = standings();
-      const key = JSON.stringify([list, gp ? [...gp.points] : null]);
-      if (key !== this.lastResultsKey) {
-        this.lastResultsKey = key;
-        const rows = list
-          .map((s) => {
-            const name = names.get(s.slot) ?? `#${s.slot + 1}`;
-            const time = s.finishTicks > 0 ? formatTime(s.finishTicks, hz) : m.table.dnf;
-            const extra = race.looped
-              ? `<td>${s.misses}</td><td>${s.tricks}</td>`
-              : `<td>${s.tricks}</td><td>${s.points}</td>`;
-            return `<tr><td>${ordinal(s.place)}</td><td>${escapeHtml(name)}</td><td>${time}</td>${extra}</tr>`;
-          })
-          .join("");
-        const tb = m.table;
-        const heads = race.looped
-          ? `<th>${tb.missed}</th><th>${tb.tricks}</th>`
-          : `<th>${tb.tricks}</th><th>${tb.points}</th>`;
-        this.results.innerHTML =
-          `<h2>${tb.results}${gp ? ` · ${tb.race(gp.index + 1, gp.count)}` : ""}</h2>` +
-          `<table><tr><th></th><th></th><th>${tb.time}</th>${heads}</tr>${rows}</table>` +
-          (gp ? grandPrixTable(gp, names) : "");
-      }
-    }
   }
-}
-
-/** Tilt standings: everyone's points so far, best first. */
-function grandPrixTable(gp: GrandPrixView, names: Map<number, string>): string {
-  const rows = [...gp.points]
-    .toSorted((a, b) => b[1] - a[1] || a[0] - b[0])
-    .map(
-      ([slot, points], i) =>
-        `<tr><td>${ordinal(i + 1)}</td><td>${escapeHtml(names.get(slot) ?? `#${slot + 1}`)}</td><td>${points}</td></tr>`,
-    )
-    .join("");
-  const tb = messages().hud.table;
-  const title = gp.index + 1 === gp.count ? tb.gpFinal : tb.gp;
-  return `<h2>${title}</h2><table class="gp"><tr><th></th><th></th><th>${tb.points}</th></tr>${rows}</table>`;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }

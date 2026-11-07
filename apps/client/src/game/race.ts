@@ -16,11 +16,13 @@ import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
 import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
+import { type RosterName, Scoreboard } from "../ui/results.ts";
 import { WrongWay } from "../ui/wrong-way.ts";
-import { parseCourse, parseEvents, parseGrandPrix, parseStandings } from "../wasm-json.ts";
+import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
 import { RaceIntro } from "./intro.ts";
+import { type PodiumData, podiumData } from "./podium.ts";
 import { SeasonCard, SeasonChange, seasonOf } from "./season-change.ts";
 
 /** Why the race server said no, by client phase (2 + the protocol's reject reason). */
@@ -52,8 +54,8 @@ export interface RaceOptions {
   debug?: boolean;
   /** Called once the race server has said yes or no. */
   onJoin?: (ok: boolean) => void;
-  /** Called once the room's plan is over (the last race's results are done). */
-  onOver?: () => void;
+  /** Called once the room's plan is over (the last race's results are done), with a Tilt's podium. */
+  onOver?: (podium: PodiumData | null) => void;
 }
 
 /** What the menus (and tests) can see of a race. */
@@ -128,11 +130,14 @@ export class RaceSession implements Stage {
   private input = new InputReader();
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
   private hud: Hud;
+  private board: Scoreboard;
   private wrongWay = new WrongWay();
   private mapRoot: HTMLDivElement;
   private minimap: CourseMap | null = null;
   private env: Environment | null = null;
   private names = new Map<number, string>();
+  private riders = new Map<number, RosterName>();
+  private looks = new Map<number, Appearance>();
   /** The seats taken, as of the last roster. */
   private slots: number[] = [];
   private rosterVersion = -1;
@@ -178,6 +183,7 @@ export class RaceSession implements Stage {
     this.hud = new Hud(opts.hud);
     this.mapRoot = document.createElement("div");
     opts.hud.append(this.mapRoot);
+    this.board = new Scoreboard(opts.hud);
   }
 
   /** Takes down the loading sign put up by `joining`. */
@@ -413,8 +419,11 @@ export class RaceSession implements Stage {
   private readRoster(engine: Engine, client: WasmClient): void {
     if (client.rosterVersion() === this.rosterVersion) return;
     this.rosterVersion = client.rosterVersion();
-    const roster = parseRoster(client.rosterJson(), roomSeed(this.opts.ticket.room));
+    const json = client.rosterJson();
+    const roster = parseRoster(json, roomSeed(this.opts.ticket.room));
     this.names = roster.names;
+    this.riders = parseRosterNames(json);
+    this.looks = roster.looks;
     this.slots = [...roster.looks.keys()];
     for (const [slot, look] of roster.looks) engine.world.setAppearance(slot, look);
   }
@@ -455,7 +464,8 @@ export class RaceSession implements Stage {
     if (race.phase === RESULTS && race.eventIndex >= race.eventCount - 1) this.finalResults = true;
     else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
       this.state.over = true;
-      this.opts.onOver?.();
+      const rows = this.board.final(this.gpPoints);
+      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.course));
     }
     this.readRoster(engine, client);
     if (race.course !== this.course) {
@@ -516,14 +526,14 @@ export class RaceSession implements Stage {
     race.wrongWay = this.wrongWay.update(race, me);
     this.hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    this.hud.update(
+    this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    this.board.update({
       race,
-      (me?.speed ?? 0) * 3.6,
-      me ? !me.grounded : false,
-      () => parseStandings(client.standingsJson()),
-      this.names,
+      mySlot: client.slot(),
+      standings: () => parseStandings(client.standingsJson()),
+      riders: this.riders,
       gp,
-    );
+    });
     this.minimap?.update(riders, nextBuoy);
     this.updateDebug(now);
   }
