@@ -112,7 +112,7 @@ export function ModeSelect() {
             {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} full={false} />}
             {mode === "room" && (
               <>
-                <PlanPickers plan={plan} onChange={setPlan} full />
+                <PlanPickers plan={plan} onChange={setPlan} full={false} />
                 <Picker
                   label={t.room.bots}
                   options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
@@ -183,7 +183,11 @@ function Races({ tilt }: { tilt: boolean }) {
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <b>{t.seasons[s]}</b>
             <span className="muted">
-              {i === 0 || seasonSports(s).length === 1 ? t.play.seasonSports.summer : t.play.seasonSports.other}
+              {i === 0 || seasonSports(s).length === 1
+                ? t.play.seasonSports.water
+                : seasons.length < SEASONS.length
+                  ? t.play.seasonSports.mountain
+                  : t.play.seasonSports.either}
             </span>
           </li>
         ))}

@@ -282,9 +282,9 @@ export const es: Messages = {
     eventAbout: {
       gp: "Un año en Costa Nevada: una carrera cada estación, en el agua y en la montaña. Puntos en cada carrera.",
       race: "Una carrera: el circuito, la estación, el tiempo y la hora del día, tal como vengan.",
-      pick: "Una carrera: elige el circuito, la estación, el tiempo y la hora del día, o déjalos al azar.",
+      pick: "Una carrera: en la sala, el anfitrión elige el circuito, la estación, el tiempo y la hora del día, o los deja al azar.",
     },
-    seasonSports: { summer: "En el agua", other: "En el agua o en la montaña" },
+    seasonSports: { water: "En el agua", mountain: "En la montaña", either: "En el agua o en la montaña" },
     party: "Añadir al grupo",
     partySoon: "Muy pronto: forma un grupo con los nombres de tus amigos.",
     createRoom: "Crear una sala",

@@ -1498,6 +1498,12 @@ a {
 .room .mode-panel .panel-title {
   display: none;
 }
+/* The host's pickers and a full room can outgrow the panel: it scrolls. */
+.room .mode-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
 
 /* --- race --- */
 

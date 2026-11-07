@@ -282,9 +282,9 @@ export const ca: Messages = {
     eventAbout: {
       gp: "Un any a Costa Nevada: una cursa cada estació, a l'aigua i a la muntanya. Punts a cada cursa.",
       race: "Una cursa: el circuit, l'estació, el temps i l'hora del dia, tal com vinguin.",
-      pick: "Una cursa: tria el circuit, l'estació, el temps i l'hora del dia, o deixa'ls a l'atzar.",
+      pick: "Una cursa: a la sala, l'amfitrió tria el circuit, l'estació, el temps i l'hora del dia, o els deixa a l'atzar.",
     },
-    seasonSports: { summer: "A l'aigua", other: "A l'aigua o a la muntanya" },
+    seasonSports: { water: "A l'aigua", mountain: "A la muntanya", either: "A l'aigua o a la muntanya" },
     party: "Afegeix al grup",
     partySoon: "Molt aviat: forma un grup amb els noms dels teus amics.",
     createRoom: "Crea una sala",

@@ -769,6 +769,36 @@ mod tests {
     }
 
     #[test]
+    fn the_weather_moves_with_the_clock_on_a_loop_and_down_a_run() {
+        use crate::race::{Phase, Race};
+        use crate::{SurfaceKind, World};
+        let mut bay = World::on_course(CourseId::Oval, SurfaceKind::Flat, 1);
+        assert_eq!(bay.weather_progress(0.0, 0.0), 0.0);
+        bay.race = Race {
+            phase: Phase::Racing,
+            phase_tick: 0,
+        };
+        let course = CourseId::Oval.course();
+        let par = f32::from(course.laps) * course.length() / LOOP_PAR_SPEED;
+        bay.tick = (par * 0.5 * crate::TICK_HZ as f32) as u32;
+        assert!((bay.weather_progress(0.0, 0.0) - 0.5).abs() < 0.01);
+        bay.tick = u32::MAX / 2;
+        assert_eq!(bay.weather_progress(0.0, 0.0), 1.0);
+        assert_eq!(bay.weather_turn(0.0, 0.0), 1.0);
+
+        let snow = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 1);
+        let c = CourseId::Mountain.course();
+        let run = c.run().unwrap();
+        let at = |s: f32| {
+            let f = c.centerline(s);
+            snow.weather_progress(f.x, f.z)
+        };
+        assert!(at(c.start_s) < 0.01);
+        assert!((at((c.start_s + run.finish_s) / 2.0) - 0.5).abs() < 0.02);
+        assert!(at(run.finish_s) > 0.99);
+    }
+
+    #[test]
     fn weather_turns_between_the_first_and_last_lap() {
         assert_eq!(turn_blend(0.0, true, 3), 0.0);
         assert_eq!(turn_blend(0.33, true, 3), 0.0);

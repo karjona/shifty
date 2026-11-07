@@ -282,9 +282,9 @@ export const en = {
     eventAbout: {
       gp: "A year in Costa Nevada: one race each season, on the water and on the mountain. Points for every race.",
       race: "One race: the circuit, the season, the weather and the time of day as they come.",
-      pick: "One race: pick the circuit, the season, the weather and the time of day, or leave them to chance.",
+      pick: "One race: in the room, the host picks the circuit, the season, the weather and the time of day, or leaves them to chance.",
     },
-    seasonSports: { summer: "On the water", other: "On the water or the mountain" },
+    seasonSports: { water: "On the water", mountain: "On the mountain", either: "On the water or the mountain" },
     party: "Add party member",
     partySoon: "Soon: form a party with your friends' handles.",
     createRoom: "Create a room",
