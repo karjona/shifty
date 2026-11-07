@@ -125,6 +125,18 @@ const DIP_KICK = 3.5;
 const DIP_STIFFNESS = 70;
 const DIP_DAMPING = 10;
 const DEFAULT_SKY = 0xa8d8f0;
+/** A rider and their shadow fit in a sphere this big around them (m). */
+const RIDER_REACH = 4.5;
+/** Riders further from the camera than this (m) are drawn without their outline. */
+const OUTLINE_FAR = 70;
+/** Riders further than this (m) from the camera's rider are outside the sun's shadow box. */
+const SHADOW_REACH = 45;
+
+/** Shows or hides an element, touching the page only when that changes. */
+function setDisplay(el: HTMLElement, on: boolean): void {
+  const display = on ? "block" : "none";
+  if (el.style.display !== display) el.style.display = display;
+}
 
 /** An angle wrapped to (-π, π]. */
 const wrapPi = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -147,6 +159,12 @@ export class World {
   private riders = new Map<number, { model: RiderModel; label: HTMLDivElement }>();
   private models = new Map<number, RiderModel>();
   private camLook = new THREE.Vector3();
+  private frustum = new THREE.Frustum();
+  private viewProjection = new THREE.Matrix4();
+  /** Around a rider: the figure, and the shadow it throws. */
+  private bounds = new THREE.Sphere(new THREE.Vector3(), RIDER_REACH);
+  private tag = new THREE.Vector3();
+  private seen = new Set<number>();
   /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
   private camHeight = 0;
@@ -173,7 +191,8 @@ export class World {
     this.labels = labels;
     // Dev: `?webgl` forces the WebGL2 fallback (browsers without WebGPU).
     const webgl = import.meta.env.DEV && devParams.has("webgl");
-    this.renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: webgl });
+    // No multisampling: the frame is drawn into the ink pass's targets, and FXAA smooths it.
+    this.renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: webgl });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     container.append(this.renderer.domElement);
@@ -342,33 +361,42 @@ export class World {
       return;
     }
     const t = tick * DT;
-    const seen = new Set<number>();
-    let me: RiderView | undefined;
+    const me = riders.find((r) => r.isMe);
+    if (me) this.followCamera(env, me, t, dt);
+    this.camera.updateMatrixWorld();
+    this.frustum.setFromProjectionMatrix(
+      this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse),
+    );
+    this.seen.clear();
     for (const r of riders) {
-      seen.add(r.slot);
+      this.seen.add(r.slot);
       const { model, label } = this.rider(env, r.slot);
-      model.mesh.visible = true;
       model.update(r, dt);
-      model.mesh.updateMatrixWorld();
+      const shown = r.isMe || this.inView(model.mesh.position);
+      model.mesh.visible = shown;
+      if (shown) {
+        this.detail(model.mesh, r, me);
+        model.mesh.updateMatrixWorld();
+      }
       // Name tags for the other riders only.
-      label.textContent = names.get(r.slot) ?? `#${r.slot + 1}`;
-      const p = model.mesh.position
-        .clone()
-        .add(new THREE.Vector3(0, 2.2, 0))
-        .project(this.camera);
-      const visible = !r.isMe && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
-      label.style.display = visible ? "block" : "none";
-      label.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
-      if (r.isMe) me = r;
+      const name = names.get(r.slot) ?? `#${r.slot + 1}`;
+      if (label.textContent !== name) label.textContent = name;
+      const p = this.tag.copy(model.mesh.position);
+      p.y += 2.2;
+      p.project(this.camera);
+      const visible = shown && !r.isMe && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
+      setDisplay(label, visible);
+      if (visible) {
+        label.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
+      }
     }
     for (const [slot, r] of this.riders) {
-      if (!seen.has(slot)) {
+      if (!this.seen.has(slot)) {
         r.model.mesh.visible = false;
-        r.label.style.display = "none";
+        setDisplay(r.label, false);
       }
     }
 
-    if (me) this.followCamera(env, me, t, dt);
     env.update({
       riders,
       models: this.models,
@@ -380,6 +408,32 @@ export class World {
       nextBuoy,
     });
     this.draw();
+  }
+
+  /** Whether a rider at `p` (or the shadow it casts) can be in the picture. */
+  private inView(p: THREE.Vector3): boolean {
+    this.bounds.center.copy(p);
+    this.bounds.center.y += 1;
+    return this.frustum.intersectsSphere(this.bounds);
+  }
+
+  /**
+   * How much of a rider is drawn: the outline only close enough to show
+   * (the ink pass draws the silhouette further away), and a shadow only
+   * inside the sun's shadow box around the camera's rider.
+   */
+  private detail(mesh: THREE.Object3D, r: RiderView, me: RiderView | undefined): void {
+    const far = this.camera.position.distanceTo(mesh.position) > OUTLINE_FAR;
+    const focus = me ?? r;
+    const shadow = Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
+    mesh.traverse((o) => {
+      const data = o.userData as { outline?: boolean; castsShadow?: boolean };
+      if (data.outline) o.visible = !far;
+      else if (o instanceof THREE.Mesh) {
+        data.castsShadow ??= o.castShadow;
+        o.castShadow = data.castsShadow && shadow;
+      }
+    });
   }
 
   /**

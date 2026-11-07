@@ -14,9 +14,7 @@ import {
   max,
   mix,
   mrt,
-  normalView,
   output,
-  packNormalToRGB,
   pass,
   perspectiveDepthToViewZ,
   renderOutput,
@@ -30,9 +28,13 @@ import {
 } from "three/tsl";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { devParams } from "../../dev-params.ts";
+import { inkEdge } from "./material.ts";
 
 /** Dev: `?inkdebug=line|normal|ink|depth` shows one of the ink pass's inputs instead of the frame. */
 const DEBUG = import.meta.env.DEV ? devParams.get("inkdebug") : null;
+
+/** The view normal, from the x and y in an `edge` texel (it faces the camera). */
+const normalOf = (e: THREE.Node<"vec4">) => vec3(e.x, e.y, float(1).sub(dot(e.xy, e.xy)).max(0).sqrt());
 
 export class CelPost {
   readonly pipeline: THREE.RenderPipeline;
@@ -64,13 +66,16 @@ export class CelPost {
     scenePass.setMRT(
       mrt({
         output,
-        normal: vec4(packNormalToRGB(normalView), 1),
-        // silhouette weight, crease weight, id, ink darkness
+        // view normal x, y; id; inked
+        edge: inkEdge(0, 1),
+        // silhouette weight, crease weight, (id), ink darkness
         ink: vec4(1, 1, 0, 1),
       }),
     );
+    // Weights in 0-1, read only under the pixel: 8 bits are plenty.
+    scenePass.getTexture("ink").type = THREE.UnsignedByteType;
     const colorTex = scenePass.getTextureNode("output");
-    const normalTex = scenePass.getTextureNode("normal");
+    const edgeTex = scenePass.getTextureNode("edge");
     const inkTex = scenePass.getTextureNode("ink");
     const depthTex = scenePass.getTextureNode("depth");
     const { width, near, far, ink, saturation } = this;
@@ -85,7 +90,8 @@ export class CelPost {
       const z0 = depthAt(uv);
       const q0 = float(1).div(z0);
       const k0 = inkTex.sample(uv);
-      const n0 = normalTex.sample(uv).xyz.mul(2).sub(1);
+      const e0 = edgeTex.sample(uv);
+      const n0 = normalOf(e0);
       // Thinner lines far away.
       const fade = smoothstep(far, near, z0);
       const r = width.mul(mix(float(0.6), float(1), fade));
@@ -107,18 +113,15 @@ export class CelPost {
         const z = depthAt(p);
         const q = float(1).div(z);
         qs.push(q);
-        const k = inkTex.sample(p);
-        const n = normalTex.sample(p).xyz.mul(2).sub(1);
+        const e = edgeTex.sample(p);
+        const n = normalOf(e);
         // A crease only counts against a neighbour at about the same depth.
         const same = smoothstep(0.08, 0.03, abs(q.sub(q0)).div(q0));
         const turn = float(1).sub(dot(n0, n));
-        crease = max(crease, smoothstep(0.18, 0.4, turn).mul(same).mul(k.w.greaterThan(0.001).select(1, 0)));
+        crease = max(crease, smoothstep(0.18, 0.4, turn).mul(same).mul(e.w));
         // Different objects: a line on the nearer (or equal) side.
-        const differ = smoothstep(0.002, 0.004, abs(k.z.sub(k0.z)));
-        idEdge = max(
-          idEdge,
-          differ.mul(q0.greaterThanEqual(q.mul(0.999)).select(1, 0)).mul(k.w.greaterThan(0.001).select(1, 0)),
-        );
+        const differ = smoothstep(0.002, 0.004, abs(e.z.sub(e0.z)));
+        idEdge = max(idEdge, differ.mul(q0.greaterThanEqual(q.mul(0.999)).select(1, 0)).mul(e.w));
       }
       // Silhouettes: the inverse depth bulges (its second difference) on the near side of a jump; flat on any plane.
       let sil: THREE.Node<"float"> = float(0);
@@ -142,7 +145,7 @@ export class CelPost {
       const graded = vec4(mix(vec3(luma), c, saturation), 1);
       if (DEBUG === "line") return vec4(vec3(line), 1);
       if (DEBUG === "normal") return vec4(n0.mul(0.5).add(0.5), 1);
-      if (DEBUG === "ink") return vec4(k0.xyz, 1);
+      if (DEBUG === "ink") return vec4(k0.x, k0.y, e0.z, 1);
       if (DEBUG === "depth") return vec4(vec3(z0.div(500)), 1);
       return graded;
     })();

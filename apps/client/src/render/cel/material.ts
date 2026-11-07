@@ -17,6 +17,7 @@ import {
   positionViewDirection,
   smoothstep,
   uniform,
+  vec4,
   vec3,
 } from "three/tsl";
 
@@ -43,12 +44,20 @@ export function inkOnlyInPass<M extends THREE.NodeMaterial>(m: M, ink: THREE.MRT
 }
 
 /**
- * What the ink pass reads for each pixel (see post.ts): silhouette and
- * crease weights, and an id. (A uniform, so materials that differ only in
- * these share one shader.)
+ * What the ink pass reads for each pixel (see post.ts): `ink`, the line's
+ * silhouette and crease weights and darkness; `edge`, what neighbours
+ * compare (the view normal's x and y, an id, and whether it is inked at
+ * all). (A uniform, so materials that differ only in these share one
+ * shader.)
  */
 export function inkNode(silhouette: number, crease: number, id: number, darkness = 1): THREE.MRTNode {
-  return mrt({ output, ink: uniform(new THREE.Vector4(silhouette, crease, id, darkness)) });
+  const ink = uniform(new THREE.Vector4(silhouette, crease, id, darkness));
+  return mrt({ output, ink, edge: inkEdge(ink.z, ink.w.greaterThan(0.001).select(1, 0)) });
+}
+
+/** The `edge` target: view normal x and y, ink id, inked (0 or 1). */
+export function inkEdge(id: THREE.Node<"float"> | number, inked: THREE.Node<"float"> | number): THREE.Node<"vec4"> {
+  return vec4(normalView.x, normalView.y, id, inked);
 }
 
 export interface CelOptions {

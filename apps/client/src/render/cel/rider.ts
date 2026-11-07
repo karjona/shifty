@@ -436,5 +436,7 @@ export function outlineOf(
   if (mesh.morphTargetInfluences) hull.morphTargetInfluences = mesh.morphTargetInfluences;
   hull.frustumCulled = false;
   hull.castShadow = false;
+  // Far away the ink pass draws the silhouette: the world drops the hull (see `World.detail`).
+  hull.userData.outline = true;
   return hull;
 }

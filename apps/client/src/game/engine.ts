@@ -80,6 +80,8 @@ export class Engine {
   /** When the current run of frames without a stall began (null: none is running). */
   private smoothSince: number | null = null;
   private settling: Settling[] = [];
+  /** Dev: frames are skipped (the frame-cost bench draws its own, see bench.ts). */
+  paused = false;
 
   readonly wasm: InitOutput;
 
@@ -105,6 +107,12 @@ export class Engine {
         throw e;
       });
       const engine = new Engine(wasm, world);
+      if (import.meta.env.DEV && devParams.has("bench")) {
+        const { installBench } = await import("./bench.ts");
+        installBench(world, (paused) => {
+          engine.paused = paused;
+        });
+      }
       setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root), false) : Promise.resolve()));
       if (!engine.render) booted();
       await world.renderer.setAnimationLoop((now: number) => engine.frame(now));
@@ -232,6 +240,7 @@ export class Engine {
     const gap = now - this.last;
     const dt = Math.min(0.1, gap / 1000);
     this.last = now;
+    if (import.meta.env.DEV && this.paused) return;
     if (this.holding > 0) {
       this.smoothSince = null;
       return;
