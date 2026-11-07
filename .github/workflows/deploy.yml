@@ -124,11 +124,15 @@ jobs:
 
   lobby:
     name: Lobby and client (Cloudflare)
-    needs: [image, web, migrate]
+    needs: [version, image, web, migrate]
     runs-on: ubuntu-latest
     environment: production
     permissions:
       contents: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -141,10 +145,19 @@ jobs:
         with:
           name: client-dist
           path: apps/client/dist
-      - run: pnpm --filter lobby exec wrangler deploy
+      # Upload, then deploy the version: the custom domain stays as it is
+      # (the token can't change it; `wrangler triggers deploy` by hand does).
+      - id: upload
+        name: Upload the Worker version
+        run: |
+          pnpm --filter lobby exec wrangler versions upload --message "v$VERSION" | tee upload.log
+          id=$(sed -n 's/^Worker Version ID: //p' upload.log)
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - name: Deploy it to all traffic
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION_ID: ${{ steps.upload.outputs.id }}
+        run: pnpm --filter lobby exec wrangler versions deploy "$VERSION_ID@100%" --message "v$VERSION" --yes
 
   race-server:
     name: Race server (Coolify)
