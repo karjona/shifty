@@ -56,7 +56,7 @@ interface Grid {
 
 /**
  * Round the grid from in front of it (angle 0, along the riders' heading) to
- * behind it (π), coming closer and lower, looking at the riders.
+ * behind it (π), coming closer, looking at the riders.
  */
 function round(seconds: number, grid: Grid, ground: (x: number, z: number) => number, chaseFov: number): Shot {
   const fx = Math.sin(grid.yaw);
@@ -176,14 +176,15 @@ export class Flyover {
   /** The camera `t` seconds into an intro `seconds` long (it ends behind your rider). */
   intro(t: number, seconds: number): CameraShot {
     const scale = seconds / this.length;
+    const shots = this.shots;
     let from = 0;
-    let shot = this.shots[0]!;
-    for (const s of this.shots) {
-      shot = s;
-      if (t < from + s.seconds * scale) break;
-      from += s.seconds * scale;
+    let i = 0;
+    while (i < shots.length - 1 && t >= from + shots[i]!.seconds * scale) {
+      from += shots[i]!.seconds * scale;
+      i++;
     }
-    const last = shot === this.shots[this.shots.length - 1];
+    const shot = shots[i]!;
+    const last = i === shots.length - 1;
     shot.at(Math.min(1, Math.max(0, (t - from) / (shot.seconds * scale))), this.pose);
     return this.out(last ? smooth((t - (seconds - HANDOVER)) / HANDOVER) : 0);
   }
