@@ -1,7 +1,8 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
-// ticket from the dev server (see vite.config.ts). The netcode e2e tests
-// use it too. URL options: name, room, bots, event (snow, or gp for the
-// Tilt), surface, pid, render=0, autopilot=1, scale, water.
+// ticket from the dev server (see vite.config.ts); a Tilt ends on its
+// podium. The netcode e2e tests use it too. URL options: name, room, bots,
+// event (snow, or gp for the Tilt), surface, pid, render=0, autopilot=1,
+// scale, water.
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -57,7 +58,15 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
         render: params.get("render") !== "0",
         autopilot: params.get("autopilot") === "1",
         debug: true,
-        onOver: () => location.reload(),
+        onOver: (podium) => {
+          if (!podium) {
+            location.reload();
+            return;
+          }
+          setStatus("");
+          help.hidden = true;
+          void import("./podium-dev.tsx").then((m) => m.showPodium(podium, () => location.reload()));
+        },
       }),
     );
   } catch (e) {

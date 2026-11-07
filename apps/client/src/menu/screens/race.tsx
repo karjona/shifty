@@ -1,9 +1,11 @@
 // A race from the menus: the race takes the screen and the controller;
-// Start / Esc opens the race menu over it (online races don't pause).
+// Start / Esc opens the race menu over it (online races don't pause). A
+// Tilt ends on its podium.
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
+import type { PodiumData } from "../../game/podium.ts";
 import { RaceSession } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { type PendingRace, fetchMe, meQuery, takePendingRace } from "../api.ts";
@@ -11,6 +13,7 @@ import { toast } from "../toast.tsx";
 import { useAction, useAutoFocus } from "../hooks.ts";
 import { nav } from "../nav.ts";
 import { Button, Glyph } from "../ui.tsx";
+import { PodiumScreen } from "./podium.tsx";
 import { VERSION } from "../../version.ts";
 
 /** `sim::Phase::Results`. */
@@ -28,6 +31,7 @@ export function RaceScreen() {
   const [status, setStatus] = useState(t.race.connecting);
   const [failed, setFailed] = useState(false);
   const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow" } | null>(null);
+  const [podium, setPodium] = useState<PodiumData | null>(null);
   const queryClient = useQueryClient();
   const credits = useRef<number | null>(queryClient.getQueryData(meQuery.queryKey)?.rider?.credits ?? null);
   const phaseNow = view?.racePhase ?? null;
@@ -57,7 +61,7 @@ export function RaceScreen() {
     if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params });
     else void navigate({ to: "/play", search: race.back.search });
   };
-  const planOver = useEffectEvent(back);
+  const planOver = useEffectEvent((data: PodiumData | null) => (data ? setPodium(data) : back()));
 
   useEffect(() => {
     const hud = hudRef.current;
@@ -75,7 +79,7 @@ export function RaceScreen() {
         hud,
         status: setStatus,
         onJoin: (ok) => setFailed(!ok),
-        onOver: () => planOver(),
+        onOver: (data) => planOver(data),
       });
       engine.show(s);
       setSession(s);
@@ -99,14 +103,16 @@ export function RaceScreen() {
 
   // The controller drives the rider; only Start (or Esc) reaches the menus.
   useEffect(() => {
-    nav.setEnabled(menu || failed || outdated);
+    nav.setEnabled(menu || failed || outdated || podium !== null);
     session?.setPaused(menu);
     return () => nav.setEnabled(true);
-  }, [menu, failed, outdated, session]);
+  }, [menu, failed, outdated, podium, session]);
 
-  useAction("menu", () => setMenu((m) => !m), !outdated);
+  useAction("menu", () => setMenu((m) => !m), !outdated && podium === null);
   useAction("back", () => (failed || outdated ? back() : setMenu(false)), menu || failed || outdated);
   useAutoFocus();
+
+  if (podium) return <PodiumScreen data={podium} onDone={back} />;
 
   if (outdated)
     return (

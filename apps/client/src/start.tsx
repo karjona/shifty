@@ -20,4 +20,6 @@ else if (import.meta.env.DEV && devParams.has("lookdev"))
   });
 else if (import.meta.env.DEV && devParams.has("celshot"))
   void import("./game/celshot.ts").then((m) => m.celshot(devParams));
+else if (import.meta.env.DEV && devParams.has("podium"))
+  void import("./game/podium-dev.tsx").then((m) => m.podiumDev(devParams));
 else createRoot(document.querySelector("#root")!).render(<App />);

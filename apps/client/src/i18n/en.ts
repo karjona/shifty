@@ -331,7 +331,6 @@ export const en = {
     getReady: "GET READY",
     go: "GO!",
     freeRide: "Free ride · next race soon",
-    results: (s: number) => `RESULTS · next race in ${s}`,
     wrongWay: "WRONG WAY",
     maxPower: "✓ MAX POWER",
     missedBuoy: "MISSED BUOY",
@@ -342,22 +341,33 @@ export const en = {
     sketchy: "SKETCHY",
     bail: "BAIL!",
     labels: { lap: "LAP", score: "SCORE", pos: "POS", time: "TIME", split: "SPLIT", race: "RACE", power: "POWER" },
-    table: {
-      results: "Results",
-      race: (i: number, n: number) => `race ${i}/${n}`,
-      time: "time",
-      missed: "missed",
-      tricks: "tricks",
-      points: "points",
-      dnf: "DNF",
-      gp: "The Tilt",
-      gpFinal: "The Tilt · final standings",
-    },
     ordinal: (n: number) => {
       const s = ["th", "st", "nd", "rd"];
       const v = n % 100;
       return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
     },
+  },
+  results: {
+    title: "Results",
+    race: (i: number, n: number) => `Race ${i} of ${n}`,
+    standings: "Standings",
+    finished: "Finished",
+    racing: "Racing",
+    lap: (lap: number, laps: number) => `Lap ${lap}/${laps}`,
+    dnf: "DNF",
+    cols: { time: "Time", missed: "Missed", tricks: "Tricks", style: "Style", tilt: "Tilt", points: "Points" },
+    tilt: "The Tilt",
+    after: (i: number, n: number) => `After race ${i} of ${n}`,
+    final: "Final",
+    next: "Next race in",
+    podium: "Podium in",
+    back: "Back in",
+  },
+  podium: {
+    card: "The Tilt",
+    champion: (_female: boolean) => "Champion of the Tilt",
+    standings: "Final standings",
+    continue: "Continue",
   },
   about: {
     title: "About",

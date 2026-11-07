@@ -1,0 +1,338 @@
+/* The race's end (see results.ts): the standings tower at the side once
+   you are through the finish, and the scoreboard on the results. Paper
+   panels with an ink edge, numbered rows, your row in the season's
+   accent; laid out on the 1920×1080 canvas like the menus. */
+
+.board {
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+  font-weight: 420;
+  line-height: 1.33;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  pointer-events: none;
+}
+.board * {
+  box-sizing: border-box;
+}
+.board-label {
+  font-size: var(--fs-label);
+  line-height: 24px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* --- rows: place, rider, time or gap, numbers --- */
+
+.board-row,
+.board-cols {
+  display: grid;
+  align-items: center;
+  column-gap: 16px;
+}
+.board-row {
+  position: relative;
+  height: 56px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--fs-body);
+}
+.board-row:last-child {
+  border-bottom: 0;
+}
+.board-cols {
+  height: 36px;
+  font-size: 15px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.board-cols > :nth-child(n + 3),
+.board-row > :nth-child(n + 3) {
+  text-align: right;
+}
+.board-row > .c-name {
+  text-align: left;
+}
+.c-place {
+  justify-self: center;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 820;
+  font-stretch: 75%;
+}
+.c-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 650;
+}
+.c-name i {
+  margin-left: 2px;
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 75%;
+  opacity: 0.5;
+}
+.c-name.bot {
+  font-weight: 450;
+}
+.c-time,
+.c-num,
+.c-total {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 720;
+  font-stretch: 75%;
+}
+.c-num {
+  color: var(--ink-2);
+}
+.c-won {
+  color: var(--ink);
+  font-weight: 820;
+}
+.c-time .still {
+  font-size: 15px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.board-row.out .c-place,
+.board-row.out .c-name,
+.board-row.out .c-time {
+  color: var(--ink-3);
+}
+/* Your row: the accent fills it, the text turns to paper. */
+.board-row.me {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+.board-row.me > *,
+.board-row.me .c-time .still {
+  color: inherit;
+}
+.board-row.fresh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  animation: board-flash 900ms var(--ease) both;
+}
+
+/* --- the tower: compact, at the side, while the others still race --- */
+
+.board-tower {
+  --cols: 48px 1fr 128px;
+  position: fixed;
+  left: var(--margin-x);
+  top: 176px;
+  width: 500px;
+  padding: 0 0 4px;
+  background: var(--paper);
+  box-shadow: var(--lift);
+  animation: board-tower-in 420ms var(--ease) both;
+}
+.board-tower.styled {
+  --cols: 48px 1fr 128px 72px;
+}
+.board-tower header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  margin: 0 24px;
+  border-bottom: 2px solid var(--ink);
+}
+.board-count {
+  margin-left: 8px;
+  font-size: 26px;
+  font-weight: 760;
+  font-stretch: 75%;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.board-tower .board-cols,
+.board-tower .board-row {
+  grid-template-columns: var(--cols);
+  padding-right: 24px;
+}
+.board-tower .board-row {
+  height: 48px;
+  font-size: 22px;
+}
+.board-tower .c-place {
+  font-size: 26px;
+}
+.board-tower .c-time,
+.board-tower .c-num {
+  font-size: 24px;
+}
+
+/* --- the scoreboard: the race, and the Tilt beside it --- */
+
+.board-results {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap);
+}
+.board-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 8px;
+  background: var(--paper);
+  box-shadow: var(--lift);
+  animation: rise 420ms var(--ease) both;
+}
+.board-race {
+  width: 960px;
+}
+.board-tilt {
+  width: 600px;
+  animation-delay: 90ms;
+}
+.board-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 var(--pad);
+  padding: 28px 0 20px;
+  border-bottom: 2px solid var(--ink);
+}
+.board-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.board-title {
+  font-size: var(--fs-title);
+  line-height: 0.86;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+/* Your place, big, beside the title. */
+.board-mine {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.board-mine b {
+  padding: 0 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 64px;
+  line-height: 72px;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.03em;
+}
+.board-mine span {
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 720;
+  font-stretch: 75%;
+  color: var(--ink-2);
+}
+.board-panel .board-cols,
+.board-panel .board-row {
+  padding-right: var(--pad);
+}
+.board-panel .board-cols {
+  height: 44px;
+  padding-top: 8px;
+}
+.board-race .board-cols,
+.board-race .board-row {
+  grid-template-columns: 72px 1fr 152px repeat(var(--n), 96px);
+}
+.board-tilt .board-cols,
+.board-tilt .board-row {
+  grid-template-columns: 72px 56px 1fr 96px;
+}
+.board-tilt.still .board-cols,
+.board-tilt.still .board-row {
+  grid-template-columns: 72px 1fr 96px;
+}
+.board-race .board-row,
+.board-tilt .board-row {
+  height: 60px;
+}
+.c-move {
+  font-size: 18px;
+  font-weight: 760;
+  font-stretch: 75%;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+.c-move.up {
+  color: #2f8a4a;
+}
+.c-move.down {
+  color: var(--danger);
+}
+.board-row.me .c-move {
+  color: inherit;
+}
+.c-total {
+  font-size: 34px;
+  font-weight: 820;
+}
+.board-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px var(--pad) 0;
+  padding: 16px 0 12px;
+  border-top: 2px solid var(--ink);
+  font-size: var(--fs-label);
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.board-left {
+  min-width: 56px;
+  padding: 0 12px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 32px;
+  line-height: 44px;
+  font-weight: 820;
+  font-stretch: 75%;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+@keyframes board-tower-in {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+@keyframes board-flash {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0;
+  }
+}
