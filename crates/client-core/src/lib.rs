@@ -266,6 +266,11 @@ impl Client {
         self.world.course
     }
 
+    /// The conditions of the race raced now.
+    pub fn conditions(&self) -> sim::Conditions {
+        self.world.conditions
+    }
+
     /// Which race of the room's plan is on (0-based).
     pub fn event_index(&self) -> u8 {
         self.event_index
@@ -488,7 +493,14 @@ impl Client {
                 self.slot = w.slot as usize;
                 self.surface_kind = w.surface_kind;
                 self.surface_seed = w.surface_seed;
-                self.world = World::on_course(w.course, w.surface_kind, w.surface_seed);
+                self.world = World::for_event(
+                    sim::conditions::Event {
+                        course: w.course,
+                        conditions: w.conditions,
+                    },
+                    w.surface_kind,
+                    w.surface_seed,
+                );
                 self.surface = self.world.surface.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
@@ -609,9 +621,9 @@ impl Client {
 
         self.event_index = s.event_index;
         self.event_count = s.event_count.max(1);
-        // A Tilt moved on to its next course: a new sea, and nothing to
+        // A Tilt moved on to its next race: a new sea, and nothing to
         // smooth from the old one.
-        let new_course = s.course != self.world.course;
+        let new_course = s.course != self.world.course || s.conditions != self.world.conditions;
         if new_course {
             self.surface = s
                 .course
@@ -636,6 +648,7 @@ impl Client {
         let mut world = World {
             tick: s.tick,
             course: s.course,
+            conditions: s.conditions,
             surface: self.surface.clone(),
             race: s.race,
             riders,

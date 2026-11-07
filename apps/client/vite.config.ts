@@ -10,11 +10,19 @@ const RACE_SERVER = process.env.RACE_SERVER ?? "localhost:4433";
 /** The lobby Worker in dev (wrangler dev); the game's `/api` goes there. */
 const LOBBY = process.env.LOBBY ?? "http://127.0.0.1:8787";
 
+/** A number from the query, or undefined if absent or not a whole number. */
+const whole = (q: URLSearchParams, k: string): number | undefined => {
+  const v = q.get(k);
+  return v !== null && /^\d+$/u.test(v) ? Number(v) : undefined;
+};
+
 /**
  * Dev-only quick join (`/?name=You` and the netcode tests skip the menus):
- * `GET /__dev/join?name=..&room=..&bots=..&surface=..&course=..` returns a
- * join ticket: a token signed with the dev lobby key, the race server URL
- * and (hash mode) its certificate hashes. Not part of builds.
+ * `GET /__dev/join?name=..&room=..&bots=..&surface=..&tilt=1` (the Tilt) or
+ * `..&course=..&season=..&weather=..&turns=..&time=..&seed=..` (one race,
+ * each left out to be drawn) returns a join ticket: a token signed with the
+ * dev lobby key, the race server URL and (hash mode) its certificate hashes.
+ * Not part of builds.
  */
 const devLobby = (): Plugin => ({
   name: "shifty-dev-lobby",
@@ -32,8 +40,14 @@ const devLobby = (): Plugin => ({
             room: q.get("room") || "dev",
             bots: Number(q.get("bots") ?? 2),
             surface: Number(q.get("surface") ?? 1),
-            course: Number(q.get("course") ?? 0),
-            events: (q.get("events") ?? "").split(",").filter(Boolean).map(Number),
+            tilt: q.get("tilt") === "1",
+            race: Object.fromEntries(
+              (["course", "season", "weather", "turns", "time"] as const).flatMap((k) => {
+                const v = whole(q, k);
+                return v === undefined ? [] : [[k, v]];
+              }),
+            ),
+            seed: whole(q, "seed"),
             pid: q.get("pid") || undefined,
           });
           res.setHeader("content-type", "application/json");

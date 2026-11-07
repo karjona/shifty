@@ -131,7 +131,19 @@ export interface Frame {
   renderer: THREE.WebGPURenderer;
   /** Summer: the buoy to pass next (index), if any. */
   nextBuoy: number | null;
+  /**
+   * The race's weather where the camera is: `progress` along the race (0 at
+   * the start, 1 at the finish: on a loop by the race clock, on a run by
+   * where the camera is down it), and how far the weather has turned from
+   * the conditions' `weather` (0) to `turns` (1; see game/conditions.ts).
+   * Both 0 outside a race.
+   */
+  progress: number;
+  turn: number;
 }
+
+/** The race's weather at a point (x, z): `[progress, turn]` (see `Frame`). */
+export type WeatherSource = (x: number, z: number) => ArrayLike<number>;
 
 const DT = 1 / 60;
 /** Landing jolt: falls slower than this (m/s) don't move the camera. */
@@ -166,6 +178,8 @@ export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(55, 1, 0.3, 4000);
+  /** The race's weather, read once a frame at the camera (null outside a race). */
+  weatherAt: WeatherSource | null = null;
   backend: "webgpu" | "webgl2" = "webgl2";
   renderScale = 1;
 
@@ -359,6 +373,8 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy: null,
+      progress: 0,
+      turn: 0,
     });
     this.draw();
     this.camReady = false;
@@ -415,6 +431,7 @@ export class World {
       if (!this.seen.has(slot)) model.mesh.visible = false;
     }
 
+    const weather = this.weatherAt?.(this.camera.position.x, this.camera.position.z);
     env.update({
       riders,
       models: this.models,
@@ -424,6 +441,8 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy,
+      progress: weather?.[0] ?? 0,
+      turn: weather?.[1] ?? 0,
     });
     this.draw();
   }

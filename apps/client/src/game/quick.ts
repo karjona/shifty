@@ -1,8 +1,9 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
 // ticket from the dev server (see vite.config.ts); a Tilt ends on its
 // podium. The netcode e2e tests use it too. URL options: name, room, bots,
-// event (snow: the mountain run, glades, or gp for the Tilt), surface, pid,
-// render=0, autopilot=1, scale, water.
+// event (snow, glades, gp for the Tilt, or a circuit's id), season, weather, turns,
+// time, seed, surface, pid, render=0, autopilot=1, scale, water.
+import { SEASONS, TIMES_OF_DAY, WEATHERS, circuit, timeOf } from "@shifty/rider";
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -22,16 +23,61 @@ const HELP = {
     "Land flat on the board, along the slope (forward or switch), and let go of the grab first!",
 };
 
+/** An index into `names` from a name or a number in the URL (null if neither). */
+function indexOf(names: readonly string[], v: string | null): number | null {
+  if (v === null) return null;
+  const n = /^\d+$/u.test(v) ? Number(v) : names.indexOf(v.toLowerCase());
+  return n >= 0 && n < names.length ? n : null;
+}
+
+/**
+ * The quick race's plan from the URL, as the dev join takes it: `event=gp`
+ * (the Tilt), or one race on `event` (snow = the mountain run, glades, or a
+ * circuit's id; the bay by default) in `season` (its sport's first by default: summer
+ * on the water, winter on the snow), with `weather`, `turns` (names or wire
+ * numbers) and `time` (10-minute steps, HH:MM, or dawn...dusk) when given,
+ * the rest drawn with `seed` (0 by default).
+ */
+function quickPlan(params: URLSearchParams): Map<string, string> {
+  const plan = new Map<string, string>();
+  const event = params.get("event");
+  if (event === "gp") plan.set("tilt", "1");
+  else {
+    const course =
+      event === "snow" ? 1 : event === "glades" ? 3 : event && circuit(Number(event)) ? Number(event) : 0;
+    plan.set("course", String(course));
+    const season = indexOf(SEASONS, params.get("season")) ?? (circuit(course)?.sport === "snow" ? 2 : 0);
+    plan.set("season", String(season));
+    for (const k of ["weather", "turns"]) {
+      const w = indexOf(WEATHERS, params.get(k));
+      if (w !== null) plan.set(k, String(w));
+    }
+    const time = params.get("time");
+    const named = indexOf(TIMES_OF_DAY, time);
+    const clock = time?.match(/^(\d{1,2}):(\d{2})$/u);
+    const step =
+      named !== null && !/^\d+$/u.test(time ?? "")
+        ? timeOf(SEASONS[season]!, TIMES_OF_DAY[named]!)
+        : clock
+          ? Math.floor((Number(clock[1]) * 60 + Number(clock[2])) / 10)
+          : time !== null && /^\d+$/u.test(time)
+            ? Number(time)
+            : null;
+    if (step !== null) plan.set("time", String(step));
+  }
+  const seed = params.get("seed");
+  if (seed && /^\d+$/u.test(seed)) plan.set("seed", seed);
+  return plan;
+}
+
 export async function quickRace(params: URLSearchParams): Promise<void> {
   const status = document.querySelector<HTMLDivElement>("#status")!;
   const setStatus = (text: string) => {
     status.textContent = text;
     status.hidden = text === "";
   };
-  const event = params.get("event");
-  const glades = event === "glades";
-  const snow = event === "snow" || glades;
-  const gp = event === "gp";
+  const plan = quickPlan(params);
+  const snow = circuit(Number(plan.get("course")))?.sport === "snow";
   const help = document.querySelector<HTMLDivElement>("#help")!;
   help.innerHTML = snow ? HELP.snow : HELP.jetski;
   help.hidden = false;
@@ -41,12 +87,12 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
     setStatus("Getting a join ticket…");
     const q = new URLSearchParams({
       name: params.get("name") || `Rider ${Math.floor(Math.random() * 900 + 100)}`,
-      room: params.get("room") ?? (glades ? "dev-glades" : snow ? "dev-snow" : "dev"),
+      // A room's plan is drawn when it is made: other options, another room.
+      room: params.get("room") ?? ["dev", ...plan.values()].join("-"),
       bots: params.get("bots") ?? "2",
       surface: params.get("surface") ?? "1",
-      course: glades ? "3" : snow ? "1" : "0",
     });
-    if (gp) q.set("events", "0,1");
+    for (const [k, v] of plan) q.set(k, v);
     const pid = params.get("pid");
     if (pid) q.set("pid", pid);
     const res = await fetch(`/__dev/join?${q}`);

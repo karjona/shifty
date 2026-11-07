@@ -105,6 +105,10 @@ pub enum CourseId {
 }
 
 impl CourseId {
+    /// Every circuit, in id order. Each one here can be drawn for a race in
+    /// any season its sport rides (see [`crate::conditions`]).
+    pub const ALL: &'static [CourseId] = &[Self::Oval, Self::Mountain, Self::Glades];
+
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::Oval),
@@ -120,6 +124,10 @@ impl CourseId {
             Self::Mountain => &MOUNTAIN,
             Self::Glades => &GLADES,
         }
+    }
+
+    pub fn sport(self) -> Sport {
+        self.course().sport
     }
 }
 

@@ -1,0 +1,9 @@
+circuit 0 jetski
+circuit 1 snow
+circuit 3 snow
+sport jetski 0 1 2 3
+sport snow 1 2 3
+season 0 climate 7 2 2 1 0 1 0 daylight 32 111 times 32 52 72 91 111
+season 1 climate 3 3 2 2 3 3 1 daylight 39 104 times 39 55 72 88 104
+season 2 climate 4 3 2 1 1 1 4 daylight 47 96 times 47 59 72 84 96
+season 3 climate 5 3 2 1 2 1 1 daylight 39 104 times 39 55 72 88 104

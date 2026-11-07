@@ -47,6 +47,7 @@ import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
 import { celify } from "./cel/material.ts";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, liftStation, outcrops } from "./mountain-props.ts";
@@ -125,14 +126,6 @@ export interface RunData {
   tables: TableData[];
   lips: LipData[];
   spines: SpineData[];
-}
-
-/** A race's conditions (`sim::conditions::Conditions`): season, weather on the way down, time of day. */
-export interface RaceConditions {
-  season: number;
-  weather: number;
-  turns: number;
-  time: number;
 }
 
 /** The mountain's colours, as uniforms: a race's conditions set them. */
@@ -539,12 +532,16 @@ export class Mountain implements Environment {
   private wind = { x: 0.6, z: -0.3 };
   private random = rng(77);
 
-  /** `course`: which run (`sim::CourseId`), for its scenery; `conditions`: the race's. */
-  constructor(run: RunData, terrain: Terrain, opts: { course?: number; conditions?: RaceConditions | null } = {}) {
+  /** The season, weather and time of day it is drawn in. */
+  readonly conditions: Conditions;
+
+  /** `conditions`: the race's (a clear winter noon if left out); `course`: which run (`sim::CourseId`), for its scenery. */
+  constructor(run: RunData, terrain: Terrain, conditions?: Conditions, course = 1) {
+    this.conditions = conditions ?? homeConditions("snow");
     this.run = run;
     this.terrain = terrain;
-    this.scenery = runScenery(opts.course ?? 1);
-    this.setConditions(opts.conditions ?? null);
+    this.scenery = runScenery(course);
+    this.setConditions(this.conditions);
     this.buildSnow();
     this.buildMountainAround();
     this.buildForest();
@@ -567,18 +564,15 @@ export class Mountain implements Environment {
     this.group.add(skyDome());
   }
 
-  /**
-   * Sets the look for a race's conditions (null: the mountain in deep
-   * winter). Only uniforms change: no shader is rebuilt.
-   */
-  setConditions(conditions: RaceConditions | null): void {
+  /** Sets the look's colours for a race's conditions. Only uniforms change: no shader is rebuilt. */
+  setConditions(conditions: Conditions): void {
     const l = this.look;
     // Fall's thin early cover bares the slopes; spring's meadows show lower down.
-    const season = conditions?.season ?? 2;
-    l.cover.value = season === 1 ? 0.45 : season === 3 ? 0.75 : 1;
-    l.ground.value.set(season === 3 ? 0x5d7a3e : 0x6a5640);
-    l.treeSnow.value = season === 2 ? 1 : season === 1 ? 0.15 : 0.35;
-    l.foliage.value.set(season === 3 ? 0x1f4a2e : 0x17382a);
+    const season = conditions.season;
+    l.cover.value = season === "fall" ? 0.45 : season === "spring" ? 0.75 : 1;
+    l.ground.value.set(season === "spring" ? 0x5d7a3e : 0x6a5640);
+    l.treeSnow.value = season === "winter" ? 1 : season === "fall" ? 0.15 : 0.35;
+    l.foliage.value.set(season === "spring" ? 0x1f4a2e : 0x17382a);
   }
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {

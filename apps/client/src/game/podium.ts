@@ -15,7 +15,7 @@ import { sharedBay } from "./backdrops.ts";
 import { disposeTree } from "./dispose.ts";
 import type { Engine, Stage } from "./engine.ts";
 import type { RosterName, TiltRow } from "../ui/results.ts";
-import { type Season, seasonOf } from "./season-change.ts";
+import type { Season } from "./season-change.ts";
 import { PALETTE, SEASONS, setAccent } from "./seasons.ts";
 
 export interface PodiumRider {
@@ -34,13 +34,13 @@ export interface PodiumData {
   season: Season;
 }
 
-/** The podium of a Tilt from its final standings, the riders' names and looks, and the course it ended on. */
+/** The podium of a Tilt from its final standings, the riders' names and looks, and the season it ended in. */
 export function podiumData(
   rows: TiltRow[],
   riders: Map<number, RosterName>,
   looks: Map<number, Appearance>,
   mySlot: number,
-  course: number,
+  season: Season,
 ): PodiumData {
   return {
     riders: rows.map((r) => ({
@@ -51,7 +51,7 @@ export function podiumData(
       points: r.total,
       me: r.slot === mySlot,
     })),
-    season: seasonOf(course),
+    season,
   };
 }
 

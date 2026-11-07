@@ -95,8 +95,12 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         bots,
         humans: 0,
         surface: surface as u8,
-        course: course as u8,
-        events: vec![],
+        tilt: false,
+        races: vec![protocol::token::RaceClaims {
+            course: Some(course as u8),
+            ..Default::default()
+        }],
+        seed: 1,
         look: String::new(),
         // Lopsided setups, so prediction has to know each rider's.
         setups: vec![[6, 2, 2, 2], [2, 3, 6, 1]],
@@ -554,6 +558,8 @@ fn predicts_the_snowboard_run_exactly() {
         h.peers[0].client.predicted_world().course,
         CourseId::Mountain
     );
+    assert_eq!(h.peers[0].client.conditions(), h.room.world().conditions);
+    assert_ne!(h.room.world().conditions.season, sim::Season::Summer);
     h.start_race();
     let before = h.peers[0].client.stats().mispredictions;
     h.run(8000.0, snowboarding);
