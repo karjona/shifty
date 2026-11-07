@@ -6,7 +6,7 @@
 use crate::DT;
 use crate::course::{Keep, Line};
 use crate::input::{Input, buttons};
-use crate::jetski::tuning as jet;
+use crate::jetski as jet;
 use crate::math::{TAU, angle_diff, atan2, clamp, sqrt};
 use crate::mountain::{Feature, Run};
 use crate::snowboard::tuning as snow;
@@ -21,8 +21,9 @@ pub fn bot_input(world: &World, slot: usize) -> Input {
 }
 
 /// Jetski bots follow the course, swing out to pass each buoy on its
-/// correct side, pull back on some crests to pop, and some take the ramps
-/// and throw a 360 on big launches.
+/// correct side, pull back on some crests to pop, and some take the ramps.
+/// In the air tricksters pick a trick for each jump (a rotation, a stunt,
+/// or both) and do the parts that fit the air left.
 fn jetski_input(world: &World, slot: usize) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
@@ -75,19 +76,125 @@ fn jetski_input(world: &World, slot: usize) -> Input {
         };
         return Input::from_analog(steer, pace, lean, 0);
     }
-    // In the air: spin while there is time left to get most of the way
-    // round (ramps, big pops), then let go and let it finish itself.
-    let g = jet::GRAVITY;
+    if !trickster {
+        return Input::from_analog(0.0, pace, 0.0, 0);
+    }
+    let g = jet::tuning::GRAVITY;
     let above = (r.pos.y - world.surface.height(r.pos.x, r.pos.z, world.tick)).max(0.0);
     let air_left = (r.vel.y + sqrt(r.vel.y * r.vel.y + 2.0 * g * above)) / g;
-    let to_go = 0.78 * TAU - r.air_spin.abs();
-    let spin_up = (1.0 - r.yaw_rate.abs() / jet::SPIN_RATE).max(0.0) / jet::TRICK_RESPONSE;
-    let spinning = r.yaw_rate.abs() > 0.4 * jet::SPIN_RATE;
-    if trickster && to_go > 0.0 && (spinning || air_left > to_go / jet::SPIN_RATE + spin_up) {
-        let dir = if slot.is_multiple_of(2) { 1.0 } else { -1.0 };
-        return Input::from_analog(dir, pace, 0.0, buttons::TRICK);
+    // The takeoff tick: the same all through a jump.
+    let jump = world.tick.wrapping_sub(u32::from(r.state_ticks));
+    let plan = JetskiPlan::pick(slot, jump);
+    let rate = world.setups[slot].sanitized().tricks();
+
+    let mut buttons = 0;
+    let (mut steer, mut lean) = (0.0, 0.0);
+    if let Some(id) = plan.stunt {
+        let stunt = jet::Stunt::of(id);
+        let ticks = |reach: u8| f32::from(jet::tuning::STUNT_FULL) / f32::from(reach) * DT;
+        let back = ticks(stunt.reach_out) + 0.15;
+        let whole =
+            ticks(stunt.reach_in) + f32::from(jet::tuning::MIN_STUNT_TICKS) * DT + 0.1 + back;
+        let started = r.grab != 0;
+        if (started && air_left > back && r.last_input.pressed(buttons::GRAB))
+            || (!started && air_left > whole)
+        {
+            buttons |= buttons::GRAB;
+            if !started {
+                // The stick picks the stunt as the button goes down.
+                let (s, l) = stunt_stick(id);
+                return Input::from_analog(s, pace, l, buttons);
+            }
+        }
     }
-    Input::from_analog(0.0, pace, 0.0, 0)
+    if let Some(rot) = plan.rotation {
+        let (button, stick_steer, stick_lean, done, max_rate) = match rot {
+            Rotation::Spin(dir) => (
+                buttons::TRICK,
+                dir,
+                0.0,
+                r.air_spin.abs(),
+                jet::tuning::SPIN_RATE,
+            ),
+            Rotation::Backflip => (
+                buttons::TRICK,
+                0.0,
+                -1.0,
+                r.pitch.max(0.0),
+                jet::tuning::FLIP_RATE,
+            ),
+            Rotation::Roll(dir) => (
+                buttons::ROLL,
+                dir,
+                0.0,
+                r.roll.abs(),
+                jet::tuning::ROLL_RATE,
+            ),
+        };
+        let speed = max_rate * rate;
+        let current = match rot {
+            Rotation::Spin(_) => r.yaw_rate.abs(),
+            Rotation::Backflip => r.pitch_rate.max(0.0),
+            Rotation::Roll(_) => r.roll_rate.abs(),
+        };
+        let to_go = 0.78 * TAU - done;
+        let spin_up = (1.0 - current / speed).max(0.0) / jet::tuning::TRICK_RESPONSE;
+        let turning = current > 0.4 * speed;
+        if to_go > 0.0 && (turning || air_left > to_go / speed + spin_up + 0.3) {
+            buttons |= button;
+            steer = stick_steer;
+            lean = stick_lean;
+        }
+    }
+    Input::from_analog(steer, pace, lean, buttons)
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Rotation {
+    /// Flat spin, to the right (+1) or the left (-1).
+    Spin(f32),
+    Backflip,
+    /// Barrel roll, to the right (+1) or the left (-1).
+    Roll(f32),
+}
+
+/// What a jetski bot tries on one jump.
+#[derive(Clone, Copy, Debug)]
+struct JetskiPlan {
+    rotation: Option<Rotation>,
+    stunt: Option<u8>,
+}
+
+impl JetskiPlan {
+    /// A trick for this bot's jump that took off at tick `jump`.
+    fn pick(slot: usize, jump: u32) -> Self {
+        let h = jump
+            .wrapping_add(slot as u32 * 0x9E37)
+            .wrapping_mul(0x9E37_79B9)
+            >> 16;
+        let dir = if (h >> 8) & 1 == 0 { 1.0 } else { -1.0 };
+        let stunt = 1 + (h >> 4) as u8 % 5;
+        let (rotation, stunt) = match h % 8 {
+            0 => (Some(Rotation::Spin(dir)), None),
+            1 => (Some(Rotation::Backflip), None),
+            2 => (Some(Rotation::Roll(dir)), None),
+            3 => (Some(Rotation::Spin(dir)), Some(stunt)),
+            4 => (Some(Rotation::Backflip), Some(stunt)),
+            _ => (None, Some(stunt)),
+        };
+        Self { rotation, stunt }
+    }
+}
+
+/// The stick that picks a stunt (steer, lean).
+fn stunt_stick(id: u8) -> (f32, f32) {
+    match id {
+        jet::stunts::HANDSTAND => (0.0, 1.0),
+        jet::stunts::SUPERMAN => (0.0, -1.0),
+        jet::stunts::NAC_NAC => (-1.0, 0.0),
+        jet::stunts::CAN_CAN => (1.0, 0.0),
+        _ => (0.0, 0.0),
+    }
 }
 
 /// Snowboard bots ride their own line down the run, scrub speed before turns

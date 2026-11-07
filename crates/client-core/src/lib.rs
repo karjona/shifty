@@ -24,7 +24,8 @@ use sim::bot::bot_input;
 use sim::math::{Vec3, angle_diff, wrap_angle};
 use sim::race::{EventKind, Race, Standing};
 use sim::{
-    CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Surface, SurfaceKind, TICK_HZ, World,
+    CourseId, Input, Inputs, MAX_RIDERS, Rider, SimEvent, Sport, Surface, SurfaceKind, TICK_HZ,
+    World,
 };
 
 pub const TICK_MS: f64 = 1000.0 / TICK_HZ as f64;
@@ -95,7 +96,8 @@ pub struct RenderRider {
     pub is_me: bool,
     pub is_bot: bool,
     /// Snowboard: how loaded the jump is (0-1), the grab being held (0 =
-    /// none), and the stick (lean: + = tucked, - = sitting back).
+    /// none), and the stick (lean: + = tucked, - = sitting back). Jetski:
+    /// how far into the stunt the rider is (0-1), and the stunt (0 = none).
     pub charge: f32,
     pub grab: u8,
     pub lean: f32,
@@ -679,6 +681,7 @@ impl Client {
             return out;
         }
         let alpha = (self.accum_ms / TICK_MS).clamp(0.0, 1.0) as f32;
+        let sport = self.world.course().sport;
         for slot in 0..MAX_RIDERS {
             let is_me = slot == self.slot;
             let is_bot = matches!(
@@ -714,11 +717,22 @@ impl Client {
                     bailing: r.bailing(),
                     is_me,
                     is_bot,
-                    charge: f32::from(r.charge) / f32::from(sim::snowboard::tuning::CHARGE_TICKS),
-                    grab: if !r.grounded && r.last_input.pressed(sim::input::buttons::GRAB) {
-                        r.grab
-                    } else {
-                        0
+                    charge: match sport {
+                        Sport::Jetski => {
+                            f32::from(r.charge) / f32::from(sim::jetski::tuning::STUNT_FULL)
+                        }
+                        Sport::Snowboard => {
+                            f32::from(r.charge) / f32::from(sim::snowboard::tuning::CHARGE_TICKS)
+                        }
+                    },
+                    grab: match sport {
+                        Sport::Jetski if r.charge > 0 => r.grab,
+                        Sport::Snowboard
+                            if !r.grounded && r.last_input.pressed(sim::input::buttons::GRAB) =>
+                        {
+                            r.grab
+                        }
+                        _ => 0,
                     },
                     lean: r.last_input.lean_f(),
                     steer: r.last_input.steer_f(),

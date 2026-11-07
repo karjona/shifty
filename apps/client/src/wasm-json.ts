@@ -68,6 +68,7 @@ export function parseEvents(json: string): RaceEvent[] {
       flip: num(o, "flip"),
       roll: num(o, "roll"),
       grab: num(o, "grab"),
+      stunt: num(o, "stunt"),
       grabTicks: num(o, "grabTicks"),
       points: num(o, "points"),
       sketchy: o.sketchy === true,

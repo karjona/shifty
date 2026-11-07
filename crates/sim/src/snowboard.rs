@@ -553,6 +553,7 @@ fn judge(r: &mut Rider, input: Input, setup: Setup, n: Vec3, impact: f32) -> Opt
         flip,
         roll: 0,
         grab: if grab_ticks > 0 { grab } else { 0 },
+        stunt: 0,
         grab_ticks,
         points: points(spin, flip, grab_ticks),
     });

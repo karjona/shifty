@@ -39,10 +39,14 @@ pub struct Rider {
     pub air_spin: f32,
     /// Ticks left down after a bail (0 = riding).
     pub bail_ticks: u8,
-    /// Snowboard: ticks the jump has been loaded (crouched) for.
+    /// Snowboard: ticks the jump has been loaded (crouched) for. Jetski:
+    /// how far into a stunt the rider is (0 = riding, up to
+    /// `jetski::tuning::STUNT_FULL`).
     pub charge: u8,
     /// Snowboard: the grab of this jump (see `snowboard::grabs`; 0 = none
-    /// yet), and how long grabs have been held in it.
+    /// yet), and how long grabs have been held in it. Jetski: the stunt of
+    /// this jump (see `jetski::stunts`), and how long it has been held all
+    /// the way in.
     pub grab: u8,
     pub grab_ticks: u8,
     /// Snowboard: ticks left wobbling after a sketchy landing (0 = steady).

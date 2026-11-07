@@ -326,8 +326,8 @@ impl WasmClient {
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
     /// `finish` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
-    /// `grab`, `grabTicks`, `points`, `sketchy`), `sketchy` (a plain jump
-    /// landed badly) or `bail`.
+    /// `grab`, `stunt`, `grabTicks`, `points`, `sketchy`), `sketchy` (a
+    /// plain jump landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
     pub fn take_events_json(&mut self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -355,6 +355,7 @@ impl WasmClient {
                     "flip": t.flip,
                     "roll": t.roll,
                     "grab": t.grab,
+                    "stunt": t.stunt,
                     "grabTicks": t.grab_ticks,
                     "points": t.points,
                     "sketchy": sketchy,

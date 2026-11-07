@@ -303,8 +303,8 @@ export const es: Messages = {
     help: {
       jetski: [
         "Stick: girar e inclinarte (tira hacia atrás en una cresta para volar) · RT acelerar · LT frenar",
-        "En el aire: mantén A + stick para girar y dar volteretas, B + stick para el tonel. ¡Aterriza recto!",
-        "Teclado: WASD conducir · flechas girar e inclinarte · Espacio / Mayús trucos",
+        "En el aire: A + stick giros y volteretas, X + stick tonel, B + stick una acrobacia. ¡Suéltala a tiempo para aterrizar!",
+        "Teclado: WASD conducir · flechas girar e inclinarte · Espacio giros · Mayús tonel · E acrobacias",
         "Pasa las boyas rojas por tu derecha y las verdes por tu izquierda.",
       ],
       snow: [
@@ -350,6 +350,15 @@ export const es: Messages = {
       power: "POTENCIA",
     },
     ordinal: (n: number) => `${n}.º`,
+  },
+  tricks: {
+    backflip: "Backflip",
+    frontflip: "Frontflip",
+    barrelRoll: "Tonel",
+    times: (n: number, trick: string) =>
+      n < 2 ? trick : `${["Doble", "Triple"][n - 2] ?? "Cuádruple"} ${trick.toLowerCase()}`,
+    grabs: ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"],
+    stunts: ["", "Sin manos", "Pino", "Superman", "Nac-nac", "Can-can"],
   },
   results: {
     title: "Resultados",

@@ -2,12 +2,13 @@
 // colours of the rider's ride; the rider on it is render-only and carries
 // their own inertia: the knees soak up landings and swells, the body lags
 // behind the hull when it speeds up or digs in, and leans into turns with
-// the bars.
+// the bars. In the air the rider reaches into stunts and back.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Colourway, botAppearance, item } from "@shifty/rider";
 import { Parts } from "./parts.ts";
 import { RiderFigure } from "./rider/model.ts";
-import { floatPose, jetskiPose } from "./rider/ride.ts";
+import { floatPose, type JetskiRide, jetskiPose } from "./rider/ride.ts";
+import { StuntHold, blendPose, stuntPose } from "./rider/stunts.ts";
 import type { RiderModel, RiderView } from "./world.ts";
 
 export const SLOT_COLORS = [0xff5a36, 0x2bb3ff, 0xffd23f, 0x7ae582, 0xc77dff, 0xff8fab, 0xf4a261, 0xe9edf2];
@@ -73,6 +74,7 @@ export class JetskiModel implements RiderModel {
   private lean = new Spring();
   private steer = 0;
   private clock = 0;
+  private stunt = new StuntHold();
   private lastVel: THREE.Vector3 | null = null;
 
   /** Without an appearance, a rider made up for the seat. */
@@ -127,7 +129,8 @@ export class JetskiModel implements RiderModel {
       this.crouch.x = this.crouch.v = this.lean.x = this.lean.v = 0;
     }
     this.lastVel = vel;
-    const steer = r.bailing ? 0 : Math.max(-1, Math.min(1, r.steer));
+    // In a stunt the stick only picked the stunt: the bars stay straight.
+    const steer = r.bailing || r.grab > 0 ? 0 : Math.max(-1, Math.min(1, r.steer));
     this.steer += (steer - this.steer) * (1 - Math.exp(-BAR_FOLLOW * dt));
     this.bars.rotation.y = -this.steer * BAR_LOCK;
 
@@ -151,9 +154,11 @@ export class JetskiModel implements RiderModel {
     const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.bars.rotation.y);
     const grip = (side: number) => local(new THREE.Vector3(side * GRIP, 0, 0).applyQuaternion(turn).add(BARS));
     const foot = (side: number) => local(new THREE.Vector3(side * FOOTWELL, DECK.y, DECK.z));
-    this.figure.pose(
-      jetskiPose(body, { feet: [foot(1), foot(-1)], grips: [grip(1), grip(-1)], crouch, lean, steer: this.steer }),
-    );
+    const ride: JetskiRide = { feet: [foot(1), foot(-1)], grips: [grip(1), grip(-1)], crouch, lean, steer: this.steer };
+    const riding = jetskiPose(body, ride);
+    const shown = this.stunt.update(r.grab, r.charge, this.clock);
+    const stunt = shown.stunt > 0 ? stuntPose(body, ride, shown.stunt) : null;
+    this.figure.pose(stunt ? blendPose(riding, stunt, shown.reach) : riding);
   }
 
   dispose(): void {

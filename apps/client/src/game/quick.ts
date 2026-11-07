@@ -11,8 +11,8 @@ const HELP = {
   jetski:
     "<b>23.4° Shifty</b> · summer · prototype<br />" +
     "Gamepad: left stick steer and lean (pull back on a crest to fly) · RT throttle · LT brake<br />" +
-    "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!<br />" +
-    "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks · F1 debug<br />" +
+    "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!<br />" +
+    "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt · F1 debug<br />" +
     'Pass <b class="red">red</b> buoys with them on your right, <b class="green">green</b> on your left',
   snow:
     "<b>23.4° Shifty</b> · winter · prototype<br />" +

@@ -25,9 +25,9 @@ export interface RiderView {
   vx: number;
   vy: number;
   vz: number;
-  /** Snowboard: how loaded the jump is (0-1). */
+  /** Snowboard: how loaded the jump is (0-1). Jetski: how far into the stunt the rider is (0-1). */
   charge: number;
-  /** Snowboard: the grab being held (0 = none). */
+  /** Snowboard: the grab being held (0 = none). Jetski: the stunt (0 = none). */
   grab: number;
   /** The stick: lean (+ = forward/tuck, - = back) and steer. */
   lean: number;
