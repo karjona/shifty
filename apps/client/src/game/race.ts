@@ -438,7 +438,7 @@ export class RaceSession implements Stage {
     else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
       this.state.over = true;
       const rows = this.board.final(this.gpPoints);
-      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.course, this.sport));
+      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.course));
     }
     this.readRoster(engine, client);
     if (race.course !== this.course) {

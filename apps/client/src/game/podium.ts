@@ -5,7 +5,7 @@
 // slowly to the three of them. It is built from what the race left behind
 // (names, looks, points), so it needs nothing more from the race server.
 import * as THREE from "three/webgpu";
-import { type Appearance, type Sport, botAppearance } from "@shifty/rider";
+import { type Appearance, botAppearance } from "@shifty/rider";
 import { Confetti, STEPS, buildPodium } from "../render/podium.ts";
 import { championPose, clapPose, wavePose } from "../render/rider/cheer.ts";
 import { RiderFigure } from "../render/rider/model.ts";
@@ -28,12 +28,10 @@ export interface PodiumRider {
   me: boolean;
 }
 
-/** A finished Tilt: everyone's final standing, best first, and how its last race was ridden. */
+/** A finished Tilt: everyone's final standing, best first, and its last race's season (the accent). */
 export interface PodiumData {
   riders: PodiumRider[];
-  /** The last race's season (the accent) and sport (what the riders wear). */
   season: Season;
-  sport: Sport;
 }
 
 /** The podium of a Tilt from its final standings, the riders' names and looks, and the course it ended on. */
@@ -43,7 +41,6 @@ export function podiumData(
   looks: Map<number, Appearance>,
   mySlot: number,
   course: number,
-  sport: "jetski" | "snow",
 ): PodiumData {
   return {
     riders: rows.map((r) => ({
@@ -55,7 +52,6 @@ export function podiumData(
       me: r.slot === mySlot,
     })),
     season: seasonOf(course),
-    sport: sport === "snow" ? "winter" : "summer",
   };
 }
 
@@ -108,7 +104,8 @@ export class Podium implements Stage {
     this.confetti = new Confetti([...colours, 0xf6f1e7, 0xf2c14e]);
     this.group.add(this.podium, this.confetti.mesh);
     data.riders.slice(0, STEPS.length).forEach((r, i) => {
-      const figure = new RiderFigure(r.look, data.sport);
+      // On the bay, in their jetski kit.
+      const figure = new RiderFigure(r.look, "summer");
       const step = STEPS[i]!;
       figure.group.position.set(step.x, step.height, 0.05);
       // The champion faces the camera; the others turn a little toward the middle.

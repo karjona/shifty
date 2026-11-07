@@ -1,8 +1,8 @@
 // Dev: the end of a Tilt outside the menus. A quick race's Tilt ends on its
 // podium, and `/?podium=1` goes straight to one with sample riders, for look
-// checks. URL options: sport (summer, winter: what they wear), season (the
-// accent: summer, fall, winter, spring), riders (1-8), me (your place,
-// 1-8; 0 = none of them).
+// checks. URL options: season (the accent: summer, fall, winter, spring),
+// riders (1-8), me (your place, 1-8; 0 = none of them), seed (the bots'
+// looks).
 import { botAppearance, defaultAppearance } from "@shifty/rider";
 import { createRoot } from "react-dom/client";
 import { PodiumScreen } from "../menu/screens/podium.tsx";
@@ -33,7 +33,6 @@ export function podiumDev(params: URLSearchParams): void {
       me: i + 1 === me,
     })),
     season,
-    sport: params.get("sport") === "summer" ? "summer" : "winter",
   };
   showPodium(data, () => location.reload());
 }
