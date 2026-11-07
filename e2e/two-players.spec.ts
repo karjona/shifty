@@ -132,6 +132,8 @@ test("the world renders", async ({ page }, info) => {
   await joined(page);
   expect(["webgpu", "webgl2"]).toContain(await page.evaluate(() => window.__shifty.renderer));
   await page.evaluate(() => window.__shifty.setInput({ steer: 0.3, throttle: 1, buttons: 0 }));
+  // The course loads behind its season card first.
+  await page.waitForFunction(() => window.__shifty.ready(), null, { timeout: software ? 90_000 : 30_000 });
   await page.waitForTimeout(2000);
   // The screen shows a scene, not a blank clear colour: count colours in a
   // real screenshot (GPU canvases can't be read back after compositing),

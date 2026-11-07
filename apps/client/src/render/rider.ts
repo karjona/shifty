@@ -79,6 +79,10 @@ export class JetskiModel implements RiderModel {
   private body = new THREE.Group();
   private figure: RiderFigure;
 
+  get ready(): Promise<void> {
+    return this.figure.ready;
+  }
+
   private crouch = new Spring();
   private lean = new Spring();
   private steer = 0;

@@ -1,7 +1,10 @@
 // The menus: screens are routes. Signed out you get the login; signed in
 // without a handle, you pick one; then the main menu, modes, rooms, races.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
+  ErrorComponent,
+  type ErrorComponentProps,
   Outlet,
   RouterProvider,
   createRootRouteWithContext,
@@ -20,6 +23,8 @@ import { RoomScreen } from "./screens/room.tsx";
 import { ShopScreen } from "./screens/shop.tsx";
 import { Welcome } from "./screens/welcome.tsx";
 import { Toasts } from "./toast.tsx";
+import { Busy } from "./busy.tsx";
+import { booted } from "../loading.ts";
 
 interface Ctx {
   queryClient: QueryClient;
@@ -30,9 +35,17 @@ const rootRoute = createRootRouteWithContext<Ctx>()({
     <>
       <Outlet />
       <Toasts />
+      <Busy />
     </>
   ),
+  errorComponent: RouteError,
 });
+
+/** A screen that failed to load: shown at once (the boot screen would hide it). */
+function RouteError(props: ErrorComponentProps) {
+  useEffect(() => booted(), []);
+  return <ErrorComponent {...props} />;
+}
 
 async function signedIn(ctx: Ctx) {
   return ctx.queryClient.ensureQueryData(meQuery);

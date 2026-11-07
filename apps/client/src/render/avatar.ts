@@ -24,6 +24,11 @@ export class Avatar {
     this.mesh.add(this.figure.group);
   }
 
+  /** Resolves once the art has first gone on. */
+  get ready(): Promise<void> {
+    return this.figure.ready;
+  }
+
   /** Dresses the avatar (rebuilt only when something changed). */
   set(appearance: Appearance, sport: Sport): void {
     this.figure.set(appearance, sport);

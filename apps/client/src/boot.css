@@ -1,0 +1,70 @@
+/* The page before the game is up: the fonts start loading with the page,
+   and the boot screen (paper, the wordmark, its axis rocking) covers
+   everything until the first backdrop is ready to draw (see game/loading.ts). */
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/archivo/wdth-italic.css";
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: #f3ede1;
+  color: #1d1b17;
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: opacity 500ms ease;
+}
+#boot.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+#boot .boot-mark {
+  display: flex;
+  align-items: center;
+  height: 72px;
+}
+#boot .deg {
+  font-size: 52px;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+#boot .axis {
+  width: 13px;
+  height: 72px;
+  margin: 0 18px 0 20px;
+  background: #2b3fd0;
+  animation: axis-rock 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+#boot .name {
+  font-size: 57px;
+  line-height: 1;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.02em;
+}
+
+#boot .boot-loading {
+  position: fixed;
+  right: 4vw;
+  bottom: 5.5vh;
+  font-size: 18px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #5f5a51;
+}
+
+/* Something loading: the axis rocks from 23.4° one way to 23.4° the other. */
+@keyframes axis-rock {
+  from {
+    transform: skewX(-23.4deg);
+  }
+  to {
+    transform: skewX(23.4deg);
+  }
+}

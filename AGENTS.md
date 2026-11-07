@@ -73,7 +73,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - A room races a plan once: one event, or the **Grand Prix** (summer then winter for now; each season in turn as they're built). After the last race's results everyone goes back where they came from (the room screen, or mode select), and a room stops offering "rejoin" once its plan is over.
 - Points by finishing place: 10, 8, 6, 5, 4, 3, 2, 1. Tricks don't count. Riders who haven't finished when the race ends get last place's points. The last race breaks ties.
 - Nobody new joins a Grand Prix once its first countdown starts (reconnecting is fine). A rider who leaves keeps the points already reported; a bot takes the seat.
-- Between races the camera lifts off the course while the screen washes into the next season's colours and name, and the next course comes up behind (the simple version of the season change).
+- Between races the camera lifts off the course while the screen washes into the next season's colours and name, and the next course comes up behind (the simple version of the season change). The same season card covers a race's first course while it loads.
 
 ### Menus
 
@@ -220,6 +220,7 @@ The sim and the protocol are written once in Rust and used by both the race serv
 Three.js, using **`WebGPURenderer` + TSL** (Three.js Shading Language) from `three/webgpu` and `three/tsl`, never the classic `WebGLRenderer` + hand-written GLSL. Browsers without WebGPU fall back to WebGL2 automatically. The three.js version is pinned (TSL still changes between releases); upgrade on purpose.
 
 - **Water:** physics-relevant swells are a pure function in `crates/sim` (sum of directional waves); the client shader evaluates the same parameters, so the water you see is the water the physics rides. Visual-only detail (FFT chop, foam, spray, wake textures) lives in the client and never touches physics. No paid water kits: their licenses forbid a public repo.
+- **Nothing compiles a shader mid-frame.** Shader compiles block the page (Safari's WebGPU, every WebGL2), so a stage's shaders compile ahead with three's `compileAsync`, which doesn't (`Engine.warm`; riders whose art arrives later warm up through `render/warm.ts`). Nothing is drawn meanwhile: the canvas holds its last frame under the boot screen, the loading sign or the season card (a race's course loads behind its card while the netcode keeps running), and the boot screen and the card stay up until what the screen shows is in (its riders, `Stage.loaded`) and frames run without a stall (`Engine.settled`). The page's entry (`main.tsx`) is a small script that puts the boot screen's "Loading…" up in the player's language; the game (`start.tsx`) loads after it. A rider's colours and size repaint in place; only a new shape or outfit rebuilds them. A material's numbers are uniforms, not constants, so materials that differ only in them share one shader. Rider textures decode off the main thread (`ImageBitmapLoader`). Check stalls in Safari's engine too (Playwright `webkit`), not only Chromium.
 
 ### DB
 

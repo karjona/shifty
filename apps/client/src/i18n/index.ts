@@ -4,28 +4,14 @@ import { useSyncExternalStore } from "react";
 import { ca } from "./ca.ts";
 import { en, type Messages } from "./en.ts";
 import { es } from "./es.ts";
+import { LOCALE_KEY, type Locale, initialLocale } from "./locale.ts";
 
-export const LOCALES = ["en", "es", "ca"] as const;
-export type Locale = (typeof LOCALES)[number];
+export { LOCALES, type Locale, isLocale } from "./locale.ts";
 export type { Messages };
 
 const MESSAGES: Record<Locale, Messages> = { en, es, ca };
-const KEY = "shifty.locale";
 
-export const isLocale = (v: unknown): v is Locale =>
-  typeof v === "string" && (LOCALES as readonly string[]).includes(v);
-
-function initial(): Locale {
-  const saved = localStorage.getItem(KEY);
-  if (isLocale(saved)) return saved;
-  for (const lang of navigator.languages) {
-    const short = lang.toLowerCase().split("-")[0];
-    if (isLocale(short)) return short;
-  }
-  return "en";
-}
-
-let locale: Locale = initial();
+let locale: Locale = initialLocale();
 const listeners = new Set<() => void>();
 document.documentElement.lang = locale;
 
@@ -36,7 +22,7 @@ export function getLocale(): Locale {
 export function setLocale(next: Locale): void {
   if (next === locale) return;
   locale = next;
-  localStorage.setItem(KEY, next);
+  localStorage.setItem(LOCALE_KEY, next);
   document.documentElement.lang = next;
   for (const l of listeners) l();
 }

@@ -1,6 +1,8 @@
-// Between two races of a Grand Prix: the camera lifts away from the course
-// as the screen washes over in the next season's colours and its name, the
-// next course comes up behind, and the wash clears.
+// The season card: the screen washed over in a season's colours, with its
+// name and the place. It covers a course while it loads (joining a race),
+// and between two races of a Grand Prix, where the camera lifts away from
+// the course as the card washes over, the next course loads behind it, and
+// the card clears.
 import * as THREE from "three/webgpu";
 import { messages } from "../i18n/index.ts";
 import type { Engine } from "./engine.ts";
@@ -9,35 +11,72 @@ export type Season = "summer" | "fall" | "winter" | "spring";
 
 /** Seconds the camera lifts before the courses swap. */
 const LIFT = 1.2;
-/** Seconds the season card stays up after the swap. */
+/** Seconds the season card stays up after the swap, at least. */
 const HOLD = 1.8;
+/** The card's fade (see .season-change in menu.css). */
+const FADE_MS = 900;
+
+/** The season of a course (`sim::CourseId`). */
+export function seasonOf(course: number): Season {
+  return course === 1 ? "winter" : "summer";
+}
+
+/** The card itself, under the menus (the race menu, the status): up until `hide`. */
+export class SeasonCard {
+  private el: HTMLDivElement;
+  private gone = false;
+
+  constructor(season: Season, fadeIn = true) {
+    const m = messages();
+    this.el = document.createElement("div");
+    this.el.className = `season-change season-${season}`;
+    this.el.innerHTML = `<b></b><span></span>`;
+    this.el.querySelector("b")!.textContent = m.seasons[season];
+    this.el.querySelector("span")!.textContent = m.place;
+    document.body.insertBefore(this.el, document.querySelector("#root"));
+    if (fadeIn) requestAnimationFrame(() => this.el.classList.add("shown"));
+    else this.el.classList.add("shown");
+  }
+
+  set season(season: Season) {
+    this.el.className = this.el.className.replace(/season-(?:summer|fall|winter|spring)/u, `season-${season}`);
+    this.el.querySelector("b")!.textContent = messages().seasons[season];
+  }
+
+  /** Rocks its axis while something loads behind it. */
+  set loading(on: boolean) {
+    this.el.classList.toggle("loading", on);
+  }
+
+  hide(): void {
+    if (this.gone) return;
+    this.gone = true;
+    this.el.classList.remove("shown");
+    setTimeout(() => this.el.remove(), FADE_MS);
+  }
+}
 
 export class SeasonChange {
   active = true;
   private t = 0;
-  private card: HTMLDivElement;
+  private card: SeasonCard;
   private eye: THREE.Vector3;
   private look: THREE.Vector3;
   private swapped = false;
 
   private engine: Engine;
-  private swap: () => void;
+  private swap: () => Promise<void>;
+  private cleared: () => void;
 
-  constructor(engine: Engine, season: Season, swap: () => void) {
+  /** `swap` puts the next course up behind the card; it clears once that is done, then `cleared` runs. */
+  constructor(engine: Engine, season: Season, swap: () => Promise<void>, cleared: () => void = () => {}) {
     this.engine = engine;
     this.swap = swap;
+    this.cleared = cleared;
     const cam = engine.world.camera;
     this.eye = cam.position.clone();
     this.look = new THREE.Vector3(0, 0, -30).applyQuaternion(cam.quaternion).add(cam.position);
-    const m = messages();
-    this.card = document.createElement("div");
-    this.card.className = `season-change season-${season}`;
-    this.card.innerHTML = `<b></b><span></span>`;
-    this.card.querySelector("b")!.textContent = m.seasons[season];
-    this.card.querySelector("span")!.textContent = m.place;
-    document.body.append(this.card);
-    // Next frame, so the fade-in transition runs.
-    requestAnimationFrame(() => this.card.classList.add("shown"));
+    this.card = new SeasonCard(season);
   }
 
   frame(dt: number): void {
@@ -47,28 +86,29 @@ export class SeasonChange {
     const eye = this.eye.clone().add(new THREE.Vector3(0, 60 * ease, 0));
     eye.lerp(this.look, -0.6 * ease);
     this.engine.world.renderFrom(eye, this.look, performance.now() / 1000, dt, this.engine.world.camera.fov);
-    if (this.t >= LIFT && !this.swapped) {
-      this.swapped = true;
-      this.swap();
-      this.active = false;
-      setTimeout(() => this.finish(), HOLD * 1000);
-    }
+    if (this.t >= LIFT && !this.swapped) this.doSwap();
+  }
+
+  private doSwap(): void {
+    this.swapped = true;
+    this.active = false;
+    this.card.loading = true;
+    const hold = new Promise((resolve) => setTimeout(resolve, HOLD * 1000));
+    void Promise.all([this.swap(), hold]).finally(() => {
+      this.card.hide();
+      this.cleared();
+    });
   }
 
   /** Takes the card away without swapping courses (the race is over). */
   cancel(): void {
     this.swapped = true;
-    this.finish();
+    this.active = false;
+    this.card.hide();
   }
 
-  /** Clears the card (now, or when the hold is over). */
+  /** Swaps now (if it hasn't yet), and clears the card once the next course is up. */
   finish(): void {
-    if (!this.swapped) {
-      this.swapped = true;
-      this.swap();
-    }
-    this.active = false;
-    this.card.classList.remove("shown");
-    setTimeout(() => this.card.remove(), 900);
+    if (!this.swapped) this.doSwap();
   }
 }

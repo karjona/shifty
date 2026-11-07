@@ -18,7 +18,6 @@ import {
   smoothstep,
   uniform,
   vec3,
-  vec4,
 } from "three/tsl";
 
 /** The sun's unshadowed strength (sum of its colour's channels × intensity), to tell light from cast shadow. */
@@ -43,9 +42,13 @@ export function inkOnlyInPass<M extends THREE.NodeMaterial>(m: M, ink: THREE.MRT
   return m;
 }
 
-/** What the ink pass reads for each pixel (see post.ts): silhouette and crease weights, and an id. */
+/**
+ * What the ink pass reads for each pixel (see post.ts): silhouette and
+ * crease weights, and an id. (A uniform, so materials that differ only in
+ * these share one shader.)
+ */
 export function inkNode(silhouette: number, crease: number, id: number, darkness = 1): THREE.MRTNode {
-  return mrt({ output, ink: vec4(silhouette, crease, id, darkness) });
+  return mrt({ output, ink: uniform(new THREE.Vector4(silhouette, crease, id, darkness)) });
 }
 
 export interface CelOptions {
@@ -114,23 +117,26 @@ class CelLightingModel extends THREE.LightingModel {
     const albedo = diffuseColor.rgb;
     const shade: THREE.Node<"vec3"> = m.shadeNode ?? m.shade.rgb;
     // Shade is darker and richer than the colour, as painters mix it (a power keeps it from going grey).
-    const shaded = pow(albedo, vec3(m.richness)).mul(shade);
+    // (The material's numbers are uniforms: materials that differ only in them share one shader.)
+    const shaded = pow(albedo, vec3(uniform(m.richness))).mul(shade);
     // A second, deeper shade in the darkest folds (where the painter darkened most).
     const deepShaded = m.deepNode ? mix(shaded, shaded.mul(0.72), m.deepNode) : shaded;
     directDiffuse.addAssign(mix(deepShaded, albedo.mul(m.lit), band));
     if (m.specStrength > 0) {
       const h = lightDirection.add(positionViewDirection).normalize();
       const nh = dot(n, h);
-      const edge = float(1 - m.specSize);
+      const edge = uniform(1 - m.specSize);
       const sw = max(fwidth(nh), float(1e-3));
-      const spec = smoothstep(edge.sub(sw), edge.add(sw), nh).mul(band).mul(m.specStrength);
+      const spec = smoothstep(edge.sub(sw), edge.add(sw), nh).mul(band).mul(uniform(m.specStrength));
       directSpecular.addAssign(m.specColorNode ? m.specColorNode.mul(spec) : vec3(spec));
     }
     if (m.rimStrength > 0) {
       const nv = dot(n, positionViewDirection);
       const rw = max(fwidth(nv), float(1e-3));
       // A crisp edge of sky light on the shade side, as in fighting-game key art.
-      const rim = smoothstep(float(0.34).add(rw), float(0.34).sub(rw), nv).mul(float(1).sub(band)).mul(m.rimStrength);
+      const rim = smoothstep(float(0.34).add(rw), float(0.34).sub(rw), nv)
+        .mul(float(1).sub(band))
+        .mul(uniform(m.rimStrength));
       directSpecular.addAssign(
         albedo
           .mul(0.45)

@@ -14,7 +14,7 @@ import {
   positionLocal,
   pow,
   smoothstep,
-  vec3,
+  uniform,
 } from "three/tsl";
 import { CelMaterial } from "./material.ts";
 
@@ -116,20 +116,26 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
     darkness: 0.4,
   });
   // Snow per pixel, so its edge is crisp: above a ragged line, and off the steepest faces.
-  const rockC = vec3(rock.r, rock.g, rock.b);
-  const snowC = vec3(snow.r, snow.g, snow.b);
-  const skyC = vec3(s.sky.r, s.sky.g, s.sky.b);
+  // (Its numbers are uniforms, so every peak shares one shader.)
+  const rockC = uniform(rock);
+  const snowC = uniform(snow);
+  const skyC = uniform(s.sky.clone());
+  const top = uniform(height);
+  const offset = uniform(seed);
+  const snowline = uniform(s.snowline);
+  const haze = uniform(s.haze);
+  const footHaze = uniform(s.footHaze);
   mat.colorNode = Fn(() => {
-    const t = positionLocal.y.div(height);
-    const n = mx_noise_float(positionLocal.mul(0.012).add(seed))
+    const t = positionLocal.y.div(top);
+    const n = mx_noise_float(positionLocal.mul(0.012).add(offset))
       .mul(0.1)
-      .add(mx_noise_float(positionLocal.mul(0.05).add(seed * 3)).mul(0.04));
+      .add(mx_noise_float(positionLocal.mul(0.05).add(offset.mul(3))).mul(0.04));
     const up = normalLocal.y;
-    const line = t.sub(s.snowline).add(n).add(up.sub(0.45).mul(0.18));
+    const line = t.sub(snowline).add(n).add(up.sub(0.45).mul(0.18));
     const w = max(fwidth(line), float(1e-4));
     const snowy = smoothstep(w.negate(), w, line);
     const base = mix(rockC, snowC, snowy);
-    return mix(base, skyC, min(float(1), float(s.haze).add(float(s.footHaze).mul(pow(float(1).sub(t), 2)))));
+    return mix(base, skyC, min(float(1), haze.add(footHaze.mul(pow(float(1).sub(t), 2)))));
   })();
   const mesh = new THREE.Mesh(geo, mat);
   return mesh;
