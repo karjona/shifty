@@ -1,12 +1,13 @@
-// Race HUD: phase banner (countdown), lap / position / time, the speed
-// meter (summer) or trick score (winter), split times at checkpoints and
-// the finish (against the first rider through), and short popups for
-// buoys, checkpoints, laps, tricks and the finish. Plain DOM: the state
-// comes from the predicted world every frame. The standings and the
-// results are the scoreboard's (results.ts).
+// Race HUD: phase banner (countdown), lap / position / time, trick score,
+// the speed meter (summer), split times at checkpoints and the finish
+// (against the first rider through), and short popups for buoys,
+// checkpoints, laps, tricks and the finish. Plain DOM: the state comes from
+// the predicted world every frame. The standings and the results are the
+// scoreboard's (results.ts).
 
 import { messages } from "../i18n/index.ts";
 import { NameTags } from "./tags.ts";
+import { trickName } from "./tricks.ts";
 
 export interface RaceView {
   phase: number;
@@ -26,7 +27,7 @@ export interface RaceView {
   misses: number;
   tickHz: number;
   wrongWay: boolean;
-  /** Trick points this race (winter). */
+  /** Trick points this race. */
   points: number;
   /** Gates on the course (start, buoys or checkpoints, finish). */
   gates: number;
@@ -48,6 +49,7 @@ export interface RaceEvent {
   flip?: number;
   roll?: number;
   grab?: number;
+  stunt?: number;
   grabTicks?: number;
   points?: number;
   /** A trick landed badly (half points). */
@@ -78,22 +80,6 @@ const RACING = 2;
 /** 1st, 1.º, 1r: in the player's language. */
 export function ordinal(n: number): string {
   return messages().hud.ordinal(n);
-}
-
-const TIMES = ["", "", "Double ", "Triple ", "Quad "];
-const times = (k: number) => TIMES[Math.min(Math.abs(k), 4)] ?? "";
-
-const GRABS = ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"];
-
-/** "Backflip 360", "540 Melon", "Double barrel roll"... from signed rotation counts (spin in half turns) and a grab. */
-export function trickName(spin: number, flip: number, roll: number, grab = 0): string {
-  const parts: string[] = [];
-  if (flip !== 0) parts.push(`${times(flip)}${flip > 0 ? "backflip" : "frontflip"}`);
-  if (roll !== 0) parts.push(`${times(roll)}barrel roll`);
-  if (spin !== 0) parts.push(String(Math.abs(spin) * 180));
-  if (grab > 0) parts.push(GRABS[grab] ?? "Grab");
-  const name = parts.join(" ");
-  return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 export function formatTime(ticks: number, hz: number): string {
@@ -164,8 +150,14 @@ export class Hud {
       } else if (e.kind === "finish") {
         this.popup(m.finish(ordinal(race.place)), "big");
       } else if (e.kind === "trick") {
-        const name = trickName(e.spin ?? 0, e.flip ?? 0, e.roll ?? 0, e.grab ?? 0);
-        this.popup(race.looped ? `${name}!` : `${name}  +${e.points ?? 0}`, "big");
+        const name = trickName({
+          spin: e.spin ?? 0,
+          flip: e.flip ?? 0,
+          roll: e.roll ?? 0,
+          grab: e.grab ?? 0,
+          stunt: e.stunt ?? 0,
+        });
+        this.popup(`${name}  +${e.points ?? 0}`, "big");
         if (e.sketchy) this.popup(m.sketchy, "bad");
       } else if (e.kind === "sketchy") {
         this.popup(`${m.sketchy}!`, "bad");
@@ -229,9 +221,10 @@ export class Hud {
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
       const lap = Math.min(Math.max(race.lap, 1), race.laps);
+      const score = `<div><span>${m.labels.score}</span> ${race.points}</div>`;
       const first = race.looped
-        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>`
-        : `<div><span>${m.labels.score}</span> ${race.points}</div>`;
+        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>${score}`
+        : score;
       const split = this.split && performance.now() < this.split.until ? this.split.html : "";
       const event = gp ? `<div><span>${m.labels.race}</span> ${gp.index + 1}/${gp.count}</div>` : "";
       this.info.innerHTML =

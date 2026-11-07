@@ -173,7 +173,7 @@ export class Bay implements Environment {
   update(f: Frame): void {
     this.time.value = f.t;
     this.gulls?.update(f.t);
-    this.course.update(this.waveParams, f.t, f.nextBuoy);
+    this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {
       const model = f.models.get(r.slot);

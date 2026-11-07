@@ -1,10 +1,15 @@
-// The jetski course: buoys (with an arrow showing the side to pass), the
-// breakwater and its lighthouse, the land, the start/finish gate, floating
-// ramps and the boundary markers. Geometry comes from the sim (`courseJson`), so what
-// you see is what you collide with.
+// The jetski course: buoys (see buoys.ts), chevron boards on the turns
+// (chevrons.ts), the breakwater and its lighthouse, the land, the
+// start/finish gate, floating ramps and the boundary markers. Geometry
+// comes from the sim (`courseJson`), so what you see is what you collide
+// with.
 import * as THREE from "three/webgpu";
-import { buildLand } from "./land.ts";
+import { BobbingBatch, type Bobbing, at, placed } from "./bobbing.ts";
+import { BuoyMarks } from "./buoys.ts";
+import { ChevronBoards } from "./chevrons.ts";
+import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
+import type { RiderView } from "./world.ts";
 
 export interface CourseData {
   length: number;
@@ -15,6 +20,10 @@ export interface CourseData {
   breakwaterRadius: number;
   outerLimit: number;
   rampSink: number;
+  /** A buoy's radius at the water line and its height above it, and a rider's radius (see `sim::buoy`). */
+  buoyRadius: number;
+  buoyHeight: number;
+  riderRadius: number;
   start: { x: number; z: number; yaw: number };
   buoys: { x: number; z: number; yaw: number; keep: "left" | "right" }[];
   ramps: { x: number; z: number; yaw: number; length: number; width: number; height: number }[];
@@ -31,18 +40,7 @@ export interface LandData {
   kind: "town" | "island" | "rock";
 }
 
-/** Distance from (x, z) to a piece of land's shore (negative inside it). */
-export function landDistance(l: LandData, x: number, z: number): number {
-  const abx = l.bx - l.ax;
-  const abz = l.bz - l.az;
-  const len2 = abx * abx + abz * abz;
-  const t = len2 > 1e-6 ? Math.min(1, Math.max(0, ((x - l.ax) * abx + (z - l.az) * abz) / len2)) : 0;
-  return Math.hypot(x - (l.ax + abx * t), z - (l.az + abz * t)) - l.radius;
-}
-
-/** Keep red on your right, green on your left ("red right returning"). */
 const RED = 0xe8402a;
-const GREEN = 0x2fb34a;
 const BOUNDARY_SPACING = 18;
 
 const std = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
@@ -62,20 +60,6 @@ function checkerTexture(): THREE.CanvasTexture {
   t.colorSpace = THREE.SRGBColorSpace;
   t.magFilter = THREE.NearestFilter;
   return t;
-}
-
-/** An arrow pointing along +X in its own plane (XY), centred. */
-function arrowShape(): THREE.Shape {
-  const s = new THREE.Shape();
-  s.moveTo(-0.9, -0.22);
-  s.lineTo(0.2, -0.22);
-  s.lineTo(0.2, -0.55);
-  s.lineTo(0.95, 0);
-  s.lineTo(0.2, 0.55);
-  s.lineTo(0.2, 0.22);
-  s.lineTo(-0.9, 0.22);
-  s.closePath();
-  return s;
 }
 
 /** A ramp wedge: `length` along +Z, rising from 0 to `height`, centred on the footprint. */
@@ -104,58 +88,15 @@ interface Floating {
   lift: number;
 }
 
-/** One of a batch of things riding the swell: where it floats, and its transform before the swell lifts it. */
-interface Bobbing {
-  x: number;
-  z: number;
-  base: THREE.Matrix4;
-}
-
-/** Many copies of one shape riding the swell, drawn as one batch. */
-class BobbingBatch {
-  readonly mesh: THREE.InstancedMesh;
-  readonly items: Bobbing[] = [];
-  private lifted = new THREE.Matrix4();
-
-  constructor(geo: THREE.BufferGeometry, material: THREE.Material, items: (Bobbing & { color?: number })[]) {
-    this.mesh = new THREE.InstancedMesh(geo, material, items.length);
-    items.forEach((it, i) => {
-      this.items.push({ x: it.x, z: it.z, base: it.base });
-      this.mesh.setMatrixAt(i, it.base);
-      if (it.color !== undefined) this.mesh.setColorAt(i, new THREE.Color(it.color));
-    });
-    this.mesh.computeBoundingSphere();
-  }
-
-  /** Lifts every copy onto the swell; `scale(i)` grows one about its own origin. */
-  update(waves: Float32Array, t: number, scale?: (i: number) => number): void {
-    this.items.forEach((it, i) => {
-      this.lifted.makeTranslation(0, waveHeight(waves, it.x, it.z, t), 0).multiply(it.base);
-      const k = scale?.(i) ?? 1;
-      if (k !== 1) this.lifted.scale(new THREE.Vector3(k, k, k));
-      this.mesh.setMatrixAt(i, this.lifted);
-    });
-    this.mesh.instanceMatrix.needsUpdate = true;
-  }
-}
-
-/** A translation. */
-const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
-
-/** The transform `x, z` (at the water line), turned `yaw`, then `local` within it. */
-function placed(x: number, z: number, yaw: number, local: THREE.Matrix4 = new THREE.Matrix4()): THREE.Matrix4 {
-  return new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(yaw)).multiply(local);
-}
-
 export class CourseView {
   readonly group = new THREE.Group();
   private floating: Floating[] = [];
-  /** Batches riding the swell: buoys (body, band, arrow) and moored boats. */
+  /** Batches riding the swell: moored boats. */
   private bobbing: BobbingBatch[] = [];
-  private arrows: BobbingBatch | null = null;
+  private buoys: BuoyMarks;
+  private chevrons: ChevronBoards;
   private boundary: THREE.InstancedMesh;
   private boundaryPoints: { x: number; z: number }[] = [];
-  private ring: THREE.Mesh;
   private matrix = new THREE.Matrix4();
 
   readonly data: CourseData;
@@ -165,17 +106,15 @@ export class CourseView {
     this.buildBreakwater();
     this.group.add(buildLand(this.data.land));
     this.buildStartGate();
-    this.buildBuoys();
+    this.buoys = new BuoyMarks(this.data);
+    this.chevrons = new ChevronBoards(this.data);
     this.buildRamps();
     this.boundary = this.buildBoundary();
     this.buildBoats();
-    this.ring = new THREE.Mesh(
-      new THREE.TorusGeometry(2.6, 0.12, 6, 32),
-      new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
-    );
-    this.ring.rotation.x = -Math.PI / 2;
-    this.ring.userData.noMerge = true;
-    this.group.add(this.ring);
+    for (const g of [this.buoys.group, this.chevrons.group]) {
+      g.userData.noMerge = true;
+      this.group.add(g);
+    }
     for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
@@ -357,44 +296,6 @@ export class CourseView {
     this.group.add(banner);
   }
 
-  private buildBuoys(): void {
-    const arrowGeo = new THREE.ShapeGeometry(arrowShape());
-    const bodies: (Bobbing & { color: number })[] = [];
-    const bands: Bobbing[] = [];
-    const arrows: (Bobbing & { color: number })[] = [];
-    for (const b of this.data.buoys) {
-      const color = b.keep === "right" ? RED : GREEN;
-      bodies.push({
-        x: b.x,
-        z: b.z,
-        base: placed(b.x, b.z, 0, new THREE.Matrix4().makeTranslation(0, 0.45, 0)),
-        color,
-      });
-      bands.push({ x: b.x, z: b.z, base: placed(b.x, b.z, 0, new THREE.Matrix4().makeTranslation(0, 0.75, 0)) });
-      // The arrow faces the riders and points to the side to pass on:
-      // keep it on your right = pass on its left. (The plane faces +Z: turn
-      // it to face oncoming riders; seen from the front, its +X is the
-      // rider's right.)
-      const arrow = new THREE.Matrix4()
-        .makeTranslation(0, 2.6, 0)
-        .multiply(new THREE.Matrix4().makeRotationY(b.yaw + Math.PI))
-        .multiply(new THREE.Matrix4().makeRotationZ(b.keep === "right" ? Math.PI : 0));
-      arrows.push({ x: b.x, z: b.z, base: placed(b.x, b.z, 0, arrow), color });
-    }
-    const body = new BobbingBatch(
-      new THREE.CylinderGeometry(0.55, 0.65, 1.5, 12),
-      std(0xffffff, { roughness: 0.45 }),
-      bodies,
-    );
-    body.mesh.castShadow = true;
-    const band = new BobbingBatch(new THREE.CylinderGeometry(0.58, 0.6, 0.3, 12), std(0xf4f4f0), bands);
-    this.arrows = new BobbingBatch(arrowGeo, std(0xffffff, { side: THREE.DoubleSide }), arrows);
-    for (const b of [body, band, this.arrows]) {
-      this.group.add(b.mesh);
-      this.bobbing.push(b);
-    }
-  }
-
   private buildRamps(): void {
     const deck = std(0xf2b630, { roughness: 0.7 });
     for (const r of this.data.ramps) {
@@ -433,8 +334,9 @@ export class CourseView {
         x = -d.straightHalf + r * Math.cos(th);
         z = r * Math.sin(th);
       }
-      // No markers on (or right against) land: the shore is the boundary there.
-      if (d.land.some((l) => landDistance(l, x, z) < 3)) continue;
+      // No markers on (or right against) land: the shore is the boundary
+      // there; nor round the turns, where the chevron boards stand.
+      if (d.land.some((l) => landDistance(l, x, z) < 3) || Math.abs(x) > d.straightHalf + 1) continue;
       this.boundaryPoints.push({ x, z });
     }
     const mesh = new THREE.InstancedMesh(
@@ -446,8 +348,8 @@ export class CourseView {
     return mesh;
   }
 
-  /** Float everything on the swells and mark the next buoy. */
-  update(waves: Float32Array, t: number, nextBuoy: number | null): void {
+  /** Floats everything on the swells, swings the buoys riders hit, and marks the next buoy. */
+  update(waves: Float32Array, t: number, dt: number, riders: readonly RiderView[], nextBuoy: number | null): void {
     for (const f of this.floating) f.obj.position.y = waveHeight(waves, f.x, f.z, t) + f.lift;
     this.boundaryPoints.forEach((p, i) => {
       this.matrix.makeTranslation(p.x, waveHeight(waves, p.x, p.z, t), p.z);
@@ -455,13 +357,8 @@ export class CourseView {
     });
     this.boundary.instanceMatrix.needsUpdate = true;
 
-    for (const b of this.bobbing) b.update(waves, t, b === this.arrows ? (i) => (i === nextBuoy ? 1.5 : 1) : undefined);
-    const b = nextBuoy === null ? undefined : this.data.buoys[nextBuoy];
-    this.ring.visible = b !== undefined;
-    if (b) {
-      const pulse = 1 + 0.12 * Math.sin(t * 6);
-      this.ring.position.set(b.x, waveHeight(waves, b.x, b.z, t) + 0.15, b.z);
-      this.ring.scale.setScalar(pulse);
-    }
+    for (const b of this.bobbing) b.update(waves, t);
+    this.buoys.update(waves, t, dt, riders, nextBuoy);
+    this.chevrons.update(waves, t);
   }
 }

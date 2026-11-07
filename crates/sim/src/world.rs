@@ -6,7 +6,7 @@ use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
 use crate::surface::{Surface, SurfaceKind};
-use crate::{jetski, snowboard};
+use crate::{buoy, jetski, snowboard};
 
 /// World-level tuning shared by every sport.
 pub mod tuning {
@@ -39,10 +39,14 @@ pub struct Rider {
     pub air_spin: f32,
     /// Ticks left down after a bail (0 = riding).
     pub bail_ticks: u8,
-    /// Snowboard: ticks the jump has been loaded (crouched) for.
+    /// Snowboard: ticks the jump has been loaded (crouched) for. Jetski:
+    /// how far into a stunt the rider is (0 = riding, up to
+    /// `jetski::tuning::STUNT_FULL`).
     pub charge: u8,
     /// Snowboard: the grab of this jump (see `snowboard::grabs`; 0 = none
-    /// yet), and how long grabs have been held in it.
+    /// yet), and how long grabs have been held in it. Jetski: the stunt of
+    /// this jump (see `jetski::stunts`), and how long it has been held all
+    /// the way in.
     pub grab: u8,
     pub grab_ticks: u8,
     /// Snowboard: ticks left wobbling after a sketchy landing (0 = steady).
@@ -238,6 +242,7 @@ impl World {
         let holding = self.race.phase.before_start();
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
+            buoy::bump(r, course, &self.surface, next);
             let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
             if course.sport == Sport::Snowboard
                 && impact.is_some_and(|i| {

@@ -68,6 +68,7 @@ export function parseEvents(json: string): RaceEvent[] {
       flip: num(o, "flip"),
       roll: num(o, "roll"),
       grab: num(o, "grab"),
+      stunt: num(o, "stunt"),
       grabTicks: num(o, "grabTicks"),
       points: num(o, "points"),
       sketchy: o.sketchy === true,
@@ -143,6 +144,9 @@ function parseBay(o: Obj): CourseData {
     breakwaterRadius: num(o, "breakwaterRadius"),
     outerLimit: num(o, "outerLimit"),
     rampSink: num(o, "rampSink"),
+    buoyRadius: num(o, "buoyRadius"),
+    buoyHeight: num(o, "buoyHeight"),
+    riderRadius: num(o, "riderRadius"),
     start: { x: num(start, "x"), z: num(start, "z"), yaw: num(start, "yaw") },
     buoys: list(o.buoys).map((b) => ({
       x: num(b, "x"),

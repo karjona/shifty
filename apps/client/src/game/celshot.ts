@@ -1,5 +1,6 @@
 // Dev: look testing the cel look without the menus.
 //  `/?celshot=flyover` (`&fly=0.3&freeze`) or `/?celshot=club`: the menu backdrops.
+//  `/?celshot=bay&eye=x,y,z&look=x,y,z&fov=50`: the bay and its course from there.
 //  `/?celshot=hero`: your rider on the club's terrace, framed like a
 //  character select. Options: yaw (rider), sun=x,y,z (offset), cx, cy, dist,
 //  fov, orbit, lift, t (freeze the idle), pose (idle, crossed), seed, bare (slots to empty).
@@ -11,6 +12,7 @@ import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, idlePose } from "../render/rider/poses.ts";
 import { backdrop, setClubRider, sharedBay } from "./backdrops.ts";
 import { Engine } from "./engine.ts";
+import { booted } from "../loading.ts";
 
 /** Anime motion: poses held on twos (12 a second), not tweened. */
 export const ON_TWOS = 12;
@@ -18,6 +20,21 @@ export const ON_TWOS = 12;
 export async function celshot(params: URLSearchParams): Promise<void> {
   const engine = await Engine.get();
   const kind = params.get("celshot");
+  if (kind === "bay") {
+    const world = engine.world;
+    world.setEnvironment(sharedBay(engine));
+    world.setSunOffset(30, 60, 15);
+    const point = (k: string, d: string) => {
+      const [x = 0, y = 0, z = 0] = (params.get(k) ?? d).split(",").map(Number);
+      return new THREE.Vector3(x, y, z);
+    };
+    const eye = point("eye", "0,160,-260");
+    const look = point("look", "0,0,0");
+    const fov = Number(params.get("fov") ?? 50);
+    void world.renderer.setAnimationLoop((now: number) => world.renderFrom(eye, look, now / 1000, 1 / 60, fov));
+    booted();
+    return;
+  }
   if (kind !== "hero") {
     if (kind === "club") setClubRider(defaultAppearance(), "summer");
     engine.show(backdrop(kind === "club" ? "club" : "flyover"));

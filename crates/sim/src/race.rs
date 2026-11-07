@@ -138,7 +138,7 @@ impl Progress {
     }
 }
 
-/// A trick landed clean.
+/// A trick landed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Trick {
     /// Half turns of spin (+ = clockwise seen from above).
@@ -147,10 +147,12 @@ pub struct Trick {
     pub flip: i8,
     /// Full barrel rolls (+ = to the right).
     pub roll: i8,
-    /// The grab held (see `snowboard::grabs`; 0 = none), and for how long.
+    /// Snowboard: the grab held (see `snowboard::grabs`; 0 = none).
     pub grab: u8,
+    /// Jetski: the stunt held (see `jetski::stunts`; 0 = none).
+    pub stunt: u8,
+    /// How long the grab or stunt was held (ticks).
     pub grab_ticks: u8,
-    /// Points scored for it (winter).
     pub points: u16,
 }
 
