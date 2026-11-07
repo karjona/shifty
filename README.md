@@ -1,6 +1,6 @@
 # 23.4° Shifty
 
-An online racing game about one place and four seasons: jetski in summer, skateboard in fall, snowboard in winter, downhill bike in spring. A love letter to Wave Race, 1080°, SSX, skate and Downhill Domination. Made for GitHub Game Off 2026 (theme: **Shift**).
+An online racing game about one place and four seasons: jetski on the sea, snowboard on the mountain, every circuit in any season and weather, and a Grand Prix that runs through the year. A love letter to Wave Race, 1080° and SSX. Made for GitHub Game Off 2026 (theme: **Shift**).
 
 > 23.4° is Earth's axial tilt, the reason seasons exist. A shifty is a board trick: twist in the air, bring it back.
 
