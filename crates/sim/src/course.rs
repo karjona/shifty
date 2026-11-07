@@ -96,13 +96,17 @@ pub struct LandDef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CourseId {
-    /// Costa Nevada bay: the summer jetski oval.
+    /// Costa Nevada bay: the jetski oval.
     Oval = 0,
-    /// Costa Nevada mountain: the winter snowboard run.
+    /// Costa Nevada mountain: the snowboard run.
     Mountain = 1,
 }
 
 impl CourseId {
+    /// Every circuit, in id order. Each one here can be drawn for a race in
+    /// any season its sport rides (see [`crate::conditions`]).
+    pub const ALL: &'static [CourseId] = &[Self::Oval, Self::Mountain];
+
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::Oval),
@@ -116,6 +120,10 @@ impl CourseId {
             Self::Oval => &OVAL,
             Self::Mountain => &MOUNTAIN,
         }
+    }
+
+    pub fn sport(self) -> Sport {
+        self.course().sport
     }
 }
 
