@@ -135,7 +135,9 @@ class SeasonField implements Stage {
   private deep = uniform(new THREE.Color());
   private mid = uniform(new THREE.Color());
   private bright = uniform(new THREE.Color());
-  private avatar = new Avatar(null, 0);
+  /** Your rider (once their look is known) and their shadow. */
+  private rider = new THREE.Group();
+  private avatar: Avatar | null = null;
   private key: THREE.DirectionalLight;
   private post: CelPost | null = null;
   private t = Math.random() * 40;
@@ -196,8 +198,8 @@ class SeasonField implements Stage {
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.005;
     shadow.scale.set(1, 0.6, 1);
-    this.avatar.mesh.add(shadow);
-    this.scene.add(this.avatar.mesh);
+    this.rider.add(shadow);
+    this.scene.add(this.rider);
   }
 
   start(engine: Engine): void {
@@ -209,14 +211,22 @@ class SeasonField implements Stage {
     return this.post?.compile(root) ?? Promise.resolve();
   }
 
+  loaded(): Promise<void> {
+    return (this.rider.visible && this.avatar?.ready) || Promise.resolve();
+  }
+
   /** Shows the rider (home) or just the colours (the other tabs). */
   showRider(on: boolean): void {
-    this.avatar.mesh.visible = on;
+    this.rider.visible = on;
   }
 
   /** Dresses the rider. */
   setRider(appearance: Appearance, sport: Sport): void {
-    this.avatar.set(appearance, sport);
+    if (this.avatar) this.avatar.set(appearance, sport);
+    else {
+      this.avatar = new Avatar(appearance, 0, sport);
+      this.rider.add(this.avatar.mesh);
+    }
   }
 
   /** Frames the whole rider, or their face (the creator, on face parts). */
@@ -252,9 +262,9 @@ class SeasonField implements Stage {
     const z = this.zoom * this.zoom * (3 - 2 * this.zoom);
     const distance = 6.4 - z * 4.9;
     const halfW = Math.tan((this.camera.fov * Math.PI) / 360) * distance * this.camera.aspect;
-    this.avatar.mesh.position.set(-halfW * 0.5, 0, 0);
-    this.avatar.mesh.rotation.y = 0.35 * (1 - z) + Math.sin(this.t * 0.25) * 0.3 * (1 - z * 0.6);
-    this.avatar.update(dt);
+    this.rider.position.set(-halfW * 0.5, 0, 0);
+    this.rider.rotation.y = 0.35 * (1 - z) + Math.sin(this.t * 0.25) * 0.3 * (1 - z * 0.6);
+    this.avatar?.update(dt);
     const lookY = 0.85 + z * 0.62;
     this.camera.position.set(0, 0.95 + z * 0.52, distance);
     this.camera.lookAt(0, lookY, 0);
@@ -332,6 +342,10 @@ class Club implements Stage {
 
   compile(root?: THREE.Object3D): Promise<void> {
     return this.engine?.world.compile(root) ?? Promise.resolve();
+  }
+
+  loaded(): Promise<void> {
+    return Promise.all(this.avatars.slice(0, this.count).map((a) => a.ready)).then(() => {});
   }
 
   frame(now: number, dt: number): void {

@@ -47,6 +47,18 @@
   letter-spacing: -0.02em;
 }
 
+#boot .boot-loading {
+  position: fixed;
+  right: 4vw;
+  bottom: 5.5vh;
+  font-size: 18px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #5f5a51;
+}
+
 /* Something loading: the axis rocks from 23.4° one way to 23.4° the other. */
 @keyframes axis-rock {
   from {

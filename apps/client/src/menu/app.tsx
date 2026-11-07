@@ -24,7 +24,7 @@ import { ShopScreen } from "./screens/shop.tsx";
 import { Welcome } from "./screens/welcome.tsx";
 import { Toasts } from "./toast.tsx";
 import { Busy } from "./busy.tsx";
-import { booted } from "../game/loading.ts";
+import { booted } from "../loading.ts";
 
 interface Ctx {
   queryClient: QueryClient;

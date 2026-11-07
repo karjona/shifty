@@ -6,13 +6,15 @@ import init, { type InitOutput } from "../wasm/sim.js";
 import { setWarmer } from "../render/warm.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
-import { booted, setBusy } from "./loading.ts";
+import { booted, whileLoading } from "../loading.ts";
 
 /** Something on screen, drawn every frame. */
 export interface Stage {
   start(engine: Engine): void;
   /** Compiles the shaders its scene (or `root`, about to join it) needs (see `Engine.warm`). */
   compile?(root?: THREE.Object3D): Promise<void>;
+  /** Resolves once what it shows has arrived and gone on (a rider's art). */
+  loaded?(): Promise<void>;
   frame(now: number, dt: number): void;
   stop(): void;
 }
@@ -33,6 +35,8 @@ const STALL_MS = 100;
 const SETTLE_MS = 800;
 /** Nothing waits longer than this (ms) for drawing to settle (a slow machine never does). */
 const SETTLE_MAX_MS = 8000;
+/** Nothing waits longer than this (ms) for a stage's art (it shows without what is late). */
+const LOAD_MAX_MS = 15000;
 
 /** Someone waiting for drawing to settle, since `since` (ms). */
 interface Settling {
@@ -68,8 +72,10 @@ export class Engine {
   readonly render = !(import.meta.env.DEV && devParams.get("render") === "0");
   private stage: Stage | null = null;
   private last = performance.now();
-  /** Warm-ups running or queued: nothing is drawn while there are any. */
+  /** Warm-ups running or queued. */
   private warming = 0;
+  /** ...of them, the ones that hold drawing (a stage's): nothing is drawn while there are any. */
+  private holding = 0;
   private warmed: Promise<void> = Promise.resolve();
   /** When the current run of frames without a stall began (null: none is running). */
   private smoothSince: number | null = null;
@@ -99,7 +105,7 @@ export class Engine {
         throw e;
       });
       const engine = new Engine(wasm, world);
-      setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root)) : Promise.resolve()));
+      setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root), false) : Promise.resolve()));
       if (!engine.render) booted();
       await world.renderer.setAnimationLoop((now: number) => engine.frame(now));
       return engine;
@@ -117,8 +123,24 @@ export class Engine {
     this.stage?.stop();
     this.stage = stage;
     stage.start(this);
-    if (stage.compile && this.render) void this.warm(() => stage.compile!());
-    else requestAnimationFrame(booted);
+    void this.prepare(stage);
+  }
+
+  /**
+   * Gets a stage that has just gone on ready: its shaders compiled (nothing
+   * is drawn meanwhile), what it shows in, and drawing smoothly. The loading
+   * sign is up until it shows; the boot screen comes off after.
+   */
+  private async prepare(stage: Stage): Promise<void> {
+    const late = new Promise<void>((resolve) => setTimeout(resolve, LOAD_MAX_MS));
+    await whileLoading(
+      (async () => {
+        if (this.render && stage.compile) await this.warm(() => stage.compile!());
+        await Promise.race([stage.loaded?.(), late]);
+      })(),
+    );
+    await this.settled();
+    booted();
   }
 
   /** Compiles what `root` needs, for the stage on screen (the world's scene if it has none of its own). */
@@ -128,19 +150,20 @@ export class Engine {
 
   /**
    * Runs `compile` (shader compiles that don't block the page), one at a
-   * time. Nothing is drawn until it is done: the canvas holds its last frame
-   * and the page (menus, timers, the netcode) carries on.
+   * time; the page (menus, timers, the netcode) carries on. With `hold`
+   * (what is in the scene is new), nothing is drawn until it is done: the
+   * canvas holds its last frame. Without (what compiles isn't in the scene
+   * yet), frames go on being drawn in between.
    */
-  warm(compile: () => Promise<void>): Promise<void> {
-    if (this.warming++ === 0) setBusy(true);
+  warm(compile: () => Promise<void>, hold = true): Promise<void> {
+    this.warming++;
+    if (hold) this.holding++;
     const run = this.warmed
       .then(compile)
       .catch((e: unknown) => console.error(e))
       .finally(() => {
-        if (--this.warming > 0) return;
-        setBusy(false);
-        // Once the first backdrop draws smoothly, the page is up.
-        void this.settled().then(booted);
+        this.warming--;
+        if (hold) this.holding--;
       });
     this.warmed = run;
     return run;
@@ -169,6 +192,26 @@ export class Engine {
    * the first frames of something new still do (the few shaders a warm-up
    * can't reach, uploads, the clean-up after loading) is over.
    */
+  private draw(now: number, dt: number): void {
+    if (this.stage) this.stage.frame(now, dt);
+    else if (this.render) this.world.renderer.render(this.world.scene, this.world.camera);
+  }
+
+  /** A frame while a warm-up waits: it has left the renderer pointed at its own targets. */
+  private drawBetweenCompiles(now: number, dt: number): void {
+    const r = this.world.renderer;
+    const target = r.getRenderTarget();
+    const outputs = r.getMRT();
+    r.setRenderTarget(null);
+    r.setMRT(null);
+    try {
+      this.draw(now, dt);
+    } finally {
+      r.setRenderTarget(target);
+      r.setMRT(outputs);
+    }
+  }
+
   settled(): Promise<void> {
     if (!this.render) return Promise.resolve();
     return new Promise((resolve) => {
@@ -189,12 +232,12 @@ export class Engine {
     const gap = now - this.last;
     const dt = Math.min(0.1, gap / 1000);
     this.last = now;
-    if (this.warming > 0) {
+    if (this.holding > 0) {
       this.smoothSince = null;
       return;
     }
-    if (this.stage) this.stage.frame(now, dt);
-    else if (this.render) this.world.renderer.render(this.world.scene, this.world.camera);
+    if (this.warming > 0) this.drawBetweenCompiles(now, dt);
+    else this.draw(now, dt);
     const end = performance.now();
     if (gap > STALL_MS || end - now > STALL_MS) this.smoothSince = null;
     else this.smoothSince ??= end;
