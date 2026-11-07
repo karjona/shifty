@@ -1,6 +1,7 @@
 // Race HUD: phase banner (countdown), lap / position / time, trick score,
 // the speed meter (summer), split times at checkpoints and the finish
-// (against the first rider through), and short popups for buoys,
+// (against the first rider through; in a time trial, at laps too, against
+// the leading ghost), and short popups for buoys,
 // checkpoints, laps, tricks and the finish. Plain DOM: the state comes from
 // the predicted world every frame. The standings and the results are the
 // scoreboard's (results.ts).
@@ -94,6 +95,24 @@ export function formatTime(ticks: number, hz: number): string {
 /** How long a split time stays up (ms). */
 const SPLIT_MS = 4000;
 
+/** A time trial's ghost, as the splits read against it. */
+export interface GhostSplits {
+  label: string;
+  /** Race ticks at each split (checkpoints, laps), the finish last. */
+  splits: number[];
+}
+
+/** `-0.42` / `+1.07` (s), or past a minute `+1:02.34`. */
+function signedGap(ticks: number, hz: number): string {
+  const sign = ticks < 0 ? "−" : "+";
+  const a = Math.abs(ticks);
+  return a >= 60 * hz ? `${sign}${formatTime(a, hz)}` : `${sign}${(a / hz).toFixed(2)}`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, id: string, parent: HTMLElement): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   e.id = id;
@@ -114,6 +133,11 @@ export class Hud {
   private passes = new Map<string, { slot: number; ticks: number }[]>();
   private passesRace = -1;
   private split: { html: string; until: number } | null = null;
+  /** Time trial: the ghosts the splits read against (none yet: your time alone). Null outside a time trial. */
+  trial: GhostSplits[] | null = null;
+  /** Time trial: splits passed in this run, and the run (its start tick). */
+  private trialSplits = 0;
+  private trialRun = -1;
 
   constructor(root: HTMLElement) {
     this.tags = new NameTags(root);
@@ -146,7 +170,10 @@ export class Hud {
   events(events: RaceEvent[], mySlot: number, race: RaceView): void {
     const m = messages().hud;
     for (const e of events) {
-      if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
+      if (this.trial) {
+        const split = e.kind === "checkpoint" || e.kind === "finish" || (e.kind === "lap" && (e.lap ?? 0) > 1);
+        if (split && e.slot === mySlot && race.racing && race.phase === RACING) this.ghostSplit(e, race, this.trial);
+      } else if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
       if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish")) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "✓", "good");
@@ -158,7 +185,7 @@ export class Hud {
       } else if (e.kind === "lap") {
         if ((e.lap ?? 0) > 1) this.popup((e.lap ?? 0) === race.laps ? m.finalLap : m.lap(e.lap ?? 0), "big");
       } else if (e.kind === "finish") {
-        this.popup(m.finish(ordinal(race.place)), "big");
+        this.popup(this.trial ? messages().trial.finish : m.finish(ordinal(race.place)), "big");
       } else if (e.kind === "trick") {
         const name = trickName({
           spin: e.spin ?? 0,
@@ -201,6 +228,28 @@ export class Hud {
       const gap = ((ticks - best) / hz).toFixed(2);
       html = `<div class="split behind"><span>${m.labels.split}</span> +${gap} · ${ordinal(ahead.length + 1)}</div>`;
     }
+    this.split = { html, until: performance.now() + SPLIT_MS };
+  }
+
+  /** Time trial: my split against the ghost that was quickest through it. */
+  private ghostSplit(e: RaceEvent, race: RaceView, ghosts: GhostSplits[]): void {
+    if (race.phaseStart !== this.trialRun) {
+      this.trialRun = race.phaseStart;
+      this.trialSplits = 0;
+    }
+    const finish = e.kind === "finish";
+    const k = this.trialSplits++;
+    const ticks = finish ? (e.ticks ?? 0) : e.tick - race.phaseStart;
+    let lead: { label: string; ticks: number } | null = null;
+    for (const g of ghosts) {
+      const t = finish ? g.splits.at(-1) : k < g.splits.length - 1 ? g.splits[k] : undefined;
+      if (t !== undefined && (!lead || t < lead.ticks)) lead = { label: g.label, ticks: t };
+    }
+    const m = messages().hud;
+    const hz = race.tickHz;
+    const html = lead
+      ? `<div class="split ${ticks <= lead.ticks ? "ahead" : "behind"}"><span>${m.labels.split}</span> ${signedGap(ticks - lead.ticks, hz)} · ${escapeHtml(lead.label)}</div>`
+      : `<div class="split ahead"><span>${m.labels.split}</span> ${formatTime(ticks, hz)}</div>`;
     this.split = { html, until: performance.now() + SPLIT_MS };
   }
 

@@ -40,6 +40,8 @@ export interface BoardInput {
   standings: () => StandingView[];
   riders: Map<number, RosterName>;
   gp: GrandPrixView | null;
+  /** A time trial: the results stay up until a retry (no countdown). */
+  trial?: boolean;
 }
 
 /** A rider's line in the Tilt standings. */
@@ -301,7 +303,9 @@ export class Scoreboard {
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +
       cols.map(([label]) => `<span>${label}</span>`).join("") +
       `</div>${rows}` +
-      (tilt ? "" : `<footer class="board-foot"><span>${next}</span><b class="board-left"></b></footer>`) +
+      (tilt || input.trial
+        ? ""
+        : `<footer class="board-foot"><span>${next}</span><b class="board-left"></b></footer>`) +
       `</section>`;
     // Moves once there are earlier results to compare with.
     const moves = tilt?.some((r) => r.move !== null) ?? false;

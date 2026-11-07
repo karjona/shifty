@@ -53,10 +53,17 @@ export class NameTags {
   private ndc = new THREE.Vector3();
   private tilt = new THREE.Euler(0, 0, 0, "YXZ");
 
-  constructor(parent: HTMLElement) {
+  /** `kind`: a class for a different set of tags (the ghosts'). */
+  constructor(parent: HTMLElement, kind = "") {
     this.root = document.createElement("div");
-    this.root.className = "name-tags";
+    this.root.className = kind ? `name-tags ${kind}` : "name-tags";
     parent.append(this.root);
+  }
+
+  /** Takes the tags off the page. */
+  dispose(): void {
+    this.root.remove();
+    this.tags.clear();
   }
 
   /** Places the tags for this frame: `t` is the sim time (s) the riders are at. */

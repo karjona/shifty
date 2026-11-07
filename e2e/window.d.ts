@@ -29,6 +29,12 @@ declare global {
       /** Holds the television camera of that name (null: the director's); says which there are and which is on. */
       tv(camera?: string | null): { cameras: string[]; on: string | null };
       net: { lagMs: number; jitterMs: number; lossPct: number };
+      /** A time trial: starts the run over from the countdown. */
+      retry(): void;
+      /** Rides with the bot's inputs (or not). */
+      autopilot(on: boolean): void;
+      /** A time trial's ghosts, once loaded. */
+      ghosts(): { label: string; finishTicks: number }[];
     };
   }
 }

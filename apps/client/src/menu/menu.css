@@ -2229,3 +2229,141 @@ a {
 :root[data-compact] .title-panel .muted {
   display: none;
 }
+
+/* --- time trial (screens/trial.tsx): your best, the board, and its rows
+   picking the ghosts raced --- */
+
+.trial-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  gap: 12px;
+}
+.trial-panel .label {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-stretch: 75%;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.trial-best {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.trial-best b {
+  font-size: var(--fs-head);
+  font-weight: 760;
+  font-stretch: 75%;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.trial-board header {
+  display: flex;
+  justify-content: space-between;
+}
+.trial-board ol {
+  list-style: none;
+  margin: 6px 0 8px;
+  padding: 0;
+  border-top: 2px solid var(--ink);
+}
+.trial-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px 1fr auto 22px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.trial-row::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
+  background: var(--accent);
+  box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
+  opacity: 0;
+  transition: opacity 120ms var(--ease);
+}
+.trial-row > * {
+  position: relative;
+  z-index: 1;
+}
+.trial-row:focus {
+  color: var(--on-accent);
+  border-bottom-color: transparent;
+}
+.trial-row:focus::before {
+  opacity: 1;
+}
+.trial-row .num {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-stretch: 75%;
+  color: var(--ink-3);
+}
+.trial-row:focus .num {
+  color: inherit;
+  opacity: 0.7;
+}
+.trial-row .who {
+  overflow: hidden;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.trial-row.me .who {
+  font-style: italic;
+}
+.trial-row .time {
+  font-weight: 700;
+  font-stretch: 75%;
+  font-variant-numeric: tabular-nums;
+}
+.trial-row .pick {
+  width: 20px;
+  height: 20px;
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+.trial-row.picked .pick {
+  background: currentColor;
+}
+:root[data-compact] .trial-row {
+  min-height: 40px;
+}
+
+/* A time trial's results: retry, or leave. */
+.trial-actions {
+  position: absolute;
+  left: 50%;
+  bottom: var(--margin-y);
+  display: flex;
+  gap: var(--gap);
+  translate: -50% 0;
+  pointer-events: auto;
+}
+.trial-actions .btn {
+  min-width: 260px;
+  min-height: 72px;
+  box-shadow:
+    inset 0 0 0 2px var(--ink),
+    var(--lift);
+}
+.trial-actions .btn-primary {
+  box-shadow: var(--lift);
+}

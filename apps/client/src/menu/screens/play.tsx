@@ -15,6 +15,7 @@ import {
   meQuery,
   type Mode,
   playSingle,
+  playTimeTrial,
   roomExists,
   setPendingRace,
 } from "../api.ts";
@@ -25,6 +26,7 @@ import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker, Spinner, TabBar, TextField } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
 import { SetupEditor } from "./setup.tsx";
+import { type TrialChoice, TrialPanel } from "./trial.tsx";
 
 export type { Mode };
 const route = getRouteApi("/play");
@@ -41,13 +43,15 @@ export function ModeSelect() {
   const [joining, setJoining] = useState(false);
   const [searching, setSearching] = useState(false);
   const [tuning, setTuning] = useState(false);
+  const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
   useEffect(() => setClubRiders(1), []);
+  const sport = mode === "trial" ? (trial?.sport === "snow" ? "winter" : "summer") : null;
   useEffect(() => {
-    if (appearance) setClubRider(appearance, event === "winter" ? "winter" : "summer");
-  }, [appearance, event]);
+    if (appearance) setClubRider(appearance, sport ?? (event === "winter" ? "winter" : "summer"));
+  }, [appearance, event, sport]);
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
@@ -59,17 +63,18 @@ export function ModeSelect() {
 
   const play = async () => {
     if (busy) return;
-    if (mode === "trial") {
-      toast(t.common.soon);
-      return;
-    }
+    if (mode === "trial" && !trial?.race) return;
     if (mode === "matchmaking") {
       setSearching(true);
       return;
     }
     setBusy(true);
     try {
-      if (mode === "single") {
+      if (mode === "trial" && trial?.race) {
+        const ticket = await playTimeTrial(trial.course, trial.season);
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
+        await navigate({ to: "/race" });
+      } else if (mode === "single") {
         const ticket = await playSingle(event);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
         await navigate({ to: "/race" });
@@ -111,34 +116,38 @@ export function ModeSelect() {
             value={mode}
             onChange={setMode}
             tabs={[
-              { id: "trial", label: t.play.modes.trial, tag: t.common.soonTag },
+              { id: "trial", label: t.play.modes.trial },
               { id: "single", label: t.play.modes.single },
               { id: "room", label: t.play.modes.room },
               { id: "matchmaking", label: t.play.modes.matchmaking },
             ]}
           />
-          <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
-            <p>{t.play.about[mode]}</p>
-            {mode === "single" && eventPicker}
-            {mode === "room" && (
-              <>
-                {eventPicker}
-                <Picker
-                  label={t.room.bots}
-                  options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
-                  value={bots}
-                  onChange={setBots}
-                />
-              </>
-            )}
-            {(mode === "single" || mode === "matchmaking") && <Races event={mode === "single" ? event : "gp"} />}
-            {mode === "room" && (
-              <>
-                <p className="muted">{t.play.eventAbout[event]}</p>
-                <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
-              </>
-            )}
-          </Panel>
+          {mode === "trial" ? (
+            <TrialPanel title={t.play.modes.trial} onChange={setTrial} />
+          ) : (
+            <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
+              <p>{t.play.about[mode]}</p>
+              {mode === "single" && eventPicker}
+              {mode === "room" && (
+                <>
+                  {eventPicker}
+                  <Picker
+                    label={t.room.bots}
+                    options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
+                    value={bots}
+                    onChange={setBots}
+                  />
+                </>
+              )}
+              {(mode === "single" || mode === "matchmaking") && <Races event={mode === "single" ? event : "gp"} />}
+              {mode === "room" && (
+                <>
+                  <p className="muted">{t.play.eventAbout[event]}</p>
+                  <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
+                </>
+              )}
+            </Panel>
+          )}
           <footer className="actions">
             <Button onClick={() => setTuning(true)}>
               <SlidersIcon />
@@ -149,7 +158,7 @@ export function ModeSelect() {
               glyph="play"
               className="play-button"
               onClick={() => void play()}
-              disabled={busy || mode === "trial"}
+              disabled={busy || (mode === "trial" && !trial?.race)}
               autoFocus
             >
               {mode === "room" ? t.play.createRoom : mode === "matchmaking" ? t.play.findRace : t.common.play}
