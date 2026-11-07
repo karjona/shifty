@@ -30,7 +30,7 @@ import {
   vec4,
 } from "three/tsl";
 import type { Finish } from "../rider/assets.ts";
-import { CelMaterial, SUN_DIR, inkNode, inkOnlyInPass } from "./material.ts";
+import { CelMaterial, SUN_DIR, UNREFLECTED, inkNode, inkOnlyInPass } from "./material.ts";
 
 export type TintKind = "kit" | "look" | "hair";
 
@@ -436,5 +436,8 @@ export function outlineOf(
   if (mesh.morphTargetInfluences) hull.morphTargetInfluences = mesh.morphTargetInfluences;
   hull.frustumCulled = false;
   hull.castShadow = false;
+  // Far away the ink pass draws the silhouette: the world drops the hull (see `World.detail`).
+  hull.userData.outline = true;
+  hull.layers.set(UNREFLECTED);
   return hull;
 }

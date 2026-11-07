@@ -103,6 +103,9 @@ function ticketCourse(token: string): number {
   }
 }
 
+/** With no frame for this long (ms), a timer runs the netcode. */
+const STALLED_MS = 100;
+
 /** How long a course waits for its riders' art before it goes on without the late ones. */
 const RIDERS_WAIT_MS = 8000;
 
@@ -205,16 +208,18 @@ export class RaceSession implements Stage {
     });
     this.opts.status(messages().race.joining);
     if (import.meta.env.DEV && this.opts.debug) {
-      this.debug = createDebugPanel(this.net, { renderScale: engine.view.scale }, (s) => engine.setScale(s));
+      this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
       this.debug.state.renderer = engine.world.backend;
     }
-    // The netcode clock must not depend on render speed: if no frame has run
-    // the netcode recently (slow GPU, hidden tab), a timer does it.
+    // The netcode clock must not stop with drawing: if frames have stopped
+    // (a hidden tab, a long stall), a timer runs it. Not between frames that
+    // are merely slow: the next frame would then show the world at the
+    // timer's later time, and frames would step unevenly.
     this.timer = setInterval(() => {
       const now = performance.now();
-      if (now - this.last > 20) this.step(now);
-    }, 10);
+      if (now - this.last > STALLED_MS) this.step(now);
+    }, 25);
     this.installHooks(engine, transport);
   }
 
@@ -228,7 +233,9 @@ export class RaceSession implements Stage {
     }
   }
 
-  private step(now: number): number {
+  private step(at: number): number {
+    // A frame's time can be a little behind the timer's last step.
+    const now = Math.max(at, this.last);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     const client = this.client;

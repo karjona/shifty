@@ -30,8 +30,11 @@ import {
   uv,
   vec2,
   vec3,
+  vertexStage,
 } from "three/tsl";
+import { noise4 } from "./cel/noise.ts";
 import { CarveTrails } from "./trails.ts";
+import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
 import { celify } from "./cel/material.ts";
@@ -142,6 +145,10 @@ const GRID_SINK = 0.3;
 /** Coarse vertices this close to the run hide under the ribbon. */
 const GRID_HIDE = RIBBON_HALF - GRID_STEP;
 const ROWS_PER_CHUNK = 96;
+/** Pines are batched in square cells this wide (m). */
+const FOREST_CELL = 96;
+/** Pine cells further than this from the camera (m) are lost in the fog. */
+const FOREST_FAR = 520;
 const SKY = 0xc9d4e4;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
 const DYE_BREAK = 0.16;
@@ -191,6 +198,9 @@ function ribbonRows(run: RunData): Float32Array {
   return Float32Array.from(rows);
 }
 
+/** Component `k` (0-2) of `v`. */
+const pick = (v: THREE.Node<"vec3">, k: number) => (k === 0 ? v.x : k === 1 ? v.y : v.z);
+
 /**
  * The snow: white in the open, blue-grey in drifts, with grain close up and
  * rock where it's steep. On the run (`ribbon`, with `uv` = arc length and
@@ -205,10 +215,10 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
   mat.colorNode = Fn(() => {
     const p = positionWorld;
     const near = smoothstep(90, 20, p.distance(cameraPosition));
-    const drift = mx_noise_float(p.xz.mul(0.045)).mul(0.5).add(0.5);
-    const blotch = mx_noise_float(p.xz.mul(0.17)).mul(0.5).add(0.5);
+    const drift = noise4(p.xz.mul(0.045)).x.mul(0.5).add(0.5);
+    const blotch = noise4(p.xz.mul(0.17)).y.mul(0.5).add(0.5);
     let c = mix(vec3(0.74, 0.8, 0.92), vec3(0.9, 0.93, 0.98), drift).mul(blotch.mul(0.1).add(0.9));
-    c = c.mul(mx_noise_float(p.xz.mul(3.1)).mul(0.05).mul(near).add(1));
+    c = c.mul(noise4(p.xz.mul(3.1)).z.mul(0.05).mul(near).add(1));
     if (ribbon) {
       const s = uv().x;
       const o = uv().y;
@@ -220,10 +230,18 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
         [3.7, 1.6, 0.07, 0.1],
         [5.3, 2.4, 0.045, 0.13],
       ] as const;
-      const lines = layers.map(([spacing, amp, freq, width], k) => {
-        const wander = sin(s.mul(freq).add(k * 2.1))
+      // How far each track wanders and where its patches lie change over
+      // metres, so they are worked out per vertex.
+      const [w0, w1, w2] = layers.map(([, amp, freq], k) =>
+        sin(s.mul(freq).add(k * 2.1))
           .mul(amp)
-          .add(mx_noise_float(vec2(s.mul(0.02), o.mul(0.08).add(k * 7.3))).mul(amp * 1.5));
+          .add(mx_noise_float(vec2(s.mul(0.02), o.mul(0.08).add(k * 7.3))).mul(amp * 1.5)),
+      );
+      const [p0, p1, p2] = layers.map((_, k) => mx_noise_float(vec2(s.mul(0.012), o.mul(0.04).add(k * 3.7))));
+      const wanders = vertexStage(vec3(w0!, w1!, w2!));
+      const patches = vertexStage(vec3(p0!, p1!, p2!));
+      const lines = layers.map(([spacing, , , width], k) => {
+        const wander = pick(wanders, k);
         const u = o.add(wander).div(spacing);
         const d = abs(fract(u).sub(0.5)).mul(spacing);
         // Each track its own depth: some fresh, some nearly filled in.
@@ -233,7 +251,7 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
         const line = smoothstep(px.add(width), max(float(width).sub(px), 0), d)
           .mul(clamp(float(width).div(px), 0, 1))
           .mul(depth);
-        const patch = smoothstep(-0.15, 0.3, mx_noise_float(vec2(s.mul(0.012), o.mul(0.04).add(k * 3.7))));
+        const patch = smoothstep(-0.15, 0.3, pick(patches, k));
         return line.mul(patch);
       });
       const tracked = max(lines[0]!, lines[1]!, lines[2]!);
@@ -435,6 +453,7 @@ export class Mountain implements Environment {
     fadeIn: 5,
   });
   private trails = new CarveTrails();
+  private forest: THREE.InstancedMesh[] = [];
   private flakeCarry = 0;
   private emitters = new Map<number, Emitter>();
   private wind = { x: 0.6, z: -0.3 };
@@ -459,6 +478,8 @@ export class Mountain implements Environment {
       (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
       true,
     );
+    this.trails.group.userData.noMerge = true;
+    mergeStatic(this.group, { cell: 400 });
     this.group.add(skyDome());
   }
 
@@ -574,6 +595,8 @@ export class Mountain implements Environment {
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
       mesh.receiveShadow = true;
+      // Each chunk is a batch of its own (so the ones out of view are culled).
+      mesh.userData.noMerge = true;
       this.group.add(mesh);
     }
   }
@@ -670,7 +693,7 @@ export class Mountain implements Environment {
     this.gridHeights = new Float32Array(nx * nz);
     for (let i = 0; i < nx * nz; i++) this.gridHeights[i] = data[i * 2]!;
     const mat = snowMaterial(false);
-    const TILE = 32;
+    const TILE = 64;
     for (let tz = 0; tz < nz - 1; tz += TILE) {
       for (let tx = 0; tx < nx - 1; tx += TILE) {
         const ex = Math.min(nx - 1, tx + TILE);
@@ -701,6 +724,7 @@ export class Mountain implements Environment {
         geo.computeVertexNormals();
         const mesh = new THREE.Mesh(geo, mat);
         mesh.receiveShadow = true;
+        mesh.userData.noMerge = true;
         this.group.add(mesh);
       }
     }
@@ -747,11 +771,9 @@ export class Mountain implements Environment {
     const pts = new Float32Array(keep.length * 2);
     keep.forEach((p, i) => pts.set([p.x, p.z], i * 2));
     const ys = this.terrain.heights(pts);
-    const mesh = new THREE.InstancedMesh(
-      pineGeometry(),
-      new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.95, flatShading: true }),
-      keep.length,
-    );
+    // In square cells, each its own batch, so the ones out of view (or out
+    // of the sun's shadow box) are left out.
+    const cells = new Map<string, THREE.Matrix4[]>();
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
@@ -762,11 +784,22 @@ export class Mountain implements Environment {
         q,
         new THREE.Vector3(p.scale, p.scale * (0.9 + rand() * 0.5), p.scale),
       );
-      mesh.setMatrixAt(i, m);
+      const key = `${Math.floor(p.x / FOREST_CELL)},${Math.floor(p.z / FOREST_CELL)}`;
+      let cell = cells.get(key);
+      if (!cell) cells.set(key, (cell = []));
+      cell.push(m.clone());
     });
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.group.add(mesh);
+    const geometry = pineGeometry();
+    const material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
+    for (const matrices of cells.values()) {
+      const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
+      matrices.forEach((mat, i) => mesh.setMatrixAt(i, mat));
+      mesh.computeBoundingSphere();
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.forest.push(mesh);
+      this.group.add(mesh);
+    }
   }
 
   /** The closest point of the run's path (coarse: 4 m samples). */
@@ -1006,6 +1039,10 @@ export class Mountain implements Environment {
 
   update(f: Frame): void {
     const ground = (x: number, z: number) => this.roughGround(x, z);
+    for (const cell of this.forest) {
+      const sphere = cell.boundingSphere!;
+      cell.visible = sphere.center.distanceTo(f.eye) - sphere.radius < FOREST_FAR;
+    }
     // Falling snow around the camera, drifting with the wind.
     this.flakeCarry += f.dt * 420;
     while (this.flakeCarry >= 1) {

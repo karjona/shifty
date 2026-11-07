@@ -104,10 +104,55 @@ interface Floating {
   lift: number;
 }
 
+/** One of a batch of things riding the swell: where it floats, and its transform before the swell lifts it. */
+interface Bobbing {
+  x: number;
+  z: number;
+  base: THREE.Matrix4;
+}
+
+/** Many copies of one shape riding the swell, drawn as one batch. */
+class BobbingBatch {
+  readonly mesh: THREE.InstancedMesh;
+  readonly items: Bobbing[] = [];
+  private lifted = new THREE.Matrix4();
+
+  constructor(geo: THREE.BufferGeometry, material: THREE.Material, items: (Bobbing & { color?: number })[]) {
+    this.mesh = new THREE.InstancedMesh(geo, material, items.length);
+    items.forEach((it, i) => {
+      this.items.push({ x: it.x, z: it.z, base: it.base });
+      this.mesh.setMatrixAt(i, it.base);
+      if (it.color !== undefined) this.mesh.setColorAt(i, new THREE.Color(it.color));
+    });
+    this.mesh.computeBoundingSphere();
+  }
+
+  /** Lifts every copy onto the swell; `scale(i)` grows one about its own origin. */
+  update(waves: Float32Array, t: number, scale?: (i: number) => number): void {
+    this.items.forEach((it, i) => {
+      this.lifted.makeTranslation(0, waveHeight(waves, it.x, it.z, t), 0).multiply(it.base);
+      const k = scale?.(i) ?? 1;
+      if (k !== 1) this.lifted.scale(new THREE.Vector3(k, k, k));
+      this.mesh.setMatrixAt(i, this.lifted);
+    });
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+/** A translation. */
+const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
+
+/** The transform `x, z` (at the water line), turned `yaw`, then `local` within it. */
+function placed(x: number, z: number, yaw: number, local: THREE.Matrix4 = new THREE.Matrix4()): THREE.Matrix4 {
+  return new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(yaw)).multiply(local);
+}
+
 export class CourseView {
   readonly group = new THREE.Group();
   private floating: Floating[] = [];
-  private buoyMeshes: THREE.Group[] = [];
+  /** Batches riding the swell: buoys (body, band, arrow) and moored boats. */
+  private bobbing: BobbingBatch[] = [];
+  private arrows: BobbingBatch | null = null;
   private boundary: THREE.InstancedMesh;
   private boundaryPoints: { x: number; z: number }[] = [];
   private ring: THREE.Mesh;
@@ -129,7 +174,9 @@ export class CourseView {
       new THREE.MeshBasicNodeMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
     );
     this.ring.rotation.x = -Math.PI / 2;
+    this.ring.userData.noMerge = true;
     this.group.add(this.ring);
+    for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
   private buildBreakwater(): void {
@@ -207,34 +254,34 @@ export class CourseView {
       seed = (seed * 16807) % 2147483647;
       return seed / 2147483647;
     };
+    const bodies: (Bobbing & { color: number })[] = [];
+    const rails: (Bobbing & { color: number })[] = [];
+    const cabins: Bobbing[] = [];
+    const masts: Bobbing[] = [];
     for (let a = 8; a < len - 8; a += 9 + rnd() * 10) {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(hull, std(colours[Math.floor(rnd() * colours.length)]!));
-      body.position.y = 0.15;
-      const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(4.2, 0.14, 1.95),
-        std(stripes[Math.floor(rnd() * stripes.length)]!),
-      );
-      rail.position.y = 0.62;
-      g.add(body, rail);
-      if (rnd() < 0.6) {
-        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea));
-        cabin.position.set(-0.6, 1.1, 0);
-        g.add(cabin);
-      }
-      if (rnd() < 0.5) {
-        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c));
-        mast.position.set(1, 2.4, 0);
-        g.add(mast);
-      }
-      for (const m of g.children) m.castShadow = true;
+      const body = colours[Math.floor(rnd() * colours.length)]!;
+      const rail = stripes[Math.floor(rnd() * stripes.length)]!;
+      const cabin = rnd() < 0.6;
+      const mast = rnd() < 0.5;
       const d = town.radius + 5 + rnd() * 3;
       const x = town.ax + ux * a + nx * d;
       const z = town.az + uz * a + nz * d;
-      g.rotation.y = Math.atan2(-uz, ux) + (rnd() - 0.5) * 0.3;
-      g.position.set(x, 0, z);
-      this.group.add(g);
-      this.floating.push({ obj: g, x, z, lift: 0 });
+      const yaw = Math.atan2(-uz, ux) + (rnd() - 0.5) * 0.3;
+      bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
+      rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
+      if (cabin) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
+      if (mast) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
+    }
+    const batches = [
+      new BobbingBatch(hull, std(0xffffff), bodies),
+      new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
+      new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
+      new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
+    ];
+    for (const b of batches) {
+      b.mesh.castShadow = true;
+      this.group.add(b.mesh);
+      this.bobbing.push(b);
     }
   }
 
@@ -311,35 +358,40 @@ export class CourseView {
   }
 
   private buildBuoys(): void {
-    const body = new THREE.CylinderGeometry(0.55, 0.65, 1.5, 12);
-    const band = new THREE.CylinderGeometry(0.58, 0.6, 0.3, 12);
     const arrowGeo = new THREE.ShapeGeometry(arrowShape());
-    const white = std(0xf4f4f0);
+    const bodies: (Bobbing & { color: number })[] = [];
+    const bands: Bobbing[] = [];
+    const arrows: (Bobbing & { color: number })[] = [];
     for (const b of this.data.buoys) {
       const color = b.keep === "right" ? RED : GREEN;
-      const g = new THREE.Group();
-      const m = new THREE.Mesh(body, std(color, { roughness: 0.45 }));
-      m.position.y = 0.45;
-      m.castShadow = true;
-      const w = new THREE.Mesh(band, white);
-      w.position.y = 0.75;
-      g.add(m, w);
+      bodies.push({
+        x: b.x,
+        z: b.z,
+        base: placed(b.x, b.z, 0, new THREE.Matrix4().makeTranslation(0, 0.45, 0)),
+        color,
+      });
+      bands.push({ x: b.x, z: b.z, base: placed(b.x, b.z, 0, new THREE.Matrix4().makeTranslation(0, 0.75, 0)) });
       // The arrow faces the riders and points to the side to pass on:
-      // keep it on your right = pass on its left.
-      const arrow = new THREE.Mesh(
-        arrowGeo,
-        std(color, { emissive: color, emissiveIntensity: 0.35, side: THREE.DoubleSide }),
-      );
-      arrow.position.y = 2.6;
-      // Plane faces +Z by default; turn it to face oncoming riders (-forward).
-      arrow.rotation.y = b.yaw + Math.PI;
-      // Seen from the front, the plane's +X is the rider's right.
-      if (b.keep === "right") arrow.rotateZ(Math.PI);
-      g.add(arrow);
-      g.position.set(b.x, 0, b.z);
-      this.group.add(g);
-      this.buoyMeshes.push(g);
-      this.floating.push({ obj: g, x: b.x, z: b.z, lift: 0 });
+      // keep it on your right = pass on its left. (The plane faces +Z: turn
+      // it to face oncoming riders; seen from the front, its +X is the
+      // rider's right.)
+      const arrow = new THREE.Matrix4()
+        .makeTranslation(0, 2.6, 0)
+        .multiply(new THREE.Matrix4().makeRotationY(b.yaw + Math.PI))
+        .multiply(new THREE.Matrix4().makeRotationZ(b.keep === "right" ? Math.PI : 0));
+      arrows.push({ x: b.x, z: b.z, base: placed(b.x, b.z, 0, arrow), color });
+    }
+    const body = new BobbingBatch(
+      new THREE.CylinderGeometry(0.55, 0.65, 1.5, 12),
+      std(0xffffff, { roughness: 0.45 }),
+      bodies,
+    );
+    body.mesh.castShadow = true;
+    const band = new BobbingBatch(new THREE.CylinderGeometry(0.58, 0.6, 0.3, 12), std(0xf4f4f0), bands);
+    this.arrows = new BobbingBatch(arrowGeo, std(0xffffff, { side: THREE.DoubleSide }), arrows);
+    for (const b of [body, band, this.arrows]) {
+      this.group.add(b.mesh);
+      this.bobbing.push(b);
     }
   }
 
@@ -403,13 +455,13 @@ export class CourseView {
     });
     this.boundary.instanceMatrix.needsUpdate = true;
 
-    const b = nextBuoy === null ? undefined : this.buoyMeshes[nextBuoy];
+    for (const b of this.bobbing) b.update(waves, t, b === this.arrows ? (i) => (i === nextBuoy ? 1.5 : 1) : undefined);
+    const b = nextBuoy === null ? undefined : this.data.buoys[nextBuoy];
     this.ring.visible = b !== undefined;
     if (b) {
       const pulse = 1 + 0.12 * Math.sin(t * 6);
-      this.ring.position.set(b.position.x, b.position.y + 0.15, b.position.z);
+      this.ring.position.set(b.x, waveHeight(waves, b.x, b.z, t) + 0.15, b.z);
       this.ring.scale.setScalar(pulse);
     }
-    this.buoyMeshes.forEach((g, i) => g.children[2]!.scale.setScalar(i === nextBuoy ? 1.5 : 1));
   }
 }

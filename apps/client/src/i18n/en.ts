@@ -223,6 +223,7 @@ export const en = {
   settings: {
     language: "Language",
     scale: "Resolution",
+    scaleAuto: "Auto",
     water: "Water",
     waterSea: "Full",
     waterBasic: "Basic (faster)",

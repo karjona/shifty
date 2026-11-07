@@ -6,20 +6,28 @@ import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   Fn,
+  cameraProjectionMatrix,
   color,
   dot,
   float,
   fwidth,
   max,
   mix,
+  modelViewMatrix,
   mx_noise_float,
   normalize,
   positionLocal,
   pow,
   smoothstep,
+  vec2,
   vec3,
+  vec4,
 } from "three/tsl";
 import { CelMaterial, SUN_DIR, inkId, inklessBasic } from "./material.ts";
+import { noise4 } from "./noise.ts";
+
+/** Where the sky sits in the depth range (1 = the far plane): behind all else, but never clipped by it. */
+const SKY_DEPTH = 0.999999;
 
 export const SKY = {
   zenith: color(0x1f6dd2),
@@ -41,10 +49,18 @@ function rng(seed: number): () => number {
   };
 }
 
-/** The sky dome: centred on the camera, drawn behind everything. */
+/**
+ * The sky dome: centred on the camera, behind everything. It is drawn after
+ * the rest, at the very back of the depth range, so only the pixels nothing
+ * else covers pay for its shader.
+ */
 export function skyDome(): THREE.Mesh {
   const geo = new THREE.SphereGeometry(3800, 48, 24);
   const m = inklessBasic({ side: THREE.BackSide, depthWrite: false, fog: false });
+  m.vertexNode = Fn(() => {
+    const clip = cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(positionLocal, 1));
+    return vec4(clip.x, clip.y, clip.w.mul(SKY_DEPTH), clip.w);
+  })();
   m.colorNode = Fn(() => {
     const d = normalize(positionLocal);
     const y = max(d.y, float(0));
@@ -57,7 +73,7 @@ export function skyDome(): THREE.Mesh {
     const n = mx_noise_float(vec3(plane.x.mul(0.22), plane.y.mul(3.2), 0.5));
     const band = n.sub(0.25).abs();
     const w = max(fwidth(band), float(1e-4));
-    const patch = smoothstep(0.1, 0.35, mx_noise_float(vec3(plane.x.mul(0.5), plane.y.mul(0.7), 7.7)));
+    const patch = smoothstep(0.1, 0.35, noise4(vec2(plane.x.mul(0.5), plane.y.mul(0.7))).x);
     const wisp = smoothstep(float(0.05).add(w), float(0.05).sub(w), band)
       .mul(patch)
       .mul(smoothstep(0.16, 0.26, y))
@@ -66,7 +82,8 @@ export function skyDome(): THREE.Mesh {
     return c;
   })();
   const dome = new THREE.Mesh(geo, m);
-  dome.renderOrder = -10;
+  // After everything opaque.
+  dome.renderOrder = 10;
   dome.frustumCulled = false;
   dome.onBeforeRender = (_r, _s, camera) => {
     dome.position.copy(camera.position);

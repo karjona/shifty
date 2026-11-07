@@ -5,6 +5,7 @@
 // the bars.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Colourway, botAppearance, item } from "@shifty/rider";
+import { Parts } from "./parts.ts";
 import { RiderFigure } from "./rider/model.ts";
 import { floatPose, jetskiPose } from "./rider/ride.ts";
 import type { RiderModel, RiderView } from "./world.ts";
@@ -47,21 +48,6 @@ export class Spring {
   }
 }
 
-function part(
-  geo: THREE.BufferGeometry,
-  mat: THREE.Material,
-  parent: THREE.Object3D,
-  x: number,
-  y: number,
-  z: number,
-): THREE.Mesh {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  parent.add(m);
-  return m;
-}
-
 /** The ride's colours (hull, seat, stripe), or the seat's colour with a dark seat. */
 function rideColours(appearance: Appearance, slot: number): Colourway {
   const ride = appearance.outfits.summer.ride;
@@ -93,26 +79,27 @@ export class JetskiModel implements RiderModel {
   constructor(slot: number, appearance: Appearance | null) {
     const look = appearance ?? botAppearance(1, slot);
     const [main, seat, stripe] = rideColours(look, slot);
-    const paint = new THREE.MeshStandardNodeMaterial({ color: main, roughness: 0.45 });
-    const second = new THREE.MeshStandardNodeMaterial({ color: seat, roughness: 0.7 });
-    const accent = new THREE.MeshStandardNodeMaterial({ color: stripe, roughness: 0.5 });
-    const dark = new THREE.MeshStandardNodeMaterial({ color: 0x23262b, roughness: 0.7 });
+    const dark = 0x23262b;
     // Hull (the rider position is the bottom of the hull), a stripe down each side, the nose, the hood the bars
-    // stand on, the seat.
-    part(new THREE.BoxGeometry(1.1, 0.5, 2.5), paint, this.hull, 0, 0.25, -0.1);
-    for (const side of [1, -1])
-      part(new THREE.BoxGeometry(0.02, 0.1, 2.3), accent, this.hull, side * 0.555, 0.32, -0.1);
-    const nose = part(new THREE.BoxGeometry(0.9, 0.42, 0.7), paint, this.hull, 0, 0.3, 1.25);
-    nose.rotation.x = 0.35;
-    const hood = part(new THREE.BoxGeometry(0.8, 0.22, 0.75), paint, this.hull, 0, 0.6, 0.6);
-    hood.rotation.x = 0.12;
-    part(new THREE.BoxGeometry(0.5, 0.2, 1.0), second, this.hull, 0, 0.6, -0.5);
-    // The steering column, and the bars with their grips.
-    const column = part(new THREE.BoxGeometry(0.08, 0.5, 0.08), dark, this.hull, 0, 0.9, 0.36);
-    column.rotation.x = -0.45;
+    // stand on, the seat, and the steering column.
+    const hull = new Parts();
+    hull.add(new THREE.BoxGeometry(1.1, 0.5, 2.5), main, 0, 0.25, -0.1);
+    for (const side of [1, -1]) hull.add(new THREE.BoxGeometry(0.02, 0.1, 2.3), stripe, side * 0.555, 0.32, -0.1);
+    hull.add(new THREE.BoxGeometry(0.9, 0.42, 0.7), main, 0, 0.3, 1.25, 0.35);
+    hull.add(new THREE.BoxGeometry(0.8, 0.22, 0.75), main, 0, 0.6, 0.6, 0.12);
+    hull.add(new THREE.BoxGeometry(0.5, 0.2, 1.0), seat, 0, 0.6, -0.5);
+    hull.add(new THREE.BoxGeometry(0.08, 0.5, 0.08), dark, 0, 0.9, 0.36, -0.45);
+    const hullMesh = hull.build();
+    hullMesh.castShadow = true;
+    this.hull.add(hullMesh);
+    // The bars with their grips.
     this.bars.position.copy(BARS);
-    part(new THREE.BoxGeometry(GRIP * 2, 0.035, 0.035), dark, this.bars, 0, 0, 0);
-    for (const side of [1, -1]) part(new THREE.BoxGeometry(0.12, 0.05, 0.05), dark, this.bars, side * GRIP, 0, 0);
+    const bars = new Parts();
+    bars.add(new THREE.BoxGeometry(GRIP * 2, 0.035, 0.035), dark);
+    for (const side of [1, -1]) bars.add(new THREE.BoxGeometry(0.12, 0.05, 0.05), dark, side * GRIP);
+    const barsMesh = bars.build();
+    barsMesh.castShadow = true;
+    this.bars.add(barsMesh);
     this.hull.add(this.bars);
     this.mesh.add(this.hull);
 

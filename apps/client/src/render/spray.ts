@@ -12,7 +12,7 @@
 // Render-only: driven by the drawn rider state, simulated on the CPU, each
 // layer drawn as one batch of camera-facing sprites.
 import * as THREE from "three/webgpu";
-import { inkNode, inkOnlyInPass } from "./cel/material.ts";
+import { UNREFLECTED, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { cameraPosition, instancedDynamicBufferAttribute, mix, smoothstep, uv, vec3 } from "three/tsl";
 import type { LandData } from "./course.ts";
 import type { RiderView } from "./world.ts";
@@ -41,7 +41,11 @@ export interface PoolLook {
   fadeIn: number;
 }
 
-/** A batch of particles: CPU-simulated, drawn as camera-facing discs. */
+/**
+ * A batch of particles: CPU-simulated, drawn as camera-facing discs. The
+ * live ones are kept packed at the front of the arrays, and only they are
+ * drawn.
+ */
 export class ParticlePool {
   readonly sprite: THREE.Sprite;
   private look: PoolLook;
@@ -55,6 +59,9 @@ export class ParticlePool {
   private life: Float32Array;
   private size0: Float32Array;
   private size1: Float32Array;
+  /** How many are alive (the first `live` of the arrays). */
+  private live = 0;
+  /** With every slot alive, the next one to give to a new particle. */
   private next = 0;
 
   constructor(look: PoolLook) {
@@ -77,17 +84,24 @@ export class ParticlePool {
     // Cut-out splashes: solid white puffs with a pale blue underside, shrinking as they fade.
     const mat = new THREE.SpriteNodeMaterial({ transparent: false, depthWrite: true });
     mat.positionNode = ps.xyz;
+    // The disc is never wider than this (in the sprite's uv), so the quad is cut down to it.
+    const widest = Math.max(0.05, (look.peak - 0.15) * 0.55);
     // Droplets, not mist: smaller, and only while the particle is still dense.
-    mat.scaleNode = ps.w.mul(0.55);
-    const r = uv().sub(0.5).length();
+    mat.scaleNode = ps.w.mul(0.55 * 2 * widest);
+    const at = uv()
+      .sub(0.5)
+      .mul(2 * widest);
+    const r = at.length();
     const lens = smoothstep(look.lensFrom, look.lensTo, ps.xyz.distance(cameraPosition));
     mat.maskNode = r.lessThan(a.mul(lens).sub(0.15).max(0).mul(0.55));
-    mat.colorNode = mix(vec3(0.74, 0.88, 0.97), vec3(1), smoothstep(0.45, 0.6, uv().y));
+    mat.colorNode = mix(vec3(0.74, 0.88, 0.97), vec3(1), smoothstep(-0.05, 0.1, at.y));
     inkOnlyInPass(mat, inkNode(1, 0, 0.77, 0.25));
     this.sprite = new THREE.Sprite(mat);
+    // Every slot until the first update (so a warm-up sees it drawn).
     this.sprite.count = n;
     this.sprite.frustumCulled = false;
     this.sprite.renderOrder = 1;
+    this.sprite.layers.set(UNREFLECTED);
   }
 
   spawn(
@@ -101,11 +115,17 @@ export class ParticlePool {
     size0: number,
     size1: number,
   ): void {
-    const i = this.next;
-    this.next = (i + 1) % this.look.max;
+    let i: number;
+    if (this.live < this.look.max) i = this.live++;
+    else {
+      i = this.next;
+      this.next = (i + 1) % this.look.max;
+    }
     this.ps[i * 4] = x;
     this.ps[i * 4 + 1] = y;
     this.ps[i * 4 + 2] = z;
+    this.ps[i * 4 + 3] = 0;
+    this.alpha[i] = 0;
     this.vel[i * 3] = vx;
     this.vel[i * 3 + 1] = vy;
     this.vel[i * 3 + 2] = vz;
@@ -115,13 +135,26 @@ export class ParticlePool {
     this.size1[i] = size1;
   }
 
+  /** Moves the last live particle into slot `i` (whose particle is gone). */
+  private fill(i: number): void {
+    const j = --this.live;
+    if (i === j) return;
+    this.ps.copyWithin(i * 4, j * 4, j * 4 + 4);
+    this.vel.copyWithin(i * 3, j * 3, j * 3 + 3);
+    this.alpha[i] = this.alpha[j]!;
+    this.age[i] = this.age[j]!;
+    this.life[i] = this.life[j]!;
+    this.size0[i] = this.size0[j]!;
+    this.size1[i] = this.size1[j]!;
+  }
+
   /** Move every particle; ones that fall back into the water (or snow) are gone. */
   update(water: (x: number, z: number) => number, dt: number, wind?: { x: number; z: number }): void {
     const { ps, alpha, look } = this;
     const drag = Math.exp(-look.drag * dt);
-    for (let i = 0; i < look.max; i++) {
+    let i = 0;
+    while (i < this.live) {
       const life = this.life[i]!;
-      if (life <= 0) continue;
       const age = this.age[i]! + dt;
       const o = i * 4;
       const v = i * 3;
@@ -129,23 +162,32 @@ export class ParticlePool {
       const vx = this.vel[v]! * drag + (wind ? wind.x * (1 - drag) : 0);
       const vz = this.vel[v + 2]! * drag + (wind ? wind.z * (1 - drag) : 0);
       vy *= drag;
+      const x = ps[o]! + vx * dt;
+      const y = ps[o + 1]! + vy * dt;
+      const z = ps[o + 2]! + vz * dt;
+      const t = age / life;
+      if (t >= 1 || (vy < 0 && y < water(x, z) - 0.1)) {
+        this.fill(i);
+        continue;
+      }
       this.vel[v] = vx;
       this.vel[v + 1] = vy;
       this.vel[v + 2] = vz;
-      ps[o]! += vx * dt;
-      ps[o + 1]! += vy * dt;
-      ps[o + 2]! += vz * dt;
-      const t = age / life;
-      if (t >= 1 || (vy < 0 && ps[o + 1]! < water(ps[o]!, ps[o + 2]!) - 0.1)) {
-        this.life[i] = 0;
-        alpha[i] = 0;
-        ps[o + 3] = 0;
-        continue;
-      }
+      ps[o] = x;
+      ps[o + 1] = y;
+      ps[o + 2] = z;
       this.age[i] = age;
-      ps[o + 3] = this.size0[i]! + (this.size1[i]! - this.size0[i]!) * Math.sqrt(t);
-      alpha[i] = look.peak * (1 - t) * Math.min(1, t * look.fadeIn);
+      const a = look.peak * (1 - t) * Math.min(1, t * look.fadeIn);
+      alpha[i] = a;
+      // Too faint to show any disc: nothing to draw.
+      ps[o + 3] = a > 0.15 ? this.size0[i]! + (this.size1[i]! - this.size0[i]!) * Math.sqrt(t) : 0;
+      i++;
     }
+    this.sprite.count = this.live;
+    this.posSizeAttr.clearUpdateRanges();
+    this.alphaAttr.clearUpdateRanges();
+    this.posSizeAttr.addUpdateRange(0, this.live * 4);
+    this.alphaAttr.addUpdateRange(0, this.live);
     this.posSizeAttr.needsUpdate = true;
     this.alphaAttr.needsUpdate = true;
   }

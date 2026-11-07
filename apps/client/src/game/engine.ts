@@ -4,6 +4,7 @@
 import type * as THREE from "three/webgpu";
 import init, { type InitOutput } from "../wasm/sim.js";
 import { setWarmer } from "../render/warm.ts";
+import { AutoResolution } from "./resolution.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
 import { booted, whileLoading } from "../loading.ts";
@@ -21,8 +22,8 @@ export interface Stage {
 
 /** Viewer settings that survive reloads. */
 export interface ViewSettings {
-  /** Render resolution scale (0.25-1). */
-  scale: number;
+  /** Render resolution: a scale of the screen's (0.25-1), or "auto" (as much as keeps frames smooth). */
+  scale: number | "auto";
   /** "sea" = full water; "basic" = swells only (slow machines). */
   water: "sea" | "basic";
 }
@@ -37,6 +38,9 @@ const SETTLE_MS = 800;
 const SETTLE_MAX_MS = 8000;
 /** Nothing waits longer than this (ms) for a stage's art (it shows without what is late). */
 const LOAD_MAX_MS = 15000;
+/** Automatic resolution draws at most this many pixels, and at least this many rows. */
+const AUTO_MAX_PIXELS = 2560 * 1440;
+const AUTO_MIN_ROWS = 540;
 
 /** Someone waiting for drawing to settle, since `since` (ms). */
 interface Settling {
@@ -56,9 +60,10 @@ export function loadViewSettings(): ViewSettings {
   // Dev: `?scale=` and `?water=` override the saved settings.
   const devScale = import.meta.env.DEV ? devParams.get("scale") : null;
   const devWater = import.meta.env.DEV ? devParams.get("water") : null;
-  const scale = Number(devScale ?? stored("scale") ?? 1);
+  const raw = devScale ?? stored("scale") ?? "auto";
+  const scale = Number(raw);
   const water = (devWater ?? stored("water")) === "basic" ? "basic" : "sea";
-  return { scale: Number.isFinite(scale) ? Math.min(1, Math.max(0.25, scale)) : 1, water };
+  return { scale: raw !== "auto" && Number.isFinite(scale) ? Math.min(1, Math.max(0.25, scale)) : "auto", water };
 }
 
 export function saveViewSettings(s: ViewSettings): void {
@@ -80,14 +85,33 @@ export class Engine {
   /** When the current run of frames without a stall began (null: none is running). */
   private smoothSince: number | null = null;
   private settling: Settling[] = [];
+  /** Dev: frames are skipped (the frame-cost bench draws its own, see bench.ts). */
+  paused = false;
 
   readonly wasm: InitOutput;
+
+  private auto = new AutoResolution();
 
   private constructor(wasm: InitOutput, world: World) {
     this.wasm = wasm;
     this.world = world;
     this.view = loadViewSettings();
-    world.setRenderScale(this.view.scale);
+    this.applyScale();
+    addEventListener("resize", () => {
+      if (this.view.scale === "auto") this.applyScale();
+    });
+  }
+
+  /** Puts the view's resolution on the renderer (automatic: from the top again). */
+  private applyScale(): void {
+    const scale = this.view.scale;
+    if (scale !== "auto") {
+      this.world.setRenderScale(scale, scale < 1);
+      return;
+    }
+    this.auto.bounds(innerWidth, innerHeight, devicePixelRatio, AUTO_MAX_PIXELS, AUTO_MIN_ROWS);
+    this.auto.reset();
+    this.world.setRenderScale(this.auto.scale, false);
   }
 
   private static booting: Promise<Engine> | null = null;
@@ -105,6 +129,12 @@ export class Engine {
         throw e;
       });
       const engine = new Engine(wasm, world);
+      if (import.meta.env.DEV && devParams.has("bench")) {
+        const { installBench } = await import("./bench.ts");
+        installBench(world, (paused) => {
+          engine.paused = paused;
+        });
+      }
       setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root), false) : Promise.resolve()));
       if (!engine.render) booted();
       await world.renderer.setAnimationLoop((now: number) => engine.frame(now));
@@ -176,9 +206,9 @@ export class Engine {
     this.stage = null;
   }
 
-  setScale(scale: number): void {
+  setScale(scale: number | "auto"): void {
     this.view.scale = scale;
-    this.world.setRenderScale(scale);
+    this.applyScale();
     saveViewSettings(this.view);
   }
 
@@ -228,10 +258,22 @@ export class Engine {
     waiter.resolve();
   }
 
+  /** Automatic resolution: follows how fast frames come (not while something new is still settling in). */
+  private adapt(gap: number, now: number): void {
+    if (this.view.scale !== "auto" || !this.render) return;
+    if (this.warming > 0 || this.settling.length > 0) {
+      this.auto.forget();
+      return;
+    }
+    const scale = this.auto.frame(gap, now);
+    if (scale !== null) this.world.setRenderScale(scale, false);
+  }
+
   private frame(now: number): void {
     const gap = now - this.last;
     const dt = Math.min(0.1, gap / 1000);
     this.last = now;
+    if (import.meta.env.DEV && this.paused) return;
     if (this.holding > 0) {
       this.smoothSince = null;
       return;
@@ -239,6 +281,7 @@ export class Engine {
     if (this.warming > 0) this.drawBetweenCompiles(now, dt);
     else this.draw(now, dt);
     const end = performance.now();
+    this.adapt(gap, end);
     if (gap > STALL_MS || end - now > STALL_MS) this.smoothSince = null;
     else this.smoothSince ??= end;
     const since = this.smoothSince;

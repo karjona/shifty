@@ -691,22 +691,25 @@ impl Client {
             let drawn = self.world.riders[slot].map(|cur| {
                 let prev = self.prev_riders[slot].unwrap_or(cur);
                 let pos = lerp(prev.pos, cur.pos, alpha) + self.render_offset[slot];
+                // Velocity too, so per-frame changes of it are smooth whatever
+                // the frame rate (a tick's velocity steps when the tick lands).
+                let vel = lerp(prev.vel, cur.vel, alpha);
                 let off = self.angle_offset[slot];
                 let blend = |a: f32, b: f32, o: f32| a + angle_diff(a, b) * alpha + o;
                 let yaw = wrap_angle(blend(prev.yaw, cur.yaw, off.x));
                 let pitch = blend(prev.pitch, cur.pitch, off.y);
                 let roll = blend(prev.roll, cur.roll, off.z);
-                (cur, pos, yaw, pitch, roll)
+                (cur, pos, vel, yaw, pitch, roll)
             });
-            if let Some((r, pos, yaw, pitch, roll)) = drawn {
+            if let Some((r, pos, vel, yaw, pitch, roll)) = drawn {
                 out.push(RenderRider {
                     slot: slot as u8,
                     pos,
                     yaw,
                     pitch,
                     roll,
-                    speed: r.speed(),
-                    vel: r.vel,
+                    speed: vel.horizontal().length(),
+                    vel,
                     grounded: r.grounded,
                     bailing: r.bailing(),
                     is_me,

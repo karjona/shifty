@@ -6,6 +6,7 @@
 // and a tumble when bailing.
 import * as THREE from "three/webgpu";
 import { type Appearance, type Colourway, botAppearance, item } from "@shifty/rider";
+import { Parts } from "./parts.ts";
 import { SLOT_COLORS } from "./rider.ts";
 import { RiderFigure } from "./rider/model.ts";
 import { snowboardPose } from "./rider/ride.ts";
@@ -19,9 +20,6 @@ const STANCE = 0.27;
 const DECK = 0.03;
 /** How far a grab pulls the board up toward the rider (m). */
 const GRAB_LIFT = 0.25;
-
-const flat = (c: number, rough = 0.8) =>
-  new THREE.MeshStandardNodeMaterial({ color: c, roughness: rough, flatShading: true });
 
 /** A damped spring toward a target. */
 class Spring {
@@ -74,28 +72,24 @@ export class BoarderModel implements RiderModel {
   constructor(slot: number, appearance: Appearance | null) {
     const look = appearance ?? botAppearance(1, slot);
     const [main, second, accent] = boardColours(look, slot);
-    const deckMat = flat(main, 0.5);
-    const bindingMat = flat(second);
-    const stripeMat = flat(accent, 0.5);
-
     // The board: a deck with kicked-up nose and tail, a stripe, and two bindings.
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(BOARD_WIDTH, 0.025, BOARD_LENGTH - 0.3), deckMat);
-    deck.position.y = 0.0125;
-    deck.castShadow = true;
-    this.board.add(deck);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.004, BOARD_LENGTH - 0.4), stripeMat);
-    stripe.position.y = 0.027;
-    this.board.add(stripe);
+    const board = new Parts();
+    board.add(new THREE.BoxGeometry(BOARD_WIDTH, 0.025, BOARD_LENGTH - 0.3), main, 0, 0.0125);
+    board.add(new THREE.BoxGeometry(0.06, 0.004, BOARD_LENGTH - 0.4), accent, 0, 0.027);
     for (const end of [1, -1]) {
-      const kick = new THREE.Mesh(new THREE.BoxGeometry(BOARD_WIDTH * 0.96, 0.025, 0.2), deckMat);
-      kick.position.set(0, 0.04, end * (BOARD_LENGTH / 2 - 0.1));
-      kick.rotation.x = -end * 0.35;
-      kick.castShadow = true;
-      this.board.add(kick);
-      const binding = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.16), bindingMat);
-      binding.position.set(0, 0.04, end * STANCE);
-      this.board.add(binding);
+      board.add(
+        new THREE.BoxGeometry(BOARD_WIDTH * 0.96, 0.025, 0.2),
+        main,
+        0,
+        0.04,
+        end * (BOARD_LENGTH / 2 - 0.1),
+        -end * 0.35,
+      );
+      board.add(new THREE.BoxGeometry(0.24, 0.05, 0.16), second, 0, 0.04, end * STANCE);
     }
+    const boardMesh = board.build({ flatShading: true });
+    boardMesh.castShadow = true;
+    this.board.add(boardMesh);
     this.rig.add(this.board);
 
     // The rider stands sideways: body space +Z (chest) is the board's -X

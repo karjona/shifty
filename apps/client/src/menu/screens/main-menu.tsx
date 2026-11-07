@@ -187,8 +187,8 @@ function SettingsTab() {
   const { data: me } = useSuspenseQuery(meQuery);
   // The view settings live in the engine; re-render after changing them.
   const [, changed] = useReducer((n: number) => n + 1, 0);
-  const now = engine?.view.scale ?? 1;
-  const scale = SCALES.reduce((a, b) => (Math.abs(b - now) < Math.abs(a - now) ? b : a));
+  const now = engine?.view.scale ?? "auto";
+  const scale = now === "auto" ? now : SCALES.reduce((a, b) => (Math.abs(b - now) < Math.abs(a - now) ? b : a));
   const water = engine?.view.water ?? "sea";
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -218,9 +218,12 @@ function SettingsTab() {
           value={locale}
           onChange={setLocale}
         />
-        <Picker
+        <Picker<number | "auto">
           label={t.settings.scale}
-          options={SCALES.map((s) => ({ value: s, label: `${Math.round(s * 100)}%` }))}
+          options={[
+            { value: "auto", label: t.settings.scaleAuto },
+            ...SCALES.map((s) => ({ value: s, label: `${Math.round(s * 100)}%` })),
+          ]}
           value={scale}
           onChange={(s) => {
             engine?.setScale(s);
