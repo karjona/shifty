@@ -14,19 +14,6 @@ body {
   width: 100vw;
   height: 100vh;
 }
-#labels .label {
-  position: fixed;
-  left: 0;
-  top: 0;
-  padding: 3px 10px;
-  background: rgb(243 237 225 / 0.92);
-  color: #1d1b17;
-  font-size: 14px;
-  font-weight: 650;
-  font-stretch: 100%;
-  white-space: nowrap;
-  pointer-events: none;
-}
 /* The race HUD: paper cells with ink figures, the season accent for what's
    good news, laid out on the same 1920×1080 canvas as the menus. */
 #ui {
@@ -36,11 +23,52 @@ body {
 #race-info,
 #banner,
 #popups,
-#results {
+#results,
+.name-tags {
   font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
   color: #1d1b17;
   -webkit-font-smoothing: antialiased;
+}
+/* The other riders' name tags (ui/tags.ts): small paper tags pointing down
+   at their heads, placed and faded every frame. */
+.name-tag {
+  position: fixed;
+  left: 0;
+  top: 0;
+  translate: -50% -100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  margin-top: -8px;
+  padding: 0 12px 0 10px;
+  background: #f3ede1;
+  box-shadow:
+    0 0 0 1px rgb(29 27 23 / 0.2),
+    0 6px 16px rgb(24 16 8 / 0.22);
+  font-size: 19px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.name-tag::before {
+  content: "";
+  width: 4px;
+  height: 16px;
+  background: var(--accent, #2b3fd0);
+  transform: skewX(-23.4deg);
+}
+.name-tag::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  border: 7px solid transparent;
+  border-top-color: #f3ede1;
+  border-bottom: 0;
+  translate: -50% 0;
 }
 #hud {
   position: fixed;

@@ -52,6 +52,7 @@ Wave Race, Blue Storm, 1080° Snowboarding, SSX Tricky, SSX 3, Tony Hawk 1-3, sk
 - **Tricks never make you faster**, in any sport: races are won on the line and the clock. Tricks score style points (what style earns is decided later, maybe customization), and a bail still costs you.
 - **Split times:** at every checkpoint (and the finish) the HUD shows your gap to the first rider through it, or your time if you are first.
 - **Wrong way** goes up after half a second of riding against the course, and down once you've ridden the right way for a moment. Time in the air, in a bail or crawling along doesn't count either way.
+- **Name tags** only for other people (bots ride untagged, like the CPU riders of the greats): a small paper tag pointing at the head, only within about 30 m, fading out by 40 m, at the screen's edges and behind the ground (a roller, a swell). The handle's number is left off. No tags in the results or under any camera but the chase camera (`hud.tags.hidden`).
 - **About the name**: 23.4° is the Earth's axial tilt, the reason seasons exist. A shifty is a snowboard and skate trick (twist the board in the air, bring it back). Always write it with the degree sign `°` (U+00B0), never `º`. Short name for the game is: **Shifty**, like it was **Tricky** for the old SSX 2. The year of four races is **the Tilt**, after the same tilt (`el Tilt` in Spanish and Catalan; never "Grand Prix", which sounds like Formula 1).
 
 ### Jetski

@@ -352,6 +352,7 @@ export class RaceSession implements Stage {
     const course = parseCourse(client.courseJson());
     this.sport = course.sport;
     this.input.sport = course.sport;
+    this.hud.tags.sport = course.sport;
     this.mapRoot.replaceChildren();
     if (!render) return;
     this.ready = false;
@@ -480,7 +481,11 @@ export class RaceSession implements Stage {
     const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (render) {
       if (this.seasonChange?.active) this.seasonChange.frame(dt);
-      else if (this.ready) engine.world.render(riders, this.names, client.renderTick(), dt, nextBuoy);
+      else if (this.ready) {
+        engine.world.render(riders, client.renderTick(), dt, nextBuoy);
+        const tagged = race.phase === RESULTS ? [] : riders;
+        this.hud.tags.update(engine.world.camera, this.env, tagged, this.names, client.renderTick() / race.tickHz, dt);
+      }
       if (this.seasonChange && !this.seasonChange.active) this.seasonChange = null;
     }
     const me = riders.find((r) => r.isMe);
