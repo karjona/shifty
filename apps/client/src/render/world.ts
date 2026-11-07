@@ -434,13 +434,13 @@ export class World {
     const focus = me ?? r;
     const shadow = Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
     mesh.traverse((o) => {
-      const data = o.userData as { outline?: boolean; castsShadow?: boolean };
+      const data = o.userData as { outline?: boolean; castsShadow?: boolean; reflects?: boolean };
       if (data.outline) o.visible = !far;
       else if (o instanceof THREE.Mesh) {
         data.castsShadow ??= o.castShadow;
         o.castShadow = data.castsShadow && shadow;
         o.layers.set(UNREFLECTED);
-        if (reflected) o.layers.enable(0);
+        if (reflected && data.reflects !== false) o.layers.enable(0);
       }
     });
   }

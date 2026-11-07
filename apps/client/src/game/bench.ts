@@ -129,6 +129,11 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       scale: () => world.renderScale,
       scene,
       census,
+      /** Moves the sun to `(x, y, z)` from the point it shines on (held frames). */
+      sun: (x: number, y: number, z: number) => {
+        const sun = world.sunLight;
+        sun.position.copy(sun.target.position).add(new THREE.Vector3(x, y, z));
+      },
       /** Holds the frame on screen (drawn again, all at once), or lets it go. */
       hold: (on: boolean) => {
         pause(on);

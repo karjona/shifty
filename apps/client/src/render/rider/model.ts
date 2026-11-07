@@ -212,6 +212,8 @@ export class RiderFigure {
           if (target !== undefined && mesh.morphTargetInfluences) mesh.morphTargetInfluences[target] = 1;
         }
         mesh.castShadow = true;
+        // In a reflection (a dark shape on the water) the body stands in for what it wears.
+        mesh.userData.reflects = i === 0 && !face;
         // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
         mesh.frustumCulled = false;
         group.add(mesh);
