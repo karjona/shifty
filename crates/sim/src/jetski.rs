@@ -7,6 +7,13 @@
 //! forces tip the nose and the sides, so the ski pitches over swells and
 //! rolls in carves without any scripted animation.
 //!
+//! In the air, holding a trick button turns the stick into rotations (flat
+//! spins and flips, or barrel rolls and flips); let go and the hull finishes
+//! toward the nearest upright attitude. Holding the stunt button reaches
+//! into a stunt (the stick picks which as the button goes down) and letting
+//! go brings the rider back onto the ski, which takes a while: landing
+//! crooked, or still out of the seat, is a bail.
+//!
 //! Units are per unit of mass: forces are accelerations, torques are angular
 //! accelerations times the inertia constants below.
 
@@ -103,10 +110,20 @@ pub mod tuning {
     pub const AIR_ROLL_DAMP: f32 = 4.0;
 
     /// Trick rotation speeds at full stick, rad/s.
-    pub const SPIN_RATE: f32 = 5.5;
-    pub const FLIP_RATE: f32 = 5.0;
-    pub const ROLL_RATE: f32 = 5.5;
-    pub const TRICK_RESPONSE: f32 = 4.0;
+    pub const SPIN_RATE: f32 = 7.0;
+    pub const FLIP_RATE: f32 = 6.0;
+    pub const ROLL_RATE: f32 = 7.0;
+    pub const TRICK_RESPONSE: f32 = 6.0;
+
+    /// How far into a stunt the rider is when all the way in (see `STUNTS`).
+    pub const STUNT_FULL: u8 = 120;
+    /// Landing further into a stunt than this is a bail.
+    pub const STUNT_LAND_REACH: f32 = 24.0;
+    /// A stunt held all the way in for this long counts.
+    pub const MIN_STUNT_TICKS: u8 = 6;
+    /// Points per tick a stunt is held all the way in, up to `MAX_STUNT_TICKS`.
+    pub const STUNT_TICK_POINTS: u32 = 6;
+    pub const MAX_STUNT_TICKS: u8 = 120;
 
     /// Landing more crooked than this is a bail.
     pub const LAND_PITCH: f32 = 0.9;
@@ -121,6 +138,111 @@ pub mod tuning {
     pub const BAIL_DRAG: f32 = 1.6;
     /// How hard the empty ski rights itself.
     pub const BAIL_RIGHTING: f32 = 18.0;
+}
+
+/// Stunts, picked by the stick as the stunt button goes down.
+pub mod stunts {
+    /// Stick centred: standing up on the footwells, arms out wide.
+    pub const NO_HANDER: u8 = 1;
+    /// Stick forward: up over the bars, legs to the sky.
+    pub const HANDSTAND: u8 = 2;
+    /// Stick back: off the back of the seat, hands on the bars, body and
+    /// legs stretched out behind.
+    pub const SUPERMAN: u8 = 3;
+    /// Stick left: a leg kicked out to the left and back.
+    pub const NAC_NAC: u8 = 4;
+    /// Stick right: a leg kicked out to the right and forward.
+    pub const CAN_CAN: u8 = 5;
+}
+
+/// How a stunt goes: how fast the rider gets into it and back onto the ski
+/// (reach per tick, out of `STUNT_FULL`), and its points before holding it.
+#[derive(Clone, Copy, Debug)]
+pub struct Stunt {
+    pub reach_in: u8,
+    pub reach_out: u8,
+    pub points: u16,
+}
+
+/// Indexed by stunt (0 = none).
+pub const STUNTS: [Stunt; 6] = [
+    Stunt {
+        reach_in: 0,
+        reach_out: STUNT_FULL,
+        points: 0,
+    },
+    // No hander: 10 ticks in, 10 back.
+    Stunt {
+        reach_in: 12,
+        reach_out: 12,
+        points: 100,
+    },
+    // Handstand: 30 in, 24 back.
+    Stunt {
+        reach_in: 4,
+        reach_out: 5,
+        points: 400,
+    },
+    // Superman: 20 in, 20 back.
+    Stunt {
+        reach_in: 6,
+        reach_out: 6,
+        points: 250,
+    },
+    // Nac-nac and can-can: 15 in, 15 back.
+    Stunt {
+        reach_in: 8,
+        reach_out: 8,
+        points: 150,
+    },
+    Stunt {
+        reach_in: 8,
+        reach_out: 8,
+        points: 150,
+    },
+];
+
+impl Stunt {
+    /// The stunt `id` (none for an unknown one).
+    pub fn of(id: u8) -> Self {
+        STUNTS.get(usize::from(id)).copied().unwrap_or(STUNTS[0])
+    }
+}
+
+fn stunt_from_stick(steer: f32, lean: f32) -> u8 {
+    if steer.abs() > 0.5 && steer.abs() >= lean.abs() {
+        if steer > 0.0 {
+            stunts::CAN_CAN
+        } else {
+            stunts::NAC_NAC
+        }
+    } else if lean > 0.5 {
+        stunts::HANDSTAND
+    } else if lean < -0.5 {
+        stunts::SUPERMAN
+    } else {
+        stunts::NO_HANDER
+    }
+}
+
+/// Points for a trick: spins grow faster than linearly, flips and rolls
+/// are worth a lot, a stunt pays its own points plus how long it is held,
+/// and every part beyond the first (a spin, a flip, a roll, a stunt) adds
+/// half again: a combo.
+pub fn points(trick: &Trick) -> u16 {
+    let h = u32::from(trick.spin.unsigned_abs());
+    let spin = 100 * h + 50 * h * h.saturating_sub(1);
+    let flip = 600 * u32::from(trick.flip.unsigned_abs());
+    let roll = 500 * u32::from(trick.roll.unsigned_abs());
+    let stunt = if trick.stunt != 0 {
+        u32::from(Stunt::of(trick.stunt).points)
+            + STUNT_TICK_POINTS * u32::from(trick.grab_ticks.min(MAX_STUNT_TICKS))
+    } else {
+        0
+    };
+    let parts = [spin, flip, roll, stunt].iter().filter(|&&p| p > 0).count() as u32;
+    let total = (spin + flip + roll + stunt) * (parts + 1) / 2;
+    total.min(u32::from(u16::MAX)) as u16
 }
 
 use tuning::*;
@@ -198,17 +320,22 @@ fn turns(angle: f32) -> i8 {
 }
 
 /// Judges a touchdown and settles the attitude back into normal ranges:
-/// upright and pointing where you're going, with full turns of spin, flip
-/// or roll, is a trick. Returns `None` for plain jumps and tiny hops.
+/// upright, pointing where you're going and back in the seat, with full
+/// turns of spin, flip or roll or a stunt held, is a trick. Returns `None`
+/// for plain jumps and tiny hops.
 fn land(r: &mut Rider, setup: Setup) -> Option<Landing> {
     let spin = -turns(r.air_spin);
     let flip = turns(r.pitch);
     let roll = turns(r.roll);
     let pitch = wrap_pi(r.pitch);
     let roll_err = wrap_pi(r.roll);
+    let (stunt, held, reach) = (r.grab, r.grab_ticks, r.charge);
     r.pitch = pitch;
     r.roll = roll_err;
     r.air_spin = 0.0;
+    r.grab = 0;
+    r.grab_ticks = 0;
+    r.charge = 0;
     if r.state_ticks < MIN_JUDGED_AIR_TICKS || r.bailing() {
         return None;
     }
@@ -221,6 +348,7 @@ fn land(r: &mut Rider, setup: Setup) -> Option<Landing> {
     if pitch.abs() > LAND_PITCH * tolerance
         || roll_err.abs() > LAND_ROLL * tolerance
         || heading.abs() > LAND_HEADING * tolerance
+        || f32::from(reach) > STUNT_LAND_REACH * tolerance
     {
         r.bail_ticks = BAIL_TICKS;
         r.vel = r.vel * BAIL_IMPACT;
@@ -229,16 +357,44 @@ fn land(r: &mut Rider, setup: Setup) -> Option<Landing> {
         r.roll_rate = 0.0;
         return Some(Landing::Bail);
     }
+    let held = if held >= MIN_STUNT_TICKS { held } else { 0 };
+    let stunt = if held > 0 { stunt } else { 0 };
     let rotations = spin.unsigned_abs() + flip.unsigned_abs() + roll.unsigned_abs();
-    if rotations == 0 {
+    if rotations == 0 && stunt == 0 {
         return None;
     }
-    Some(Landing::Clean(Trick {
+    let mut trick = Trick {
         spin: spin * 2,
         flip,
         roll,
+        stunt,
+        grab_ticks: held,
         ..Trick::default()
-    }))
+    };
+    trick.points = points(&trick);
+    Some(Landing::Clean(trick))
+}
+
+/// One tick of the stunt button in the air: held, the rider reaches into
+/// the stunt (the stick picks it as the button goes down; once one is held
+/// all the way in, it is the jump's stunt); let go, the rider comes back
+/// onto the ski.
+fn stunt_tick(r: &mut Rider, input: Input) {
+    if input.pressed(buttons::GRAB) && !r.bailing() {
+        let fresh = r.grab == 0 || !r.last_input.pressed(buttons::GRAB);
+        if fresh && r.charge == 0 && r.grab_ticks == 0 {
+            r.grab = stunt_from_stick(input.steer_f(), input.lean_f());
+        }
+        if r.charge >= STUNT_FULL {
+            r.grab_ticks = r.grab_ticks.saturating_add(1);
+        }
+        r.charge = r
+            .charge
+            .saturating_add(Stunt::of(r.grab).reach_in)
+            .min(STUNT_FULL);
+    } else {
+        r.charge = r.charge.saturating_sub(Stunt::of(r.grab).reach_out);
+    }
 }
 
 /// Advance one rider one tick on the water (or above it). Returns how a
@@ -344,6 +500,7 @@ pub fn integrate(
         r.pitch_rate *= damp;
         r.roll_rate *= damp;
     } else {
+        stunt_tick(r, input);
         let spin_btn = input.pressed(buttons::TRICK);
         let roll_btn = input.pressed(buttons::ROLL);
         if (spin_btn || roll_btn) && !r.bailing() {
@@ -366,7 +523,13 @@ pub fn integrate(
         } else {
             // No tricks: a little steering, the hull turns back to its flight
             // path and the nose follows it. A released rotation finishes
-            // toward the nearest upright attitude.
+            // toward the nearest upright attitude. In a stunt the stick
+            // only picked the stunt.
+            let (steer, lean) = if input.pressed(buttons::GRAB) {
+                (0.0, 0.0)
+            } else {
+                (steer, lean)
+            };
             let speed_h = r.speed().max(0.1);
             let align = if speed_h > 4.0 {
                 angle_diff(r.yaw, atan2(r.vel.x, r.vel.z)) * AIR_ALIGN

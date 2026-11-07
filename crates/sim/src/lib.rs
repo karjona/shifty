@@ -378,6 +378,7 @@ mod tests {
             [EventKind::Trick {
                 trick: race::Trick {
                     spin: 2,
+                    points: 300,
                     ..race::Trick::default()
                 },
                 sketchy: false
@@ -449,6 +450,162 @@ mod tests {
         assert_eq!(tricks(&ev), [EventKind::Bail]);
         assert_eq!(r.race.meter, 0);
         assert!(r.speed() < 8.0, "a bail costs speed: {}", r.speed());
+    }
+
+    #[test]
+    fn jetski_points_grow_with_rotations_stunts_and_combos() {
+        let p = |t: race::Trick| jetski::points(&t);
+        let none = race::Trick::default;
+        assert_eq!(p(none()), 0);
+        assert_eq!(p(race::Trick { spin: 2, ..none() }), 300);
+        assert_eq!(p(race::Trick { spin: -4, ..none() }), 1000);
+        assert_eq!(p(race::Trick { flip: -1, ..none() }), 600);
+        assert_eq!(p(race::Trick { roll: 1, ..none() }), 500);
+        let superman = race::Trick {
+            stunt: jetski::stunts::SUPERMAN,
+            grab_ticks: 10,
+            ..none()
+        };
+        assert_eq!(p(superman), 250 + 60);
+        // Two parts: half again; three: twice.
+        assert_eq!(
+            p(race::Trick {
+                spin: 2,
+                flip: 1,
+                ..none()
+            }),
+            1350
+        );
+        assert_eq!(
+            p(race::Trick {
+                spin: 2,
+                flip: 1,
+                ..superman
+            }),
+            2 * (300 + 600 + 310)
+        );
+    }
+
+    /// The stick that picks each stunt, as (steer, lean).
+    const STUNT_STICKS: [(u8, f32, f32); 5] = [
+        (jetski::stunts::NO_HANDER, 0.0, 0.0),
+        (jetski::stunts::HANDSTAND, 0.0, 1.0),
+        (jetski::stunts::SUPERMAN, 0.0, -1.0),
+        (jetski::stunts::NAC_NAC, -1.0, 0.0),
+        (jetski::stunts::CAN_CAN, 1.0, 0.0),
+    ];
+
+    /// The one trick of a jump, if it was landed.
+    fn landed_trick(events: &[SimEvent]) -> Option<race::Trick> {
+        match tricks(events)[..] {
+            [EventKind::Trick { trick, .. }] => Some(trick),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_stick_picks_the_stunt_and_letting_go_in_time_lands_it() {
+        for (stunt, steer, lean) in STUNT_STICKS {
+            // Held for three quarters of a second, then back on the ski
+            // for the landing.
+            let (ev, r) = ramp_jump(|r| {
+                let held = r.state_ticks < 45;
+                Input::from_analog(steer, 1.0, lean, if held { buttons::GRAB } else { 0 })
+            });
+            let trick = landed_trick(&ev).unwrap_or_else(|| panic!("{stunt}: {ev:?}"));
+            assert_eq!(trick.stunt, stunt, "{trick:?}");
+            assert_eq!((trick.spin, trick.flip, trick.roll), (0, 0, 0));
+            assert!(trick.grab_ticks >= jet::MIN_STUNT_TICKS, "{trick:?}");
+            assert_eq!(trick.points, jetski::points(&trick));
+            assert!(!r.bailing());
+            assert_eq!(r.race.meter, 1, "tricks never make you faster");
+        }
+    }
+
+    #[test]
+    fn landing_still_in_a_stunt_is_a_bail() {
+        for (_, steer, lean) in STUNT_STICKS {
+            let (ev, r) = ramp_jump(|_| Input::from_analog(steer, 1.0, lean, buttons::GRAB));
+            assert_eq!(tricks(&ev), [EventKind::Bail]);
+            assert!(r.bailing());
+        }
+    }
+
+    #[test]
+    fn one_stunt_a_jump_and_the_stick_is_free_once_it_is_picked() {
+        // A superman (stick back), then the stick goes left and the button
+        // is pressed again: still the superman, and the hull goes straight.
+        let (ev, _) = ramp_jump(|r| {
+            let t = r.state_ticks;
+            let (steer, lean) = if t < 2 { (0.0, -1.0) } else { (-1.0, 0.0) };
+            let held = t < 35 || (40..50).contains(&t);
+            Input::from_analog(steer, 1.0, lean, if held { buttons::GRAB } else { 0 })
+        });
+        let trick = landed_trick(&ev).unwrap_or_else(|| panic!("{ev:?}"));
+        assert_eq!(trick.stunt, jetski::stunts::SUPERMAN);
+        assert_eq!(trick.spin, 0);
+    }
+
+    #[test]
+    fn a_rotation_with_a_stunt_is_a_combo_worth_more_than_both() {
+        let spin = |stunt: bool| {
+            ramp_jump(move |r| {
+                let t = r.state_ticks;
+                let grab = if stunt && t < 30 { buttons::GRAB } else { 0 };
+                if stunt && t == 0 {
+                    // Pick the superman first.
+                    Input::from_analog(0.0, 1.0, -1.0, grab)
+                } else if r.air_spin.abs() < 0.8 * math::TAU {
+                    Input::from_analog(1.0, 1.0, 0.0, buttons::TRICK | grab)
+                } else {
+                    Input::from_analog(0.0, 1.0, 0.0, grab)
+                }
+            })
+            .0
+        };
+        let alone = landed_trick(&spin(false)).unwrap();
+        let combo = landed_trick(&spin(true)).unwrap_or_else(|| panic!("no combo"));
+        assert_eq!((combo.spin, combo.stunt), (2, jetski::stunts::SUPERMAN));
+        let superman = jetski::points(&race::Trick {
+            stunt: combo.stunt,
+            grab_ticks: combo.grab_ticks,
+            ..race::Trick::default()
+        });
+        assert!(
+            combo.points > alone.points + superman,
+            "{combo:?} vs {alone:?} + {superman}"
+        );
+    }
+
+    #[test]
+    fn a_handstand_needs_big_air() {
+        // Off a small hop (a launch off a low crest) there is no time to
+        // get up and back: letting go at once still lands in it.
+        let mut w = straight_world(SurfaceKind::Flat, 0);
+        let mut r = w.riders[0].unwrap();
+        r.vel = r.forward() * 20.0 + Vec3::new(0.0, 3.0, 0.0);
+        r.pos.y += 0.3;
+        r.grounded = false;
+        r.quantize();
+        w.riders[0] = Some(r);
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        let mut events = Vec::new();
+        for _ in 0..90 {
+            let r = w.riders[0].unwrap();
+            let held = r.charge < jet::STUNT_FULL && r.grab_ticks == 0;
+            inputs[0] = Some(Input::from_analog(
+                0.0,
+                1.0,
+                1.0,
+                if held && !r.grounded {
+                    buttons::GRAB
+                } else {
+                    0
+                },
+            ));
+            events.extend(w.step(&inputs));
+        }
+        assert_eq!(tricks(&events), [EventKind::Bail]);
     }
 
     #[test]
