@@ -19,6 +19,7 @@ import {
 import { type ModelAsset, builtModels, loadModel, loadOverlay } from "./assets.ts";
 import { inkId } from "../cel/material.ts";
 import { CelTintMaterial, type FaceOverlays, NO_OVERLAY, faceGeometry, limbGeometry, outlineOf } from "../cel/rider.ts";
+import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
 
@@ -95,8 +96,12 @@ export class RiderFigure {
   private rigFor: Look["body"] | null = null;
   /** Called each time the figure has been (re)built. */
   onBuilt: (() => void) | null = null;
+  /** Resolves once the art has first gone on. */
+  readonly ready: Promise<void>;
+  private markReady: () => void = () => {};
 
   constructor(appearance: Appearance, sport: Sport) {
+    this.ready = new Promise((resolve) => (this.markReady = resolve));
     this.set(appearance, sport);
   }
 
@@ -114,9 +119,13 @@ export class RiderFigure {
         loadModel(look.body, "body"),
         ...items.map((i) => loadModel(look.body, i.model)),
       ]);
-      if (version === this.version) {
-        this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
-      }
+      if (version !== this.version) return;
+      const built = this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
+      if (!built) return;
+      // Its shaders compile before it shows; the last look stays on until then.
+      await warmUp(built.group);
+      if (version === this.version) this.commit(built);
+      else built.dispose();
     })();
   }
 
@@ -131,19 +140,17 @@ export class RiderFigure {
     return this.group.scale.x;
   }
 
-  private build(look: Look, assets: ModelAsset[], wearing: Worn[], overlays: FaceOverlays): void {
-    this.clear();
+  /** A look's meshes, bound to a rig (this figure's, if the body is the same), not shown yet. */
+  private build(look: Look, assets: ModelAsset[], wearing: Worn[], overlays: FaceOverlays): Built | null {
     const [body] = assets;
-    if (!body) return;
-    if (!this.rig || this.rigFor !== look.body) {
-      this.rig?.root.removeFromParent();
-      this.body = bodyFromRest(body.rest, ART_HEIGHT);
-      this.rig = new Rig(this.body);
-      this.rigFor = look.body;
-      this.group.add(this.rig.root);
-    }
-    const s = (HEIGHTS[look.body][look.height] ?? ART_HEIGHT) / ART_HEIGHT;
-    this.group.scale.setScalar(s);
+    if (!body) return null;
+    const sameRig = this.rig !== null && this.rigFor === look.body;
+    const measures = sameRig ? this.body! : bodyFromRest(body.rest, ART_HEIGHT);
+    const rig = sameRig ? this.rig! : new Rig(measures);
+    const group = new THREE.Group();
+    group.scale.setScalar((HEIGHTS[look.body][look.height] ?? ART_HEIGHT) / ART_HEIGHT);
+    const meshes: THREE.SkinnedMesh[] = [];
+    const materials: CelTintMaterial[] = [];
     const hair = HAIR_COLOURS[look.hairColor] ?? HAIR_COLOURS[1]!;
     const own: Colourway = [
       SKIN_TONES[look.skin] ?? SKIN_TONES[1]!,
@@ -186,21 +193,46 @@ export class RiderFigure {
         mesh.castShadow = true;
         // Riders move about a lot: skip per-frame bounds checks against a stale rest pose.
         mesh.frustumCulled = false;
-        this.group.add(mesh);
-        mesh.bind(this.rig.skeleton, new THREE.Matrix4());
-        this.meshes.push(mesh);
+        group.add(mesh);
+        mesh.bind(rig.skeleton, new THREE.Matrix4());
+        meshes.push(mesh);
         mesh.receiveShadow = true;
         const outline = outlineOf(mesh, mat);
-        this.group.add(outline);
-        outline.bind(this.rig.skeleton, new THREE.Matrix4());
-        this.meshes.push(outline);
-        this.materials.push(mat);
+        group.add(outline);
+        outline.bind(rig.skeleton, new THREE.Matrix4());
+        meshes.push(outline);
+        materials.push(mat);
       }
     }
+    return {
+      group,
+      rig,
+      body: measures,
+      rigFor: look.body,
+      meshes,
+      materials,
+      dispose: () => {
+        for (const m of materials) m.dispose();
+      },
+    };
+  }
+
+  /** Puts a built look on (in place of the last one). */
+  private commit(b: Built): void {
+    this.clear();
+    if (b.rig !== this.rig) this.rig?.root.removeFromParent();
+    this.rig = b.rig;
+    this.body = b.body;
+    this.rigFor = b.rigFor;
+    this.group.scale.copy(b.group.scale);
+    this.group.add(b.rig.root, ...b.meshes);
+    this.meshes = b.meshes;
+    this.materials = b.materials;
     if (this.pending) {
-      this.rig.apply(this.pending);
+      b.rig.apply(this.pending);
       this.pending = null;
     }
+    this.markReady();
     this.onBuilt?.();
   }
 
@@ -215,4 +247,15 @@ export class RiderFigure {
     this.version++;
     this.clear();
   }
+}
+
+/** A look built and waiting to go on. */
+interface Built {
+  group: THREE.Group;
+  rig: Rig;
+  body: Body;
+  rigFor: Look["body"];
+  meshes: THREE.SkinnedMesh[];
+  materials: CelTintMaterial[];
+  dispose(): void;
 }

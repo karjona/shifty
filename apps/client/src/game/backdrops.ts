@@ -108,6 +108,10 @@ class Flyover implements Stage {
     engine.world.setSunOffset(30, 60, 15);
   }
 
+  compile(root?: THREE.Object3D): Promise<void> {
+    return this.engine?.world.compile(root) ?? Promise.resolve();
+  }
+
   frame(now: number, dt: number): void {
     const engine = this.engine;
     if (!engine?.render) return;
@@ -198,6 +202,11 @@ class SeasonField implements Stage {
 
   start(engine: Engine): void {
     this.engine = engine;
+    this.post ??= new CelPost(engine.world.renderer, this.scene, this.camera);
+  }
+
+  compile(root?: THREE.Object3D): Promise<void> {
+    return this.post?.compile(root) ?? Promise.resolve();
   }
 
   /** Shows the rider (home) or just the colours (the other tabs). */
@@ -319,6 +328,10 @@ class Club implements Stage {
     shadow.updateProjectionMatrix();
     engine.world.scene.add(this.group);
     this.place();
+  }
+
+  compile(root?: THREE.Object3D): Promise<void> {
+    return this.engine?.world.compile(root) ?? Promise.resolve();
   }
 
   frame(now: number, dt: number): void {

@@ -39,6 +39,8 @@ export interface RiderView {
 /** A rider as drawn: a jetski, or a snowboarder. */
 export interface RiderModel {
   readonly mesh: THREE.Group;
+  /** Resolves once the rider's art is in and on. */
+  readonly ready: Promise<void>;
   update(r: RiderView, dt: number): void;
   /** Frees what the model made for itself, once it is no longer drawn. */
   dispose?(): void;
@@ -89,6 +91,8 @@ export interface Environment {
   readonly camera: CameraTuning;
   /** Top speed (m/s), for speed-driven effects. */
   readonly topSpeed: number;
+  /** Something in it reflects the world (the sea). */
+  readonly reflects?: boolean;
   /** Colours the sky, the fog and the lights. */
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
@@ -219,6 +223,11 @@ export class World {
     this.cel.render();
   }
 
+  /** Compiles what the scene (or `root`, about to join it) needs to be drawn (see `CelPost.compile`). */
+  compile(root: THREE.Object3D = this.scene): Promise<void> {
+    return this.cel.compile(root, this.env?.reflects ?? false);
+  }
+
   /** The sun, for stages that light their own shots. */
   get sunLight(): THREE.DirectionalLight {
     return this.sun;
@@ -304,6 +313,12 @@ export class World {
     this.camReady = false;
   }
 
+  /** Puts these seats' riders in the scene ahead of drawing them (so they warm up with the course). */
+  addRiders(slots: number[]): RiderModel[] {
+    const env = this.env;
+    return env ? slots.map((slot) => this.rider(env, slot).model) : [];
+  }
+
   private rider(env: Environment, slot: number): { model: RiderModel; label: HTMLDivElement } {
     let r = this.riders.get(slot);
     if (r) return r;
@@ -311,6 +326,7 @@ export class World {
     this.scene.add(model.mesh);
     const label = document.createElement("div");
     label.className = "label";
+    label.style.display = "none";
     this.labels.append(label);
     r = { model, label };
     this.riders.set(slot, r);

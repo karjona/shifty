@@ -47,12 +47,20 @@ export class CelPost {
   private camNear = uniform(0.3);
   private camFar = uniform(4000);
   private camera: THREE.PerspectiveCamera;
+  private renderer: THREE.WebGPURenderer;
+  private scene: THREE.Scene;
+  private scenePass: THREE.PassNode;
+  /** Laid out like a reflector's target (see `compile`). */
+  private mirrorTarget = new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType });
 
   constructor(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.camera = camera;
+    this.renderer = renderer;
+    this.scene = scene;
     this.pipeline = new THREE.RenderPipeline(renderer);
     this.pipeline.outputColorTransform = false;
     const scenePass = pass(scene, camera, { samples: 0 });
+    this.scenePass = scenePass;
     scenePass.setMRT(
       mrt({
         output,
@@ -139,6 +147,39 @@ export class CelPost {
       return graded;
     })();
     this.pipeline.outputNode = fxaa(renderOutput(inked));
+  }
+
+  /**
+   * Compiles the shaders that drawing `root` (the scene, or something about
+   * to join it) will need, without blocking the page: every mesh, in view or
+   * not, as the inked pass draws it and, with `mirror`, as a reflection
+   * draws it. The renderer points at this pass's targets until it resolves,
+   * so nothing else may draw meanwhile.
+   */
+  async compile(root: THREE.Object3D = this.scene, mirror = false): Promise<void> {
+    const r = this.renderer;
+    const culled: THREE.Object3D[] = [];
+    root.traverse((o) => {
+      if (!o.frustumCulled) return;
+      o.frustumCulled = false;
+      culled.push(o);
+    });
+    const target = r.getRenderTarget();
+    const outputs = r.getMRT();
+    try {
+      r.setRenderTarget(this.scenePass.renderTarget);
+      r.setMRT(this.scenePass.getMRT());
+      await r.compileAsync(root, this.camera, this.scene);
+      if (mirror) {
+        r.setRenderTarget(this.mirrorTarget);
+        r.setMRT(null);
+        await r.compileAsync(root, this.camera, this.scene);
+      }
+    } finally {
+      r.setRenderTarget(target);
+      r.setMRT(outputs);
+      for (const o of culled) o.frustumCulled = true;
+    }
   }
 
   render(): void {

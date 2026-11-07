@@ -56,6 +56,10 @@ export class BoarderModel implements RiderModel {
   private board = new THREE.Group();
   private figure: RiderFigure;
 
+  get ready(): Promise<void> {
+    return this.figure.ready;
+  }
+
   private crouch = new Spring(90, 12);
   private lean = new Spring(60, 10);
   private reach = new Spring(40, 9);

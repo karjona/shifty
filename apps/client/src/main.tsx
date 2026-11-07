@@ -1,11 +1,10 @@
-import "@fontsource-variable/archivo/wdth.css";
-import "@fontsource-variable/archivo/wdth-italic.css";
 import "./style.css";
 import "./menu/menu.css";
 import { createRoot } from "react-dom/client";
 import { App } from "./menu/app.tsx";
 import { fitUi } from "./menu/scale.ts";
 import { devParams } from "./dev-params.ts";
+import { booted } from "./game/loading.ts";
 
 fitUi();
 
@@ -14,7 +13,10 @@ fitUi();
 // build that still has them).
 if (import.meta.env.DEV && devParams.has("name")) void import("./game/quick.ts").then((m) => m.quickRace(devParams));
 else if (import.meta.env.DEV && devParams.has("lookdev"))
-  void import("./game/lookdev.ts").then((m) => m.lookdev(devParams));
+  void import("./game/lookdev.ts").then((m) => {
+    booted();
+    return m.lookdev(devParams);
+  });
 else if (import.meta.env.DEV && devParams.has("celshot"))
   void import("./game/celshot.ts").then((m) => m.celshot(devParams));
 else createRoot(document.querySelector("#root")!).render(<App />);

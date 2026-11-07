@@ -17,7 +17,7 @@ import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
-import { SeasonChange } from "./season-change.ts";
+import { SeasonCard, SeasonChange, seasonOf } from "./season-change.ts";
 
 /** Why the race server said no, by client phase (2 + the protocol's reject reason). */
 function rejectReason(phase: number): string {
@@ -90,6 +90,22 @@ function parseRoster(json: string, seed: number): { names: Map<number, string>; 
   return { names, looks };
 }
 
+/** The first course of a ticket's plan, from its claims (readable; only the race server checks them). */
+function ticketCourse(token: string): number {
+  try {
+    const part = (token.split(".")[0] ?? "").replaceAll("-", "+").replaceAll("_", "/");
+    const json = new TextDecoder().decode(Uint8Array.from(atob(part), (c) => c.charCodeAt(0)));
+    const claims: unknown = JSON.parse(json);
+    const course: unknown = typeof claims === "object" && claims !== null ? Reflect.get(claims, "course") : null;
+    return typeof course === "number" ? course : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** How long a course waits for its riders' art before it goes on without the late ones. */
+const RIDERS_WAIT_MS = 8000;
+
 /** A number from the room's code, so everyone in it sees the same bots. */
 function roomSeed(room: string): number {
   let h = 2166136261;
@@ -109,6 +125,8 @@ export class RaceSession implements Stage {
   private minimap: CourseMap | null = null;
   private env: Environment | null = null;
   private names = new Map<number, string>();
+  /** The seats taken, as of the last roster. */
+  private slots: number[] = [];
   private rosterVersion = -1;
   private gpVersion = -1;
   private gpPoints = new Map<number, number>();
@@ -120,6 +138,10 @@ export class RaceSession implements Stage {
   private stats: Record<string, number> = {};
   private stopped = false;
   private seasonChange: SeasonChange | null = null;
+  /** Covers the course while it loads (joining). */
+  private card: SeasonCard | null = null;
+  /** The course on screen is built and ready to draw. */
+  private ready = false;
   private debug: ReturnType<typeof createDebugPanel> | null = null;
   private fps = { frames: 0, since: performance.now(), bytesIn: 0, bytesOut: 0, at: performance.now() };
   readonly state: RaceState = {
@@ -152,9 +174,15 @@ export class RaceSession implements Stage {
 
   start(engine: Engine): void {
     this.engine = engine;
+    if (this.opts.render ?? engine.render) {
+      this.card = new SeasonCard(seasonOf(ticketCourse(this.opts.ticket.token)), false);
+      this.card.loading = true;
+      this.showHud(false);
+    }
     this.opts.status(messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
       this.opts.status(e instanceof Error ? e.message : String(e));
+      this.card?.hide();
       this.opts.onJoin?.(false);
     });
   }
@@ -293,13 +321,18 @@ export class RaceSession implements Stage {
     return this.stats;
   }
 
-  /** The course's surroundings and minimap (on joining, and at each Grand Prix course). */
-  private setCourse(engine: Engine, client: WasmClient, render: boolean): void {
+  /**
+   * The course's surroundings and minimap (on joining, and at each Grand
+   * Prix course), and every rider's model on it. Resolves once it is ready
+   * to draw: its shaders compiled and the riders' art in (or late).
+   */
+  private async setCourse(engine: Engine, client: WasmClient, render: boolean): Promise<void> {
     const course = parseCourse(client.courseJson());
     this.sport = course.sport;
     this.input.sport = course.sport;
     this.mapRoot.replaceChildren();
     if (!render) return;
+    this.ready = false;
     const old = this.env;
     if (course.sport === "snow") {
       this.env = new Mountain(course.run, {
@@ -321,6 +354,35 @@ export class RaceSession implements Stage {
     }
     engine.world.setEnvironment(this.env);
     if (old) disposeTree(old.group);
+    const env = this.env;
+    engine.world.addRiders(this.slots);
+    await engine.warm(() => engine.world.compile());
+    // (The roster may have come in meanwhile.)
+    if (this.client !== client) return;
+    this.readRoster(engine, client);
+    const riders = engine.world.addRiders(this.slots);
+    const late = new Promise<void>((resolve) => setTimeout(resolve, RIDERS_WAIT_MS));
+    await Promise.race([Promise.all(riders.map((r) => r.ready)), late]);
+    if (this.env !== env || this.stopped) return;
+    this.ready = true;
+    // The first frame still compiles a few shaders the warm-up can't reach (shadows, the ink pass's own):
+    // it is drawn before the course shows.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  /** The HUD is off while a season card is up. */
+  private showHud(on: boolean): void {
+    this.opts.hud.style.visibility = on ? "" : "hidden";
+  }
+
+  /** Who rides where, and what they look like (when the roster has changed). */
+  private readRoster(engine: Engine, client: WasmClient): void {
+    if (client.rosterVersion() === this.rosterVersion) return;
+    this.rosterVersion = client.rosterVersion();
+    const roster = parseRoster(client.rosterJson(), roomSeed(this.opts.ticket.room));
+    this.names = roster.names;
+    this.slots = [...roster.looks.keys()];
+    for (const [slot, look] of roster.looks) engine.world.setAppearance(slot, look);
   }
 
   frame(now: number): void {
@@ -328,10 +390,7 @@ export class RaceSession implements Stage {
     const client = this.client;
     if (!engine) return;
     const dt = this.step(now);
-    if (!client) {
-      if (engine.render) engine.world.renderer.render(engine.world.scene, engine.world.camera);
-      return;
-    }
+    if (!client) return;
     const render = this.opts.render ?? engine.render;
     const phase = client.phase();
     this.state.phase = phase;
@@ -342,12 +401,11 @@ export class RaceSession implements Stage {
     else this.opts.status("");
     if (!this.joined && phase !== 0) {
       this.joined = true;
+      if (phase !== 1) this.card?.hide();
       this.opts.onJoin?.(phase === 1);
     }
-    if (phase !== 1) {
-      if (render) engine.world.renderer.render(engine.world.scene, engine.world.camera);
-      return;
-    }
+    if (phase >= 2 || this.closedReason) this.card?.hide();
+    if (phase !== 1) return;
 
     const race = this.readRace();
     Object.assign(this.state, {
@@ -362,25 +420,30 @@ export class RaceSession implements Stage {
       this.state.over = true;
       this.opts.onOver?.();
     }
+    this.readRoster(engine, client);
     if (race.course !== this.course) {
       const first = this.course === -1;
       this.course = race.course;
       if (first || !render) {
-        this.setCourse(engine, client, render);
+        const card = this.card;
+        if (card) card.season = seasonOf(race.course);
+        void this.setCourse(engine, client, render).finally(() => {
+          card?.hide();
+          if (this.card === card) this.card = null;
+          this.showHud(true);
+        });
       } else {
         // A Grand Prix moves on: the season changes, and the new course
         // comes up behind the change.
         this.seasonChange?.finish();
-        this.seasonChange = new SeasonChange(engine, race.course === 1 ? "winter" : "summer", () =>
-          this.setCourse(engine, client, render),
+        this.showHud(false);
+        this.seasonChange = new SeasonChange(
+          engine,
+          seasonOf(race.course),
+          () => this.setCourse(engine, client, render),
+          () => this.showHud(true),
         );
       }
-    }
-    if (client.rosterVersion() !== this.rosterVersion) {
-      this.rosterVersion = client.rosterVersion();
-      const roster = parseRoster(client.rosterJson(), roomSeed(this.opts.ticket.room));
-      this.names = roster.names;
-      for (const [slot, look] of roster.looks) engine.world.setAppearance(slot, look);
     }
     if (race.gpVersion !== this.gpVersion) {
       this.gpVersion = race.gpVersion;
@@ -391,7 +454,7 @@ export class RaceSession implements Stage {
     const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (render) {
       if (this.seasonChange?.active) this.seasonChange.frame(dt);
-      else engine.world.render(riders, this.names, client.renderTick(), dt, nextBuoy);
+      else if (this.ready) engine.world.render(riders, this.names, client.renderTick(), dt, nextBuoy);
       if (this.seasonChange && !this.seasonChange.active) this.seasonChange = null;
     }
     const me = riders.find((r) => r.isMe);
@@ -456,6 +519,7 @@ export class RaceSession implements Stage {
         standings: () => (this.client ? parseStandings(this.client.standingsJson()) : []),
         names: () => Object.fromEntries(this.names),
         grandPrix: () => Object.fromEntries(this.gpPoints),
+        ready: () => this.ready,
         setInput: (v: { steer?: number; throttle?: number; lean?: number; buttons?: number } | null) => {
           this.input.forced = v;
         },
@@ -468,6 +532,7 @@ export class RaceSession implements Stage {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.seasonChange?.cancel();
+    this.card?.hide();
     this.transport?.close();
     this.client?.free();
     this.client = null;

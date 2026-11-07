@@ -69,6 +69,7 @@ export class Bay implements Environment {
   readonly group = new THREE.Group();
   readonly camera = CAMERA;
   readonly topSpeed: number;
+  readonly reflects: boolean;
 
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
@@ -86,6 +87,7 @@ export class Bay implements Environment {
 
   constructor(opts: BayOptions) {
     this.topSpeed = opts.topSpeed;
+    this.reflects = opts.water === "sea";
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
     this.group.add(buildScenery(this.sky));
