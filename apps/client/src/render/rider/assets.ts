@@ -83,7 +83,8 @@ export function loadOverlay(body: BodyKind, name: string): Promise<THREE.Texture
   return loadTexture(`${BASE}/${body}/body.face.${name}.png`).catch(() => null);
 }
 
-function loadTexture(url: string): Promise<THREE.Texture> {
+/** A texture of the art (a map of raw factors, not colours), loaded once. */
+export function loadTexture(url: string): Promise<THREE.Texture> {
   let t = textures.get(url);
   if (!t) {
     t = images.loadAsync(url).then((bitmap) => {

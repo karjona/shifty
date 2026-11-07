@@ -305,8 +305,17 @@ class SeasonField implements Stage {
     if (this.avatar) this.avatar.set(appearance, sport);
     else {
       this.avatar = new Avatar(appearance, 0, sport);
+      this.avatar.showRide(this.withRide);
       this.rider.add(this.avatar.mesh);
     }
+  }
+
+  private withRide = false;
+
+  /** Shows the rider's ride with them, or not. */
+  showRide(on: boolean): void {
+    this.withRide = on;
+    this.avatar?.showRide(on);
   }
 
   private shot: RiderShot = "body";
@@ -398,6 +407,14 @@ class Club implements Stage {
     this.avatars[0]?.set(appearance, sport);
   }
 
+  private withRide = false;
+
+  /** Shows your rider's ride with them, or not. */
+  showRide(on: boolean): void {
+    this.withRide = on;
+    this.avatars[0]?.showRide(on);
+  }
+
   /** How many riders stand on the terrace (you and your party). */
   setRiders(count: number): void {
     this.count = Math.max(1, Math.min(4, count));
@@ -409,6 +426,7 @@ class Club implements Stage {
     while (this.avatars.length < this.count) {
       const you = this.avatars.length === 0 ? this.you : null;
       const a = new Avatar(you?.appearance ?? null, this.avatars.length, you?.sport ?? "summer");
+      if (this.avatars.length === 0) a.showRide(this.withRide);
       this.avatars.push(a);
     }
     this.avatars.forEach((a, i) => {
@@ -582,6 +600,16 @@ export function setMenuRider(appearance: Appearance, sport: Sport): void {
 /** Frames your rider on the main menu's colours for `shot`, in the free space on screen `space` gives. */
 export function setMenuShot(shot: RiderShot, space: (() => ScreenBox | null) | null): void {
   (field ??= new SeasonField()).setShot(shot, space);
+}
+
+/** Shows your rider's ride with them on the main menu's colours (the collection). */
+export function showMenuRide(on: boolean): void {
+  (field ??= new SeasonField()).showRide(on);
+}
+
+/** Shows your rider's ride with them on the club's terrace (the pro shop's rides). */
+export function showClubRide(on: boolean): void {
+  (club ??= new Club()).showRide(on);
 }
 
 /** Frames your rider up close on the club's terrace (the pro shop). */

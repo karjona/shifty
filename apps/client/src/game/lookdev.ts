@@ -3,8 +3,8 @@
 // looks; 0 = the default rider), body (male, female: everyone's, in its starter kit), skin, hair,
 // hairColor, eyes, eyeColor, brows, nose, mouth, facialHair, height, wear (item ids to put on),
 // bare (slots to empty), pose (idle, crossed), t (freeze the idle at a time), cx/cy/dist (camera),
-// orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air). Keys: F next
-// shot, R new looks, arrows orbit.
+// orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air), stand (with their
+// ride beside them, as in the menus). Keys: F next shot, R new looks, arrows orbit.
 import * as THREE from "three/webgpu";
 import {
   type Appearance,
@@ -17,9 +17,9 @@ import {
 } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
+import { Avatar } from "../render/avatar.ts";
 import { CLUB, buildClub } from "../render/club.ts";
 import { BoarderModel } from "../render/boarder.ts";
-import { celify } from "../render/cel/material.ts";
 import { JetskiModel } from "../render/rider.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, idlePose } from "../render/rider/poses.ts";
@@ -107,12 +107,19 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   document.body.append(label);
 
   const riding = params.has("ride");
+  const standing = params.has("stand");
   let skis: RiderModel[] = [];
+  let avatars: Avatar[] = [];
   const build = () => {
     for (const r of riders) {
       r.group.removeFromParent();
       r.dispose();
     }
+    for (const a of avatars) {
+      a.mesh.removeFromParent();
+      a.dispose();
+    }
+    avatars = [];
     for (const j of skis) {
       j.mesh.removeFromParent();
       j.dispose?.();
@@ -122,11 +129,18 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       riders = [];
       skis = Array.from({ length: count }, (_, i) => {
         const a = appearanceFor(seed, i, params);
-        const m = sport === "winter" ? new BoarderModel(i, a) : new JetskiModel(i, a);
-        celify(m.mesh);
-        return m;
+        return sport === "winter" ? new BoarderModel(i, a) : new JetskiModel(i, a);
       });
       for (const j of skis) world.scene.add(j.mesh);
+    } else if (standing) {
+      riders = [];
+      avatars = Array.from({ length: count }, (_, i) => {
+        const a = new Avatar(appearanceFor(seed, i, params), i, sport);
+        a.showRide(true);
+        a.crossed = shot === "select";
+        world.scene.add(a.mesh);
+        return a;
+      });
     } else {
       riders = Array.from({ length: count }, (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport));
       for (const r of riders) world.scene.add(r.group);
@@ -167,6 +181,12 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       r.group.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
       const pose = params.get("pose") ?? (shot === "select" ? "crossed" : "idle");
       if (r.body) r.pose((pose === "crossed" ? crossedPose : idlePose)(r.body, time + i * 3.1));
+    });
+    avatars.forEach((a, i) => {
+      const x = (i - (avatars.length - 1) / 2) * 1.6;
+      a.mesh.position.set(base.x - x, base.y, base.z);
+      a.mesh.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
+      a.update(1 / 60);
     });
     skis.forEach((j, i) => {
       const x = (i - (skis.length - 1) / 2) * 1.6;

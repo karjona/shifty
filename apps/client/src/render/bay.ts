@@ -134,9 +134,7 @@ export class Bay implements Environment {
   }
 
   makeRider(slot: number, appearance: Appearance | null): RiderModel {
-    const model = new JetskiModel(slot, appearance);
-    celify(model.mesh, () => ({ spec: 0.5, specSize: 0.03 }));
-    return model;
+    return new JetskiModel(slot, appearance);
   }
 
   private buildWater(): void {
