@@ -303,8 +303,8 @@ export const en = {
     help: {
       jetski: [
         "Stick: steer and lean (pull back on a crest to fly) · RT throttle · LT brake",
-        "In the air: hold A + stick to spin and flip, B + stick to barrel roll. Land straight!",
-        "Keyboard: WASD drive · arrows steer and lean · Space / Shift tricks",
+        "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!",
+        "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt",
         "Pass red buoys on your right, green ones on your left.",
       ],
       snow: [
@@ -358,6 +358,18 @@ export const en = {
       const v = n % 100;
       return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
     },
+  },
+  tricks: {
+    backflip: "Backflip",
+    frontflip: "Frontflip",
+    barrelRoll: "Barrel roll",
+    /** A rotation done `n` times in one jump: "Double backflip". */
+    times: (n: number, trick: string) =>
+      n < 2 ? trick : `${["Double", "Triple"][n - 2] ?? "Quad"} ${trick.toLowerCase()}`,
+    /** Snowboard grabs, by id (0 = none). */
+    grabs: ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"],
+    /** Jetski stunts, by id (0 = none). */
+    stunts: ["", "No hander", "Handstand", "Superman", "Nac-nac", "Can-can"],
   },
   about: {
     title: "About",

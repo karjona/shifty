@@ -3,8 +3,8 @@
 // looks; 0 = the default rider), body (male, female: everyone's, in its starter kit), skin, hair,
 // hairColor, eyes, eyeColor, brows, nose, mouth, facialHair, height, wear (item ids to put on),
 // bare (slots to empty), pose (idle, crossed), t (freeze the idle at a time), cx/cy/dist (camera),
-// orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air). Keys: F next
-// shot, R new looks, arrows orbit.
+// orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air; on a jetski, stunt 1-5
+// and how far into it, reach 0-1). Keys: F next shot, R new looks, arrows orbit.
 import * as THREE from "three/webgpu";
 import {
   type Appearance,
@@ -187,8 +187,8 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
         vx: 0,
         vy: 0,
         vz: 0,
-        charge: 0,
-        grab: Number(params.get("grab") ?? 0),
+        charge: params.has("stunt") ? Number(params.get("reach") ?? 1) : 0,
+        grab: Number(params.get("stunt") ?? params.get("grab") ?? 0),
         lean: Number(params.get("lean") ?? 0),
         steer: Number(params.get("steer") ?? 0),
         wobble: 0,

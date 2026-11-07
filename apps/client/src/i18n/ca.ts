@@ -303,8 +303,8 @@ export const ca: Messages = {
     help: {
       jetski: [
         "Estic: girar i inclinar-te (estira enrere en una cresta per volar) · RT accelerar · LT frenar",
-        "A l'aire: mantén A + estic per girar i fer tombarelles, B + estic per al tonell. Aterra recte!",
-        "Teclat: WASD conduir · fletxes girar i inclinar-te · Espai / Maj trucs",
+        "A l'aire: A + estic girs i tombarelles, X + estic tonell, B + estic una acrobàcia. Deixa-la anar a temps per aterrar!",
+        "Teclat: WASD conduir · fletxes girar i inclinar-te · Espai girs · Maj tonell · E acrobàcies",
         "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
       ],
       snow: [
@@ -362,6 +362,15 @@ export const ca: Messages = {
       gpFinal: "El Tilt · classificació final",
     },
     ordinal: (n: number) => `${n}${n === 1 || n === 3 ? "r" : n === 2 ? "n" : n === 4 ? "t" : "è"}`,
+  },
+  tricks: {
+    backflip: "Backflip",
+    frontflip: "Frontflip",
+    barrelRoll: "Tonell",
+    times: (n: number, trick: string) =>
+      n < 2 ? trick : `${["Doble", "Triple"][n - 2] ?? "Quàdruple"} ${trick.toLowerCase()}`,
+    grabs: ["", "Indy", "Nose grab", "Tail grab", "Melon", "Method"],
+    stunts: ["", "Sense mans", "Vertical", "Superman", "Nac-nac", "Can-can"],
   },
   about: {
     title: "Quant a",
