@@ -28,7 +28,7 @@ export function RaceScreen() {
   const outdated = race !== null && race.ticket.version !== VERSION;
   const [session, setSession] = useState<RaceSession | null>(null);
   const [menu, setMenu] = useState(false);
-  const [status, setStatus] = useState(t.race.connecting);
+  const [status, setStatus] = useState("");
   const [failed, setFailed] = useState(false);
   const [view, setView] = useState<{ racePhase: number; sport: "jetski" | "snow" } | null>(null);
   const [podium, setPodium] = useState<PodiumData | null>(null);

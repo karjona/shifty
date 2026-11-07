@@ -6,6 +6,7 @@ import { type Appearance, botAppearance, decodeAppearance } from "@shifty/rider"
 import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
 import { messages } from "../i18n/index.ts";
 import { InputReader } from "../input.ts";
+import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
@@ -15,6 +16,7 @@ import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
 import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
 import { type RosterName, Scoreboard } from "../ui/results.ts";
+import { WrongWay } from "../ui/wrong-way.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { disposeTree } from "./dispose.ts";
@@ -40,7 +42,7 @@ export interface RaceOptions {
   ticket: JoinTicket;
   /** Where the HUD goes. */
   hud: HTMLElement;
-  /** Status line (joining, rejected, connection lost). */
+  /** Status line (rejected, connection lost); connecting and joining show on the loading sign. */
   status: (text: string) => void;
   /** false: run the netcode without drawing (netcode tests). */
   render?: boolean;
@@ -127,6 +129,7 @@ export class RaceSession implements Stage {
   private net: NetConditions = { lagMs: 0, jitterMs: 0, lossPct: 0 };
   private hud: Hud;
   private board: Scoreboard;
+  private wrongWay = new WrongWay();
   private mapRoot: HTMLDivElement;
   private minimap: CourseMap | null = null;
   private env: Environment | null = null;
@@ -176,6 +179,15 @@ export class RaceSession implements Stage {
     this.board = new Scoreboard(opts.hud);
   }
 
+  /** Takes down the loading sign put up by `joining`. */
+  private joinSign: (() => void) | null = null;
+
+  /** Puts the loading sign up saying how joining goes (null: joined, or turned away). */
+  private joining(label: (() => string) | null): void {
+    this.joinSign?.();
+    this.joinSign = label ? holdLoading(label) : null;
+  }
+
   /** Paused (a menu is open over the race): the rider gets no input. */
   private paused = false;
 
@@ -190,8 +202,9 @@ export class RaceSession implements Stage {
       this.card.loading = true;
       this.showHud(false);
     }
-    this.opts.status(messages().race.connecting);
+    this.joining(() => messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
+      this.joining(null);
       this.opts.status(e instanceof Error ? e.message : String(e));
       this.card?.hide();
       this.opts.onJoin?.(false);
@@ -212,7 +225,7 @@ export class RaceSession implements Stage {
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.opts.status(messages().race.joining);
+    this.joining(() => messages().race.joining);
     if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -345,6 +358,7 @@ export class RaceSession implements Stage {
     const course = parseCourse(client.courseJson());
     this.sport = course.sport;
     this.input.sport = course.sport;
+    this.hud.tags.sport = course.sport;
     this.mapRoot.replaceChildren();
     if (!render) return;
     this.ready = false;
@@ -414,16 +428,19 @@ export class RaceSession implements Stage {
     const phase = client.phase();
     this.state.phase = phase;
     const m = messages().race;
-    if (phase === 0) this.opts.status(m.joining);
-    else if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
+    if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
     else if (this.closedReason) this.opts.status(m.lost(this.closedReason));
     else this.opts.status("");
     if (!this.joined && phase !== 0) {
       this.joined = true;
+      this.joining(null);
       if (phase !== 1) this.card?.hide();
       this.opts.onJoin?.(phase === 1);
     }
-    if (phase >= 2 || this.closedReason) this.card?.hide();
+    if (phase >= 2 || this.closedReason) {
+      this.card?.hide();
+      this.joining(null);
+    }
     if (phase !== 1) return;
 
     const race = this.readRace();
@@ -474,10 +491,15 @@ export class RaceSession implements Stage {
     const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
     if (render) {
       if (this.seasonChange?.active) this.seasonChange.frame(dt);
-      else if (this.ready) engine.world.render(riders, this.names, client.renderTick(), dt, nextBuoy);
+      else if (this.ready) {
+        engine.world.render(riders, client.renderTick(), dt, nextBuoy);
+        const tagged = race.phase === RESULTS ? [] : riders;
+        this.hud.tags.update(engine.world.camera, this.env, tagged, this.names, client.renderTick() / race.tickHz, dt);
+      }
       if (this.seasonChange && !this.seasonChange.active) this.seasonChange = null;
     }
     const me = riders.find((r) => r.isMe);
+    race.wrongWay = this.wrongWay.update(race, me);
     this.hud.events(parseEvents(client.takeEventsJson()), client.slot(), race);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
     this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
@@ -550,6 +572,7 @@ export class RaceSession implements Stage {
 
   stop(): void {
     this.stopped = true;
+    this.joining(null);
     if (this.timer) clearInterval(this.timer);
     this.seasonChange?.cancel();
     this.card?.hide();

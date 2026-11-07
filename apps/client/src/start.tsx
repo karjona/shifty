@@ -3,11 +3,8 @@ import "./style.css";
 import "./menu/menu.css";
 import { createRoot } from "react-dom/client";
 import { App } from "./menu/app.tsx";
-import { fitUi } from "./menu/scale.ts";
 import { devParams } from "./dev-params.ts";
 import { booted } from "./loading.ts";
-
-fitUi();
 
 // The quick race and the look checks only exist on the dev server: builds
 // drop these branches and the modules with them (and vite.config.ts fails a
