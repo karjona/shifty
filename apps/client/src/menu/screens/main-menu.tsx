@@ -2,6 +2,7 @@
 // along the top; on Home your rider stands over the seasons' colours with
 // a banner, missions and news around.
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { audio } from "../../audio/index.ts";
 import { preloadClub, setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { SEASONS, onSeasonShown, shownSeason } from "../../game/seasons.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
@@ -183,6 +184,9 @@ function HeroBanner({ banners, onOpen }: { banners: Banner[]; onOpen: (b: Banner
 }
 
 const SCALES = [0.5, 0.75, 1];
+/** Volume steps (0-1). */
+const VOLUMES = Array.from({ length: 11 }, (_, i) => i / 10);
+const VOLUME_KINDS = ["master", "effects", "music"] as const;
 
 function SettingsTab() {
   const t = useT();
@@ -191,7 +195,7 @@ function SettingsTab() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: me } = useSuspenseQuery(meQuery);
-  // The view settings live in the engine; re-render after changing them.
+  // The view settings live in the engine, the volumes in the sound system; re-render after changing them.
   const [, changed] = useReducer((n: number) => n + 1, 0);
   const now = engine?.view.scale ?? "auto";
   const scale = now === "auto" ? now : SCALES.reduce((a, b) => (Math.abs(b - now) < Math.abs(a - now) ? b : a));
@@ -248,6 +252,21 @@ function SettingsTab() {
             changed();
           }}
         />
+      </Panel>
+      <Panel title={t.settings.sound}>
+        {VOLUME_KINDS.map((kind) => (
+          <Picker<number>
+            key={kind}
+            label={t.settings.volume[kind]}
+            wrap={false}
+            options={VOLUMES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))}
+            value={Math.round(audio.volume(kind) * 10) / 10}
+            onChange={(v) => {
+              audio.setVolume(kind, v);
+              changed();
+            }}
+          />
+        ))}
       </Panel>
       <Panel title={t.settings.controls}>
         <p className="muted">{t.settings.controlsBody}</p>

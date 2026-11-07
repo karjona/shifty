@@ -132,6 +132,7 @@ export function Picker<T extends string | number>({
   onChange,
   onFocus,
   autoFocus,
+  wrap = true,
 }: {
   label: string;
   autoFocus?: boolean;
@@ -140,13 +141,19 @@ export function Picker<T extends string | number>({
   value: T;
   onChange: (v: T) => void;
   onFocus?: () => void;
+  /** Stepping past the last option comes round to the first (false: it stops at either end). */
+  wrap?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const i = Math.max(
     0,
     options.findIndex((o) => o.value === value),
   );
-  const step = (d: number) => onChange(options[(i + d + options.length) % options.length]!.value);
+  const step = (d: number) => {
+    const n = options.length;
+    const j = wrap ? (i + d + n) % n : Math.min(n - 1, Math.max(0, i + d));
+    if (j !== i) onChange(options[j]!.value);
+  };
   const onStep = useEffectEvent((d: number) => step(d));
   useEffect(() => {
     const el = ref.current;
