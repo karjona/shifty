@@ -520,9 +520,7 @@ export class Mountain implements Environment {
   }
 
   makeRider(slot: number, appearance: Appearance | null): RiderModel {
-    const model = new BoarderModel(slot, appearance);
-    celify(model.mesh);
-    return model;
+    return new BoarderModel(slot, appearance);
   }
 
   /** The run's snow: a ribbon of the sim's own heights, in chunks (so off-screen ones are culled). */

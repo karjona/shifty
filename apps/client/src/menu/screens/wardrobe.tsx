@@ -5,7 +5,7 @@ import { type Appearance, ITEMS, type Kit, REQUIRED, SLOTS, type Slot, type Spor
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { setMenuRider } from "../../game/backdrops.ts";
+import { setMenuRider, showMenuRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
 import { useRiderShot } from "../hooks.ts";
@@ -34,6 +34,11 @@ export function Wardrobe() {
   useEffect(() => {
     if (a) setMenuRider(a, sport);
   }, [a, sport]);
+  // Your ride stands with your rider while you dress them.
+  useEffect(() => {
+    showMenuRide(true);
+    return () => showMenuRide(false);
+  }, []);
   if (!rider || !a) return null;
   const changed = JSON.stringify(a) !== JSON.stringify(rider.appearance);
 
