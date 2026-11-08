@@ -179,9 +179,10 @@ export function lake(run: RunData, spot: NonNullable<RunScenery["lake"]>, height
   for (let r = 1; r <= rings; r++)
     for (let k = 0; k < around; k++) pts.set(place(r, k), (1 + (r - 1) * around + k) * 2);
   const ys = heights(pts);
-  // The ice lies at the ground's height near the middle of the lake.
-  const inner = Array.from(ys.subarray(0, 1 + around * 3)).toSorted((a, b) => a - b);
-  const ice = inner[Math.floor(inner.length * 0.6)]! + 0.05;
+  // The ice lies flat over the ground inside the shore (a little proud of
+  // it where the ground dips), and its edge banks down into the snow.
+  const inner = Array.from(ys.subarray(0, 1 + around * (rings - 2))).toSorted((a, b) => a - b);
+  const ice = inner[Math.floor(inner.length * 0.95)]! + 0.05;
   const pos: number[] = [c.x, ice, c.z];
   for (let r = 1; r <= rings; r++) {
     for (let k = 0; k < around; k++) {

@@ -185,11 +185,11 @@ function gladesShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: En
       { eye: on(spine.s - 120, -40, 22), look: on(spine.s - 20, spine.offset, 0), fov: 50 },
       { eye: on(spine.s - 60, -38, 18), look: on(spine.s + 40, spine.offset, 0), fov: 50 },
     ),
-    // Low through the pines.
+    // Low through the pines, to the log across the run.
     dolly(
       1.5,
-      { eye: on(830, 0, 3.2), look: on(880, 0, 1), fov: 54 },
-      { eye: on(870, 0, 2.8), look: on(925, 0, 1), fov: 54 },
+      { eye: on(990, 2, 3.2), look: on(1045, 0, 0.5), fov: 54 },
+      { eye: on(1018, 2, 2.6), look: on(1075, 0, 1), fov: 54 },
     ),
     round(2.0, grid, ground, env.camera.fov),
   ];

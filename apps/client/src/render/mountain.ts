@@ -50,7 +50,7 @@ import { celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
-import { creek, lake, lipProps, liftStation, outcrops } from "./mountain-props.ts";
+import { creek, lake, lipProps, liftStation, outcrops, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -856,10 +856,12 @@ export class Mountain implements Environment {
     }
     // Lone pines on the run (they are solid in the sim).
     for (const o of this.run.obstacles) if (o.kind === "pine") spots.push({ x: o.x, z: o.z, scale: 1.4 });
-    // Keep the riding width clear (but for the run's own pines).
+    // Keep the riding width clear (but for the run's own pines), the shore
+    // between the run and its lake, and round the lodge.
+    const shore = this.clearings();
     const clear = spots.filter((p) => {
       const nearest = this.nearestPath(p.x, p.z);
-      return nearest.dist > nearest.limit + 1.5 || p.scale === 1.4;
+      return (nearest.dist > nearest.limit + 1.5 && !shore(p.x, p.z)) || p.scale === 1.4;
     });
     const all = new Float32Array(clear.length * 2);
     clear.forEach((p, i) => all.set([p.x, p.z], i * 2));
@@ -903,6 +905,30 @@ export class Mountain implements Environment {
       this.forest.push(mesh);
       this.group.add(mesh);
     }
+  }
+
+  /** Whether a point is in open ground: round the lodge, and from the run's edge across its lake. */
+  private clearings(): (x: number, z: number) => boolean {
+    const lodge = this.scenery.lodge;
+    const at = runPoint(this.run, lodge.s);
+    const home = runAt(this.run, lodge.s, (at.limit + lodge.out) * lodge.side);
+    const yard = 12 * lodge.size;
+    const nearLodge = (x: number, z: number) => (x - home.x) ** 2 + (z - home.z) ** 2 < yard * yard;
+    const spot = this.scenery.lake;
+    if (!spot) return nearLodge;
+    const side = Math.sign(spot.offset);
+    const near = runPoint(this.run, spot.s).limit + 3;
+    const far = Math.abs(spot.offset) + spot.across + 10;
+    const c = runAt(this.run, spot.s, (side * (near + far)) / 2);
+    const fx = Math.sin(c.yaw);
+    const fz = Math.cos(c.yaw);
+    const along = spot.along * 1.35;
+    const across = (far - near) / 2;
+    return (x, z) => {
+      const u = (x - c.x) * fx + (z - c.z) * fz;
+      const v = (x - c.x) * -fz + (z - c.z) * fx;
+      return (u / along) ** 2 + (v / across) ** 2 < 1 || nearLodge(x, z);
+    };
   }
 
   /** The closest point of the run's path (coarse: 4 m samples). */

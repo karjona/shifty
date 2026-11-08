@@ -255,8 +255,14 @@ export function snowRigs(
   const rigs = [low, pitch, orbit, crane, wide, trackside, drone("drone", (x, z) => ground(x, z))];
   const scenery = runScenery(course);
   const standing = (w: Watch, r: RiderView) => w.still(r.slot) > 0.4 && along.of(r) > finish;
-  /** A long lens from `eye` on a rider standing in the finish area (yours first). */
-  const onlooker = (name: string, eye: THREE.Vector3, frame: number, score: number): Rig => ({
+  /** A camera at `eye` on a rider standing in the finish area (yours first): a long lens framing `frame` m, or a fixed `fov`. */
+  const onlooker = (
+    name: string,
+    eye: THREE.Vector3,
+    frame: number,
+    score: number,
+    fov: number | null = null,
+  ): Rig => ({
     name,
     minShot: 4,
     maxShot: 8,
@@ -270,6 +276,7 @@ export function snowRigs(
       out.frame = frame;
       out.follow = 4;
       onRider(out, r);
+      if (fov !== null) out.fov = fov;
     },
     holds: (_w, r) => along.of(r) > finish - 5 && sees(eye, r),
   });
@@ -283,7 +290,7 @@ export function snowRigs(
     // Across the frozen lake, low: the ice, the finish area, the mountain behind.
     const l = scenery.lake;
     rigs.push(
-      onlooker("lake", on(l.s + l.along * 0.3, l.offset + Math.sign(l.offset) * l.across * 0.95, 1.6), 7, 0.45),
+      onlooker("lake", on(l.s + l.along * 0.25, l.offset + Math.sign(l.offset) * l.across * 0.6, 3), 7, 0.45, 26),
     );
   }
   return rigs;
