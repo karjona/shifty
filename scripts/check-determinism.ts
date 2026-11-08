@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const ticks = Number(process.argv[2] ?? 3000);
+const ticks = Number(process.argv[2] ?? 4800);
 
 const wasm = await import(new URL("../apps/client/src/wasm/sim.js", import.meta.url).href);
 wasm.initSync({ module: readFileSync(new URL("../apps/client/src/wasm/sim_bg.wasm", import.meta.url)) });

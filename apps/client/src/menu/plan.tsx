@@ -74,17 +74,18 @@ export function usePlanSummary(plan: PlanRequest): string {
 }
 
 /**
- * The plan's pickers: the Tilt or one race, and with `full`, the race's
- * circuit, season, weather and time of day (each with "Draw" first).
+ * The plan's pickers: the Tilt or one race, and for one race its circuit
+ * (`fields` "circuit"), or its circuit, season, weather and time of day
+ * ("all"), each with "Draw" first.
  */
 export function PlanPickers({
   plan,
   onChange,
-  full,
+  fields,
 }: {
   plan: PlanRequest;
   onChange: (plan: PlanRequest) => void;
-  full: boolean;
+  fields: "event" | "circuit" | "all";
 }) {
   const t = useT();
   const spec = plan.tilt ? {} : plan.race;
@@ -110,14 +111,16 @@ export function PlanPickers({
         value={plan.tilt ? "gp" : "race"}
         onChange={(v) => onChange(v === "gp" ? TILT : { tilt: false, race: plan.tilt ? {} : spec })}
       />
-      {full && !plan.tilt && (
+      {fields !== "event" && !plan.tilt && (
+        <Picker<number>
+          label={t.room.circuit}
+          options={[draw, ...CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) }))]}
+          value={spec.course ?? DRAW}
+          onChange={(course) => set({ course })}
+        />
+      )}
+      {fields === "all" && !plan.tilt && (
         <>
-          <Picker<number>
-            label={t.room.circuit}
-            options={[draw, ...CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) }))]}
-            value={spec.course ?? DRAW}
-            onChange={(course) => set({ course })}
-          />
           <Picker<number>
             label={t.room.season}
             options={[

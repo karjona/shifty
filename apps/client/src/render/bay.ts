@@ -80,7 +80,11 @@ export class Bay implements Environment {
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
+  /** The swells now: the sim's, each wave's height turned as far as the race's weather has. */
   private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  /** The sim's swells as given: each wave's height at the start (field 3) and at the end (field 7). */
+  private waveTurn = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  private turned = 0;
   private course: CourseView;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
@@ -106,7 +110,8 @@ export class Bay implements Environment {
     }
     // Chop seed only needs to be stable per room: derive it from the swells.
     this.sea?.setWaves(opts.waves, Math.round(Math.abs(opts.waves[5] ?? 1) * 1e6));
-    this.waveParams.set(opts.waves.subarray(0, MAX_WAVES * WAVE_FIELDS));
+    this.waveTurn.set(opts.waves.subarray(0, MAX_WAVES * WAVE_FIELDS));
+    this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
     this.course = new CourseView(opts.course);
     this.group.add(this.course.group);
@@ -174,8 +179,28 @@ export class Bay implements Environment {
     this.water = water;
   }
 
+  /** Turns the swells' heights as far as the race's weather has turned (a storm builds lap by lap). */
+  private turnSwells(turn: number): void {
+    if (Math.abs(turn - this.turned) < 1e-4) return;
+    this.turned = turn;
+    let changed = false;
+    for (let i = 0; i < MAX_WAVES; i++) {
+      const o = i * WAVE_FIELDS;
+      const from = this.waveTurn[o + 3] ?? 0;
+      const amp = from + ((this.waveTurn[o + 7] ?? from) - from) * turn;
+      if (amp !== this.waveParams[o + 3]) {
+        this.waveParams[o + 3] = amp;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.swells.setFromSim(this.waveParams);
+    this.sea?.setSwells(this.waveParams);
+  }
+
   update(f: Frame): void {
     this.time.value = f.t;
+    this.turnSwells(f.turn);
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);

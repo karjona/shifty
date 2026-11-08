@@ -341,6 +341,11 @@ export class SeaWater {
     this.mesh.position.set(x, 0, z);
   }
 
+  /** The swells' heights now (a race's sea turns; see `Bay`). */
+  setSwells(params: Float32Array): void {
+    this.swells.setFromSim(params);
+  }
+
   setWaves(params: Float32Array, seed: number): void {
     this.swells.setFromSim(params);
     const mainDir = Math.atan2(params[1] ?? 0, params[0] ?? 1);

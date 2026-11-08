@@ -281,7 +281,7 @@ export const es: Messages = {
     events: { gp: "El Tilt", race: "Una carrera" },
     eventAbout: {
       gp: "Un año en Costa Nevada: una carrera cada estación, en el agua y en la montaña. Puntos en cada carrera.",
-      race: "Una carrera: el circuito, la estación, el tiempo y la hora del día, tal como vengan.",
+      race: "Una carrera en el circuito que elijas (o cualquiera), con la estación, el tiempo y la hora del día que toquen.",
       pick: "Una carrera: en la sala, el anfitrión elige el circuito, la estación, el tiempo y la hora del día, o los deja al azar.",
     },
     seasonSports: { water: "En el agua", mountain: "En la montaña", either: "En el agua o en la montaña" },

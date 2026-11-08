@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
     let m = args_map(&args[1..]);
     match cmd.as_str() {
         "determinism" => {
-            let ticks = args.get(1).map_or(Ok(3000), |t| t.parse())?;
+            let ticks = args.get(1).map_or(Ok(4800), |t| t.parse())?;
             println!("{:016x}", sim::determinism_scenario(ticks));
         }
         "token" => {
