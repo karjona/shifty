@@ -140,8 +140,8 @@ function capeShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env:
   return [
     dolly(
       2.2,
-      { eye: v(-60, 75, 430), look: v(-10, 12, 0), fov: 44 },
-      { eye: v(40, 58, 400), look: v(0, 10, -20), fov: 44 },
+      { eye: v(-130, 46, 320), look: v(-50, 12, 60), fov: 46 },
+      { eye: v(10, 40, 300), look: v(-10, 10, 20), fov: 46 },
     ),
     dolly(
       1.6,

@@ -601,6 +601,71 @@ function umbrellas(ground: CoastGround, beach: LandData, count: number): THREE.G
   return g;
 }
 
+/** Points every `step` m round a capsule's edge (world x, z as x, y). */
+function perimeter(l: LandData, step: number): THREE.Vector2[] {
+  const dx = l.bx - l.ax;
+  const dz = l.bz - l.az;
+  const len = Math.hypot(dx, dz);
+  const ux = len > 1e-3 ? dx / len : 1;
+  const uz = len > 1e-3 ? dz / len : 0;
+  const out: THREE.Vector2[] = [];
+  for (const side of [-1, 1])
+    for (let a = 0; a <= len; a += step)
+      out.push(new THREE.Vector2(l.ax + ux * a - uz * side * l.radius, l.az + uz * a + ux * side * l.radius));
+  const arc = Math.max(1, Math.round((Math.PI * l.radius) / step));
+  for (const [cx, cz, from] of [
+    [l.bx, l.bz, Math.atan2(uz, ux) - Math.PI / 2],
+    [l.ax, l.az, Math.atan2(uz, ux) + Math.PI / 2],
+  ] as const)
+    for (let i = 0; i <= arc; i++) {
+      const a = from + (i / arc) * Math.PI;
+      out.push(new THREE.Vector2(cx + Math.cos(a) * l.radius, cz + Math.sin(a) * l.radius));
+    }
+  return out;
+}
+
+/**
+ * Boulders fallen from the cliffs, heaped along the water line round the
+ * headland and the rocky mainland near the course (not on the beach or by
+ * the town): one instanced batch in the coast's material.
+ */
+function shoreBoulders(ground: CoastGround, land: LandData[], coast: THREE.Material): THREE.InstancedMesh {
+  const geo = paint(weather(new THREE.IcosahedronGeometry(1, 1), 0.25, 1.3, 13), DARK_ROCK, 0.25);
+  const items: THREE.Matrix4[] = [];
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  let k = 0;
+  for (const l of land) {
+    if (l.kind !== "headland" && l.kind !== "coast") continue;
+    for (const p of perimeter(l, 2.6)) {
+      k++;
+      if (p.x < NEAR.x0 || p.x > NEAR.x1 || p.y < NEAR.z0 || p.y > NEAR.z1) continue;
+      const g = ground.sample(p.x, p.y);
+      if (g.kind !== "headland" && g.kind !== "coast") continue;
+      if (Math.abs(g.inland) > 1.5 || hash(k * 1.7) < 0.25) continue;
+      for (let n = 0; n < 2; n++) {
+        const size = 1.2 + hash(k * 3.1 + n) * 2.6;
+        const x = p.x + (hash(k * 5.3 + n) - 0.5) * 4;
+        const z = p.y + (hash(k * 7.9 + n) - 0.5) * 4;
+        q.setFromEuler(e.set(hash(k + n) * 3, hash(k * 2 + n) * 6, hash(k * 3 + n) * 3));
+        items.push(
+          new THREE.Matrix4().compose(
+            new THREE.Vector3(x, -0.4 + size * 0.2, z),
+            q,
+            new THREE.Vector3(size, size * 0.7, size),
+          ),
+        );
+      }
+    }
+  }
+  const mesh = new THREE.InstancedMesh(geo, coast, items.length);
+  items.forEach((m, i) => mesh.setMatrixAt(i, m));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.computeBoundingSphere();
+  return mesh;
+}
+
 /** Pines on the clifftops and the hills, cypresses by the town: instanced, coloured by the season (`COAST_LOOK`). */
 function pines(ground: CoastGround): THREE.Group {
   const g = new THREE.Group();
@@ -808,7 +873,7 @@ export class CapeScenery implements WaterScenery {
       if (count > 0) this.group.add(umbrellas(ground, beach, count));
     }
 
-    this.group.add(pines(ground));
+    this.group.add(pines(ground), shoreBoulders(ground, land, coast));
     const sierraGroup = sierra();
     sierraGroup.userData.noMerge = true;
     this.group.add(sierraGroup);
