@@ -91,7 +91,13 @@ export class Minimap implements CourseMap {
     const h = maxZ - minZ + pad * 2;
     const svg = node(
       "svg",
-      { id: "minimap", class: "loop", viewBox: `${minX - pad} ${minZ - pad} ${w} ${h}`, width: LOOP_WIDTH, height: (LOOP_WIDTH * h) / w },
+      {
+        id: "minimap",
+        class: "loop",
+        viewBox: `${minX - pad} ${minZ - pad} ${w} ${h}`,
+        width: LOOP_WIDTH,
+        height: (LOOP_WIDTH * h) / w,
+      },
       root,
     );
     const water = loopLine(course, 0);
@@ -102,7 +108,8 @@ export class Minimap implements CourseMap {
       const line = { x1: l.ax, y1: l.az, x2: l.bx, y2: l.bz, "stroke-width": l.radius * 2 };
       node("line", { ...line, class: `land ${l.kind}` }, svg);
     }
-    for (const side of [-1, 1]) node("polyline", { points: loopLine(course, side * course.laneHalf), class: "lane" }, svg);
+    for (const side of [-1, 1])
+      node("polyline", { points: loopLine(course, side * course.laneHalf), class: "lane" }, svg);
     return svg;
   }
 

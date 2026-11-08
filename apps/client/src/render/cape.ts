@@ -13,13 +13,25 @@
 // snow line. Rock, sand and grass share one material, so a season's change
 // is a few numbers, never a new shader.
 import * as THREE from "three/webgpu";
-import { Fn, attribute, color, float, fract, fwidth, mix, normalWorld, positionWorld, smoothstep, uniform } from "three/tsl";
+import {
+  Fn,
+  attribute,
+  color,
+  float,
+  fract,
+  fwidth,
+  mix,
+  normalWorld,
+  positionWorld,
+  smoothstep,
+  uniform,
+} from "three/tsl";
 import type { Season } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
 import type { BobbingBatch } from "./bobbing.ts";
 import { noise3 } from "./cel/terrain.ts";
 import { type CourseData, type LandData, type Mooring, mooredBoats } from "./course.ts";
-import { Boxes, buildLand, capsuleOutline, landDistance, prism, rng, unitBox, unitCone } from "./land.ts";
+import { Boxes, buildLand, capsuleOutline, landDistance, prism, rng, unitBox } from "./land.ts";
 import { hash, peak } from "./scenery.ts";
 
 /**
@@ -60,7 +72,7 @@ const SAND = new THREE.Color(0xecdbaf);
 const PROMENADE = new THREE.Color(0xd9cbb0);
 /** The town's quay top (see land.ts) and the mole's. */
 const QUAY_TOP = 2.2;
-const MOLE_TOP = 2.6;
+export const MOLE_TOP = 2.6;
 /** Cliff tops: the headland rises toward its point; the mainland's cliffs. */
 const HEADLAND_TOP = 22;
 const POINT_TOP = 32;
@@ -126,9 +138,13 @@ export class CoastGround {
     g.color.copy(DARK_ROCK);
     if (dHead < 0) {
       const inland = -dHead;
-      const top = HEADLAND_TOP + (POINT_TOP - HEADLAND_TOP) * smooth((z + 20) / 130) + n * 4;
-      const cliff = Math.pow(smooth(inland / 8), 0.6);
-      const hh = -2 + (top + 2) * cliff + Math.min(inland, 40) * 0.08 + n2 * 1.2 * cliff;
+      // A cliff (its height wandering along the shore), then the top rising
+      // in a rounded hump toward the point.
+      const top = HEADLAND_TOP + (POINT_TOP - HEADLAND_TOP) * smooth((z + 20) / 130);
+      const edge = top * (0.45 + 0.25 * (n * 0.5 + 0.5));
+      const cliff = Math.pow(smooth(inland / 6), 0.7);
+      const crown = smooth((inland - 4) / 34);
+      const hh = -2 + (edge + 2) * cliff + (top - edge) * crown + n2 * 1.4 * cliff;
       if (hh > h) {
         h = hh;
         kind = "headland";
@@ -138,9 +154,9 @@ export class CoastGround {
     }
     if (dCoast < 0) {
       const inland = -dCoast;
-      const cliff = Math.pow(smooth(inland / 9), 0.6);
-      const hills = Math.max(0, inland - 24) * 0.3 * (0.75 + 0.35 * n) + n2 * 1.5;
-      const hh = -2 + (COAST_CLIFF + 2 + n * 5) * cliff + Math.min(hills, 170);
+      const cliff = Math.pow(smooth(inland / 7), 0.7);
+      const hills = Math.max(0, inland - 18) * 0.3 * (0.75 + 0.35 * n) + n2 * 1.5;
+      const hh = -2 + (COAST_CLIFF * (0.6 + 0.4 * (n * 0.5 + 0.5)) + 2) * cliff + Math.min(hills, 170);
       if (hh > h) {
         h = hh;
         kind = "coast";
@@ -201,7 +217,7 @@ function paint(geo: THREE.BufferGeometry, rgb: THREE.Color, lush: number): THREE
  * turned up above the snow line.
  */
 function coastMaterial(): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 1 });
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1 });
   m.userData.colorNode = Fn(() => {
     const base = attribute("color", "vec3");
     const lush = attribute("lush", "float");
@@ -214,9 +230,7 @@ function coastMaterial(): THREE.MeshStandardNodeMaterial {
     const grassy = smoothstep(float(0.8).sub(w), float(0.8).add(w), up).mul(lush);
     const c = mix(layered, COAST_LOOK.grass, grassy);
     const above = smoothstep(COAST_LOOK.snowLine, COAST_LOOK.snowLine.add(4), positionWorld.y);
-    const snowy = smoothstep(float(0.72).sub(w), float(0.72).add(w), up)
-      .mul(above)
-      .mul(COAST_LOOK.snowCover);
+    const snowy = smoothstep(float(0.72).sub(w), float(0.72).add(w), up).mul(above).mul(COAST_LOOK.snowCover);
     return mix(c, color(SNOW), smoothstep(0.45, 0.55, snowy));
   })();
   return m;
@@ -301,8 +315,10 @@ function weather(geo: THREE.BufferGeometry, amount: number, scale: number, seed:
  * neck, standing on its two legs (the sim's arch capsules).
  */
 function arch(legs: LandData[]): THREE.BufferGeometry | null {
-  if (legs.length < 2) return null;
-  const [a, b] = legs.toSorted((p, q) => p.az - q.az) as [LandData, LandData];
+  const sorted = legs.toSorted((p, q) => p.az - q.az);
+  const a = sorted[0];
+  const b = sorted[sorted.length - 1];
+  if (!a || !b || a === b) return null;
   const cx = (a.ax + a.bx + b.ax + b.bx) / 4;
   // The opening: between the legs' inner faces, up to its crown.
   const open0 = a.az + a.radius;
@@ -332,23 +348,32 @@ function arch(legs: LandData[]): THREE.BufferGeometry | null {
   const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 14, steps: 6 });
   geo.rotateY(Math.PI / 2);
   geo.translate(cx - depth / 2, 0, 0);
-  const flat = geo.toNonIndexed();
-  geo.dispose();
-  weather(flat, 1.6, 0.09, 31);
-  return paint(flat, ROCK, 0.8);
+  weather(geo, 1.6, 0.09, 31);
+  return paint(geo, ROCK, 0.8);
 }
 
 /** A sea stack: a pillar of layered rock, narrowing a little to a scrubby top. */
 function stack(l: LandData, seed: number): THREE.BufferGeometry {
-  const h = 13 + hash(seed) * 14;
-  const geo = new THREE.CylinderGeometry(l.radius * 0.8, l.radius * 1.05, h + 6, 9, 7);
+  const h = 14 + hash(seed) * 13;
+  const rows = 12;
+  const geo = new THREE.CylinderGeometry(l.radius * 0.78, l.radius * 1.08, h + 6, 12, rows);
   geo.translate(0, h / 2 - 3, 0);
   const p = geo.attributes.position!;
-  const lean = (hash(seed + 3) - 0.5) * 0.12;
+  const lean = (hash(seed + 3) - 0.5) * 0.14;
+  const ledge = 2.6 + hash(seed + 5) * 1.6;
   for (let i = 0; i < p.count; i++) {
     const y = p.getY(i);
-    const k = 1 + noise3(p.getX(i) * 0.4, y * 0.25, p.getZ(i) * 0.4, seed) * 0.22;
-    p.setXYZ(i, p.getX(i) * k + y * lean, y + (y > h - 3.5 ? noise3(p.getX(i), 0, p.getZ(i), seed) * 1.4 : 0), p.getZ(i) * k);
+    // Lumps, ledges where harder layers stand out, and a waist the sea has cut.
+    const lumps = noise3(p.getX(i) * 0.35, y * 0.18, p.getZ(i) * 0.35, seed) * 0.26;
+    const layer = (y / ledge) % 1 < 0.35 ? 0.07 : 0;
+    const waist = -0.14 * Math.exp(-(((y - 1.5) / 2.5) ** 2));
+    const k = 1 + lumps + layer + waist;
+    p.setXYZ(
+      i,
+      p.getX(i) * k + y * lean,
+      y + (y > h - 0.5 ? noise3(p.getX(i) * 0.6, 0, p.getZ(i) * 0.6, seed) * 1.6 : 0),
+      p.getZ(i) * k,
+    );
   }
   geo.translate(l.ax, 0, l.az);
   const flat = geo.toNonIndexed();
@@ -411,20 +436,46 @@ function mole(l: LandData, ground: CoastGround): THREE.Group {
       const x = l.ax + ux * a - uz * reach * side;
       const z = l.az + uz * a + ux * reach * side;
       if (ground.height(x, z) > 0) continue;
-      stones.add(x, -0.6 + r() * 0.8 * (side === 1 ? 1 : 0.3), z, s, s * 0.8, s, [0xa49c8e, 0x958d80, 0xb3ab9c][Math.floor(r() * 3)]!, r() * 3);
+      stones.add(
+        x,
+        -0.6 + r() * 0.8 * (side === 1 ? 1 : 0.3),
+        z,
+        s,
+        s * 0.8,
+        s,
+        [0xa49c8e, 0x958d80, 0xb3ab9c][Math.floor(r() * 3)]!,
+        r() * 3,
+      );
     }
   }
   g.add(stones.build(new THREE.BoxGeometry(1, 1, 1), std(0xffffff, { flatShading: true })));
   // Bollards along the harbour side.
   const bollards = new Boxes();
-  for (let a = 4; a < len; a += 7) bollards.add(l.ax + ux * a + uz * (l.radius - 0.6), MOLE_TOP, l.az + uz * a - ux * (l.radius - 0.6), 0.35, 0.6, 0.35, 0x3a3f46);
+  for (let a = 4; a < len; a += 7)
+    bollards.add(
+      l.ax + ux * a + uz * (l.radius - 0.6),
+      MOLE_TOP,
+      l.az + uz * a - ux * (l.radius - 0.6),
+      0.35,
+      0.6,
+      0.35,
+      0x3a3f46,
+    );
   g.add(bollards.build(unitBox(), std(0xffffff)));
   // The harbour light on the head: green, as the course's marks on your left.
   const hx = l.bx + ux * (l.radius - 2);
   const hz = l.bz + uz * (l.radius - 2);
   g.add(put(new THREE.CylinderGeometry(0.9, 1.1, 5.5, 10), std(0xf4f1ea), hx, MOLE_TOP + 2.75, hz));
   g.add(put(new THREE.CylinderGeometry(0.95, 0.95, 1.2, 10), std(0x2f9a4a), hx, MOLE_TOP + 4.2, hz));
-  g.add(put(new THREE.CylinderGeometry(0.55, 0.55, 0.9, 10), std(0xd8ffe0, { emissive: 0x6cff8a, emissiveIntensity: 0.6 }), hx, MOLE_TOP + 6, hz));
+  g.add(
+    put(
+      new THREE.CylinderGeometry(0.55, 0.55, 0.9, 10),
+      std(0xd8ffe0, { emissive: 0x6cff8a, emissiveIntensity: 0.6 }),
+      hx,
+      MOLE_TOP + 6,
+      hz,
+    ),
+  );
   g.add(put(new THREE.ConeGeometry(0.8, 0.8, 10), std(0x2f9a4a), hx, MOLE_TOP + 6.85, hz));
   return g;
 }
@@ -437,7 +488,15 @@ function beacon(l: LandData, coast: THREE.Material): THREE.Group {
   g.add(put(paint(rock, ROCK, 0.3), coast, l.ax, 0.2, l.az));
   g.add(put(new THREE.CylinderGeometry(0.25, 0.3, 7, 8), std(0xd6402e), l.ax, 6, l.az));
   g.add(put(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 10), std(0xd6402e), l.ax, 8.2, l.az));
-  g.add(put(new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8), std(0xffe0d8, { emissive: 0xff6a4a, emissiveIntensity: 0.6 }), l.ax, 9.4, l.az));
+  g.add(
+    put(
+      new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8),
+      std(0xffe0d8, { emissive: 0xff6a4a, emissiveIntensity: 0.6 }),
+      l.ax,
+      9.4,
+      l.az,
+    ),
+  );
   return g;
 }
 
@@ -534,7 +593,11 @@ function umbrellas(ground: CoastGround, beach: LandData, count: number): THREE.G
   }
   const cone = new THREE.ConeGeometry(0.5, 1, 8, 1);
   cone.translate(0, 0.5, 0);
-  g.add(poles.build(unitBox(), std(0xffffff)), canopies.build(cone, std(0xffffff, { side: THREE.DoubleSide })), loungers.build(unitBox(), std(0xffffff)));
+  g.add(
+    poles.build(unitBox(), std(0xffffff)),
+    canopies.build(cone, std(0xffffff, { side: THREE.DoubleSide })),
+    loungers.build(unitBox(), std(0xffffff)),
+  );
   return g;
 }
 
@@ -546,16 +609,22 @@ function pines(ground: CoastGround): THREE.Group {
   const needles = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1 });
   needles.userData.colorNode = Fn(() => {
     const up = normalWorld.y;
-    const snowy = smoothstep(0.35, 0.6, up).mul(COAST_LOOK.snowCover).mul(smoothstep(COAST_LOOK.snowLine, COAST_LOOK.snowLine.add(4), positionWorld.y));
+    const snowy = smoothstep(0.35, 0.6, up)
+      .mul(COAST_LOOK.snowCover)
+      .mul(smoothstep(COAST_LOOK.snowLine, COAST_LOOK.snowLine.add(4), positionWorld.y));
     return mix(COAST_LOOK.pines, color(SNOW), smoothstep(0.4, 0.5, snowy));
   })();
   const items: { x: number; y: number; z: number; s: number; h: number; tint: number }[] = [];
   const tryAt = (x: number, z: number, chance: number, seed: number) => {
-    if (hash(seed) > chance) return;
+    // In groves, with clearings between them.
+    const grove = smooth((noise3(x * 0.012, 4.5, z * 0.012, 3) + 0.15) * 2.2);
+    if (hash(seed) > chance * grove) return;
     const { lush, kind, inland, h: y } = ground.sample(x, z);
     if (lush < 0.9 || kind === "town" || inland < 6 || y < 4) return;
     // Not on a steep face.
-    const slope = Math.abs(ground.height(x + 2, z) - ground.height(x - 2, z)) + Math.abs(ground.height(x, z + 2) - ground.height(x, z - 2));
+    const slope =
+      Math.abs(ground.height(x + 2, z) - ground.height(x - 2, z)) +
+      Math.abs(ground.height(x, z + 2) - ground.height(x, z - 2));
     if (slope > 3.2) return;
     const size = 3.2 + hash(seed + 1) * 2.6;
     items.push({ x, y, z, s: size, h: 4 + hash(seed + 2) * 5, tint: 0.82 + hash(seed + 3) * 0.3 });
@@ -564,14 +633,14 @@ function pines(ground: CoastGround): THREE.Group {
   for (let z = NEAR.z0; z < NEAR.z1; z += 7) {
     for (let x = NEAR.x0; x < NEAR.x1; x += 7) {
       k++;
-      tryAt(x + (hash(k * 1.3) - 0.5) * 6, z + (hash(k * 2.7) - 0.5) * 6, 0.42, k * 3.1);
+      tryAt(x + (hash(k * 1.3) - 0.5) * 6, z + (hash(k * 2.7) - 0.5) * 6, 0.5, k * 3.1);
     }
   }
   for (let z = FAR.z0 + 300; z < 320; z += 20) {
     for (let x = -800; x < 800; x += 20) {
       k++;
       if (x > NEAR.x0 && x < NEAR.x1 && z > NEAR.z0 && z < NEAR.z1) continue;
-      tryAt(x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.35, k * 3.1);
+      tryAt(x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.3, k * 3.1);
     }
   }
   const crowns = new THREE.InstancedMesh(crown, needles, items.length);
@@ -611,18 +680,47 @@ function sierra(): THREE.Group {
 }
 
 /** Fishing boats moored in the harbour, along the town's quay and in the lee of the mole. */
-function harbourMoorings(town: LandData, mole: LandData): Mooring[] {
+function harbourMoorings(town: LandData, breakwater: LandData): Mooring[] {
   const r = rng(23);
   const spots: Mooring[] = [];
   // The quay's face toward the harbour (+x), from the harbour's head to the mole.
   const face = town.ax + town.radius + 3.2;
-  for (let z = -112; z < mole.az - mole.radius - 6; z += 7 + r() * 4) {
+  for (let z = -112; z < breakwater.az - breakwater.radius - 6; z += 7 + r() * 4) {
     if (r() < 0.2) continue;
     spots.push({ x: face + r() * 0.8, z, yaw: -Math.PI / 2 + (r() - 0.5) * 0.15 });
   }
   // Inside the mole.
-  for (let x = mole.ax + 6; x < mole.bx - 6; x += 8 + r() * 3) spots.push({ x, z: mole.az - mole.radius - 3, yaw: (r() - 0.5) * 0.15 });
+  for (let x = breakwater.ax + 6; x < breakwater.bx - 6; x += 8 + r() * 3)
+    spots.push({ x, z: breakwater.az - breakwater.radius - 3, yaw: (r() - 0.5) * 0.15 });
   return spots;
+}
+
+/** Where the beach bar and the lifeguard tower stand: along the beach (z) and how far up the sand (m). */
+const BAR = { z: -30, inland: 38 };
+export const LIFEGUARD = { z: 25, inland: 16, top: 5.5 };
+
+/** The point on the beach `inland` metres up the sand at `z`. */
+export function onBeach(ground: CoastGround, beach: LandData, z: number, inland: number): THREE.Vector3 {
+  let x = beach.ax - beach.radius;
+  for (let k = 0; k < 80; k++) {
+    const s = ground.sample(x, z);
+    if (s.kind === "beach" && s.inland >= inland) break;
+    x += 1;
+  }
+  return new THREE.Vector3(x, ground.height(x, z), z);
+}
+
+/** The watchtower's foot: the highest ground near the headland's southern end. Its top is 13 m up. */
+export function watchtowerSpot(ground: CoastGround, land: LandData[]): THREE.Vector3 | null {
+  const point = land.filter((l) => l.kind === "headland").toSorted((a, b) => b.bz - a.bz)[0];
+  if (!point) return null;
+  const best = new THREE.Vector3(point.bx, -1, point.bz);
+  for (let dz = -20; dz <= 10; dz += 2)
+    for (let dx = -12; dx <= 12; dx += 2) {
+      const h = ground.height(point.bx + dx, point.bz + dz);
+      if (h > best.y) best.set(point.bx + dx, h, point.bz + dz);
+    }
+  return best;
 }
 
 /** Everything round the cape's course that isn't the course itself. */
@@ -640,7 +738,15 @@ export class CapeScenery implements WaterScenery {
     const coast = coastMaterial();
     const inNear = (x: number, z: number, margin: number) =>
       x > NEAR.x0 + margin && x < NEAR.x1 - margin && z > NEAR.z0 + margin && z < NEAR.z1 - margin;
-    const near = new THREE.Mesh(groundMesh(ground, NEAR, () => false, () => 0), coast);
+    const near = new THREE.Mesh(
+      groundMesh(
+        ground,
+        NEAR,
+        () => false,
+        () => 0,
+      ),
+      coast,
+    );
     const far = new THREE.Mesh(
       groundMesh(
         ground,
@@ -671,7 +777,7 @@ export class CapeScenery implements WaterScenery {
       m.receiveShadow = true;
       this.group.add(m);
     }
-    for (const l of land.filter((l) => l.kind === "rock")) this.group.add(beacon(l, coast));
+    for (const rock of land.filter((l) => l.kind === "rock")) this.group.add(beacon(rock, coast));
 
     // The harbour: the town on its quay (as the bay's), the mole, the boats.
     const town = land.find((l) => l.kind === "town");
@@ -685,35 +791,19 @@ export class CapeScenery implements WaterScenery {
       }
     }
 
-    // The watchtower on the point: the highest ground near the headland's south end.
-    const point = land.filter((l) => l.kind === "headland").toSorted((a, b) => b.bz - a.bz)[0];
-    if (point) {
-      let best = { x: point.bx, z: point.bz, h: -1 };
-      for (let dz = -20; dz <= 10; dz += 2)
-        for (let dx = -12; dx <= 12; dx += 2) {
-          const h = ground.height(point.bx + dx, point.bz + dz);
-          if (h > best.h) best = { x: point.bx + dx, z: point.bz + dz, h };
-        }
-      this.group.add(watchtower(best.x, best.h - 0.5, best.z, 0.4));
-    }
+    const tower = watchtowerSpot(ground, land);
+    if (tower) this.group.add(watchtower(tower.x, tower.y - 0.5, tower.z, 0.4));
 
     // The beach: the bar, the lifeguard tower, umbrellas in season.
     const beach = land.find((l) => l.kind === "beach");
     if (beach) {
-      const at = (z: number, inland: number) => {
-        let x = beach.ax - beach.radius;
-        for (let k = 0; k < 80; k++) {
-          const s = ground.sample(x, z);
-          if (s.kind === "beach" && s.inland >= inland) break;
-          x += 1;
-        }
-        return { x, z, y: ground.height(x, z) };
-      };
-      const bar = at(-30, 38);
+      const bar = onBeach(ground, beach, BAR.z, BAR.inland);
       // Facing the sea (west, -x).
       this.group.add(chiringuito(bar.x, bar.y, bar.z, -Math.PI / 2, season === "summer" || season === "spring"));
-      const tower = at(25, 16);
-      this.group.add(lifeguardTower(tower.x, tower.y, tower.z, -Math.PI / 2, season === "summer" ? 0x2fb34a : 0xf2c14e));
+      const lifeguard = onBeach(ground, beach, LIFEGUARD.z, LIFEGUARD.inland);
+      this.group.add(
+        lifeguardTower(lifeguard.x, lifeguard.y, lifeguard.z, -Math.PI / 2, season === "summer" ? 0x2fb34a : 0xf2c14e),
+      );
       const count = season === "summer" ? 70 : season === "winter" ? 0 : 18;
       if (count > 0) this.group.add(umbrellas(ground, beach, count));
     }
@@ -740,4 +830,3 @@ export class Cape extends Bay {
     this.land = scenery.ground;
   }
 }
-

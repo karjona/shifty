@@ -133,7 +133,17 @@ function parseRun(o: Obj): RunData {
   };
 }
 
-const LAND_KINDS: readonly LandKind[] = ["town", "island", "rock", "headland", "coast", "beach", "mole", "stack", "arch"];
+const LAND_KINDS: readonly LandKind[] = [
+  "town",
+  "island",
+  "rock",
+  "headland",
+  "coast",
+  "beach",
+  "mole",
+  "stack",
+  "arch",
+];
 const landKind = (v: unknown): LandKind => LAND_KINDS.find((k) => k === v) ?? "rock";
 
 function parseBay(o: Obj): CourseData {

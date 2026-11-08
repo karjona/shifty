@@ -123,26 +123,35 @@ function capeShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env:
     centre: v(s.x - Math.sin(s.yaw) * back, 0.6, s.z - Math.cos(s.yaw) * back),
     yaw: s.yaw,
   };
+  /** A point `at` m round the centre line, `side` m to its right, `up` m over the water. */
+  const on = (at: number, up: number, side = 0) => {
+    const step = course.path.length > 1 ? course.path[1]!.s : 2;
+    const n = course.path.length;
+    const p = course.path[((Math.round(at / step) % n) + n) % n] ?? course.path[0]!;
+    return v(p.x - Math.cos(p.yaw) * side, up, p.z + Math.sin(p.yaw) * side);
+  };
   const legs = course.land.filter((l) => l.kind === "arch");
   const archX = legs.length > 0 ? legs.reduce((sum, l) => sum + l.ax + l.bx, 0) / (legs.length * 2) : 0;
-  const archZ = legs.length > 0 ? legs.reduce((sum, l) => sum + l.az, 0) / legs.length : -90;
-  const stacks = course.land.filter((l) => l.kind === "stack").toSorted((a, b) => a.az - b.az);
-  const stack = stacks[1] ?? { ax: -117, az: 119 };
+  // Where the line passes under the arch, and where it enters the stacks.
+  const arch = course.path.reduce((best, p) =>
+    Math.abs(p.x - archX) < Math.abs(best.x - archX) && p.z < 0 ? p : best,
+  );
+  const stacks = course.length * 0.71;
   return [
     dolly(
       2.2,
-      { eye: v(-300, 70, 360), look: v(0, 14, -20), fov: 44 },
-      { eye: v(-190, 52, 330), look: v(20, 12, -40), fov: 44 },
+      { eye: v(-60, 75, 430), look: v(-10, 12, 0), fov: 44 },
+      { eye: v(40, 58, 400), look: v(0, 10, -20), fov: 44 },
     ),
     dolly(
       1.6,
-      { eye: v(archX - 95, 4.5, archZ + 2), look: v(archX + 20, 8, archZ), fov: 52 },
-      { eye: v(archX - 45, 3.6, archZ + 1), look: v(archX + 40, 7, archZ), fov: 52 },
+      { eye: on(arch.s - 85, 4.5, 4), look: on(arch.s + 10, 7), fov: 52 },
+      { eye: on(arch.s - 45, 3.6, 3), look: on(arch.s + 40, 6), fov: 52 },
     ),
     dolly(
       1.6,
-      { eye: v(stack.ax + 70, 9, stack.az + 75), look: v(stack.ax - 5, 7, stack.az - 10), fov: 50 },
-      { eye: v(stack.ax + 40, 7, stack.az + 40), look: v(stack.ax - 20, 6, stack.az - 40), fov: 50 },
+      { eye: on(stacks - 40, 9, -6), look: on(stacks + 40, 5), fov: 50 },
+      { eye: on(stacks - 5, 6, -4), look: on(stacks + 75, 4), fov: 50 },
     ),
     round(2.0, grid, (x, z) => env.ground(x, z, 0), env.camera.fov),
   ];
