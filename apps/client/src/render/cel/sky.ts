@@ -8,6 +8,7 @@ import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   Fn,
+  If,
   attribute,
   cameraProjectionMatrix,
   clamp,
@@ -99,18 +100,21 @@ export function skyDome(): THREE.Mesh {
       .mul(smoothstep(0.55, 0.35, y))
       .mul(LOOK.cirrus);
     c = mix(c, mix(c, vec3(1), 0.3), wisp);
-    // The cloud deck: masses that close in with the weather, lighter at their edges, fading into the horizon.
-    const q = plane.mul(0.32).add(drift.mul(4));
-    const mass = noise4(q.mul(0.55))
-      .x.mul(0.6)
-      .add(noise4(q.mul(1.6)).y.mul(0.28))
-      .add(noise4(q.mul(4.3)).z.mul(0.1));
-    const edge = mass.sub(mix(float(0.62), float(-0.55), LOOK.overcast));
-    const cloud = cut0(edge)
-      .mul(smoothstep(0.015, 0.14, y))
-      .mul(LOOK.overcast.greaterThan(0.001).select(1, 0));
-    const deck = mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14)));
-    c = mix(c, deck, cloud);
+    // The cloud deck: masses that close in with the weather, lighter at their edges, fading into the horizon
+    // (worked out only under one).
+    const sky = c.toVar();
+    If(LOOK.overcast.greaterThan(0.001), () => {
+      const q = plane.mul(0.32).add(drift.mul(4));
+      const mass = noise4(q.mul(0.55))
+        .x.mul(0.6)
+        .add(noise4(q.mul(1.6)).y.mul(0.28))
+        .add(noise4(q.mul(4.3)).z.mul(0.1));
+      const edge = mass.sub(mix(float(0.62), float(-0.55), LOOK.overcast));
+      const cloud = cut0(edge).mul(smoothstep(0.015, 0.14, y));
+      const deck = mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14)));
+      sky.assign(mix(sky, deck, cloud));
+    });
+    c = sky;
     return c;
   })();
   const dome = new THREE.Mesh(geo, m);

@@ -81,6 +81,8 @@ export const LOOK = {
   /** On the mountain: bare ground where the snow is off it (two tones). */
   ground: colour(0x8a7650),
   ground2: colour(0x6e5a3c),
+  /** The most thin cover, slush and hard snow anywhere on the run on screen (0-1 each; the mountain sets it). */
+  runSnow: uniform(new THREE.Vector3(1, 1, 1)),
   /** Seconds, and the wind (m/s, x and z) the sky and the precipitation drift with. */
   time: uniform(0),
   wind: uniform(new THREE.Vector2(0.6, -0.3)),

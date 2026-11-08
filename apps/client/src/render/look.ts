@@ -5,7 +5,7 @@
 // frame as the weather turns.
 import * as THREE from "three/webgpu";
 import { type Conditions, type Season, type Weather, sunAt } from "../game/conditions.ts";
-import { LOOK, resetLook } from "./cel/look.ts";
+import { LOOK } from "./cel/look.ts";
 
 /** How a circuit sits under the sky. */
 export interface CircuitLook {
@@ -31,6 +31,7 @@ const SUN_LOWEST = (10 * Math.PI) / 180;
 type RGB = THREE.Color;
 const hex = (h: number) => new THREE.Color(h);
 const rgb = (r: number, g: number, b: number) => new THREE.Color(r, g, b);
+const WHITE = rgb(1, 1, 1);
 
 /** Everything about the look that changes with the weather (lerped as it turns). */
 interface Sky {
@@ -251,8 +252,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     sea: [0x3c6a86, 0x4f7f98, 0x7c9cb0, 0x6aa0a6],
     seaWeight: 0.6,
     chop: 0.7,
-    fogNear: 0.16,
-    fogFar: 0.36,
+    fogNear: 0.2,
+    fogFar: 0.45,
     wind: 0,
   },
   rain: {
@@ -497,10 +498,12 @@ export class ConditionsLook {
   private from: Sky;
   private to: Sky;
   private wind: THREE.Vector2;
+  private fogTint: THREE.Color;
 
   constructor(conditions: Conditions, circuit: CircuitLook) {
     this.conditions = conditions;
     this.circuit = circuit;
+    this.fogTint = rgb(...(circuit.fogTint ?? [1, 1, 1]));
     const { season, time } = conditions;
     const sun = sunAt(season, time);
     const el = (sun.elevation * 180) / Math.PI;
@@ -548,8 +551,9 @@ export class ConditionsLook {
 
   /**
    * Puts the look on screen for how far the weather has turned (`turn`,
-   * 0-1), at `t` seconds, with the camera at height `eyeY` (in `wind`): the uniforms,
-   * the fog and the background, and the lights for what isn't cel-shaded.
+   * 0-1), at `t` seconds, with the camera at height `eyeY` and the sim's
+   * wind there: the uniforms, the fog and the background, and the lights
+   * for what isn't cel-shaded.
    */
   apply(
     turn: number,
@@ -595,31 +599,25 @@ export class ConditionsLook {
     else LOOK.wind.value.copy(this.wind).multiplyScalar(s.wind);
     this.cover = s.cover;
     this.tower = s.tower;
-    // Rain falls as snow in the cold: in winter on the mountain, and above the cold line.
+    // Rain falls as snow in the cold: in winter on the mountain, and above the snow line.
     const mountain = this.circuit.mountain === true;
     const cold = mountain && (this.conditions.season === "winter" || eyeY > this.line);
     const winterFlurry = mountain && this.conditions.season === "winter" ? 0.3 : 0;
     this.rain = cold ? 0 : s.rain;
     this.snow = Math.max(s.snow, cold ? s.rain : 0, winterFlurry * (1 - s.rain));
-    const tint = this.circuit.fogTint ?? [1, 1, 1];
     // The haze away from a low sun is cooler than the horizon under it.
     fog.color
       .copy(s.horizon)
       .lerp(s.upper, s.dusk * 0.3)
-      .multiply(rgb(...tint));
+      .multiply(this.fogTint);
     fog.near = this.circuit.fogNear * s.fogNear;
     fog.far = this.circuit.fogFar * s.fogFar;
     background.copy(fog.color);
     LOOK.far.value.copy(fog.color);
     if (sun) sun.color.copy(s.lit).multiplyScalar(0.9);
     if (hemi) {
-      hemi.color.copy(s.upper).lerp(rgb(1, 1, 1), 0.5);
+      hemi.color.copy(s.upper).lerp(WHITE, 0.5);
       hemi.groundColor.copy(s.seaMid);
     }
-  }
-
-  /** Puts the look back as the menus have it. */
-  static reset(): void {
-    resetLook();
   }
 }

@@ -8,6 +8,7 @@
 import * as THREE from "three/webgpu";
 import {
   Fn,
+  If,
   cameraPosition,
   clamp,
   dot,
@@ -113,26 +114,36 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
       .mul(smoothstep(220, 40, dist))
       .mul(LOOK.shadow);
     c = mix(c, mix(white, LOOK.glow, LOOK.dusk.mul(0.6)), glint);
-    // Rain: rings spreading on the water close by, in some cells, each to its own beat.
-    const cell = floor(xz.mul(0.8));
-    const lot = hash(cell.x.add(cell.y.mul(57.0)));
-    const beat = fract(i.time.mul(1.3).add(lot.mul(7)));
-    const ring = fract(xz.mul(0.8)).sub(0.5).length().sub(beat.mul(0.36)).abs();
-    const rw = max(fwidth(ring), float(1e-3));
-    const rings = smoothstep(rw.mul(1.2), float(0), ring)
-      .mul(float(1).sub(beat))
-      .mul(lot.greaterThan(0.45).select(1, 0))
-      .mul(smoothstep(28, 8, dist))
-      .mul(LOOK.rainRings);
+    // Rain: rings spreading on the water close by, in some cells, each to its own beat (worked out only in the rain).
+    const rings = float(0).toVar();
+    If(LOOK.rainRings.greaterThan(0.001), () => {
+      const cell = floor(xz.mul(0.8));
+      const lot = hash(cell.x.add(cell.y.mul(57.0)));
+      const beat = fract(i.time.mul(1.3).add(lot.mul(7)));
+      const ring = fract(xz.mul(0.8)).sub(0.5).length().sub(beat.mul(0.36)).abs();
+      const rw = max(fwidth(ring), float(1e-3));
+      rings.assign(
+        smoothstep(rw.mul(1.2), float(0), ring)
+          .mul(float(1).sub(beat))
+          .mul(lot.greaterThan(0.45).select(1, 0))
+          .mul(smoothstep(28, 8, dist))
+          .mul(LOOK.rainRings),
+      );
+    });
     c = mix(c, mix(c, white, 0.5), rings);
     // Foam: crests, wakes and the surf on every shore, cut out with a pale rim.
     // Whitecaps: small, only on the highest crests; the wind breaks them out all over.
     const crest = smoothstep(1.5, 1.85, h)
       .mul(0.7)
       .mul(cut(0.35, flowNoise(xz.mul(0.25), i.time, 0.2)));
-    const caps = cut(float(0.9).sub(LOOK.whitecaps.mul(0.32)), flowNoise(xz.mul(0.11), i.time, 0.35))
-      .mul(cut(0.2, flowNoise(xz.mul(0.6).add(31), i.time, 1.2)))
-      .mul(LOOK.whitecaps);
+    const caps = float(0).toVar();
+    If(LOOK.whitecaps.greaterThan(0.001), () => {
+      caps.assign(
+        cut(float(0.9).sub(LOOK.whitecaps.mul(0.32)), flowNoise(xz.mul(0.11), i.time, 0.35))
+          .mul(cut(0.2, flowNoise(xz.mul(0.6).add(31), i.time, 1.2)))
+          .mul(LOOK.whitecaps),
+      );
+    });
     const wake = smoothstep(0.04, 0.7, i.wake).mul(
       mix(float(0.55), float(1), flowNoise(xz.mul(0.7), i.time, 1).mul(0.5).add(0.5)),
     );

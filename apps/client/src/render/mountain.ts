@@ -17,6 +17,7 @@ import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import {
   Fn,
+  If,
   abs,
   attribute,
   cameraPosition,
@@ -193,6 +194,8 @@ const DYE_WIDTH = 0.6;
 /** How far either side (m) the curvature and the local pitch are measured over, and the pitch around it. */
 const CURVE_SPAN = 1.5;
 const PITCH_SPAN = 9;
+/** A snow line below this (m) covers the whole mountain. */
+const SNOW_EVERYWHERE = -1000;
 /** The groomed snow reaches this far past the riding width (m). */
 const RUN_EDGE = 4;
 
@@ -262,28 +265,33 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
   // How deep the snow lies (0 = bare ground, 1 = covered): on the run it is
   // groomed (patchy at its edges when the cover is thin); off it, down to the
   // snow line, deeper in hollows and thinner on steep faces.
+  // (Worked out only where the snow can be off: never in a winter that covers it all.)
   const cover = Fn(() => {
-    const p = positionWorld;
-    const n = noise4(p.xz.mul(0.013));
-    const fine = noise4(p.xz.mul(0.21));
-    const above = p.y.sub(LOOK.snowLine).add(n.x.mul(28)).div(22);
-    let off: THREE.Node<"float"> = above.add(normalWorld.y.sub(0.86).mul(6)).add(fine.y.mul(0.5));
-    if (ribbon) {
-      const hollow = attribute("shade", "float").max(0).mul(0.8);
-      off = off.add(hollow);
-      const run = attribute("run", "float");
-      // A thin cover (the sim's depth, m) is patchy at the run's edges, with tufts poking through.
-      const thin = clamp(float(0.45).sub(attribute<"vec4">("snow", "vec4").x).div(0.3), 0, 1);
-      const groomed = run
-        .mul(2.2)
-        .sub(1)
-        .sub(thin.mul(fine.x.mul(0.6).add(1.2)));
-      const tufts = noise4(p.xz.mul(0.9))
-        .w.sub(float(1).sub(thin.mul(0.42)))
-        .mul(5);
-      off = max(off, groomed).sub(max(tufts, 0));
-    }
-    return clamp(cut0(off), 0, 1);
+    const covered = float(1).toVar();
+    If(LOOK.snowLine.greaterThan(SNOW_EVERYWHERE), () => {
+      const p = positionWorld;
+      const n = noise4(p.xz.mul(0.013));
+      const fine = noise4(p.xz.mul(0.21));
+      const above = p.y.sub(LOOK.snowLine).add(n.x.mul(28)).div(22);
+      let off: THREE.Node<"float"> = above.add(normalWorld.y.sub(0.86).mul(6)).add(fine.y.mul(0.5));
+      if (ribbon) {
+        const hollow = attribute("shade", "float").max(0).mul(0.8);
+        off = off.add(hollow);
+        const run = attribute("run", "float");
+        // A thin cover (the sim's depth, m) is patchy at the run's edges, with tufts poking through.
+        const thin = clamp(float(0.45).sub(attribute<"vec4">("snow", "vec4").x).div(0.3), 0, 1);
+        const groomed = run
+          .mul(2.2)
+          .sub(1)
+          .sub(thin.mul(fine.x.mul(0.6).add(1.2)));
+        const tufts = noise4(p.xz.mul(0.9))
+          .w.sub(float(1).sub(thin.mul(0.42)))
+          .mul(5);
+        off = max(off, groomed).sub(max(tufts, 0));
+      }
+      covered.assign(clamp(cut0(off), 0, 1));
+    });
+    return covered;
   })();
   mat.colorNode = Fn(() => {
     const p = positionWorld;
@@ -338,19 +346,27 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
       // The snow the sim has here: slush wetter, greyer and darker, the tracks cut deep into it; hard
       // snow icy and polished; fresh powder bright, filling the old tracks in.
       const snow = attribute<"vec4">("snow", "vec4");
-      const polish = smoothstep(0.2, 0.7, noise4(vec2(s.mul(0.05), o.mul(0.35))).y)
-        .mul(0.5)
-        .add(0.5);
-      c = mix(c, c.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94)), snow.w);
+      // (Each worked out only on a run that has that snow somewhere: `LOOK.runSnow`.)
+      const sc = c.toVar();
+      If(LOOK.runSnow.z.greaterThan(0.001), () => {
+        const polish = smoothstep(0.2, 0.7, noise4(vec2(s.mul(0.05), o.mul(0.35))).y)
+          .mul(0.5)
+          .add(0.5);
+        sc.assign(mix(sc, sc.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94)), snow.w));
+      });
       // A thin cover is scratchy: grass and earth showing through in specks.
-      const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
-      const speck = cut0(noise4(p.xz.mul(2.3)).x.sub(float(0.8).sub(thinHere.mul(0.4))))
-        .mul(smoothstep(0.05, 0.3, thinHere))
-        .mul(near);
-      c = mix(c, LOOK.ground2, speck.mul(0.85));
-      const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
-      c = mix(c, c.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z);
-      c = mix(c, mix(c, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
+      If(LOOK.runSnow.x.greaterThan(0.001), () => {
+        const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
+        const speck = cut0(noise4(p.xz.mul(2.3)).x.sub(float(0.8).sub(thinHere.mul(0.4))))
+          .mul(smoothstep(0.05, 0.3, thinHere))
+          .mul(near);
+        sc.assign(mix(sc, LOOK.ground2, speck.mul(0.85)));
+      });
+      If(LOOK.runSnow.y.greaterThan(0.001), () => {
+        const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
+        sc.assign(mix(sc, sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z));
+      });
+      c = mix(sc, mix(sc, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
@@ -572,6 +588,8 @@ export class Mountain implements Environment {
   private trails = new CarveTrails();
   private forest: THREE.InstancedMesh[] = [];
   private scenery: RunScenery;
+  /** The most thin cover, slush and hard snow anywhere on the run (see `LOOK.runSnow`). */
+  private runSnow = new THREE.Vector3();
   private emitters = new Map<number, Emitter>();
   private random = rng(77);
 
@@ -640,6 +658,7 @@ export class Mountain implements Environment {
     this.sun = sun;
     this.hemi = hemi;
     this.look.apply(0, 0, this.run.path[0]!.y, null, this.fog, this.background, sun, hemi);
+    LOOK.runSnow.value.copy(this.runSnow);
   }
 
   ground(x: number, z: number): number {
@@ -772,11 +791,20 @@ export class Mountain implements Environment {
       points[r * 2] = xyz[(r * cols + middle) * 3]!;
       points[r * 2 + 1] = xyz[(r * cols + middle) * 3 + 2]!;
     }
-    const snow = this.terrain.snow?.(points);
-    if (snow && snow.length >= rows * 4) return snow;
-    const packed = new Float32Array(rows * 4);
-    for (let r = 0; r < rows; r++) packed[r * 4] = 1;
-    return packed;
+    let snow = this.terrain.snow?.(points);
+    if (!snow || snow.length < rows * 4) {
+      snow = new Float32Array(rows * 4);
+      for (let r = 0; r < rows; r++) snow[r * 4] = 1;
+    }
+    for (let r = 0; r < rows; r++) {
+      const thin = Math.max(0, Math.min(1, (0.45 - snow[r * 4]!) / 0.3));
+      this.runSnow.set(
+        Math.max(this.runSnow.x, thin),
+        Math.max(this.runSnow.y, snow[r * 4 + 2]!),
+        Math.max(this.runSnow.z, snow[r * 4 + 3]!),
+      );
+    }
+    return snow;
   }
 
   /**
@@ -1299,6 +1327,7 @@ export class Mountain implements Environment {
       cell.visible = sphere.center.distanceTo(f.eye) - sphere.radius < FOREST_FAR;
     }
     if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
+    LOOK.runSnow.value.copy(this.runSnow);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);
