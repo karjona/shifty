@@ -1,6 +1,7 @@
 // Dev: look testing the cel look without the menus.
 //  `/?celshot=flyover` (`&fly=0.3&freeze`) or `/?celshot=club`: the menu backdrops.
 //  `/?celshot=bay&eye=x,y,z&look=x,y,z&fov=50`: the bay and its course from there.
+//  `/?celshot=course&event=snow&season=fall&weather=storm&time=dusk`: a circuit in its conditions (courseshot.ts).
 //  `/?celshot=hero`: your rider on the club's terrace, framed like a
 //  character select. Options: yaw (rider), sun=x,y,z (offset), cx, cy, dist,
 //  fov, orbit, lift, t (freeze the idle), pose (idle, crossed), seed, bare (slots to empty).
@@ -20,6 +21,11 @@ export const ON_TWOS = 12;
 export async function celshot(params: URLSearchParams): Promise<void> {
   const engine = await Engine.get();
   const kind = params.get("celshot");
+  if (kind === "course") {
+    const { courseShot } = await import("./courseshot.ts");
+    await courseShot(engine, params);
+    return;
+  }
   if (kind === "bay") {
     const world = engine.world;
     world.setEnvironment(sharedBay(engine));

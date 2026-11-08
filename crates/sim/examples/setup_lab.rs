@@ -73,7 +73,7 @@ fn main() {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(4);
-    for course in [CourseId::Oval, CourseId::Mountain] {
+    for course in [CourseId::Oval, CourseId::Mountain, CourseId::Cape] {
         println!("{course:?}: {races} races of 8 bots per setup");
         let mut base = 0.0;
         for (name, bytes) in SETUPS {

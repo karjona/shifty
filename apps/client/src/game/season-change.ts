@@ -6,9 +6,11 @@
 import * as THREE from "three/webgpu";
 import { messages } from "../i18n/index.ts";
 import { holdLoading } from "../loading.ts";
+import { circuit } from "@shifty/rider";
+import { type Season, circuitName } from "./conditions.ts";
 import type { Engine } from "./engine.ts";
 
-export type Season = "summer" | "fall" | "winter" | "spring";
+export type { Season } from "./conditions.ts";
 
 /** Seconds the camera lifts before the courses swap. */
 const LIFT = 1.2;
@@ -17,9 +19,10 @@ const HOLD = 1.8;
 /** The card's fade (see .season-change in menu.css). */
 const FADE_MS = 900;
 
-/** The season of a course (`sim::CourseId`). */
-export function seasonOf(course: number): Season {
-  return course === 1 ? "winter" : "summer";
+/** What the card says under the season: the circuit, if known, and the place. */
+function where(course: number | null): string {
+  const m = messages();
+  return course === null ? m.place : `${circuitName(course, circuit(course)?.sport ?? "jetski")} · ${m.place}`;
 }
 
 /** The card itself, under the menus (the race menu, the status): up until `hide`. */
@@ -28,13 +31,14 @@ export class SeasonCard {
   private gone = false;
   private release: (() => void) | null = null;
 
-  constructor(season: Season, fadeIn = true) {
+  /** `course`: the course coming up (`sim::CourseId`), if known. */
+  constructor(season: Season, fadeIn = true, course: number | null = null) {
     const m = messages();
     this.el = document.createElement("div");
     this.el.className = `season-change season-${season}`;
     this.el.innerHTML = `<b></b><span></span>`;
     this.el.querySelector("b")!.textContent = m.seasons[season];
-    this.el.querySelector("span")!.textContent = m.place;
+    this.el.querySelector("span")!.textContent = where(course);
     document.body.insertBefore(this.el, document.querySelector("#root"));
     if (fadeIn) requestAnimationFrame(() => this.el.classList.add("shown"));
     else this.el.classList.add("shown");
@@ -43,6 +47,11 @@ export class SeasonCard {
   set season(season: Season) {
     this.el.className = this.el.className.replace(/season-(?:summer|fall|winter|spring)/u, `season-${season}`);
     this.el.querySelector("b")!.textContent = messages().seasons[season];
+  }
+
+  /** The course coming up (`sim::CourseId`). */
+  set course(course: number) {
+    this.el.querySelector("span")!.textContent = where(course);
   }
 
   /** Puts the loading sign up while something loads behind it. */
@@ -81,15 +90,25 @@ export class SeasonChange {
   private swap: () => Promise<void>;
   private cleared: () => void;
 
-  /** `swap` puts the next course up behind the card; it clears once that is done, and `cleared` runs once it is gone. */
-  constructor(engine: Engine, season: Season, swap: () => Promise<void>, cleared: () => void = () => {}) {
+  /**
+   * `swap` puts the next course up behind the card; it clears once that is
+   * done, and `cleared` runs once it is gone. `course`: the next course
+   * (`sim::CourseId`).
+   */
+  constructor(
+    engine: Engine,
+    season: Season,
+    swap: () => Promise<void>,
+    cleared: () => void = () => {},
+    course: number | null = null,
+  ) {
     this.engine = engine;
     this.swap = swap;
     this.cleared = cleared;
     const cam = engine.world.camera;
     this.eye = cam.position.clone();
     this.look = new THREE.Vector3(0, 0, -30).applyQuaternion(cam.quaternion).add(cam.position);
-    this.card = new SeasonCard(season);
+    this.card = new SeasonCard(season, true, course);
   }
 
   frame(dt: number): void {

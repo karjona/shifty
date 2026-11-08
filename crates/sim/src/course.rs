@@ -2,8 +2,10 @@
 //! it. Each course belongs to one sport.
 //!
 //! A line is either a loop or an open run:
-//! - The jetski course is a long oval ("stadium") around a rock breakwater:
-//!   two straights joined by half circles, raced for laps.
+//! - The bay is a long oval ("stadium") around a rock breakwater: two
+//!   straights joined by half circles, raced for laps.
+//! - The cape is a loop of any shape (see [`crate::circuit`]) round a
+//!   headland, raced for laps.
 //! - The snowboard course is a run down the mountain (see [`crate::mountain`]),
 //!   raced once from the start gate at the top to the finish at the bottom.
 //!
@@ -14,9 +16,11 @@
 //! Everything here is static data plus pure functions, so the server and
 //! every client agree on it without sending it over the network.
 
-use crate::math::{PI, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
-use crate::mountain::{MOUNTAIN, Run};
-use crate::surface::{SeaState, Surface, SurfaceKind};
+use crate::circuit::{Circuit, Corner};
+use crate::conditions::Conditions;
+use crate::math::{PI, Pcg32, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
+use crate::mountain::{GLADES, MOUNTAIN, Obstacle, Run};
+use crate::surface::{SeaState, Shelter, Surface, SurfaceKind};
 
 /// The sport a course is raced in. It picks the physics, the rules and how
 /// riders are drawn.
@@ -81,6 +85,18 @@ pub enum LandKind {
     Island,
     /// A rock sticking out of the water.
     Rock,
+    /// A headland: rock and cliffs, pines on top.
+    Headland,
+    /// The mainland's rocky coast.
+    Coast,
+    /// A sandy beach.
+    Beach,
+    /// A harbour's breakwater (a mole).
+    Mole,
+    /// A sea stack: a tall pillar of rock standing in the sea.
+    Stack,
+    /// A leg of a natural rock arch (the span over the water isn't solid).
+    Arch,
 }
 
 /// Land: a capsule around the segment from `a` to `b` (world x, z) with
@@ -96,17 +112,27 @@ pub struct LandDef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CourseId {
-    /// Costa Nevada bay: the summer jetski oval.
+    /// Costa Nevada bay: the jetski oval.
     Oval = 0,
-    /// Costa Nevada mountain: the winter snowboard run.
+    /// Costa Nevada mountain: the mountain run, from the summit to the village.
     Mountain = 1,
+    /// Costa Nevada cape: a jetski loop round a rocky headland.
+    Cape = 2,
+    /// Costa Nevada mountain: the glades, from the ridge to the lake.
+    Glades = 3,
 }
 
 impl CourseId {
+    /// Every circuit, in id order. Each one here can be drawn for a race in
+    /// any season its sport rides (see [`crate::conditions`]).
+    pub const ALL: &'static [CourseId] = &[Self::Oval, Self::Mountain, Self::Cape, Self::Glades];
+
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::Oval),
             1 => Some(Self::Mountain),
+            2 => Some(Self::Cape),
+            3 => Some(Self::Glades),
             _ => None,
         }
     }
@@ -115,7 +141,13 @@ impl CourseId {
         match self {
             Self::Oval => &OVAL,
             Self::Mountain => &MOUNTAIN,
+            Self::Cape => &CAPE,
+            Self::Glades => &GLADES,
         }
+    }
+
+    pub fn sport(self) -> Sport {
+        self.course().sport
     }
 }
 
@@ -129,7 +161,8 @@ pub struct Course {
     pub laps: u8,
     /// Arc length of the start line (on a loop, also the finish line).
     pub start_s: f32,
-    /// Buoys in the order they are met after the start line.
+    /// Buoys in the order they are met after the start line (on a loop, round
+    /// to the ones before it).
     pub buoys: &'static [BuoyDef],
     pub ramps: &'static [RampDef],
     pub land: &'static [LandDef],
@@ -141,6 +174,8 @@ pub struct Course {
 pub enum Line {
     /// A loop: two straights along X joined by half circles.
     Stadium(Stadium),
+    /// A loop of straights and arcs round a polygon of corners.
+    Loop(&'static Circuit),
     /// An open run down the mountain.
     Run(&'static Run),
 }
@@ -366,30 +401,356 @@ pub static OVAL: Course = Course {
     },
 };
 
+static CAPE_LINE: Circuit = Circuit::new(
+    &[
+        // The harbour's head: right, toward the arch.
+        Corner {
+            x: -126.0,
+            z: -90.0,
+            radius: 27.0,
+        },
+        // Out of the arch into the beach cove: right, down the beach.
+        Corner {
+            x: 90.0,
+            z: -90.0,
+            radius: 34.2,
+        },
+        // Round the point under the watchtower: a long fast sweeper.
+        Corner {
+            x: 97.2,
+            z: 162.0,
+            radius: 64.8,
+        },
+        // Off the stacks: right, back up the west side.
+        Corner {
+            x: -144.0,
+            z: 184.5,
+            radius: 27.0,
+        },
+        // Through the stacks: left...
+        Corner {
+            x: -94.5,
+            z: 117.0,
+            radius: 23.4,
+        },
+        // ...and right, lined up for the harbour mouth.
+        Corner {
+            x: -126.0,
+            z: 67.5,
+            radius: 23.4,
+        },
+    ],
+    42.0,
+);
+
+/// The cape: a 900 m loop round a rocky headland, three laps. Out of the
+/// harbour, under the natural arch through the headland's neck, down the
+/// beach cove (the start), round the point under the watchtower, west along
+/// the open sea (the swell rolls in against you, with the ramps), weaving
+/// through the sea stacks, and in through the narrow harbour mouth. The
+/// harbour and the coves are sheltered; off the point takes the full swell.
+pub static CAPE: Course = Course {
+    sport: Sport::Jetski,
+    line: Line::Loop(&CAPE_LINE),
+    lane_half: 22.0,
+    laps: 3,
+    start_s: 270.0,
+    buoys: &[
+        // After the start, down the beach toward the ramp.
+        BuoyDef {
+            s: 330.0,
+            offset: 0.0,
+            keep: Keep::Right,
+        },
+        // Round the point: inside markers.
+        BuoyDef {
+            s: 423.0,
+            offset: 10.0,
+            keep: Keep::Right,
+        },
+        BuoyDef {
+            s: 472.5,
+            offset: 10.0,
+            keep: Keep::Right,
+        },
+        // Off the point, between the ramps.
+        BuoyDef {
+            s: 548.0,
+            offset: 2.0,
+            keep: Keep::Left,
+        },
+        // The stacks: in, round, out.
+        BuoyDef {
+            s: 657.0,
+            offset: 7.0,
+            keep: Keep::Right,
+        },
+        BuoyDef {
+            s: 711.0,
+            offset: -4.0,
+            keep: Keep::Left,
+        },
+        BuoyDef {
+            s: 765.0,
+            offset: 5.0,
+            keep: Keep::Right,
+        },
+        // In the harbour, along the moored boats.
+        BuoyDef {
+            s: 841.5,
+            offset: -5.0,
+            keep: Keep::Left,
+        },
+        // The harbour's head: inside marker.
+        BuoyDef {
+            s: 18.0,
+            offset: 9.0,
+            keep: Keep::Right,
+        },
+        // Lines you up for the arch.
+        BuoyDef {
+            s: 94.5,
+            offset: -6.0,
+            keep: Keep::Left,
+        },
+        // Into the beach cove.
+        BuoyDef {
+            s: 214.2,
+            offset: 9.0,
+            keep: Keep::Right,
+        },
+    ],
+    ramps: &[
+        // Down the beach, toward the crowd.
+        RampDef {
+            s: 368.0,
+            offset: -6.0,
+            length: 9.0,
+            width: 5.0,
+            height: 2.6,
+        },
+        // Off the point, into the swell.
+        RampDef {
+            s: 510.0,
+            offset: 8.0,
+            length: 9.0,
+            width: 5.0,
+            height: 2.6,
+        },
+        RampDef {
+            s: 596.0,
+            offset: -7.0,
+            length: 9.0,
+            width: 5.0,
+            height: 2.6,
+        },
+    ],
+    land: &[
+        // The arch through the headland's neck: its legs, 28 m apart.
+        LandDef {
+            a: (-5.4, -112.0),
+            b: (5.4, -112.0),
+            radius: 8.0,
+            kind: LandKind::Arch,
+        },
+        LandDef {
+            a: (-5.4, -68.0),
+            b: (5.4, -68.0),
+            radius: 8.0,
+            kind: LandKind::Arch,
+        },
+        // The neck, from the mainland to the arch, and the headland beyond it.
+        LandDef {
+            a: (0.0, -135.0),
+            b: (0.0, -126.0),
+            radius: 16.2,
+            kind: LandKind::Headland,
+        },
+        LandDef {
+            a: (-19.8, -55.8),
+            b: (19.8, -55.8),
+            radius: 12.6,
+            kind: LandKind::Headland,
+        },
+        LandDef {
+            a: (-4.5, -49.5),
+            b: (0.0, 9.0),
+            radius: 27.0,
+            kind: LandKind::Headland,
+        },
+        LandDef {
+            a: (0.0, 9.0),
+            b: (4.5, 81.0),
+            radius: 37.8,
+            kind: LandKind::Headland,
+        },
+        LandDef {
+            a: (4.5, 81.0),
+            b: (9.0, 112.5),
+            radius: 23.4,
+            kind: LandKind::Headland,
+        },
+        LandDef {
+            a: (-45.0, 45.0),
+            b: (-36.0, 99.0),
+            radius: 25.2,
+            kind: LandKind::Headland,
+        },
+        // The mainland round the bay: the coast behind the arch and the
+        // hills behind it, the harbour town and the coast past it on the
+        // west, the beach and the coast past it on the east.
+        LandDef {
+            a: (-700.0, -180.0),
+            b: (700.0, -180.0),
+            radius: 54.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (-800.0, -420.0),
+            b: (800.0, -420.0),
+            radius: 200.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (-420.0, -180.0),
+            b: (-420.0, 300.0),
+            radius: 150.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (430.0, -180.0),
+            b: (430.0, 300.0),
+            radius: 120.0,
+            kind: LandKind::Coast,
+        },
+        LandDef {
+            a: (-226.8, -135.0),
+            b: (-226.8, 108.0),
+            radius: 54.0,
+            kind: LandKind::Town,
+        },
+        LandDef {
+            a: (229.5, -135.0),
+            b: (235.8, 108.0),
+            radius: 85.5,
+            kind: LandKind::Beach,
+        },
+        // The harbour mole, and the beacon rock across the mouth from its head.
+        LandDef {
+            a: (-193.5, 37.8),
+            b: (-147.6, 37.8),
+            radius: 5.4,
+            kind: LandKind::Mole,
+        },
+        LandDef {
+            a: (-106.2, 36.0),
+            b: (-106.2, 36.0),
+            radius: 5.0,
+            kind: LandKind::Rock,
+        },
+        // The sea stacks off the headland's south-west.
+        LandDef {
+            a: (-95.4, 156.6),
+            b: (-95.4, 156.6),
+            radius: 6.0,
+            kind: LandKind::Stack,
+        },
+        LandDef {
+            a: (-117.0, 119.0),
+            b: (-117.0, 119.0),
+            radius: 6.0,
+            kind: LandKind::Stack,
+        },
+        LandDef {
+            a: (-136.8, 104.4),
+            b: (-136.8, 104.4),
+            radius: 5.0,
+            kind: LandKind::Stack,
+        },
+        LandDef {
+            a: (-105.0, 64.0),
+            b: (-105.0, 64.0),
+            radius: 5.0,
+            kind: LandKind::Stack,
+        },
+        LandDef {
+            a: (-184.5, 216.0),
+            b: (-184.5, 216.0),
+            radius: 8.0,
+            kind: LandKind::Stack,
+        },
+    ],
+    sea: SeaState {
+        // Rolling in from the south-west: against you off the point.
+        direction: Some(2.5),
+        spread: 0.25,
+        shelter: &[
+            // The harbour, behind its mole.
+            Shelter {
+                x: -135.0,
+                z: -36.0,
+                inner: 40.0,
+                outer: 90.0,
+                calm: 0.2,
+            },
+            // The arch, in the headland's lee.
+            Shelter {
+                x: 0.0,
+                z: -90.0,
+                inner: 36.0,
+                outer: 99.0,
+                calm: 0.35,
+            },
+            // The beach cove.
+            Shelter {
+                x: 117.0,
+                z: -72.0,
+                inner: 36.0,
+                outer: 126.0,
+                calm: 0.55,
+            },
+        ],
+        ..SeaState::OPEN_SEA
+    },
+};
+
 impl Course {
     /// Length of the centre line (one lap of a loop).
     pub fn length(&self) -> f32 {
         match &self.line {
             Line::Stadium(st) => st.length(),
+            Line::Loop(c) => c.length(),
             Line::Run(run) => run.length(),
         }
     }
 
     /// Whether the line is a loop raced for laps (or an open run).
     pub fn looped(&self) -> bool {
-        matches!(self.line, Line::Stadium(_))
+        matches!(self.line, Line::Stadium(_) | Line::Loop(_))
+    }
+
+    /// Whether the course is on the water (a loop), or on the snow (a run).
+    pub fn afloat(&self) -> bool {
+        self.looped()
     }
 
     pub fn stadium(&self) -> Option<&Stadium> {
         match &self.line {
             Line::Stadium(st) => Some(st),
-            Line::Run(_) => None,
+            Line::Loop(_) | Line::Run(_) => None,
+        }
+    }
+
+    pub fn circuit(&self) -> Option<&'static Circuit> {
+        match self.line {
+            Line::Loop(c) => Some(c),
+            Line::Stadium(_) | Line::Run(_) => None,
         }
     }
 
     pub fn run(&self) -> Option<&'static Run> {
         match self.line {
-            Line::Stadium(_) => None,
+            Line::Stadium(_) | Line::Loop(_) => None,
             Line::Run(run) => Some(run),
         }
     }
@@ -397,8 +758,21 @@ impl Course {
     /// The sea this course is raced on (flat calm for courses on land).
     pub fn surface(&self, kind: SurfaceKind, seed: u32) -> Surface {
         match self.line {
-            Line::Stadium(_) => Surface::with_sea(kind, seed, &self.sea),
+            Line::Stadium(_) | Line::Loop(_) => Surface::with_sea(kind, seed, &self.sea),
             Line::Run(_) => Surface::flat(),
+        }
+    }
+
+    /// The sea this course is raced on in some conditions. Only the sea as
+    /// designed (`SurfaceKind::Swells`) follows them: flat, calm and rough
+    /// seas (dev) stay as they are.
+    pub fn surface_in(&self, kind: SurfaceKind, seed: u32, conditions: Conditions) -> Surface {
+        match self.line {
+            Line::Stadium(_) | Line::Loop(_) if kind == SurfaceKind::Swells => {
+                let veer = Pcg32::new(u64::from(seed) ^ 0x0BEE_7000).range(-1.0, 1.0);
+                Surface::turning(kind, seed, &self.sea, conditions.sea(veer))
+            }
+            _ => self.surface(kind, seed),
         }
     }
 
@@ -426,6 +800,7 @@ impl Course {
     pub fn centerline(&self, s: f32) -> Frame {
         match &self.line {
             Line::Stadium(st) => st.centerline(self.wrap_s(s)),
+            Line::Loop(c) => c.centerline(self.wrap_s(s)),
             Line::Run(run) => run.centerline(s),
         }
     }
@@ -434,13 +809,14 @@ impl Course {
     pub fn project(&self, x: f32, z: f32) -> (f32, f32) {
         match &self.line {
             Line::Stadium(st) => st.project(x, z),
+            Line::Loop(c) => c.project(x, z),
             Line::Run(run) => run.project(x, z),
         }
     }
 
     pub fn gate_count(&self) -> usize {
         match &self.line {
-            Line::Stadium(_) => self.buoys.len() + 1,
+            Line::Stadium(_) | Line::Loop(_) => self.buoys.len() + 1,
             Line::Run(run) => run.checkpoints.len() + 2,
         }
     }
@@ -450,7 +826,7 @@ impl Course {
             return Gate::Start;
         }
         match &self.line {
-            Line::Stadium(_) => Gate::Buoy(i - 1),
+            Line::Stadium(_) | Line::Loop(_) => Gate::Buoy(i - 1),
             Line::Run(run) if i <= run.checkpoints.len() => Gate::Checkpoint(i - 1),
             Line::Run(_) => Gate::Finish,
         }
@@ -523,8 +899,8 @@ impl Course {
 
     /// Keeps a body at `pos` with velocity `vel` on the course: out of the
     /// breakwater, the land and the sides of the ramps, inside the outer
-    /// limit, and (on a run) between its edges and clear of what stands
-    /// on it. Returns the hardest impact (speed into the wall, m/s) on any
+    /// limit (on the cape, as far either side of the centre line), and (on a
+    /// run) between its edges and clear of what stands on it. Returns the hardest impact (speed into the wall, m/s) on any
     /// contact.
     pub fn collide(
         &self,
@@ -547,6 +923,15 @@ impl Course {
                     note(push(pos, vel, -nx, -nz, d - outer));
                 }
             }
+            Line::Loop(c) => {
+                let (s, offset) = c.project(pos.x, pos.z);
+                let limit = c.limit - radius;
+                if offset.abs() > limit {
+                    let (rx, rz) = c.centerline(s).right();
+                    let sign = if offset > 0.0 { -1.0 } else { 1.0 };
+                    note(push(pos, vel, rx * sign, rz * sign, offset.abs() - limit));
+                }
+            }
             Line::Run(run) => {
                 let (s, offset) = run.project(pos.x, pos.z);
                 let limit = run.limit(s) - radius;
@@ -558,20 +943,10 @@ impl Course {
                     // little, and hits count for less.
                     note(slide(pos, vel, rx * sign, rz * sign, depth) * SOFT_WALL);
                 }
-                for o in run.obstacles() {
-                    let dx = pos.x - o.x;
-                    let dz = pos.z - o.z;
-                    let min = o.radius + radius;
-                    let dd = dx * dx + dz * dz;
-                    if dd < min * min && pos.y < o.y + o.height {
-                        let dist = sqrt(dd);
-                        let (nx, nz) = if dist > 1e-4 {
-                            (dx / dist, dz / dist)
-                        } else {
-                            (1.0, 0.0)
-                        };
-                        note(slide(pos, vel, nx, nz, min - dist));
-                    }
+                if let Some(impact) =
+                    collide_obstacles(pos, vel, run.obstacles().iter().copied(), radius, false)
+                {
+                    note(impact);
                 }
             }
         }
@@ -713,6 +1088,41 @@ impl LandDef {
 
 /// Moves `pos` by `depth` along `(nx, nz)` and bounces the velocity off
 /// that wall. Returns the speed of the impact (into the wall).
+/// Keeps a body of `radius` out of obstacles standing on a run (it slides
+/// along them, or clears them in the air). Returns the hardest impact.
+/// `rounded` obstacles (rocks through the snow) shed you without holding
+/// you back: pressed against one, you slip round it.
+pub fn collide_obstacles(
+    pos: &mut Vec3,
+    vel: &mut Vec3,
+    obstacles: impl IntoIterator<Item = Obstacle>,
+    radius: f32,
+    rounded: bool,
+) -> Option<f32> {
+    let mut hit: Option<f32> = None;
+    for o in obstacles {
+        let dx = pos.x - o.x;
+        let dz = pos.z - o.z;
+        let min = o.radius + radius;
+        let dd = dx * dx + dz * dz;
+        if dd < min * min && pos.y < o.y + o.height {
+            let dist = sqrt(dd);
+            let (nx, nz) = if dist > 1e-4 {
+                (dx / dist, dz / dist)
+            } else {
+                (1.0, 0.0)
+            };
+            let impact = if rounded {
+                glance(pos, vel, nx, nz, min - dist)
+            } else {
+                slide(pos, vel, nx, nz, min - dist)
+            };
+            hit = Some(hit.map_or(impact, |h: f32| h.max(impact)));
+        }
+    }
+    hit
+}
+
 fn push(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
     pos.x += nx * depth;
     pos.z += nz * depth;
@@ -730,6 +1140,20 @@ fn push(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
 
 /// Like [`push`], but friction along the wall grows with the impact, so
 /// sliding along it barely slows you. Returns the speed of the impact.
+/// Moves a body out of something round and takes away the speed into it,
+/// keeping the rest. Returns the speed into it.
+fn glance(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
+    pos.x += nx * depth;
+    pos.z += nz * depth;
+    let vn = vel.x * nx + vel.z * nz;
+    if vn >= 0.0 {
+        return 0.0;
+    }
+    vel.x -= nx * vn;
+    vel.z -= nz * vn;
+    -vn
+}
+
 fn slide(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
     pos.x += nx * depth;
     pos.z += nz * depth;
@@ -756,7 +1180,12 @@ mod tests {
 
     #[test]
     fn centre_line_and_projection_agree() {
-        let c = &OVAL;
+        for c in [&OVAL, &CAPE] {
+            line_and_projection_agree(c);
+        }
+    }
+
+    fn line_and_projection_agree(c: &Course) {
         let mut s = 0.5;
         while s < c.length() {
             let f = c.centerline(s);
@@ -780,7 +1209,12 @@ mod tests {
 
     #[test]
     fn land_is_solid_and_clear_of_the_racing_line() {
-        let c = &OVAL;
+        for c in [&OVAL, &CAPE] {
+            land_clear(c);
+        }
+    }
+
+    fn land_clear(c: &Course) {
         for land in c.land {
             let (cx, cz) = land.a;
             let mut pos = Vec3::new(cx + 0.5, 0.0, cz + 0.5);
@@ -810,12 +1244,83 @@ mod tests {
 
     #[test]
     fn buoys_are_in_order_and_in_the_lane() {
-        let c = &OVAL;
-        let mut last = c.start_s;
-        for b in c.buoys {
-            assert!(b.s > last && b.s < c.length());
-            assert!(b.offset.abs() < c.lane_half);
-            last = b.s;
+        for c in [&OVAL, &CAPE] {
+            // In the order met after the start line.
+            let mut last = 0.0;
+            for b in c.buoys {
+                let after = c.wrap_s(b.s - c.start_s);
+                assert!(after > last && b.s < c.length());
+                assert!(b.offset.abs() < c.lane_half);
+                last = after;
+            }
+        }
+    }
+
+    #[test]
+    fn the_cape_loops_without_kinks() {
+        let c = &CAPE;
+        let l = c.length();
+        assert!((850.0..950.0).contains(&l), "{l}");
+        // The line closes on itself, heading the same way.
+        let a = c.centerline(0.0);
+        let b = c.centerline(l - 0.01);
+        assert!((a.x - b.x).abs() < 0.05 && (a.z - b.z).abs() < 0.05);
+        assert!(crate::math::angle_diff(a.yaw, b.yaw).abs() < 0.01);
+        // Its pieces meet without a step.
+        let mut s = 0.0;
+        while s < l {
+            let f = c.centerline(s);
+            let g = c.centerline(s + 0.5);
+            assert!((f.x - g.x).hypot(f.z - g.z) < 0.51, "step at {s}");
+            s += 0.5;
+        }
+    }
+
+    #[test]
+    fn the_arch_is_the_only_way_through_the_headland() {
+        let c = &CAPE;
+        let s = Surface::flat();
+        // Riding straight through the arch, on the centre line or near its legs.
+        for off in [-9.0, 0.0, 9.0] {
+            let f = c.centerline(150.0);
+            let (x, z) = f.at_offset(off);
+            let mut pos = Vec3::new(x, 0.0, z);
+            let mut vel = Vec3::new(20.0, 0.0, 0.0);
+            assert!(c.collide(&mut pos, &mut vel, &s, 0).is_none(), "{off}");
+        }
+        // Either side of the arch, the rock stops you.
+        for z in [-120.0, -60.0] {
+            let mut pos = Vec3::new(0.0, 0.0, z);
+            let mut vel = Vec3::new(20.0, 0.0, 0.0);
+            assert!(c.collide(&mut pos, &mut vel, &s, 0).is_some(), "{z}");
+        }
+    }
+
+    #[test]
+    fn the_harbour_is_sheltered_and_the_point_is_not() {
+        let sea = CAPE.surface(SurfaceKind::Swells, 3);
+        let (harbour, _, _) = sea.exposure(-130.0, -30.0);
+        let (point, _, _) = sea.exposure(20.0, 190.0);
+        assert!(harbour < 0.3, "{harbour}");
+        assert!((point - 1.0).abs() < 1e-6, "{point}");
+        // The swell's slope matches its height, sheltered or not.
+        for (x, z) in [
+            (-130.0, -30.0),
+            (-120.0, 30.0),
+            (60.0, -80.0),
+            (20.0, 190.0),
+        ] {
+            for tick in [0, 77, 400] {
+                let h = 0.05;
+                let a = sea.sample(x, z, tick);
+                let dx = (sea.height(x + h, z, tick) - sea.height(x - h, z, tick)) / (2.0 * h);
+                let dz = (sea.height(x, z + h, tick) - sea.height(x, z - h, tick)) / (2.0 * h);
+                assert!(
+                    (a.dhdx - dx).abs() < 0.02 && (a.dhdz - dz).abs() < 0.02,
+                    "{x} {z} {tick}: {a:?} {dx} {dz}"
+                );
+                assert!((a.height - sea.height(x, z, tick)).abs() < 1e-5);
+            }
         }
     }
 

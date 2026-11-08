@@ -1,11 +1,25 @@
 // The lobby Worker: accounts (Better Auth), player profiles, menu content,
-// and starting races (single player, private rooms, matchmaking). Race
-// servers report in here too (heartbeats, results).
+// and starting races (single player, time trials, private rooms,
+// matchmaking). Race servers report in here too (heartbeats, results, time
+// trial runs).
+import { parsePlan, TILT } from "@shifty/rider";
 import { Hono, type Context } from "hono";
 import { type Auth, createAuth } from "./auth.ts";
 import { menuContent } from "./content.ts";
 import { type Db, openRequestDb } from "./db/client.ts";
 import { databaseUrl, type Env } from "./env.ts";
+import {
+  checkGhost,
+  decodeGhost,
+  ghostBytes,
+  isGhostId,
+  loadBoard,
+  parseRun,
+  parseTrial,
+  startTimeTrial,
+  storeRun,
+  trialQuery,
+} from "./ghosts.ts";
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
 import { devMailbox } from "./mail.ts";
@@ -24,7 +38,6 @@ import {
 } from "./riders.ts";
 import { isRoomCode, newRoomCode } from "./rooms.ts";
 import type { ServerInfo } from "./servers.ts";
-import { isEventChoice } from "./tickets.ts";
 import { VERSION } from "./version.ts";
 
 export { Matchmaker } from "./matchmaker.ts";
@@ -98,6 +111,19 @@ app.post("/api/servers/results", async (c) => {
   const report = parseReport(await c.req.json().catch((): unknown => null));
   if (!report) return c.json({ error: "bad_request" }, 400);
   return c.json({ stored: await storeReport(c.var.db, report) });
+});
+
+app.post("/api/servers/runs", async (c) => {
+  if (!(await raceServer(c))) return c.json({ error: "unauthorized" }, 401);
+  const run = parseRun(await c.req.json().catch((): unknown => null));
+  if (!run) return c.json({ error: "bad_request" }, 400);
+  const servers = await c.env.SERVERS.get(c.env.SERVERS.idFromName("all")).live();
+  if (!servers.some((s) => s.addr === run.server)) return c.json({ error: "unknown_server" }, 403);
+  const ghost = decodeGhost(run.ghost);
+  if (!ghost) return c.json({ error: "bad_run", reason: "base64" }, 400);
+  const checked = checkGhost(ghost, run);
+  if (typeof checked === "string") return c.json({ error: "bad_run", reason: checked }, 400);
+  return c.json(await storeRun(c.var.db, run, ghost));
 });
 
 app.on(["GET", "POST"], "/api/auth/*", (c) => c.var.auth.handler(c.req.raw));
@@ -203,10 +229,11 @@ app.get("/api/content", async (c) => {
 app.post("/api/play/single", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
-  const event = (await jsonBody(c.req.raw)).event ?? "gp";
-  if (!isEventChoice(event)) return c.json({ error: "bad_request" }, 400);
+  const body = await jsonBody(c.req.raw);
+  const plan = body.plan === undefined ? TILT : parsePlan(body.plan);
+  if (!plan) return c.json({ error: "bad_request" }, 400);
   try {
-    const ticket = await startSingle(c.env, { userId: p.user.id, handle: p.player.handle }, event);
+    const ticket = await startSingle(c.env, { userId: p.user.id, handle: p.player.handle }, plan);
     return c.json({ ticket });
   } catch (e) {
     if (e instanceof NoRaceServer) return c.json({ error: "no_server" }, 503);
@@ -214,17 +241,51 @@ app.post("/api/play/single", async (c) => {
   }
 });
 
+app.post("/api/play/time-trial", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const trial = parseTrial(await jsonBody(c.req.raw));
+  if (!trial) return c.json({ error: "bad_request" }, 400);
+  try {
+    const racer = { userId: p.user.id, handle: p.player.handle };
+    return c.json({ ticket: await startTimeTrial(c.env, racer, trial.course, trial.season) });
+  } catch (e) {
+    if (e instanceof NoRaceServer) return c.json({ error: "no_server" }, 503);
+    throw e;
+  }
+});
+
+app.get("/api/time-trial/board", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const trial = trialQuery(c.req.query("course"), c.req.query("season"));
+  if (!trial) return c.json({ error: "bad_request" }, 400);
+  return c.json(await loadBoard(c.var.db, trial, p.user.id));
+});
+
+app.get("/api/time-trial/ghosts/:id", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const id = c.req.param("id");
+  const ghost = isGhostId(id) ? await ghostBytes(c.var.db, id) : null;
+  if (!ghost) return c.json({ error: "no_ghost" }, 404);
+  return c.body(ghost, 200, {
+    "content-type": "application/octet-stream",
+    "cache-control": "private, max-age=31536000, immutable",
+  });
+});
+
 app.post("/api/rooms", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   const body = await jsonBody(c.req.raw);
-  const event = body.event ?? "gp";
+  const plan = body.plan === undefined ? TILT : parsePlan(body.plan);
   const bots = typeof body.bots === "number" ? body.bots : 3;
-  if (!isEventChoice(event)) return c.json({ error: "bad_request" }, 400);
+  if (!plan) return c.json({ error: "bad_request" }, 400);
   for (let i = 0; i < 8; i++) {
     const code = newRoomCode();
     // oxlint-disable-next-line eslint/no-await-in-loop
-    if (await c.env.ROOMS.get(c.env.ROOMS.idFromName(code)).create(code, p.user.id, event, bots)) {
+    if (await c.env.ROOMS.get(c.env.ROOMS.idFromName(code)).create(code, p.user.id, plan, bots)) {
       return c.json({ code });
     }
   }

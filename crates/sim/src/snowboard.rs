@@ -27,6 +27,7 @@
 //! Units are per unit of mass: forces are accelerations.
 
 use crate::DT;
+use crate::conditions::SnowGrip;
 use crate::course::Frame;
 use crate::input::{Input, buttons};
 use crate::math::{
@@ -217,6 +218,18 @@ pub fn hold(r: &mut Rider, spot: Frame, run: &Run) {
 /// Advance one rider one tick on the snow (or above it). Returns how a jump
 /// ended, on the tick it touches down.
 pub fn integrate(r: &mut Rider, input: Input, setup: Setup, run: &Run) -> Option<Landing> {
+    integrate_on(r, input, setup, run, SnowGrip::PACKED)
+}
+
+/// [`integrate`] on snow that holds the board as `snow` says (see
+/// `conditions::SnowCover`).
+pub fn integrate_on(
+    r: &mut Rider,
+    input: Input,
+    setup: Setup,
+    run: &Run,
+    snow: SnowGrip,
+) -> Option<Landing> {
     let was_bailing = r.bailing();
     r.bail_ticks = r.bail_ticks.saturating_sub(1);
     if was_bailing && !r.bailing() {
@@ -226,7 +239,7 @@ pub fn integrate(r: &mut Rider, input: Input, setup: Setup, run: &Run) -> Option
         r.yaw_rate = 0.0;
     }
     let landing = if r.grounded {
-        ride(r, input, setup, run);
+        ride(r, input, setup, run, snow);
         None
     } else {
         fly(r, input, setup, run)
@@ -236,7 +249,7 @@ pub fn integrate(r: &mut Rider, input: Input, setup: Setup, run: &Run) -> Option
 }
 
 /// One tick on the snow.
-fn ride(r: &mut Rider, input: Input, setup: Setup, run: &Run) {
+fn ride(r: &mut Rider, input: Input, setup: Setup, run: &Run, snow: SnowGrip) {
     let steer = input.steer_f();
     let lean = input.lean_f();
     let bailing = r.bailing();
@@ -263,7 +276,7 @@ fn ride(r: &mut Rider, input: Input, setup: Setup, run: &Run) {
     } else {
         -downhill.dot(right)
     };
-    let handling = setup.handling();
+    let handling = setup.handling() * snow.edge;
     let grip = CARVE_GRIP * handling * steady * (1.0 - TUCK_TURN_LOSS * tuck) + inward.max(0.0);
     let cap = (grip / speed.max(1.0)).min(MAX_TURN_RATE * handling) * (1.0 + SKID_TURN * brake);
     let target = if bailing { 0.0 } else { -steer * cap };
@@ -273,10 +286,11 @@ fn ride(r: &mut Rider, input: Input, setup: Setup, run: &Run) {
     // the motion (never reversing it).
     v += downhill * DT;
     let drag = (DRAG + (TUCK_DRAG - DRAG) * tuck) * setup.glide();
+    let friction = SNOW_FRICTION * snow.friction;
     let decel = if bailing {
-        BAIL_DECEL + SNOW_FRICTION * GRAVITY * n.y
+        BAIL_DECEL + friction * GRAVITY * n.y
     } else {
-        SNOW_FRICTION * GRAVITY * n.y
+        friction * GRAVITY * n.y
             + drag * speed * speed
             + BRAKE * brake
             + CARVE_DRAG * r.yaw_rate.abs() * speed
@@ -1043,6 +1057,43 @@ mod tests {
         let mut q = w.riders[0].unwrap();
         q.quantize();
         assert_eq!(Some(q), w.riders[0]);
+    }
+
+    #[test]
+    fn bots_race_down_the_glades_cleanly() {
+        let run = &crate::mountain::GLADES_RUN;
+        let mut w = World::on_course(CourseId::Glades, SurfaceKind::Flat, 3);
+        for slot in 0..MAX_RIDERS {
+            w.spawn(slot);
+        }
+        w.start_intro();
+        let mut inputs: Inputs = [None; MAX_RIDERS];
+        let mut checkpoints = 0;
+        let mut finishes = Vec::new();
+        let mut falls = 0;
+        for _ in 0..60 * 60 * 4 {
+            for (slot, i) in inputs.iter_mut().enumerate() {
+                *i = Some(bot_input(&w, slot));
+            }
+            for e in w.step(&inputs) {
+                match e.kind {
+                    EventKind::Checkpoint { .. } if w.race.phase == Phase::Racing => {
+                        checkpoints += 1
+                    }
+                    EventKind::Finish { ticks } => finishes.push(ticks),
+                    EventKind::Bail if w.race.phase == Phase::Racing => falls += 1,
+                    _ => {}
+                }
+            }
+            if w.race.phase == Phase::Results {
+                break;
+            }
+        }
+        assert_eq!(finishes.len(), MAX_RIDERS, "everyone finishes");
+        assert_eq!(checkpoints, MAX_RIDERS * run.checkpoints.len());
+        let best = *finishes.iter().min().unwrap();
+        assert!((60 * 70..60 * 100).contains(&best), "{best} ticks");
+        assert!(falls <= MAX_RIDERS / 2, "{falls} falls");
     }
 
     #[test]

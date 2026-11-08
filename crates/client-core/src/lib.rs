@@ -152,8 +152,10 @@ pub struct Client {
     phase: Phase,
     last_hello_ms: f64,
     slot: usize,
-    surface: Surface,
-    /// The room's sea, rebuilt for each course of a Tilt.
+    /// The race's world without riders (its course, conditions, sea and
+    /// wind), rebuilt for each race of a Tilt: snapshots fill it in.
+    base: World,
+    /// The room's sea.
     surface_kind: SurfaceKind,
     surface_seed: u32,
     /// Which race of the room's plan is on, out of how many.
@@ -181,6 +183,10 @@ pub struct Client {
     pending_events: Vec<Event>,
     /// The race (of the room's plan) this screen is ready for, plus one (0 = none).
     ready: u8,
+    /// Time trial: retries asked for so far (wrapping), repeated in every input packet.
+    retries: u8,
+    /// The room is a time trial (from the welcome).
+    trial: bool,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
@@ -199,7 +205,7 @@ impl Client {
             phase: Phase::Connecting,
             last_hello_ms: f64::NEG_INFINITY,
             slot: 0,
-            surface: Surface::flat(),
+            base: World::new(CourseId::Oval, Surface::flat()),
             surface_kind: SurfaceKind::Flat,
             surface_seed: 0,
             event_index: 0,
@@ -222,6 +228,8 @@ impl Client {
             next_event_id: 0,
             pending_events: Vec::new(),
             ready: 0,
+            retries: 0,
+            trial: false,
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -250,7 +258,7 @@ impl Client {
     }
 
     pub fn surface(&self) -> &Surface {
-        &self.surface
+        &self.world.surface
     }
 
     pub fn roster(&self) -> &[Option<RosterEntry>; MAX_RIDERS] {
@@ -264,6 +272,11 @@ impl Client {
 
     pub fn course(&self) -> CourseId {
         self.world.course
+    }
+
+    /// The conditions of the race raced now.
+    pub fn conditions(&self) -> sim::Conditions {
+        self.world.conditions
     }
 
     /// Which race of the room's plan is on (0-based).
@@ -281,6 +294,17 @@ impl Client {
     /// every screen in the room is ready for it.
     pub fn set_ready(&mut self, event: Option<u8>) {
         self.ready = event.map_or(0, |e| e.saturating_add(1));
+    }
+
+    /// Time trial: start the run over from the countdown. The ask rides in
+    /// every input packet until the server's snapshots show it done.
+    pub fn retry(&mut self) {
+        self.retries = self.retries.wrapping_add(1);
+    }
+
+    /// The room is a time trial.
+    pub fn trial(&self) -> bool {
+        self.trial
     }
 
     /// Tilt points by seat (None: no rider there).
@@ -465,6 +489,7 @@ impl Client {
             last_snapshot_tick: self.last_snapshot_tick.unwrap_or(0),
             client_time: Self::time16(now_ms),
             ready: self.ready,
+            retry: self.retries,
             first_tick: first,
             inputs,
         };
@@ -488,8 +513,17 @@ impl Client {
                 self.slot = w.slot as usize;
                 self.surface_kind = w.surface_kind;
                 self.surface_seed = w.surface_seed;
-                self.world = World::on_course(w.course, w.surface_kind, w.surface_seed);
-                self.surface = self.world.surface.clone();
+                self.world = World::for_event(
+                    sim::conditions::Event {
+                        course: w.course,
+                        conditions: w.conditions,
+                    },
+                    w.surface_kind,
+                    w.surface_seed,
+                );
+                self.trial = w.trial;
+                self.world.trial = w.trial;
+                self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
                     w.server_tick + (rtt_ticks + self.target_lead + 1.0).ceil() as u32;
@@ -609,14 +643,18 @@ impl Client {
 
         self.event_index = s.event_index;
         self.event_count = s.event_count.max(1);
-        // A Tilt moved on to its next course: a new sea, and nothing to
+        // A Tilt moved on to its next race: a new sea, and nothing to
         // smooth from the old one.
-        let new_course = s.course != self.world.course;
+        let new_course = s.course != self.world.course || s.conditions != self.world.conditions;
         if new_course {
-            self.surface = s
-                .course
-                .course()
-                .surface(self.surface_kind, self.surface_seed);
+            self.base = World::for_event(
+                sim::conditions::Event {
+                    course: s.course,
+                    conditions: s.conditions,
+                },
+                self.surface_kind,
+                self.surface_seed,
+            );
         }
 
         // Reconcile: authoritative state at s.tick, re-simulated to the present.
@@ -633,14 +671,12 @@ impl Client {
                     sim::Setup::for_sport(&e.setups, sport)
                 })
         });
-        let mut world = World {
-            tick: s.tick,
-            course: s.course,
-            surface: self.surface.clone(),
-            race: s.race,
-            riders,
-            setups,
-        };
+        let mut world = self.base.clone();
+        world.tick = s.tick;
+        world.race = s.race;
+        world.riders = riders;
+        world.setups = setups;
+        world.sync_weather();
         let mut prev = world.riders;
         if target_tick.wrapping_sub(s.tick) as usize >= HISTORY - 8 {
             target_tick = s.tick;

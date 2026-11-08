@@ -92,6 +92,17 @@ html {
   border-bottom: 0;
   translate: -50% 0;
 }
+/* Ghosts' labels in a time trial (game/ghosts.ts): smaller, see-through. */
+.ghost-tags .name-tag {
+  height: 24px;
+  padding: 0 10px 0 8px;
+  background: rgb(243 237 225 / 0.7);
+  font-size: 15px;
+  font-style: italic;
+}
+.ghost-tags .name-tag::after {
+  border-top-color: rgb(243 237 225 / 0.7);
+}
 #hud {
   position: fixed;
   left: 72px;
@@ -395,8 +406,26 @@ html {
   stroke-linecap: round;
 }
 #minimap .land.island,
-#minimap .land.rock {
+#minimap .land.rock,
+#minimap .land.headland,
+#minimap .land.stack,
+#minimap .land.arch,
+#minimap .land.mole {
   stroke: #8a8072;
+}
+#minimap .sea-edge,
+#minimap .sea-band {
+  fill: none;
+  stroke-linejoin: round;
+}
+#minimap .sea-edge {
+  stroke: #1d1b17;
+}
+#minimap .sea-band {
+  stroke: rgb(243 237 225 / 0.94);
+}
+#minimap.loop .lane {
+  stroke-linejoin: round;
 }
 #minimap .start {
   stroke: #1d1b17;

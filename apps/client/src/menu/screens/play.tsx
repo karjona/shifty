@@ -7,47 +7,50 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
+import { CIRCUITS, type PlanRequest, SEASONS, TILT, circuit } from "@shifty/rider";
 import {
   ApiError,
   createRoom,
-  type EventChoice,
   lobbySocket,
   meQuery,
   type Mode,
   playSingle,
+  playTimeTrial,
   roomExists,
   setPendingRace,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
+import { PlanPickers, seasonSports } from "../plan.tsx";
 import { useLoading } from "../busy.tsx";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker, Spinner, TabBar, TextField } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
 import { SetupEditor } from "./setup.tsx";
+import { type TrialChoice, TrialPanel } from "./trial.tsx";
 
 export type { Mode };
 const route = getRouteApi("/play");
-const EVENTS: EventChoice[] = ["gp", "summer", "winter"];
-
 export function ModeSelect() {
   useBackdrop("club");
   const t = useT();
   const navigate = useNavigate();
   const { mode = "single" } = route.useSearch();
-  const [event, setEvent] = useState<EventChoice>("gp");
+  const [plan, setPlan] = useState<PlanRequest>(TILT);
   const [bots, setBots] = useState(3);
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
   const [searching, setSearching] = useState(false);
   const [tuning, setTuning] = useState(false);
+  const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
   useEffect(() => setClubRiders(1), []);
+  const sport = mode === "trial" ? (trial?.sport === "snow" ? "winter" : "summer") : null;
   useEffect(() => {
-    if (appearance) setClubRider(appearance, event === "winter" ? "winter" : "summer");
-  }, [appearance, event]);
+    if (appearance) setClubRider(appearance, sport ?? clubSport(plan));
+  }, [appearance, plan, sport]);
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
@@ -59,22 +62,23 @@ export function ModeSelect() {
 
   const play = async () => {
     if (busy) return;
-    if (mode === "trial") {
-      toast(t.common.soon);
-      return;
-    }
+    if (mode === "trial" && !trial?.race) return;
     if (mode === "matchmaking") {
       setSearching(true);
       return;
     }
     setBusy(true);
     try {
-      if (mode === "single") {
-        const ticket = await playSingle(event);
+      if (mode === "trial" && trial?.race) {
+        const ticket = await playTimeTrial(trial.course, trial.season);
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
+        await navigate({ to: "/race" });
+      } else if (mode === "single") {
+        const ticket = await playSingle(plan);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
         await navigate({ to: "/race" });
       } else {
-        const code = await createRoom(event, bots);
+        const code = await createRoom(plan, bots);
         await navigate({ to: "/room/$code", params: { code } });
       }
     } catch (e) {
@@ -84,15 +88,6 @@ export function ModeSelect() {
     }
   };
   useAction("play", () => void play(), !joining && !searching);
-
-  const eventPicker = (
-    <Picker<EventChoice>
-      label={t.room.event}
-      options={EVENTS.map((e) => ({ value: e, label: t.play.events[e] }))}
-      value={event}
-      onChange={setEvent}
-    />
-  );
 
   return (
     <div className="screen mode-select">
@@ -111,34 +106,38 @@ export function ModeSelect() {
             value={mode}
             onChange={setMode}
             tabs={[
-              { id: "trial", label: t.play.modes.trial, tag: t.common.soonTag },
+              { id: "trial", label: t.play.modes.trial },
               { id: "single", label: t.play.modes.single },
               { id: "room", label: t.play.modes.room },
               { id: "matchmaking", label: t.play.modes.matchmaking },
             ]}
           />
-          <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
-            <p>{t.play.about[mode]}</p>
-            {mode === "single" && eventPicker}
-            {mode === "room" && (
-              <>
-                {eventPicker}
-                <Picker
-                  label={t.room.bots}
-                  options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
-                  value={bots}
-                  onChange={setBots}
-                />
-              </>
-            )}
-            {(mode === "single" || mode === "matchmaking") && <Races event={mode === "single" ? event : "gp"} />}
-            {mode === "room" && (
-              <>
-                <p className="muted">{t.play.eventAbout[event]}</p>
-                <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
-              </>
-            )}
-          </Panel>
+          {mode === "trial" ? (
+            <TrialPanel title={t.play.modes.trial} onChange={setTrial} />
+          ) : (
+            <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
+              <p>{t.play.about[mode]}</p>
+              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
+              {mode === "room" && (
+                <>
+                  <PlanPickers plan={plan} onChange={setPlan} fields="event" />
+                  <Picker
+                    label={t.room.bots}
+                    options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
+                    value={bots}
+                    onChange={setBots}
+                  />
+                </>
+              )}
+              {(mode === "single" || mode === "matchmaking") && <Races tilt={mode !== "single" || plan.tilt} />}
+              {mode === "room" && (
+                <>
+                  <p className="muted">{plan.tilt ? t.play.eventAbout.gp : t.play.eventAbout.pick}</p>
+                  <Button onClick={() => setJoining(true)}>{t.play.joinRoom}</Button>
+                </>
+              )}
+            </Panel>
+          )}
           <footer className="actions">
             <Button onClick={() => setTuning(true)}>
               <SlidersIcon />
@@ -149,7 +148,7 @@ export function ModeSelect() {
               glyph="play"
               className="play-button"
               onClick={() => void play()}
-              disabled={busy || mode === "trial"}
+              disabled={busy || (mode === "trial" && !trial?.race)}
               autoFocus
             >
               {mode === "room" ? t.play.createRoom : mode === "matchmaking" ? t.play.findRace : t.common.play}
@@ -172,19 +171,33 @@ export function ModeSelect() {
   );
 }
 
-/** The races an event runs, in order. */
-function Races({ event }: { event: EventChoice }) {
+/** The sport the club's terrace dresses your rider for: a race on the snow, or the water. */
+function clubSport(plan: PlanRequest): "summer" | "winter" {
+  if (plan.tilt || plan.race.course === undefined) return "summer";
+  return circuit(plan.race.course)?.sport === "snow" ? "winter" : "summer";
+}
+
+/** The races a plan runs, in order: a Tilt's seasons (its circuits are drawn), or one race. */
+function Races({ tilt }: { tilt: boolean }) {
   const t = useT();
-  const seasons = event === "gp" ? (["summer", "winter"] as const) : [event];
+  if (!tilt) return <p className="muted">{t.play.eventAbout.race}</p>;
+  // With fewer circuits than seasons, a Tilt is summer on the water, then winter on the mountain.
+  const seasons = CIRCUITS.length >= SEASONS.length ? SEASONS : (["summer", "winter"] as const);
   return (
     <div className="races">
-      <p className="muted">{t.play.eventAbout[event]}</p>
+      <p className="muted">{t.play.eventAbout.gp}</p>
       <ol>
         {seasons.map((s, i) => (
           <li key={s}>
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <b>{t.seasons[s]}</b>
-            <span className="muted">{t.play.eventAbout[s]}</span>
+            <span className="muted">
+              {i === 0 || seasonSports(s).length === 1
+                ? t.play.seasonSports.water
+                : seasons.length < SEASONS.length
+                  ? t.play.seasonSports.mountain
+                  : t.play.seasonSports.either}
+            </span>
           </li>
         ))}
       </ol>

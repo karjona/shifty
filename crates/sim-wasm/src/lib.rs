@@ -7,10 +7,12 @@
 use client_core::{Client, Phase};
 use serde_json::json;
 use sim::course::{Keep, LandKind, Line, Sport, tuning as course_tuning};
-use sim::mountain::{Feature, ObstacleKind, Run};
+use sim::mountain::{Feature, LipKind, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 use wasm_bindgen::prelude::*;
+
+mod ghost;
 
 /// Floats per rider in the render buffer: `[slot, x, y, z, yaw, pitch, roll,
 /// speed, grounded, is_me, is_bot, vx, vy, vz, bailing, charge, grab, lean,
@@ -38,7 +40,7 @@ pub const STATS_FIELDS: [&str; 17] = [
 ];
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 24] = [
+pub const RACE_FIELDS: [&str; 28] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -63,13 +65,85 @@ pub const RACE_FIELDS: [&str; 24] = [
     "eventCount",
     "gpVersion",
     "autopilot",
+    "season",
+    "weather",
+    "turns",
+    "time",
 ];
+
+/// Layout of the weather buffer (f32), for the look: the race's weather at
+/// a point. `progress` along the race (0 start, 1 finish), `turn` from the
+/// conditions' `weather` (0) to `turns` (1); the wind (m/s, x and z, and
+/// its speed); how big the sea runs against the course's sea as designed
+/// (0 on land); the snow (depth in m, and how much of it is
+/// powder, slush and hard snow; the rest is packed); and how hard it snows
+/// and rains (0-1).
+pub const WEATHER_FIELDS: [&str; 12] = [
+    "progress",
+    "turn",
+    "windX",
+    "windZ",
+    "wind",
+    "seaHeight",
+    "snowDepth",
+    "powder",
+    "slush",
+    "hard",
+    "snowing",
+    "raining",
+];
+
+/// Floats per point from `snowAt`: `[depth, powder, slush, hard]`.
+pub const SNOW_STRIDE: usize = 4;
+
+/// The weather at `(x, z)` in a world (see `WEATHER_FIELDS`).
+fn weather_on(world: &World, x: f32, z: f32, out: &mut [f32]) {
+    let progress = world.weather_progress(x, z);
+    let turn = world.weather_turn(x, z);
+    let (wx, wz) = world.wind_at(x, z);
+    let c = world.conditions;
+    let sea_height = if !world.course().looped() {
+        0.0
+    } else if world.surface.kind == SurfaceKind::Swells {
+        let sea = c.sea(0.0);
+        sea.from + (sea.to - sea.from) * turn
+    } else {
+        1.0
+    };
+    let snow = world.snow_at(x, z);
+    let v = [
+        progress,
+        turn,
+        wx,
+        wz,
+        (wx * wx + wz * wz).sqrt(),
+        sea_height,
+        snow.depth,
+        snow.powder,
+        snow.slush,
+        snow.hard,
+        c.snowing(turn),
+        c.raining(turn),
+    ];
+    out.copy_from_slice(&v);
+}
+
+/// The snow at each `[x, z]` pair of `points` (see `SNOW_STRIDE`).
+fn snow_on(world: &World, points: &[f32]) -> Vec<f32> {
+    let mut out = Vec::with_capacity(points.len() / 2 * SNOW_STRIDE);
+    for &[x, z] in points.as_chunks::<2>().0 {
+        let s = world.snow_at(x, z);
+        out.extend_from_slice(&[s.depth, s.powder, s.slush, s.hard]);
+    }
+    out
+}
 
 #[wasm_bindgen]
 pub struct WasmClient {
     inner: Client,
     render_buf: Vec<f32>,
     race_buf: Vec<f64>,
+    weather_buf: Vec<f32>,
     stats_buf: Vec<f64>,
     wave_buf: Vec<f32>,
     out_buf: Vec<u8>,
@@ -83,6 +157,7 @@ impl WasmClient {
             inner: Client::new(token),
             render_buf: vec![0.0; MAX_RIDERS * RENDER_STRIDE],
             race_buf: vec![0.0; RACE_FIELDS.len()],
+            weather_buf: vec![0.0; WEATHER_FIELDS.len()],
             stats_buf: vec![0.0; STATS_FIELDS.len()],
             wave_buf: Vec::new(),
             out_buf: Vec::with_capacity(2048),
@@ -99,6 +174,16 @@ impl WasmClient {
     #[wasm_bindgen(js_name = setReady)]
     pub fn set_ready(&mut self, event: i32) {
         self.inner.set_ready(u8::try_from(event).ok());
+    }
+
+    /// Time trial: start the run over from the countdown.
+    pub fn retry(&mut self) {
+        self.inner.retry();
+    }
+
+    /// The room is a time trial (once joined).
+    pub fn trial(&self) -> bool {
+        self.inner.trial()
     }
 
     /// Advance the clock with this frame's input (analog values in [-1, 1]).
@@ -213,6 +298,9 @@ impl WasmClient {
 
     /// Wave parameters for the water shader: `[dir_x, dir_z, k, amplitude,
     /// omega, phase, sharpness, 0]` per wave, `sim::surface::MAX_WAVES` waves.
+    ///
+    /// Each wave's height turns from `amplitude` to `amplitude_to` (the
+    /// last field) along the race: blend them by the weather's `turn`.
     #[wasm_bindgen(js_name = waveParams)]
     pub fn wave_params(&mut self) -> Vec<f32> {
         self.wave_buf = self.inner.surface().wave_params().to_vec();
@@ -295,6 +383,10 @@ impl WasmClient {
             f64::from(self.inner.event_count()),
             f64::from(self.inner.gp_version()),
             f64::from(u8::from(autopilot)),
+            f64::from(world.conditions.season as u8),
+            f64::from(world.conditions.weather as u8),
+            f64::from(world.conditions.turns as u8),
+            f64::from(world.conditions.time),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -379,7 +471,28 @@ impl WasmClient {
         serde_json::Value::Array(list).to_string()
     }
 
-    /// 0 = jetski (summer), 1 = snowboard (winter).
+    /// The race's conditions: `[season, weather, turns, time]` (wire
+    /// numbers, see `sim::conditions`).
+    pub fn conditions(&self) -> Vec<u8> {
+        self.inner.conditions().to_bytes().to_vec()
+    }
+
+    /// Refreshes the weather buffer for `(x, z)` and returns it (see
+    /// `weatherFields()` for the layout). One call a frame, at the camera.
+    #[wasm_bindgen(js_name = updateWeather)]
+    pub fn update_weather(&mut self, x: f32, z: f32) -> *const f32 {
+        weather_on(self.inner.predicted_world(), x, z, &mut self.weather_buf);
+        self.weather_buf.as_ptr()
+    }
+
+    /// The snow under each `[x, z]` of `points`, now: `[depth, powder,
+    /// slush, hard]` per point (nothing on the water).
+    #[wasm_bindgen(js_name = snowAt)]
+    pub fn snow_at(&self, points: &[f32]) -> Vec<f32> {
+        snow_on(self.inner.predicted_world(), points)
+    }
+
+    /// 0 = jetski, 1 = snowboard.
     pub fn sport(&self) -> u8 {
         match self.inner.predicted_world().course().sport {
             Sport::Jetski => 0,
@@ -394,9 +507,9 @@ impl WasmClient {
         top_speed_on(self.inner.predicted_world())
     }
 
-    /// The course, for drawing it (positions in metres, angles in radians).
-    /// Bay courses carry `stadium`, buoys, ramps and land; mountain runs
-    /// carry `run`.
+    /// The course, for drawing it (positions in metres, angles in radians):
+    /// its `id` (`sim::CourseId`), then bay courses carry `stadium`, buoys,
+    /// ramps and land; mountain runs carry `run`.
     #[wasm_bindgen(js_name = courseJson)]
     pub fn course_json(&self) -> String {
         course_json_on(self.inner.predicted_world())
@@ -462,8 +575,9 @@ impl WasmClient {
 }
 
 /// The run, for drawing it: its centre line every 4 m (with half width,
-/// walls and riding limit), gates, obstacles and what is built on it.
-fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
+/// walls and riding limit), gates, obstacles and what is built on it
+/// (tables, natural lips, spines).
+fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serde_json::Value {
     let length = run.length();
     let mut path = Vec::new();
     let mut s = 0.0;
@@ -481,17 +595,20 @@ fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
         let f = run.centerline(s);
         json!({ "s": s, "x": f.x, "z": f.z, "yaw": f.yaw, "half": run.width_at(s).half, "limit": run.limit(s), "y": run.height(f.x, f.z) })
     };
+    let obstacle = |o: &sim::mountain::Obstacle, cover: bool| {
+        let kind = match o.kind {
+            ObstacleKind::Pine => "pine",
+            ObstacleKind::Rock => "rock",
+            ObstacleKind::Tower => "tower",
+        };
+        json!({ "x": o.x, "y": o.y, "z": o.z, "radius": o.radius, "height": o.height, "kind": kind, "cover": cover })
+    };
+    // Fall's rocks poking through the thin cover are obstacles like any other (`cover`: true).
     let obstacles: Vec<serde_json::Value> = run
         .obstacles()
         .iter()
-        .map(|o| {
-            let kind = match o.kind {
-                ObstacleKind::Pine => "pine",
-                ObstacleKind::Rock => "rock",
-                ObstacleKind::Tower => "tower",
-            };
-            json!({ "x": o.x, "y": o.y, "z": o.z, "radius": o.radius, "height": o.height, "kind": kind })
-        })
+        .map(|o| obstacle(o, false))
+        .chain(rocks.iter().map(|k| obstacle(&k.obstacle, true)))
         .collect();
     let tables: Vec<serde_json::Value> = run
         .features
@@ -512,6 +629,54 @@ fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
             _ => None,
         })
         .collect();
+    let lips: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Lip {
+                s,
+                offset,
+                half_width,
+                height,
+                ramp,
+                kind,
+                ..
+            } => Some(json!({
+                "s": s,
+                "lip": s + ramp,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+                "kind": match kind {
+                    LipKind::Wind => "wind",
+                    LipKind::Log => "log",
+                    LipKind::Rock => "rock",
+                },
+            })),
+            _ => None,
+        })
+        .collect();
+    let spines: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Spine {
+                s,
+                length,
+                ease,
+                offset,
+                half_width,
+                height,
+            } => Some(json!({
+                "s": s,
+                "end": s + length + 2.0 * ease,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+            })),
+            _ => None,
+        })
+        .collect();
     json!({
         "length": length,
         "startS": c.start_s,
@@ -522,6 +687,8 @@ fn run_json(c: &sim::Course, run: &Run) -> serde_json::Value {
         "path": path,
         "obstacles": obstacles,
         "tables": tables,
+        "lips": lips,
+        "spines": spines,
     })
 }
 
@@ -536,6 +703,7 @@ fn course_json_on(world: &World) -> String {
     let c = world.course();
     let start = c.centerline(c.start_s);
     let mut out = json!({
+        "id": world.course as u8,
         "sport": if c.sport == Sport::Snowboard { "snow" } else { "jetski" },
         "length": c.length(),
         "laps": c.laps,
@@ -543,8 +711,14 @@ fn course_json_on(world: &World) -> String {
         "rampSink": course_tuning::RAMP_SINK,
         "start": { "x": start.x, "z": start.z, "yaw": start.yaw },
     });
+    out["place"] = json!(match world.course {
+        CourseId::Oval => "bay",
+        CourseId::Mountain => "mountain",
+        CourseId::Cape => "cape",
+        CourseId::Glades => "glades",
+    });
     match c.line {
-        Line::Stadium(st) => {
+        Line::Stadium(_) | Line::Loop(_) => {
             let buoys: Vec<serde_json::Value> = (0..c.buoys.len())
                 .map(|i| {
                     let (x, z) = c.buoy_pos(i);
@@ -552,44 +726,69 @@ fn course_json_on(world: &World) -> String {
                     json!({
                         "x": x,
                         "z": z,
+                        "s": b.s,
                         "yaw": c.centerline(b.s).yaw,
                         "keep": if b.keep == Keep::Left { "left" } else { "right" },
                     })
                 })
                 .collect();
             let ramps: Vec<serde_json::Value> = c
-                    .ramps
-                    .iter()
-                    .map(|d| {
-                        let f = c.centerline(d.s + d.length * 0.5);
-                        let (x, z) = f.at_offset(d.offset);
-                        json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
-                    })
-                    .collect();
+                .ramps
+                .iter()
+                .map(|d| {
+                    let f = c.centerline(d.s + d.length * 0.5);
+                    let (x, z) = f.at_offset(d.offset);
+                    json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
+                })
+                .collect();
             let land: Vec<serde_json::Value> = c
-                    .land
-                    .iter()
-                    .map(|l| {
-                        let kind = match l.kind {
-                            LandKind::Town => "town",
-                            LandKind::Island => "island",
-                            LandKind::Rock => "rock",
-                        };
-                        json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
-                    })
-                    .collect();
-            out["straightHalf"] = json!(st.straight_half);
-            out["radius"] = json!(st.radius);
-            out["breakwaterRadius"] = json!(st.breakwater_radius);
-            out["outerLimit"] = json!(st.outer_limit);
+                .land
+                .iter()
+                .map(|l| {
+                    let kind = match l.kind {
+                        LandKind::Town => "town",
+                        LandKind::Island => "island",
+                        LandKind::Rock => "rock",
+                        LandKind::Headland => "headland",
+                        LandKind::Coast => "coast",
+                        LandKind::Beach => "beach",
+                        LandKind::Mole => "mole",
+                        LandKind::Stack => "stack",
+                        LandKind::Arch => "arch",
+                    };
+                    json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+                })
+                .collect();
+            // The centre line every 2 m, with how sharply it turns there.
+            let length = c.length();
+            let steps = (length / 2.0) as usize;
+            let path: Vec<serde_json::Value> = (0..steps)
+                .map(|i| {
+                    let s = length * i as f32 / steps as f32;
+                    let f = c.centerline(s);
+                    let curve = c.circuit().map_or(0.0, |l| l.curvature(s));
+                    json!({ "s": s, "x": f.x, "z": f.z, "yaw": f.yaw, "curve": curve })
+                })
+                .collect();
+            match c.line {
+                Line::Stadium(st) => {
+                    out["straightHalf"] = json!(st.straight_half);
+                    out["radius"] = json!(st.radius);
+                    out["breakwaterRadius"] = json!(st.breakwater_radius);
+                    out["outerLimit"] = json!(st.outer_limit);
+                }
+                Line::Loop(l) => out["outerLimit"] = json!(l.limit),
+                Line::Run(_) => {}
+            }
             out["buoyRadius"] = json!(sim::buoy::tuning::RADIUS);
             out["buoyHeight"] = json!(sim::buoy::tuning::HEIGHT);
             out["riderRadius"] = json!(c.sport.rider_radius());
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
+            out["path"] = json!(path);
         }
-        Line::Run(run) => out["run"] = run_json(c, run),
+        Line::Run(run) => out["run"] = run_json(c, run, world.cover_rocks()),
     }
     out.to_string()
 }
@@ -645,7 +844,8 @@ pub struct Scenery {
 
 #[wasm_bindgen]
 impl Scenery {
-    /// `course`: 0 = the summer bay, 1 = the winter mountain.
+    /// `course`: a `sim::CourseId` (0 = the bay, 1 = the mountain, 2 = the
+    /// cape), in its sport's home conditions (see `setConditions`).
     #[wasm_bindgen(constructor)]
     pub fn new(course: u8, surface_kind: u8, seed: u32) -> Self {
         let course = CourseId::from_u8(course).unwrap_or(CourseId::Oval);
@@ -658,6 +858,44 @@ impl Scenery {
     #[wasm_bindgen(js_name = courseJson)]
     pub fn course_json(&self) -> String {
         course_json_on(&self.world)
+    }
+
+    /// Sets the conditions it is drawn in (`[season, weather, turns, time]`;
+    /// bytes out of range are ignored): the sea, the wind, the snow and
+    /// fall's rocks follow.
+    #[wasm_bindgen(js_name = setConditions)]
+    pub fn set_conditions(&mut self, bytes: &[u8]) {
+        if let [a, b, c, d] = *bytes
+            && let Some(conditions) = sim::Conditions::from_bytes([a, b, c, d])
+        {
+            self.world = World::for_event(
+                sim::conditions::Event {
+                    course: self.world.course,
+                    conditions,
+                },
+                self.world.surface.kind,
+                self.world.surface.seed,
+            );
+        }
+    }
+
+    /// The weather at `(x, z)` before a race (see `WEATHER_FIELDS`).
+    #[wasm_bindgen(js_name = weatherAt)]
+    pub fn weather_at(&self, x: f32, z: f32) -> Vec<f32> {
+        let mut out = vec![0.0; WEATHER_FIELDS.len()];
+        weather_on(&self.world, x, z, &mut out);
+        out
+    }
+
+    /// The snow under each `[x, z]` of `points` (see `WasmClient::snowAt`).
+    #[wasm_bindgen(js_name = snowAt)]
+    pub fn snow_at(&self, points: &[f32]) -> Vec<f32> {
+        snow_on(&self.world, points)
+    }
+
+    /// Its conditions: `[season, weather, turns, time]`.
+    pub fn conditions(&self) -> Vec<u8> {
+        self.world.conditions.to_bytes().to_vec()
     }
 
     #[wasm_bindgen(js_name = waveParams)]
@@ -703,6 +941,11 @@ pub fn stats_fields() -> Vec<String> {
 #[wasm_bindgen(js_name = raceFields)]
 pub fn race_fields() -> Vec<String> {
     RACE_FIELDS.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[wasm_bindgen(js_name = weatherFields)]
+pub fn weather_fields() -> Vec<String> {
+    WEATHER_FIELDS.iter().map(|s| (*s).to_owned()).collect()
 }
 
 #[wasm_bindgen(js_name = renderStride)]

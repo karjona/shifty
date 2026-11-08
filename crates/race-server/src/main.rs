@@ -67,6 +67,7 @@ async fn main() -> Result<()> {
         (Some(url), Some(secret)) => {
             let lobby = Lobby::new(url, secret)?;
             rooms.report_to(lobby.clone().reporter());
+            rooms.report_runs_to(lobby.clone().run_reporter(config.public_addr.clone()));
             tokio::spawn(lobby.heartbeats(config.clone(), rooms.clone(), cert.clone()));
         }
         (Some(_), None) => {

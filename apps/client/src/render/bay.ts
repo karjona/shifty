@@ -1,6 +1,8 @@
-// Summer: the bay. Sky and sun, the sea (the sim's swells plus GPU chop,
-// ripples, wakes, foam and reflections, or the swells alone), the course
-// on it, the coast behind, and the spray the jetskis throw.
+// The water courses' environment, and the bay's. Sky and sun, the sea (the
+// sim's swells plus GPU chop, ripples, wakes, foam and reflections, or the
+// swells alone), the course on it, the coast behind, and the spray the
+// jetskis throw. Other places on the water bring their own land and
+// backdrop (see cape.ts).
 import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import {
@@ -16,16 +18,29 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
-import { SKY, clouds, skyDome } from "./cel/sky.ts";
+import { LOOK } from "./cel/look.ts";
+import { Cumulus, skyDome } from "./cel/sky.ts";
+import { Precipitation } from "./cel/precip.ts";
+import { type CircuitLook, ConditionsLook } from "./look.ts";
 import { Gulls } from "./cel/gulls.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
 import { buildScenery } from "./scenery.ts";
 import { Spray } from "./spray.ts";
 import { SeaWater, type WakeSource } from "./water.ts";
-import { MAX_WAVES, WATER_SNAP, WAVE_FIELDS, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
+import {
+  MAX_SHELTERS,
+  MAX_WAVES,
+  PARAMS_LEN,
+  WATER_SNAP,
+  WAVE_FIELDS,
+  WaveUniforms,
+  waterGrid,
+  waveHeight,
+} from "./waves.ts";
 import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
@@ -56,6 +71,18 @@ const CAMERA: CameraTuning = {
   tilt: 0,
 };
 
+/**
+ * The bay under the sky: noon's sun stands over the town's side of the bay
+ * (+x, +z), and snow lies down to the shore in winter.
+ */
+const BAY_LOOK: CircuitLook = {
+  south: [30, 15],
+  swing: 1,
+  fogNear: 140,
+  fogFar: 700,
+  snowLine: { summer: 290, fall: 175, winter: -4, spring: 200 },
+};
+
 export interface BayOptions {
   /** "sea" = swells + GPU chop, ripples, foam and reflections (see water.ts); "basic" = swells only, cheap. */
   water: "basic" | "sea";
@@ -64,6 +91,23 @@ export interface BayOptions {
   /** The sim's swells (`waveParams`). */
   waves: Float32Array;
   course: CourseData;
+  /** The land and backdrop round the course (the bay's coast if none). */
+  scenery?: WaterScenery;
+  /** The race's season, weather and time of day (a clear summer noon if left out). */
+  conditions?: Conditions;
+  /** How the circuit sits under the sky (the bay's if left out). */
+  look?: CircuitLook;
+}
+
+/** What stands round a water course besides the course itself: land, towns, the backdrop. */
+export interface WaterScenery {
+  readonly group: THREE.Group;
+  /** Where the gulls circle. */
+  readonly gulls: THREE.Vector3;
+  /** The sea is hidden this far inside the land (m), where swells would show through low shores. */
+  readonly inland: number;
+  /** Per frame: what floats rides the swell. */
+  update(waves: Float32Array, t: number): void;
 }
 
 export class Bay implements Environment {
@@ -71,11 +115,18 @@ export class Bay implements Environment {
   readonly camera = CAMERA;
   readonly topSpeed: number;
   readonly reflects: boolean;
+  /** The season, weather and time of day it is drawn in. */
+  readonly conditions: Conditions;
 
-  private sky = new THREE.Color(0xa8d8f0);
+  /** What the conditions look like (see look.ts). */
+  readonly look: ConditionsLook;
   private time = uniform(0);
-  private swells = new WaveUniforms(MAX_WAVES);
-  private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
+  private swells = new WaveUniforms(MAX_WAVES, MAX_SHELTERS);
+  /** The swells now: the sim's, each wave's height turned as far as the race's weather has (and the shelters after them). */
+  private waveParams = new Float32Array(PARAMS_LEN);
+  /** The sim's swells as given: each wave's height at the start (field 3) and at the end (field 7). */
+  private waveTurn = new Float32Array(PARAMS_LEN);
+  private turned = 0;
   private course: CourseView;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
@@ -85,22 +136,32 @@ export class Bay implements Environment {
   private wakeSources = new Map<number, WakeSource>();
   private spray: Spray;
   private gulls: Gulls | null = null;
+  private cumulus = new Cumulus(new THREE.Vector3(0, 0, 300));
+  private precipitation = new Precipitation();
+  private sun: THREE.DirectionalLight | null = null;
+  private hemi: THREE.HemisphereLight | null = null;
+  private background = new THREE.Color();
+  private scenery: WaterScenery | null;
 
   constructor(opts: BayOptions) {
+    this.conditions = opts.conditions ?? homeConditions("jetski");
+    this.look = new ConditionsLook(this.conditions, opts.look ?? BAY_LOOK);
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
+    this.scenery = opts.scenery ?? null;
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
-    this.group.add(buildScenery(this.sky));
+    this.group.add(this.scenery?.group ?? buildScenery());
     if (opts.water === "sea") {
-      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS);
+      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS, this.scenery?.inland ?? null);
       this.group.add(this.sea.mesh);
     } else {
       this.buildWater();
     }
     // Chop seed only needs to be stable per room: derive it from the swells.
     this.sea?.setWaves(opts.waves, Math.round(Math.abs(opts.waves[5] ?? 1) * 1e6));
-    this.waveParams.set(opts.waves.subarray(0, MAX_WAVES * WAVE_FIELDS));
+    this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
+    this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
     this.course = new CourseView(opts.course);
     this.group.add(this.course.group);
@@ -110,23 +171,28 @@ export class Bay implements Environment {
     if (this.sea) this.sea.mesh.userData.noMerge = true;
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
-    this.group.add(skyDome(), clouds(new THREE.Vector2(0, 300)));
-    this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
+    this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
+    this.gulls = new Gulls(this.scenery?.gulls ?? new THREE.Vector3(40, 0, 40));
+    this.gulls.group.userData.weather = true;
     this.group.add(this.gulls.group);
   }
 
   private fog: THREE.Fog | null = null;
 
+  get sunOffset(): THREE.Vector3 {
+    return this.look.sun;
+  }
+
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
-    scene.background = SKY.fog;
     // (One fog for the bay: a new one would rebuild every shader that draws in it.)
-    this.fog ??= new THREE.Fog(SKY.fog, 140, 700);
+    this.fog ??= new THREE.Fog(0xc4e9f8, 140, 700);
     scene.fog = this.fog;
-    hemi.color.set(0xfff4e0);
-    hemi.groundColor.set(0x2a6f8f);
+    scene.background = this.background;
     hemi.intensity = 1.2;
-    sun.color.set(0xfff1d6);
     sun.intensity = 2.6;
+    this.sun = sun;
+    this.hemi = hemi;
+    this.look.apply(0, 0, 0, null, this.fog, this.background, sun, hemi);
   }
 
   ground(x: number, z: number, t: number): number {
@@ -149,8 +215,8 @@ export class Bay implements Environment {
       return p.add(vec3(0, w.h, 0));
     });
     const colour = Fn(() => {
-      const deep = vec3(0.04, 0.32, 0.45);
-      const crest = vec3(0.18, 0.66, 0.72);
+      const deep = LOOK.seaDeep;
+      const crest = LOOK.seaShallow;
       const base = mix(deep, crest, smoothstep(-0.8, 1.2, positionWorld.y));
       // Faint 4 m grid so speed reads even on calm water.
       const gx = step(0.965, fract(positionWorld.x.div(4)));
@@ -168,10 +234,36 @@ export class Bay implements Environment {
     this.water = water;
   }
 
+  /** Turns the swells' heights as far as the race's weather has turned (a storm builds lap by lap). */
+  private turnSwells(turn: number): void {
+    if (Math.abs(turn - this.turned) < 1e-4) return;
+    this.turned = turn;
+    let changed = false;
+    for (let i = 0; i < MAX_WAVES; i++) {
+      const o = i * WAVE_FIELDS;
+      const from = this.waveTurn[o + 3] ?? 0;
+      const amp = from + ((this.waveTurn[o + 7] ?? from) - from) * turn;
+      if (amp !== this.waveParams[o + 3]) {
+        this.waveParams[o + 3] = amp;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.swells.setFromSim(this.waveParams);
+    this.sea?.setSwells(this.waveParams);
+  }
+
   update(f: Frame): void {
     this.time.value = f.t;
+    this.turnSwells(f.turn);
+    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
+    this.cumulus.update(this.look.cover, this.look.tower);
+    this.precipitation.update(this.look.rain, this.look.snow);
+    // The gulls shelter from the rain.
+    if (this.gulls) this.gulls.group.visible = this.look.rain < 0.3 && this.look.snow < 0.5;
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
+    this.scenery?.update(this.waveParams, f.t);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {
       const model = f.models.get(r.slot);

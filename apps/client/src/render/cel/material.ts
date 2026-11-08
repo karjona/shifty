@@ -20,6 +20,7 @@ import {
   vec4,
   vec3,
 } from "three/tsl";
+import { LOOK, weathered } from "./look.ts";
 
 /**
  * The layer of things the chase camera draws but reflections leave out
@@ -98,6 +99,13 @@ export interface CelOptions {
   map?: THREE.Texture | null;
   /** How dark its lines are (0 = the colour itself, 1 = full ink). */
   darkness?: number;
+  /**
+   * Out in the weather: the season's colours for this kind of foliage
+   * (`FOLIAGE` in look.ts), snow on its upward faces, wet in the rain.
+   */
+  outdoor?: number;
+  /** How far it fades into the distance's colour (`LOOK.far`), 0-1. */
+  haze?: THREE.Node<"float">;
 }
 
 /** Default shade: a cool, slightly violet tone, as in a painted shadow. */
@@ -129,15 +137,23 @@ class CelLightingModel extends THREE.LightingModel {
     const facing = smoothstep(m.threshold.sub(w), m.threshold.add(w), x);
     // The light arrives with the cast shadow already in it.
     const unshadowed = clamp(dot(lightColor, vec3(1)).div(SUN_STRENGTH), 0, 1);
-    const band = facing.mul(smoothstep(0.4, 0.6, unshadowed));
-    const albedo = diffuseColor.rgb;
+    // Cast shadows thin out under an overcast sky.
+    const band = facing.mul(mix(float(1), smoothstep(0.4, 0.6, unshadowed), LOOK.shadow));
+    let albedo: THREE.Node<"vec3"> = diffuseColor.rgb;
+    if (m.outdoor !== null) albedo = weathered(albedo, m.outdoor);
+
     const shade: THREE.Node<"vec3"> = m.shadeNode ?? m.shade.rgb;
     // Shade is darker and richer than the colour, as painters mix it (a power keeps it from going grey).
     // (The material's numbers are uniforms: materials that differ only in them share one shader.)
-    const shaded = pow(albedo, vec3(uniform(m.richness))).mul(shade);
+    // (The light's colour, lit and in shade, is the conditions': see look.ts.)
+    const shaded = pow(albedo, vec3(uniform(m.richness)))
+      .mul(shade)
+      .mul(LOOK.shade);
     // A second, deeper shade in the darkest folds (where the painter darkened most).
     const deepShaded = m.deepNode ? mix(shaded, shaded.mul(0.72), m.deepNode) : shaded;
-    directDiffuse.addAssign(mix(deepShaded, albedo.mul(m.lit), band));
+    const toned = mix(deepShaded, albedo.mul(m.lit).mul(LOOK.lit), band);
+    // Distance laid over the light: lit and shade alike fade into it.
+    directDiffuse.addAssign(m.hazeNode ? mix(toned, LOOK.far, clamp(m.hazeNode, 0, 1)) : toned);
     if (m.specStrength > 0) {
       const h = lightDirection.add(positionViewDirection).normalize();
       const nh = dot(n, h);
@@ -177,6 +193,10 @@ export class CelMaterial extends THREE.MeshToonNodeMaterial {
   deepNode: THREE.Node<"float"> | null = null;
   /** A per-pixel shade tone, instead of `shade`. */
   shadeNode: THREE.Node<"vec3"> | null = null;
+  /** Out in the weather, as this kind of foliage (see `CelOptions.outdoor`); null if not. */
+  outdoor: THREE.Node<"float"> | null;
+  /** How far it fades into the distance (see `CelOptions.haze`). */
+  hazeNode: THREE.Node<"float"> | null;
   specStrength: number;
   /** How much richer (more saturated) shade is than the colour (1 = a plain multiple). */
   richness: number;
@@ -201,6 +221,8 @@ export class CelMaterial extends THREE.MeshToonNodeMaterial {
     this.richness = o.richness ?? 1.3;
     this.specSize = o.specSize ?? 0.04;
     this.rimStrength = o.rim ?? 0;
+    this.outdoor = o.outdoor === undefined ? null : uniform(o.outdoor);
+    this.hazeNode = o.haze ?? null;
     inkOnlyInPass(this, inkNode(o.silhouette ?? 1, o.crease ?? 1, o.id ?? 0, o.darkness ?? 1));
   }
 
@@ -233,6 +255,9 @@ function signature(o: CelOptions): string | null {
   return parts.join(";");
 }
 
+/** How far scenery made with standard materials fades into the distance, for `celify` (see `CelOptions.haze`). */
+export const HAZE = new WeakMap<THREE.Material, THREE.Node<"float">>();
+
 /**
  * Swaps the standard materials under `root` for cel ones (same colour,
  * vertex colours and facets). `tune` picks per-material options.
@@ -252,7 +277,11 @@ export function celify(
     let c = done.get(m);
     if (!c) {
       const colorNode: unknown = m.userData.colorNode ?? (keepColorNodes ? m.colorNode : null);
+      // Scenery says what it is out in the weather on its material (see `CelOptions.outdoor`, `HAZE`).
+      const outdoor: unknown = m.userData.outdoor;
       const options: CelOptions = {
+        outdoor: typeof outdoor === "number" ? outdoor : undefined,
+        haze: HAZE.get(m),
         colorNode: colorNode instanceof THREE.Node ? asVec3(colorNode) : undefined,
         color: m.color,
         map: m.map,

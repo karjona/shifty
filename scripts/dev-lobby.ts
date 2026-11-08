@@ -24,10 +24,21 @@ export interface JoinClaims {
   iat: number;
   bots: number;
   surface: number;
-  /** 0 = the summer bay (jetski), 1 = the winter mountain (snowboard). */
-  course: number;
-  /** Every course of the room, in order (a Tilt); empty = just `course`. */
-  events: number[];
+  /** The Tilt (everything drawn)... */
+  tilt?: true;
+  /** ...or one race, each field picked (wire numbers, see `sim::conditions`) or left out to be drawn. */
+  races?: RaceSpec[];
+  /** Seeds the plan's draw. */
+  seed: number;
+}
+
+/** One race as asked for: a circuit (`sim::CourseId`), season, weather, what it turns to, start time. */
+export interface RaceSpec {
+  course?: number;
+  season?: number;
+  weather?: number;
+  turns?: number;
+  time?: number;
 }
 
 const b64url = (b: Buffer): string => b.toString("base64url");
@@ -74,8 +85,10 @@ export interface DevJoinOptions {
   room?: string;
   bots?: number;
   surface?: number;
-  course?: number;
-  events?: number[];
+  /** The Tilt, or (by default) one race. */
+  tilt?: boolean;
+  race?: RaceSpec;
+  seed?: number;
   pid?: string;
 }
 
@@ -92,8 +105,8 @@ export function devJoinTicket(raceServer: string, opts: DevJoinOptions) {
     iat: Math.floor(Date.now() / 1000),
     bots: opts.bots ?? 2,
     surface: opts.surface ?? 1,
-    course: opts.course ?? 0,
-    events: opts.events ?? [],
+    ...(opts.tilt ? { tilt: true } : { races: [opts.race ?? {}] }),
+    seed: opts.seed ?? 0,
   };
   return { token: mintJoinToken(key, claims), claims };
 }

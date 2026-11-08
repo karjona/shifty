@@ -1,6 +1,7 @@
-// Minimaps, seen from above with +X to the right and +Z down. Summer: the
-// oval, with buoys, ramps and every rider (the race runs clockwise).
-// Winter: the run snaking down the mountain, with its checkpoints.
+// Minimaps, seen from above with +X to the right and +Z down. On the water:
+// the bay's oval or the cape's loop, with buoys, ramps and every rider (the
+// races run clockwise). On the snow: the run snaking down the mountain, with
+// its checkpoints.
 import type { CourseData } from "../render/course.ts";
 import type { RunData } from "../render/mountain.ts";
 import type { RiderView } from "../render/world.ts";
@@ -30,6 +31,20 @@ export interface CourseMap {
   update(riders: RiderView[], nextBuoy: number | null): void;
 }
 
+/** A loop's centre line `offset` m to its right, as SVG points (every few metres). */
+function loopLine(course: CourseData, offset: number): string {
+  const pts: string[] = [];
+  course.path.forEach((p, i) => {
+    if (i % 3 !== 0) return;
+    pts.push(`${(p.x - Math.cos(p.yaw) * offset).toFixed(1)},${(p.z + Math.sin(p.yaw) * offset).toFixed(1)}`);
+  });
+  if (pts[0]) pts.push(pts[0]);
+  return pts.join(" ");
+}
+
+/** The cape's map is drawn this wide (px): its loop is about as tall as it is wide. */
+const LOOP_WIDTH = 200;
+
 export class Minimap implements CourseMap {
   private svg: SVGSVGElement;
   private dots = new Map<number, SVGCircleElement>();
@@ -37,25 +52,8 @@ export class Minimap implements CourseMap {
   private buoys: { x: number; z: number }[];
 
   constructor(root: HTMLElement, course: CourseData) {
-    const half = course.straightHalf;
-    const outer = course.outerLimit;
-    const w = (half + outer) * 2 + MARGIN * 2;
-    const h = outer * 2 + MARGIN * 2;
-    this.svg = node(
-      "svg",
-      { id: "minimap", viewBox: `${-w / 2} ${-h / 2} ${w} ${h}`, width: WIDTH, height: (WIDTH * h) / w },
-      root,
-    );
-    node("path", { d: stadium(half, outer), class: "sea" }, this.svg);
-    const lane = course.radius;
-    node("path", { d: stadium(half, lane + course.laneHalf), class: "lane" }, this.svg);
-    node("path", { d: stadium(half, lane - course.laneHalf), class: "lane" }, this.svg);
-    node("path", { d: stadium(half, course.breakwaterRadius), class: "rock" }, this.svg);
-    // Land: a capsule is a line with round caps, as thick as it is wide.
-    for (const l of course.land) {
-      const line = { x1: l.ax, y1: l.az, x2: l.bx, y2: l.bz, "stroke-width": l.radius * 2 };
-      node("line", { ...line, class: `land ${l.kind}` }, this.svg);
-    }
+    if (course.place === "bay") this.svg = Minimap.oval(root, course);
+    else this.svg = Minimap.loop(root, course);
     const s = course.start;
     const rx = -Math.cos(s.yaw);
     const rz = Math.sin(s.yaw);
@@ -74,6 +72,69 @@ export class Minimap implements CourseMap {
     this.buoys = course.buoys;
     for (const b of course.buoys) node("circle", { cx: b.x, cy: b.z, r: 3.5, class: `buoy ${b.keep}` }, this.svg);
     this.nextRing = node("circle", { r: 9, class: "next" }, this.svg);
+  }
+
+  /** The cape: the water inside the outer limit along the loop, the shores, the lane. */
+  private static loop(root: HTMLElement, course: CourseData): SVGSVGElement {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (const p of course.path) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+    const pad = course.outerLimit + MARGIN;
+    const w = maxX - minX + pad * 2;
+    const h = maxZ - minZ + pad * 2;
+    const svg = node(
+      "svg",
+      {
+        id: "minimap",
+        class: "loop",
+        viewBox: `${minX - pad} ${minZ - pad} ${w} ${h}`,
+        width: LOOP_WIDTH,
+        height: (LOOP_WIDTH * h) / w,
+      },
+      root,
+    );
+    const water = loopLine(course, 0);
+    node("polyline", { points: water, class: "sea-edge", "stroke-width": course.outerLimit * 2 + 4 }, svg);
+    node("polyline", { points: water, class: "sea-band", "stroke-width": course.outerLimit * 2 }, svg);
+    // Land: a capsule is a line with round caps, as thick as it is wide.
+    for (const l of course.land) {
+      const line = { x1: l.ax, y1: l.az, x2: l.bx, y2: l.bz, "stroke-width": l.radius * 2 };
+      node("line", { ...line, class: `land ${l.kind}` }, svg);
+    }
+    for (const side of [-1, 1])
+      node("polyline", { points: loopLine(course, side * course.laneHalf), class: "lane" }, svg);
+    return svg;
+  }
+
+  /** The bay: the oval round its breakwater, the island, the town quay. */
+  private static oval(root: HTMLElement, course: CourseData): SVGSVGElement {
+    const half = course.straightHalf;
+    const outer = course.outerLimit;
+    const w = (half + outer) * 2 + MARGIN * 2;
+    const h = outer * 2 + MARGIN * 2;
+    const svg = node(
+      "svg",
+      { id: "minimap", viewBox: `${-w / 2} ${-h / 2} ${w} ${h}`, width: WIDTH, height: (WIDTH * h) / w },
+      root,
+    );
+    node("path", { d: stadium(half, outer), class: "sea" }, svg);
+    const lane = course.radius;
+    node("path", { d: stadium(half, lane + course.laneHalf), class: "lane" }, svg);
+    node("path", { d: stadium(half, lane - course.laneHalf), class: "lane" }, svg);
+    node("path", { d: stadium(half, course.breakwaterRadius), class: "rock" }, svg);
+    // Land: a capsule is a line with round caps, as thick as it is wide.
+    for (const l of course.land) {
+      const line = { x1: l.ax, y1: l.az, x2: l.bx, y2: l.bz, "stroke-width": l.radius * 2 };
+      node("line", { ...line, class: `land ${l.kind}` }, svg);
+    }
+    return svg;
   }
 
   update(riders: RiderView[], nextBuoy: number | null): void {

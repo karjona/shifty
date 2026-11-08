@@ -15,8 +15,9 @@
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
 import { landDistance } from "./land.ts";
+import { LOOK } from "./cel/look.ts";
 import { celWaterMaterial } from "./cel/water.ts";
-import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
+import { MAX_SHELTERS, MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
   Fn,
   cameraPosition,
@@ -224,7 +225,7 @@ export class SeaWater {
   readonly mesh: THREE.Mesh;
   private wake = new WakeField();
   private time = uniform(0);
-  private swells = new WaveUniforms(MAX_WAVES);
+  private swells = new WaveUniforms(MAX_WAVES, MAX_SHELTERS);
   private chop = new WaveUniforms(CHOP_WAVES);
   private origin = uniform(new THREE.Vector2());
   private swellDir = uniform(new THREE.Vector2(1, 0));
@@ -239,7 +240,11 @@ export class SeaWater {
     ),
   );
 
-  constructor(size: number, segments: number) {
+  /**
+   * `inland`: hide the water this far inside the land (m), where swells
+   * would show through low shores; `null` hides it past the bay's plain.
+   */
+  constructor(size: number, segments: number, inland: number | null = null) {
     const t = this.time;
     const { swells, chop, origin } = this;
     const wakeTex = this.wake.output;
@@ -247,9 +252,13 @@ export class SeaWater {
     const displaced = Fn(() => {
       const p = positionLocal.add(vec3(origin.x, 0, origin.y));
       const swell = swells.sum(p, t);
+      // Sheltered water is calmer all the way down to the chop; the wind roughens it.
+      const calm = swells.exposure(p).f.mul(LOOK.chop);
       const ripple = chop.sum(p, t);
-      normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
-      return positionLocal.add(vec3(0, swell.h.add(ripple.h), 0));
+      const rdx = ripple.dx.mul(calm);
+      const rdz = ripple.dz.mul(calm);
+      normalLocal.assign(vec3(swell.dx.add(rdx).negate(), 1, swell.dz.add(rdz).negate()).normalize());
+      return positionLocal.add(vec3(0, swell.h.add(ripple.h.mul(calm)), 0));
     });
 
     // The slope (x, z) of the fine ripples at this pixel, faded by distance.
@@ -268,7 +277,7 @@ export class SeaWater {
       return vec2(dx, dz);
     });
     const fine = ripples();
-    const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.y.negate())).normalize();
+    const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.y.negate()).mul(LOOK.chop)).normalize();
 
     // Distance from this pixel to the nearest shore (metres), from the baked field.
     const shoreAt = Fn(() => {
@@ -306,6 +315,7 @@ export class SeaWater {
         mirror,
         time: t,
         swellDir: this.swellDir,
+        hidden: inland === null ? null : shoreAt().lessThan(-inland),
       }),
     );
     this.mesh.receiveShadow = true;
@@ -339,6 +349,11 @@ export class SeaWater {
   follow(x: number, z: number): void {
     this.origin.value.set(x, z);
     this.mesh.position.set(x, 0, z);
+  }
+
+  /** The swells' heights now (a race's sea turns; see `Bay`). */
+  setSwells(params: Float32Array): void {
+    this.swells.setFromSim(params);
   }
 
   setWaves(params: Float32Array, seed: number): void {

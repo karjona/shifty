@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! devkit determinism [ticks]            native determinism hash
-//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--humans 0] [--surface 1] [--course 0] [--pid p]
+//! devkit token --room r --name n [--aud localhost:4433] [--bots 0] [--humans 0] [--surface 1] [--pid p]
+//!               [--tilt 1 | --course 0 --season 0 --weather 0 --turns 0 --time 72] [--seed 0]
 //! devkit bots [--server localhost:4433] [--count 3] [--room dev] [--seconds 20] [--lag-ms 0] [--loss 0.0] [--humans 0] [--loading 0]
 //! ```
 //!
@@ -17,7 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use client_core::{Client, Phase};
 use ed25519_dalek::{Signer, SigningKey};
-use protocol::token::{JoinClaims, b64, encode_claims, signing_input};
+use protocol::token::{JoinClaims, RaceClaims, b64, encode_claims, signing_input};
 use serde::Deserialize;
 use sim::Input;
 use sim::math::Pcg32;
@@ -98,6 +99,8 @@ fn now_unix() -> u64 {
 }
 
 fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<JoinClaims> {
+    let opt = |k: &str| -> Result<Option<u8>> { Ok(m.get(k).map(|v| v.parse()).transpose()?) };
+    let tilt = m.get("tilt").is_some_and(|v| v != "0");
     Ok(JoinClaims {
         v: 1,
         aud: m
@@ -112,14 +115,22 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         bots: m.get("bots").map_or(Ok(0), |b| b.parse())?,
         humans: m.get("humans").map_or(Ok(0), |b| b.parse())?,
         surface: m.get("surface").map_or(Ok(1), |b| b.parse())?,
-        course: m.get("course").map_or(Ok(0), |b| b.parse())?,
-        events: m.get("events").map_or(Ok(vec![]), |list| {
-            list.split(',')
-                .map(str::parse)
-                .collect::<Result<Vec<u8>, _>>()
-        })?,
+        tilt,
+        races: if tilt {
+            Vec::new()
+        } else {
+            vec![RaceClaims {
+                course: opt("course")?,
+                season: opt("season")?,
+                weather: opt("weather")?,
+                turns: opt("turns")?,
+                time: opt("time")?,
+            }]
+        },
+        seed: m.get("seed").map_or(Ok(0), |b| b.parse())?,
         look: String::new(),
         setups: Vec::new(),
+        trial: m.get("trial").is_some_and(|t| t == "1"),
     })
 }
 
@@ -132,7 +143,7 @@ async fn main() -> Result<()> {
     let m = args_map(&args[1..]);
     match cmd.as_str() {
         "determinism" => {
-            let ticks = args.get(1).map_or(Ok(3000), |t| t.parse())?;
+            let ticks = args.get(1).map_or(Ok(4800), |t| t.parse())?;
             println!("{:016x}", sim::determinism_scenario(ticks));
         }
         "token" => {

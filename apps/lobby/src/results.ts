@@ -5,13 +5,23 @@ import type { Db } from "./db/client.ts";
 import { match, matchPlayer, raceResult } from "./db/schema.ts";
 import { isRecord } from "./json.ts";
 import { pay, payouts } from "./rewards.ts";
-import { courses, isEventChoice } from "./tickets.ts";
+
+/** A race's conditions in wire numbers (`sim::Conditions`). */
+export interface ReportConditions {
+  season: number;
+  weather: number;
+  turns: number;
+  time: number;
+}
 
 export interface ResultReport {
   room: string;
   round: number;
   event: number;
+  /** How many races the room's plan has (null from race servers that don't say). */
+  eventCount: number | null;
   course: number;
+  conditions: ReportConditions | null;
   entries: {
     /** Account id; null for bots. */
     pid: string | null;
@@ -33,6 +43,19 @@ export function parseReport(v: unknown): ResultReport | null {
   const event = int(o.event, 0, 31);
   const course = int(o.course, 0, 255);
   if (typeof o.room !== "string" || round === null || event === null || course === null) return null;
+  const eventCount = o.eventCount === undefined ? null : int(o.eventCount, 1, 32);
+  if (eventCount === null && o.eventCount !== undefined) return null;
+  let conditions: ReportConditions | null = null;
+  if (o.conditions !== undefined) {
+    const c = o.conditions;
+    if (!isRecord(c)) return null;
+    const season = int(c.season, 0, 3);
+    const weather = int(c.weather, 0, 6);
+    const turns = int(c.turns, 0, 6);
+    const time = int(c.time, 0, 143);
+    if (season === null || weather === null || turns === null || time === null) return null;
+    conditions = { season, weather, turns, time };
+  }
   if (!Array.isArray(o.entries) || o.entries.length > 8) return null;
   const entries: ResultReport["entries"] = [];
   for (const x of o.entries as unknown[]) {
@@ -49,7 +72,7 @@ export function parseReport(v: unknown): ResultReport | null {
       gpPoints: x.gpPoints === null ? null : int(x.gpPoints, 0, 10_000),
     });
   }
-  return { room: o.room, round, event, course, entries };
+  return { room: o.room, round, event, eventCount, course, conditions, entries };
 }
 
 /** Stores a race's results and pays its rewards; returns how many results were kept. */
@@ -60,7 +83,7 @@ export async function storeReport(db: Db, report: ResultReport): Promise<number>
     .where(eq(match.id, report.room))
     .limit(1);
   if (!m) return 0;
-  const planLength = isEventChoice(m.event) ? courses(m.event).length : 1;
+  const planLength = report.eventCount ?? (m.event === "gp" ? 2 : 1);
   if (report.event >= planLength - 1)
     await db
       .update(match)

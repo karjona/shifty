@@ -1,9 +1,12 @@
 // Land along the course, drawn from the sim's capsules (`courseJson`), so
 // the shore you see is the shore you hit: the town quay with its waterfront,
 // the island with its pines and chapel, and rocks. Low-poly and
-// flat-shaded; anything repeated is instanced.
+// flat-shaded; anything repeated is instanced. All of it is out in the
+// weather (see cel/look.ts): snow on roofs and rocks in winter, the
+// island's grass and trees in the season's colours.
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
+import { FOLIAGE } from "./cel/look.ts";
 import { Fn, float, fract, fwidth, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 
 /** Distance from (x, z) to a piece of land's shore (negative inside it). */
@@ -16,7 +19,7 @@ export function landDistance(l: LandData, x: number, z: number): number {
 }
 
 /** Seeded noise in [0, 1). */
-function rng(seed: number): () => number {
+export function rng(seed: number): () => number {
   let s = seed >>> 0 || 1;
   return () => {
     s ^= s << 13;
@@ -26,8 +29,16 @@ function rng(seed: number): () => number {
   };
 }
 
-const mat = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
-  new THREE.MeshStandardNodeMaterial({ color, roughness: 0.9, flatShading: true, ...opts });
+/** A flat-shaded material out in the weather, as foliage of `kind` (see `FOLIAGE`). */
+const mat = (
+  color: number,
+  opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {},
+  kind: number = FOLIAGE.none,
+) => {
+  const m = new THREE.MeshStandardNodeMaterial({ color, roughness: 0.9, flatShading: true, ...opts });
+  m.userData.outdoor = kind;
+  return m;
+};
 
 const STONE = 0xb4a58c;
 const PAVING = 0xd9cbb0;
@@ -44,7 +55,7 @@ const AWNINGS = [0x2a8fb0, 0xd94a3a, 0x3f8a4a, 0xf2c14e, 0xf6f2ea];
 const SHUTTERS = [0x2f7d6b, 0x3a6ea5, 0x2d8a9a, 0x4f7f3a, 0x6b8fb3, 0x2f7d6b];
 
 /** Outline of a capsule in world xz, counter-clockwise seen from above. */
-function capsuleOutline(l: LandData, steps = 16): THREE.Vector2[] {
+export function capsuleOutline(l: LandData, steps = 16): THREE.Vector2[] {
   const dir = Math.atan2(l.bz - l.az, l.bx - l.ax);
   const out: THREE.Vector2[] = [];
   const arc = (cx: number, cz: number, from: number) => {
@@ -59,7 +70,7 @@ function capsuleOutline(l: LandData, steps = 16): THREE.Vector2[] {
 }
 
 /** A prism over `outline` (world xz) from `bottom` to `top`: [top, sides] material groups. */
-function prism(outline: THREE.Vector2[], bottom: number, top: number): THREE.BufferGeometry {
+export function prism(outline: THREE.Vector2[], bottom: number, top: number): THREE.BufferGeometry {
   // Shape y is world -z (the extrusion is turned to stand up along +y).
   const shape = new THREE.Shape(outline.map((p) => new THREE.Vector2(p.x, -p.y)));
   const geo = new THREE.ExtrudeGeometry(shape, { depth: top - bottom, bevelEnabled: false, curveSegments: 1 });
@@ -69,7 +80,7 @@ function prism(outline: THREE.Vector2[], bottom: number, top: number): THREE.Buf
 }
 
 /** Instanced boxes: `add` one per call, `build` makes the mesh. */
-class Boxes {
+export class Boxes {
   private items: { m: THREE.Matrix4; c: THREE.Color }[] = [];
   private q = new THREE.Quaternion();
   private e = new THREE.Euler();
@@ -93,14 +104,14 @@ class Boxes {
 }
 
 /** A box geometry sitting on y = 0. */
-function unitBox(): THREE.BufferGeometry {
+export function unitBox(): THREE.BufferGeometry {
   const g = new THREE.BoxGeometry(1, 1, 1);
   g.translate(0, 0.5, 0);
   return g;
 }
 
 /** A four-sided roof sitting on y = 0. */
-function unitRoof(): THREE.BufferGeometry {
+export function unitRoof(): THREE.BufferGeometry {
   const g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1);
   g.rotateY(Math.PI / 4);
   g.translate(0, 0.5, 0);
@@ -108,14 +119,14 @@ function unitRoof(): THREE.BufferGeometry {
 }
 
 /** A seven-sided cone sitting on y = 0 (pines, palm crowns). */
-function unitCone(): THREE.BufferGeometry {
+export function unitCone(): THREE.BufferGeometry {
   const g = new THREE.ConeGeometry(0.5, 1, 7);
   g.translate(0, 0.5, 0);
   return g;
 }
 
 /** Jitter a geometry's vertices so it reads as rock (seeded, radial in xz). */
-function roughen(geo: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
+export function roughen(geo: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
   const r = rng(seed);
   const pos = geo.attributes.position!;
   for (let i = 0; i < pos.count; i++) {
@@ -232,7 +243,7 @@ function town(l: LandData, seed: number): THREE.Group {
     roofs.build(unitRoof(), tiledRoof()),
     windows.build(unitBox(), mat(0xffffff, { roughness: 0.3 }), false),
     trunks.build(unitBox(), plain),
-    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide })),
+    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide }, FOLIAGE.evergreen)),
     awnings.build(unitBox(), plain),
   );
   return g;
@@ -251,7 +262,7 @@ function tiledRoof(): THREE.MeshStandardNodeMaterial {
 }
 
 /** A palm's crown of drooping fronds, about a unit across, its heart at y = 0. */
-function palmCrown(): THREE.BufferGeometry {
+export function palmCrown(): THREE.BufferGeometry {
   const pos: number[] = [];
   const fronds = 9;
   const segs = 7;
@@ -293,7 +304,7 @@ function island(l: LandData, seed: number): THREE.Group {
   rock.position.y = -1;
   const cap = new THREE.Mesh(
     roughen(new THREE.CylinderGeometry(l.radius * 0.62, l.radius * 0.74, 1.2, 14, 1), 0.08, seed + 1),
-    mat(GRASS),
+    mat(GRASS, {}, FOLIAGE.grass),
   );
   cap.position.y = 4.4;
   rock.castShadow = cap.castShadow = true;
@@ -311,7 +322,7 @@ function island(l: LandData, seed: number): THREE.Group {
     trunks.add(x, 4.8, z, 0.4, 1.4, 0.4, TRUNK);
     pines.add(x, 5.8, z, 2.6 + r(), h, 2.6 + r(), PINE);
   }
-  const plain = mat(0xffffff);
+  const plain = mat(0xffffff, {}, FOLIAGE.evergreen);
   g.add(pines.build(unitCone(), plain), trunks.build(unitBox(), plain));
 
   // A small chapel facing the course.

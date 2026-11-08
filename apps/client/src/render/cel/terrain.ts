@@ -1,21 +1,25 @@
 // Landforms for the cel look: mountains with ridges and gullies (so the
 // sun cuts clean light and shade shapes across them), snow caps with
-// crisp, ragged edges, and the distance laid in as an illustrator's haze.
+// crisp, ragged edges down to the season's snow line, and the distance
+// laid in as an illustrator's haze (thicker on a hazy day).
 import * as THREE from "three/webgpu";
 import {
   Fn,
   attribute,
   float,
   fwidth,
+  clamp,
   max,
   min,
   mix,
   mx_noise_float,
   normalLocal,
+  positionWorld,
   pow,
   smoothstep,
   uniform,
 } from "three/tsl";
+import { LOOK } from "./look.ts";
 import { CelMaterial } from "./material.ts";
 
 /** Seeded hash in [0, 1). */
@@ -72,12 +76,11 @@ function ridged(x: number, y: number, z: number, seed: number, octaves = 4): num
 export interface PeakStyle {
   rock: THREE.ColorRepresentation;
   snow: THREE.ColorRepresentation;
-  /** Fraction of the height above which snow lies (0-1). */
+  /** Fraction of the height above which snow lies (0-1), on top of the season's snow line. */
   snowline: number;
   /** How far toward the sky the whole peak is hazed (0-1), and more at its foot. */
   haze: number;
   footHaze: number;
-  sky: THREE.Color;
 }
 
 /** A mountain about `radius` across its base and `height` tall, its foot at y = 0. */
@@ -120,7 +123,7 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
   geo.setAttribute("peakLocal", new THREE.BufferAttribute(local, 3));
   geo.setAttribute("peakShape", new THREE.BufferAttribute(shape, 4));
   geo.setAttribute("peakFoot", new THREE.BufferAttribute(foot, 1));
-  const mat = peakMaterial(rock, snow, s.sky);
+  const mat = peakMaterial(rock, snow);
   const mesh = new THREE.Mesh(geo, mat);
   return mesh;
 }
@@ -128,8 +131,8 @@ export function celPeak(radius: number, height: number, seed: number, s: PeakSty
 const peakMaterials = new Map<string, CelMaterial>();
 
 /** The peaks' material for one set of colours (shared: each peak's numbers are on its vertices). */
-function peakMaterial(rock: THREE.Color, snow: THREE.Color, sky: THREE.Color): CelMaterial {
-  const key = `${rock.getHex()} ${snow.getHex()} ${sky.getHex()}`;
+function peakMaterial(rock: THREE.Color, snow: THREE.Color): CelMaterial {
+  const key = `${rock.getHex()} ${snow.getHex()}`;
   const cached = peakMaterials.get(key);
   if (cached) return cached;
   const mat = new CelMaterial({
@@ -144,25 +147,29 @@ function peakMaterial(rock: THREE.Color, snow: THREE.Color, sky: THREE.Color): C
   // Snow per pixel, so its edge is crisp: above a ragged line, and off the steepest faces.
   const rockC = uniform(rock);
   const snowC = uniform(snow);
-  const skyC = uniform(sky.clone());
+  const shape = attribute<"vec4">("peakShape", "vec4");
+  const t = attribute<"vec3">("peakLocal", "vec3").y.div(shape.x);
   mat.colorNode = Fn(() => {
     const p = attribute<"vec3">("peakLocal", "vec3");
-    const shape = attribute<"vec4">("peakShape", "vec4");
-    const footHaze = attribute<"float">("peakFoot", "float");
-    const top = shape.x;
     const offset = shape.y;
     const snowline = shape.z;
-    const haze = shape.w;
-    const t = p.y.div(top);
     const n = mx_noise_float(p.mul(0.012).add(offset))
       .mul(0.1)
       .add(mx_noise_float(p.mul(0.05).add(offset.mul(3))).mul(0.04));
     const up = normalLocal.y;
-    const line = t.sub(snowline).add(n).add(up.sub(0.45).mul(0.18));
+    // Snow down to the season's line (m); a peak far above it is white but for its foot and steepest faces.
+    const season = clamp(positionWorld.y.sub(LOOK.snowLine).div(90), -1.5, 0.3);
+    const line = season.add(t.sub(snowline).mul(0.6)).add(n).add(up.sub(0.45).mul(0.18));
     const w = max(fwidth(line), float(1e-4));
     const snowy = smoothstep(w.negate(), w, line);
-    const base = mix(rockC, snowC, snowy);
-    return mix(base, skyC, min(float(1), haze.add(footHaze.mul(pow(float(1).sub(t), 2)))));
+    return mix(rockC, snowC, snowy);
+  })();
+  // Hazed toward the distance's colour, more at its foot and on a hazy day.
+  mat.hazeNode = Fn(() => {
+    const haze = shape.w;
+    const footHaze = attribute<"float">("peakFoot", "float");
+    const hazed = min(float(1), haze.add(footHaze.mul(pow(float(1).sub(t), 2))));
+    return hazed.add(LOOK.haze.mul(float(1).sub(hazed)));
   })();
   peakMaterials.set(key, mat);
   return mat;

@@ -22,8 +22,13 @@ use protocol::{
 };
 use serde::Serialize;
 use sim::bot::bot_input;
+use sim::conditions::Event as RaceEvent;
 use sim::race::{Phase, Race};
-use sim::{CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, World};
+use sim::{
+    CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, Weather, World,
+};
+
+use crate::record::{RunReport, Trial};
 
 pub type ConnId = u64;
 
@@ -38,6 +43,9 @@ pub const IDLE_TIMEOUT_MS: u64 = 10_000;
 /// The grid waits at most this long for every screen to be ready; screens
 /// still loading then see the race wherever it is.
 pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
+/// A time trial's results stay up this long at most (a forgotten tab):
+/// then its room is over.
+pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
 /// Packet rate limit per connection: burst and sustained packets per second.
 const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
@@ -62,13 +70,16 @@ const BOT_SETUPS: [[u8; 4]; 8] = [
 #[derive(Clone, Debug)]
 pub struct RoomConfig {
     pub id: String,
-    /// The courses raced, in order: one, or a Tilt.
-    pub plan: Vec<CourseId>,
+    /// The races, in order: one, or a Tilt. Drawn once, from the token
+    /// that creates the room.
+    pub plan: Vec<RaceEvent>,
     pub surface_kind: SurfaceKind,
     pub surface_seed: u32,
     pub bots: u8,
     /// People the lobby sent: the first race waits for them all to arrive.
     pub humans: u8,
+    /// A time trial in this season (0-3): one rider, no bots, runs recorded.
+    pub trial: Option<u8>,
 }
 
 impl RoomConfig {
@@ -77,17 +88,35 @@ impl RoomConfig {
         for b in claims.room.bytes() {
             seed = (seed ^ u32::from(b)).wrapping_mul(0x0100_0193);
         }
-        let mut plan = claims.plan();
+        let mut plan = claims.events();
+        plan.truncate(protocol::token::MAX_EVENTS);
         if plan.is_empty() {
-            plan.push(CourseId::Oval);
+            plan.push(RaceEvent::home(CourseId::Oval));
         }
+        // A time trial: one race, in clear, steady weather.
+        let trial = claims.trial.then(|| {
+            plan.truncate(1);
+            let c = &mut plan[0].conditions;
+            c.weather = Weather::Clear;
+            c.turns = Weather::Clear;
+            c.season as u8
+        });
         Self {
             id: claims.room.clone(),
             plan,
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
-            bots: claims.bots.min((MAX_RIDERS - 1) as u8),
-            humans: claims.humans.min(MAX_HUMANS as u8),
+            bots: if trial.is_some() {
+                0
+            } else {
+                claims.bots.min((MAX_RIDERS - 1) as u8)
+            },
+            humans: if trial.is_some() {
+                1
+            } else {
+                claims.humans.min(MAX_HUMANS as u8)
+            },
+            trial,
         }
     }
 
@@ -109,16 +138,40 @@ pub struct ReportEntry {
     pub gp_points: Option<u16>,
 }
 
+/// A race's conditions, for the lobby (JSON, wire numbers).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ReportConditions {
+    pub season: u8,
+    pub weather: u8,
+    pub turns: u8,
+    pub time: u8,
+}
+
+impl From<sim::Conditions> for ReportConditions {
+    fn from(c: sim::Conditions) -> Self {
+        let [season, weather, turns, time] = c.to_bytes();
+        Self {
+            season,
+            weather,
+            turns,
+            time,
+        }
+    }
+}
+
 /// A finished race, for the lobby (JSON).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RaceReport {
     pub room: String,
     /// Counts runs through the plan (a plan started again from the top, when
     /// the first player arrives in a room that bots kept racing, is a new round).
     pub round: u16,
-    /// The race's place in the plan.
+    /// The race's place in the plan, and how many races the plan has.
     pub event: u8,
+    pub event_count: u8,
     pub course: u8,
+    pub conditions: ReportConditions,
     pub entries: Vec<ReportEntry>,
 }
 
@@ -217,6 +270,8 @@ pub struct Room {
     arrived: usize,
     /// The last race's results are done.
     over: bool,
+    /// A time trial's runs.
+    trial: Option<Trial>,
     pub stats: RoomStats,
 }
 
@@ -228,12 +283,17 @@ pub struct Outbox {
     pub close: Vec<ConnId>,
     /// Races that just ended, for the lobby.
     pub reports: Vec<RaceReport>,
+    /// Time trial runs that just finished, for the lobby.
+    pub runs: Vec<RunReport>,
 }
 
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
+        let mut world = World::for_event(config.plan[0], config.surface_kind, config.surface_seed);
+        world.trial = config.trial.is_some();
         let mut room = Self {
-            world: World::on_course(config.plan[0], config.surface_kind, config.surface_seed),
+            trial: config.trial.map(|season| Trial::new(&config.id, season)),
+            world,
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
             entrants: Default::default(),
@@ -373,12 +433,16 @@ impl Room {
                     p.conn = conn;
                     // A new screen: it says again what it has loaded.
                     p.ready = 0;
+                    if let Some(trial) = &mut self.trial {
+                        trial.seat(&claims.pid, &claims.look_bytes());
+                    }
                 }
                 p.last_packet_ms = now_ms;
                 slot
             }
             None => {
-                if self.human_count() >= MAX_HUMANS {
+                let most = if self.trial.is_some() { 1 } else { MAX_HUMANS };
+                if self.human_count() >= most {
                     return Err(RejectReason::RoomFull);
                 }
                 if self.human_count() == 0 {
@@ -433,6 +497,9 @@ impl Room {
                 // the Tilt table.
                 self.players[slot] = Some(player);
                 self.apply_setups();
+                if let Some(trial) = &mut self.trial {
+                    trial.seat(&claims.pid, &claims.look_bytes());
+                }
                 let events: Vec<EventBody> = (0..MAX_RIDERS)
                     .filter_map(|s| self.roster_event(s))
                     .collect();
@@ -461,10 +528,12 @@ impl Room {
             snapshot_interval: SNAPSHOT_INTERVAL as u8,
             max_riders: MAX_RIDERS as u8,
             course: self.world.course,
+            conditions: self.world.conditions,
             surface_kind: self.config.surface_kind,
             surface_seed: self.config.surface_seed,
             server_tick: self.world.tick,
             echo_client_time: client_time,
+            trial: self.trial.is_some(),
         }
     }
 
@@ -531,12 +600,14 @@ impl Room {
             let table = self.standings_event();
             self.broadcast_event(&table, None);
         }
-        if entries.iter().any(|e| e.pid.is_some()) {
+        if self.trial.is_none() && entries.iter().any(|e| e.pid.is_some()) {
             out.reports.push(RaceReport {
                 room: self.config.id.clone(),
                 round: self.round,
                 event: self.event_index as u8,
+                event_count: self.config.plan.len() as u8,
                 course: self.world.course as u8,
+                conditions: self.world.conditions.into(),
                 entries,
             });
         }
@@ -544,7 +615,7 @@ impl Room {
 
     /// Back to the grid of the plan's first race, with no points.
     fn restart_plan(&mut self) {
-        if self.event_index != 0 || self.world.course != self.config.plan[0] {
+        if self.event_index != 0 || self.world.event() != self.config.plan[0] {
             self.event_index = 0;
             self.round = self.round.wrapping_add(1);
             self.load_course();
@@ -584,16 +655,15 @@ impl Room {
         self.load_course();
     }
 
-    /// A fresh world on the plan's current course (if it changed), with
+    /// A fresh world for the plan's current race (if it changed), with
     /// every seated rider on the grid.
     fn load_course(&mut self) {
-        let course = self.config.plan[self.event_index];
-        if course == self.world.course {
+        let event = self.config.plan[self.event_index];
+        if event == self.world.event() {
             return;
         }
         let tick = self.world.tick;
-        let mut world =
-            World::on_course(course, self.config.surface_kind, self.config.surface_seed);
+        let mut world = World::for_event(event, self.config.surface_kind, self.config.surface_seed);
         world.tick = tick;
         world.race = Race::new(tick);
         for slot in 0..MAX_RIDERS {
@@ -623,6 +693,9 @@ impl Room {
         p.ack_events(packet.event_ack);
         // Readiness only moves on (packets can arrive out of order).
         p.ready = p.ready.max(packet.ready);
+        if let Some(trial) = &mut self.trial {
+            trial.retries(packet.retry);
+        }
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
 
@@ -663,6 +736,9 @@ impl Room {
         if self.world.race.phase == Phase::Grid && self.grid_done() {
             self.world.start_intro();
         }
+        if let Some(trial) = &mut self.trial {
+            trial.before_step(&mut self.world);
+        }
         let next = self.world.tick.wrapping_add(1);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for slot in 0..MAX_RIDERS {
@@ -679,10 +755,22 @@ impl Room {
             }
         }
         let phase_before = self.world.race.phase;
-        self.world.step(&inputs);
+        let events = self.world.step(&inputs);
+        if let Some(trial) = &mut self.trial
+            && let Some(slot) = self.seats.iter().position(|s| *s == Seat::Human)
+        {
+            out.runs
+                .extend(trial.after_step(&self.world, slot, &events));
+        }
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
             (Phase::Results, Phase::Grid) => self.results_done(),
+            (_, Phase::Results)
+                if self.trial.is_some()
+                    && self.world.race.elapsed(self.world.tick) >= TRIAL_RESULTS_TICKS =>
+            {
+                self.over = true;
+            }
             _ => {}
         }
 
@@ -734,6 +822,7 @@ impl Room {
                         .saturating_sub(p.echo_received_ms)
                         .min(u64::from(u16::MAX)) as u16,
                     course: self.world.course,
+                    conditions: self.world.conditions,
                     event_index: self.event_index as u8,
                     event_count: self.config.plan.len() as u8,
                     race: self.world.race,
@@ -765,10 +854,18 @@ mod tests {
             bots,
             humans: 0,
             surface: SurfaceKind::Flat as u8,
-            course: events[0],
-            events,
+            tilt: false,
+            races: events
+                .into_iter()
+                .map(|c| protocol::token::RaceClaims {
+                    course: Some(c),
+                    ..Default::default()
+                })
+                .collect(),
+            seed: 5,
             look: String::new(),
             setups: Vec::new(),
+            trial: false,
         }
     }
 
@@ -780,6 +877,7 @@ mod tests {
             last_snapshot_tick: 0,
             client_time: 0,
             ready: ready.map_or(0, |e| e as u8 + 1),
+            retry: 0,
             first_tick: room.tick() + 1,
             inputs: vec![Input::default()],
         };
@@ -836,6 +934,9 @@ mod tests {
             panic!("one race, one report: {reports:?}")
         };
         assert_eq!((report.round, report.event, report.course), (1, 0, 0));
+        assert_eq!(report.event_count, 2);
+        assert_eq!(report.conditions, room.config.plan[0].conditions.into());
+        assert_eq!(room.world().conditions, room.config.plan[1].conditions);
         assert_eq!(report.entries.len(), 4);
         let mine = report
             .entries

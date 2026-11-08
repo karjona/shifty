@@ -111,6 +111,52 @@ function bayShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env: 
   ];
 }
 
+/**
+ * The cape: the whole headland from the open sea with the sierra behind,
+ * low through the arch, weaving down past the stacks, then the grid off
+ * the beach.
+ */
+function capeShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env: Environment): Shot[] {
+  const s = course.start;
+  const back = 14;
+  const grid: Grid = {
+    centre: v(s.x - Math.sin(s.yaw) * back, 0.6, s.z - Math.cos(s.yaw) * back),
+    yaw: s.yaw,
+  };
+  /** A point `at` m round the centre line, `side` m to its right, `up` m over the water. */
+  const on = (at: number, up: number, side = 0) => {
+    const step = course.path.length > 1 ? course.path[1]!.s : 2;
+    const n = course.path.length;
+    const p = course.path[((Math.round(at / step) % n) + n) % n] ?? course.path[0]!;
+    return v(p.x - Math.cos(p.yaw) * side, up, p.z + Math.sin(p.yaw) * side);
+  };
+  const legs = course.land.filter((l) => l.kind === "arch");
+  const archX = legs.length > 0 ? legs.reduce((sum, l) => sum + l.ax + l.bx, 0) / (legs.length * 2) : 0;
+  // Where the line passes under the arch, and where it enters the stacks.
+  const arch = course.path.reduce((best, p) =>
+    Math.abs(p.x - archX) < Math.abs(best.x - archX) && p.z < 0 ? p : best,
+  );
+  const stacks = course.length * 0.71;
+  return [
+    dolly(
+      2.2,
+      { eye: v(-130, 46, 320), look: v(-50, 12, 60), fov: 46 },
+      { eye: v(10, 40, 300), look: v(-10, 10, 20), fov: 46 },
+    ),
+    dolly(
+      1.6,
+      { eye: on(arch.s - 85, 4.5, 4), look: on(arch.s + 10, 7), fov: 52 },
+      { eye: on(arch.s - 45, 3.6, 3), look: on(arch.s + 40, 6), fov: 52 },
+    ),
+    dolly(
+      1.6,
+      { eye: on(stacks - 40, 9, -6), look: on(stacks + 40, 5), fov: 50 },
+      { eye: on(stacks - 5, 6, -4), look: on(stacks + 75, 4), fov: 50 },
+    ),
+    round(2.0, grid, (x, z) => env.ground(x, z, 0), env.camera.fov),
+  ];
+}
+
 /** The centre line of a run at `s` (from its points every few metres; straight on behind the top). */
 function runAt(path: RunPoint[], s: number): RunPoint {
   const first = path[0]!;
@@ -160,13 +206,51 @@ function mountainShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: 
   ];
 }
 
+/** The glades: the col and the couloir below it, the bowl and its spine, through the pines, the grid. */
+function gladesShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: Environment): Shot[] {
+  const ground = (x: number, z: number) => env.ground(x, z, 0);
+  const on = (s: number, offset: number, up: number) => {
+    const p = runAt(run.path, s);
+    const x = p.x + Math.cos(p.yaw) * -offset;
+    const z = p.z + Math.sin(p.yaw) * offset;
+    return new THREE.Vector3(x, ground(x, z) + up, z);
+  };
+  const start = runAt(run.path, run.startS - 8);
+  const grid: Grid = { centre: new THREE.Vector3(start.x, start.y + 0.4, start.z), yaw: start.yaw };
+  const spine = run.spines[0] ?? { s: 380, end: 490, offset: 0 };
+  return [
+    // Over the col, the lift's top station beside it, down into the couloir.
+    dolly(
+      2.0,
+      { eye: on(-40, 18, 14), look: on(70, -2, -6), fov: 50 },
+      { eye: on(-12, 10, 22), look: on(150, 0, -10), fov: 48 },
+    ),
+    // Along the bowl's rim, to its spine.
+    dolly(
+      1.5,
+      { eye: on(spine.s - 120, -40, 22), look: on(spine.s - 20, spine.offset, 0), fov: 50 },
+      { eye: on(spine.s - 60, -38, 18), look: on(spine.s + 40, spine.offset, 0), fov: 50 },
+    ),
+    // Low through the pines, to the log across the run.
+    dolly(
+      1.5,
+      { eye: on(990, 2, 3.2), look: on(1045, 0, 0.5), fov: 54 },
+      { eye: on(1018, 2, 2.6), look: on(1075, 0, 1), fov: 54 },
+    ),
+    round(2.0, grid, ground, env.camera.fov),
+  ];
+}
+
 export class Flyover {
   private shots: Shot[];
   private pose: Pose = { eye: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 };
   private shot: CameraShot = { eye: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50, chase: 0 };
 
   constructor(course: CourseInfo, env: Environment) {
-    this.shots = course.sport === "snow" ? mountainShots(course.run, env) : bayShots(course.bay, env);
+    if (course.sport === "snow")
+      this.shots = course.id === 3 ? gladesShots(course.run, env) : mountainShots(course.run, env);
+    else if (course.bay.place === "cape") this.shots = capeShots(course.bay, env);
+    else this.shots = bayShots(course.bay, env);
   }
 
   /** Seconds the shots last, before they are fitted to the intro. */

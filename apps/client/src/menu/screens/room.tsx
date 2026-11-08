@@ -7,15 +7,16 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
-import { type EventChoice, lobbySocket, meQuery, setPendingRace } from "../api.ts";
+import { type PlanRequest, TILT, parsePlan } from "@shifty/rider";
+import { lobbySocket, meQuery, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
+import { PlanPickers, usePlanSummary } from "../plan.tsx";
 import { Button, Hints, Panel, Picker } from "../ui.tsx";
 import { useLoading } from "../busy.tsx";
 import { TopBar } from "./common.tsx";
 
 const route = getRouteApi("/room/$code");
-const EVENTS: EventChoice[] = ["gp", "summer", "winter"];
 
 type RoomMessage =
   | { t: "state"; room: RoomState }
@@ -35,7 +36,6 @@ function parseRoomMessage(data: unknown): RoomMessage | null {
   if (m.t === "ticket") return { t: "ticket", ticket: parseJoinTicket(get("ticket")) };
   if (m.t === "error") return { t: "error", error: String(get("error")) };
   if (m.t !== "state") return null;
-  const event = get("event");
   const members = get("members");
   const racing = get("racing");
   return {
@@ -43,7 +43,7 @@ function parseRoomMessage(data: unknown): RoomMessage | null {
     room: {
       code: String(get("code")),
       hostId: String(get("hostId")),
-      event: event === "summer" || event === "winter" ? event : "gp",
+      plan: parsePlan(get("plan")) ?? TILT,
       bots: Number(get("bots")) || 0,
       members: (Array.isArray(members) ? (members as unknown[]) : []).flatMap((x) =>
         typeof x === "object" && x !== null
@@ -64,7 +64,7 @@ function parseRoomMessage(data: unknown): RoomMessage | null {
 interface RoomState {
   code: string;
   hostId: string;
-  event: EventChoice;
+  plan: PlanRequest;
   bots: number;
   members: { userId: string; handle: string; ready: boolean }[];
   racing: string[];
@@ -168,22 +168,21 @@ export function RoomScreen() {
                 </ul>
                 {host ? (
                   <>
-                    <Picker<EventChoice>
-                      label={t.room.event}
-                      options={EVENTS.map((e) => ({ value: e, label: t.play.events[e] }))}
-                      value={room.event}
-                      onChange={(event) => send({ t: "settings", event, bots: room.bots })}
+                    <PlanPickers
+                      plan={room.plan}
+                      onChange={(plan) => send({ t: "settings", plan, bots: room.bots })}
+                      fields="all"
                     />
                     <Picker
                       label={t.room.bots}
                       options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
                       value={room.bots}
-                      onChange={(bots) => send({ t: "settings", event: room.event, bots })}
+                      onChange={(bots) => send({ t: "settings", plan: room.plan, bots })}
                     />
                   </>
                 ) : (
                   <p className="muted">
-                    {t.play.events[room.event]} · {t.room.bots}: {room.bots}
+                    <PlanSummary plan={room.plan} /> · {t.room.bots}: {room.bots}
                     <br />
                     {t.room.waiting}
                   </p>
@@ -226,4 +225,8 @@ export function RoomScreen() {
       />
     </div>
   );
+}
+
+function PlanSummary({ plan }: { plan: PlanRequest }) {
+  return usePlanSummary(plan);
 }

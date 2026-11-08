@@ -6,8 +6,10 @@ import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
+import { resetLook } from "./cel/look.ts";
 import { CelPost } from "./cel/post.ts";
 import { PIXEL_AT_1M } from "./cel/rider.ts";
+import { NO_WEATHER, type WeatherHere } from "../game/conditions.ts";
 
 export interface RiderView {
   slot: number;
@@ -109,6 +111,8 @@ export interface Environment {
   readonly topSpeed: number;
   /** Something in it reflects the world (the sea). */
   readonly reflects?: boolean;
+  /** Where its sun shines from, relative to what it lights (see `World.setSunOffset`), if it has its own. */
+  readonly sunOffset?: THREE.Vector3;
   /** Colours the sky, the fog and the lights. */
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
@@ -131,7 +135,21 @@ export interface Frame {
   renderer: THREE.WebGPURenderer;
   /** Summer: the buoy to pass next (index), if any. */
   nextBuoy: number | null;
+  /**
+   * The race's weather where the camera is: `progress` along the race (0 at
+   * the start, 1 at the finish: on a loop by the race clock, on a run by
+   * where the camera is down it), and how far the weather has turned from
+   * the conditions' `weather` (0) to `turns` (1; see game/conditions.ts).
+   * Both 0 outside a race. `weather` has them too, with the wind, the sea
+   * and the snow there.
+   */
+  progress: number;
+  turn: number;
+  weather: Readonly<WeatherHere>;
 }
+
+/** The race's weather at a point (x, z) (see `Frame`). */
+export type WeatherSource = (x: number, z: number) => Readonly<WeatherHere>;
 
 const DT = 1 / 60;
 /** Landing jolt: falls slower than this (m/s) don't move the camera. */
@@ -166,6 +184,8 @@ export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(55, 1, 0.3, 4000);
+  /** The race's weather, read once a frame at the camera (null outside a race). */
+  weatherAt: WeatherSource | null = null;
   backend: "webgpu" | "webgl2" = "webgl2";
   renderScale = 1;
 
@@ -267,7 +287,17 @@ export class World {
 
   /** Compiles what the scene (or `root`, about to join it) needs to be drawn (see `CelPost.compile`). */
   compile(root: THREE.Object3D = this.scene): Promise<void> {
-    return this.cel.compile(root, this.env?.reflects ?? false);
+    // What only some weather shows (`userData.weather`) is compiled shown, so it never compiles when it comes.
+    const shown: THREE.Object3D[] = [];
+    root.traverse((o) => {
+      if (o.userData.weather === true && !o.visible) {
+        o.visible = true;
+        shown.push(o);
+      }
+    });
+    return this.cel.compile(root, this.env?.reflects ?? false).finally(() => {
+      for (const o of shown) o.visible = false;
+    });
   }
 
   /**
@@ -308,7 +338,9 @@ export class World {
     if (this.env) this.scene.remove(this.env.group);
     this.env = env;
     this.scene.add(env.group);
+    resetLook();
     env.light(this.scene, this.sun, this.hemi);
+    if (env.sunOffset) this.sunOffset.copy(env.sunOffset);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();
     for (const r of this.models.values()) {
@@ -323,6 +355,7 @@ export class World {
   clearEnvironment(): void {
     if (this.env) this.scene.remove(this.env.group);
     this.env = null;
+    resetLook();
     for (const r of this.models.values()) {
       this.scene.remove(r.mesh);
       r.dispose?.();
@@ -337,10 +370,10 @@ export class World {
 
   /**
    * Draws the surroundings from a set viewpoint, without the chase camera
-   * (menus, the season change). `riders` are drawn by their own models,
-   * placed by the caller.
+   * (menus, the season change), its weather turned by `turn` (see `Frame`).
+   * Riders are drawn by their own models, placed by the caller.
    */
-  renderFrom(eye: THREE.Vector3, look: THREE.Vector3, t: number, dt: number, fov = 50): void {
+  renderFrom(eye: THREE.Vector3, look: THREE.Vector3, t: number, dt: number, fov = 50, turn = 0): void {
     this.camera.position.copy(eye);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(look);
@@ -359,6 +392,9 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy: null,
+      progress: turn,
+      turn,
+      weather: turn === 0 ? NO_WEATHER : { ...NO_WEATHER, progress: turn, turn },
     });
     this.draw();
     this.camReady = false;
@@ -415,6 +451,7 @@ export class World {
       if (!this.seen.has(slot)) model.mesh.visible = false;
     }
 
+    const weather = this.weatherAt?.(this.camera.position.x, this.camera.position.z) ?? NO_WEATHER;
     env.update({
       riders,
       models: this.models,
@@ -424,6 +461,9 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy,
+      progress: weather.progress,
+      turn: weather.turn,
+      weather,
     });
     this.draw();
   }

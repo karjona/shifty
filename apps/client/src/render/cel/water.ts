@@ -3,16 +3,20 @@
 // slopes that face you, a pale sheen toward the horizon, turquoise over
 // the shallows; white wave lines drawn where the ripples cross, glints of
 // sun, the reflections laid in as flat darker shapes, and foam as cut-out
-// white with a pale blue rim.
+// white with a pale blue rim. Its colours are the season's and the
+// weather's (see look.ts): the wind raises whitecaps, the rain rings it.
 import * as THREE from "three/webgpu";
 import {
   Fn,
+  If,
   cameraPosition,
   clamp,
-  color,
   dot,
   float,
+  floor,
+  fract,
   fwidth,
+  hash,
   max,
   mix,
   mx_noise_float,
@@ -25,6 +29,7 @@ import {
   vec3,
   vertexStage,
 } from "three/tsl";
+import { LOOK } from "./look.ts";
 import { SUN_DIR, inkNode, inkOnlyInPass } from "./material.ts";
 import { flowNoise, noise4 } from "./noise.ts";
 import { SKY } from "./sky.ts";
@@ -40,6 +45,8 @@ export interface CelWaterInputs {
   time: THREE.Node<"float">;
   /** Which way the main swell runs (xz, unit). */
   swellDir: THREE.Node<"vec2">;
+  /** Where the water is hidden (under the land); `null`: past the bay's coastal plain. */
+  hidden?: THREE.Node<"bool"> | null;
 }
 
 /** An anti-aliased step of `x` at `edge`. */
@@ -50,12 +57,14 @@ const cut = (edge: THREE.Node<"float"> | number, x: THREE.Node<"float">) => {
 };
 
 export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial {
-  const deep = color(0x0f62b2);
-  const mid = color(0x1690c8);
-  const light = color(0x46b9de);
-  const shallow = color(0x37cdc8);
-  const foamShade = color(0xbfe8f6);
-  const white = color(0xffffff);
+  const deep = LOOK.seaDeep;
+  const mid = LOOK.seaMid;
+  const light = LOOK.seaLight;
+  const shallow = LOOK.seaShallow;
+  // Foam and glints in the light of the day.
+  const white = LOOK.lit.rgb;
+  const foamLinear = new THREE.Color(0xbfe8f6);
+  const foamShade = vec3(foamLinear.r, foamLinear.g, foamLinear.b).mul(LOOK.lit);
 
   const colour = Fn(() => {
     const p = positionWorld;
@@ -99,21 +108,48 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
     const dashes = cut(0.32, noise4(vec2(along.mul(0.07), across.mul(0.09))).w);
     const near = smoothstep(140, 30, dist);
     c = mix(c, mix(c, white, 0.6), lineN.mul(dashes).mul(near));
-    // Glints of sun.
+    // Glints of sun (none once cast shadows are gone: no sun to glint).
     const r = reflect(v.negate(), i.surfaceNormal);
-    const glint = cut(0.9972, dot(r, SUN_DIR)).mul(smoothstep(220, 40, dist));
-    c = mix(c, white, glint);
+    const glint = cut(0.9972, dot(r, SUN_DIR))
+      .mul(smoothstep(220, 40, dist))
+      .mul(LOOK.shadow);
+    c = mix(c, mix(white, LOOK.glow, LOOK.dusk.mul(0.6)), glint);
+    // Rain: rings spreading on the water close by, in some cells, each to its own beat (worked out only in the rain).
+    const rings = float(0).toVar();
+    If(LOOK.rainRings.greaterThan(0.001), () => {
+      const cell = floor(xz.mul(0.8));
+      const lot = hash(cell.x.add(cell.y.mul(57.0)));
+      const beat = fract(i.time.mul(1.3).add(lot.mul(7)));
+      const ring = fract(xz.mul(0.8)).sub(0.5).length().sub(beat.mul(0.36)).abs();
+      const rw = max(fwidth(ring), float(1e-3));
+      rings.assign(
+        smoothstep(rw.mul(1.2), float(0), ring)
+          .mul(float(1).sub(beat))
+          .mul(lot.greaterThan(0.45).select(1, 0))
+          .mul(smoothstep(28, 8, dist))
+          .mul(LOOK.rainRings),
+      );
+    });
+    c = mix(c, mix(c, white, 0.5), rings);
     // Foam: crests, wakes and the surf on every shore, cut out with a pale rim.
-    // Whitecaps: small, only on the highest crests.
+    // Whitecaps: small, only on the highest crests; the wind breaks them out all over.
     const crest = smoothstep(1.5, 1.85, h)
       .mul(0.7)
       .mul(cut(0.35, flowNoise(xz.mul(0.25), i.time, 0.2)));
+    const caps = float(0).toVar();
+    If(LOOK.whitecaps.greaterThan(0.001), () => {
+      caps.assign(
+        cut(float(0.9).sub(LOOK.whitecaps.mul(0.32)), flowNoise(xz.mul(0.11), i.time, 0.35))
+          .mul(cut(0.2, flowNoise(xz.mul(0.6).add(31), i.time, 1.2)))
+          .mul(LOOK.whitecaps),
+      );
+    });
     const wake = smoothstep(0.04, 0.7, i.wake).mul(
       mix(float(0.55), float(1), flowNoise(xz.mul(0.7), i.time, 1).mul(0.5).add(0.5)),
     );
     const bands = sin(i.shore.mul(1.3).sub(i.time.mul(1.6)).add(wash2.mul(4)));
     const surf = smoothstep(1.8, 0.6, i.shore).add(cut(0.82, bands).mul(smoothstep(7, 3, i.shore)));
-    const foam = clamp(crest.add(wake).add(surf), 0, 1);
+    const foam = clamp(crest.add(caps).add(wake).add(surf), 0, 1);
     c = mix(c, foamShade, cut(0.28, foam));
     c = mix(c, white, cut(0.55, foam));
     return c;
@@ -121,8 +157,8 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
 
   const m = new THREE.MeshBasicNodeMaterial({ fog: true });
   m.positionNode = i.position;
-  // The coastal plain stands just above the sea: keep swells from showing through it.
-  m.maskNode = positionWorld.z.lessThan(120.5);
+  // Low land stands just above the sea: keep swells from showing through it.
+  m.maskNode = i.hidden ? i.hidden.not() : positionWorld.z.lessThan(120.5);
   m.colorNode = colour;
   return inkOnlyInPass(m, inkNode(0, 0, 0, 0));
 }
