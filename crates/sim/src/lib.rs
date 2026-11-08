@@ -7,6 +7,7 @@
 
 pub mod bot;
 pub mod buoy;
+pub mod circuit;
 pub mod conditions;
 pub mod course;
 pub mod input;

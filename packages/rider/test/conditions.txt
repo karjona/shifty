@@ -1,5 +1,6 @@
 circuit 0 jetski
 circuit 1 snow
+circuit 2 jetski
 sport jetski 0 1 2 3
 sport snow 1 2 3
 season 0 climate 7 2 2 1 0 1 0 daylight 32 111 times 32 52 72 91 111

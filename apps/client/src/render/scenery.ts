@@ -28,13 +28,13 @@ import {
 } from "three/tsl";
 
 /** Deterministic noise in [0, 1) for placing scenery. */
-function hash(n: number): number {
+export function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
 /** A ridged peak, snow-capped above `snowline` (0-1) and hazed toward the sky. */
-function peak(
+export function peak(
   radius: number,
   height: number,
   seed: number,

@@ -31,11 +31,27 @@ export interface ChevronSpot {
   dir: 1 | -1;
 }
 
+/** A board facing riders coming round a turn: toward its centre (`in`), turned toward them (`go` is the way they ride). */
+function facing(x: number, z: number, inX: number, inZ: number, goX: number, goZ: number): ChevronSpot {
+  const nx = inX * Math.cos(FACING) - goX * Math.sin(FACING);
+  const nz = inZ * Math.cos(FACING) - goZ * Math.sin(FACING);
+  const yaw = Math.atan2(nx, nz);
+  // Seen from the front, the board's right is its +X.
+  const dir = goX * Math.cos(yaw) - goZ * Math.sin(yaw) >= 0 ? 1 : -1;
+  return { x, z, yaw, dir };
+}
+
+/** Turns gentler than this (1 / radius) get no boards. */
+const GENTLE = 1 / 90;
+
 /**
- * The boards along the outside of both turns of the oval: on an arc just
- * past the outer limit (each board's near end clear of it), off any land.
+ * The boards along the outside of every turn: on the oval, on an arc just
+ * past the outer limit round both ends; on other loops, as far out along
+ * every arc of the centre line. Each board's near end is clear of the
+ * limit, and none stands on land.
  */
 export function chevronSpots(d: CourseData): ChevronSpot[] {
+  if (d.place !== "bay") return loopSpots(d);
   const spots: ChevronSpot[] = [];
   const r = d.outerLimit + (BOARD.width / 2) * Math.sin(FACING) + 0.5;
   const turns: [number, number][] = [
@@ -50,17 +66,32 @@ export function chevronSpots(d: CourseData): ChevronSpot[] {
       const z = r * Math.sin(th);
       if (d.land.some((l) => landDistance(l, x, z) < BOARD.width)) continue;
       // Toward the turn's centre, and along the way riders go round it.
-      const inX = -Math.cos(th);
-      const inZ = -Math.sin(th);
-      const goX = -Math.sin(th);
-      const goZ = Math.cos(th);
-      const nx = inX * Math.cos(FACING) - goX * Math.sin(FACING);
-      const nz = inZ * Math.cos(FACING) - goZ * Math.sin(FACING);
-      const yaw = Math.atan2(nx, nz);
-      // Seen from the front, the board's right is its +X.
-      const dir = goX * Math.cos(yaw) - goZ * Math.sin(yaw) >= 0 ? 1 : -1;
-      spots.push({ x, z, yaw, dir });
+      spots.push(facing(x, z, -Math.cos(th), -Math.sin(th), -Math.sin(th), Math.cos(th)));
     }
+  }
+  return spots;
+}
+
+function loopSpots(d: CourseData): ChevronSpot[] {
+  const spots: ChevronSpot[] = [];
+  const out = d.outerLimit + (BOARD.width / 2) * Math.sin(FACING) + 0.5;
+  let next = -Infinity;
+  for (const p of d.path) {
+    if (Math.abs(p.curve) < GENTLE) {
+      next = -Infinity;
+      continue;
+    }
+    // Spaced along the outside, where the arc is longer.
+    if (p.s < next) continue;
+    next = p.s + SPACING / (1 + out * Math.abs(p.curve));
+    // Right of travel is (-cos, sin); a right turn (curve > 0) has its outside on the left.
+    const side = p.curve > 0 ? -1 : 1;
+    const rx = -Math.cos(p.yaw) * side;
+    const rz = Math.sin(p.yaw) * side;
+    const x = p.x + rx * out;
+    const z = p.z + rz * out;
+    if (d.land.some((l) => landDistance(l, x, z) < BOARD.width)) continue;
+    spots.push(facing(x, z, -rx, -rz, Math.sin(p.yaw), Math.cos(p.yaw)));
   }
   return spots;
 }

@@ -7,11 +7,12 @@
 // An operator follows the rider on every shot, a little behind like a
 // person would, zooming so the rider stays about the same size in the
 // frame (a long lens far away, wide up close). Each course has its own
-// cameras: see broadcast-bay.ts and broadcast-snow.ts.
+// cameras: see broadcast-bay.ts, broadcast-cape.ts and broadcast-snow.ts.
 import * as THREE from "three/webgpu";
 import type { CameraShot, Environment, RiderView } from "../render/world.ts";
 import type { CourseInfo } from "../wasm-json.ts";
 import { bayRigs } from "./broadcast-bay.ts";
+import { capeRigs } from "./broadcast-cape.ts";
 import type { Aim, Rig, Watch } from "./broadcast-rig.ts";
 import { snowRigs } from "./broadcast-snow.ts";
 
@@ -95,7 +96,9 @@ export class Broadcast {
 
   /** The course on screen, once it is built. `heights`: the ground at many points at once (the mountain's). */
   setCourse(course: CourseInfo, env: Environment, heights?: (points: Float32Array) => Float32Array): void {
-    this.rigs = course.sport === "snow" ? snowRigs(course.run, env, heights) : bayRigs(course.bay, env);
+    if (course.sport === "snow") this.rigs = snowRigs(course.run, env, heights);
+    else if (course.bay.place === "cape") this.rigs = capeRigs(course.bay, env);
+    else this.rigs = bayRigs(course.bay, env);
     this.rig = null;
     this.restUntil.clear();
     this.still.clear();

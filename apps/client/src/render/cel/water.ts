@@ -44,6 +44,8 @@ export interface CelWaterInputs {
   time: THREE.Node<"float">;
   /** Which way the main swell runs (xz, unit). */
   swellDir: THREE.Node<"vec2">;
+  /** Where the water is hidden (under the land); `null`: past the bay's coastal plain. */
+  hidden?: THREE.Node<"bool"> | null;
 }
 
 /** An anti-aliased step of `x` at `edge`. */
@@ -144,8 +146,8 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
 
   const m = new THREE.MeshBasicNodeMaterial({ fog: true });
   m.positionNode = i.position;
-  // The coastal plain stands just above the sea: keep swells from showing through it.
-  m.maskNode = positionWorld.z.lessThan(120.5);
+  // Low land stands just above the sea: keep swells from showing through it.
+  m.maskNode = i.hidden ? i.hidden.not() : positionWorld.z.lessThan(120.5);
   m.colorNode = colour;
   return inkOnlyInPass(m, inkNode(0, 0, 0, 0));
 }
