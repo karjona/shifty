@@ -283,7 +283,7 @@ export function snowRigs(
     // Across the frozen lake, low: the ice, the finish area, the mountain behind.
     const l = scenery.lake;
     rigs.push(
-      onlooker("lake", on(l.s + l.along * 0.4, l.offset * 1.05 - Math.sign(l.offset) * l.across, 1.6), 7, 0.45),
+      onlooker("lake", on(l.s + l.along * 0.3, l.offset + Math.sign(l.offset) * l.across * 0.95, 1.6), 7, 0.45),
     );
   }
   return rigs;

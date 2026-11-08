@@ -43,8 +43,7 @@ function quickPlan(params: URLSearchParams): Map<string, string> {
   const event = params.get("event");
   if (event === "gp") plan.set("tilt", "1");
   else {
-    const course =
-      event === "snow" ? 1 : event === "glades" ? 3 : event && circuit(Number(event)) ? Number(event) : 0;
+    const course = event === "snow" ? 1 : event === "glades" ? 3 : event && circuit(Number(event)) ? Number(event) : 0;
     plan.set("course", String(course));
     const season = indexOf(SEASONS, params.get("season")) ?? (circuit(course)?.sport === "snow" ? 2 : 0);
     plan.set("season", String(season));

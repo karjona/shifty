@@ -220,7 +220,7 @@ export function creek(run: RunData, spot: NonNullable<RunScenery["creek"]>, heig
     const open = Math.min(1, (s - spot.from) / 30, (spot.to - s) / 30);
     const wander = Math.sin(s * 0.07) * 0.4;
     const mid = (p.half + 0.6 + wander) * spot.side;
-    const w = (0.35 + 0.55 * open) * spot.side;
+    const w = (0.2 + 0.4 * open) * spot.side;
     rows.push([runAt(run, s, mid - w), runAt(run, s, mid + w)]);
   }
   const pts = new Float32Array(rows.length * 4);
@@ -241,7 +241,7 @@ export function creek(run: RunData, spot: NonNullable<RunScenery["creek"]>, heig
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, flat(0x8fb3cf, { roughness: 0.2, side: THREE.DoubleSide }));
+  const mesh = new THREE.Mesh(geo, flat(0x6f8fa8, { roughness: 0.2, side: THREE.DoubleSide }));
   mesh.receiveShadow = true;
   return mesh;
 }

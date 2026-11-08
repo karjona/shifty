@@ -390,7 +390,8 @@ function pineGeometry(): THREE.BufferGeometry {
     [0.55, 4.9, 2.0],
   ] as const;
   for (const [r, y, h] of tiers) {
-    const cone = new THREE.ConeGeometry(r, h, 7);
+    // Rings up the cone, so the snow band has vertices of its own.
+    const cone = new THREE.ConeGeometry(r, h, 7, 4);
     cone.translate(0, y + h / 2, 0);
     parts.push(
       colorize(cone, (vy) => {
