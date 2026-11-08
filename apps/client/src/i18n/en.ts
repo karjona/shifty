@@ -281,7 +281,7 @@ export const en = {
     events: { gp: "The Tilt", race: "One race" },
     eventAbout: {
       gp: "A year in Costa Nevada: one race each season, on the water and on the mountain. Points for every race.",
-      race: "One race: the circuit, the season, the weather and the time of day as they come.",
+      race: "One race on the circuit you pick (or any), in whatever season, weather and time of day come up.",
       pick: "One race: in the room, the host picks the circuit, the season, the weather and the time of day, or leaves them to chance.",
     },
     seasonSports: { water: "On the water", mountain: "On the mountain", either: "On the water or the mountain" },
