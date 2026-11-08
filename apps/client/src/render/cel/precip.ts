@@ -79,7 +79,7 @@ class Fall {
   /** How much falls (0-1). */
   readonly amount = uniform(0);
 
-  constructor(look: PrecipLook, flakes: boolean, seed: number) {
+  constructor(look: PrecipLook, flakes: boolean, seed: number, name: string) {
     const n = look.count;
     const corner = new Float32Array(n * 4 * 2);
     const seeds = new Float32Array(n * 4 * 4);
@@ -120,7 +120,7 @@ class Fall {
       const side = normalize(cross(along, toCam));
       const dist = local.length();
       // Never thinner than about a pixel, and nothing right at the lens; past the amount, nothing at all.
-      const shown = smoothstep(0.6, 2.2, dist)
+      const shown = smoothstep(1.2, 3.5, dist)
         .mul(seedA.w.lessThan(amount).select(1, 0))
         .mul(smoothstep(0.5, 0.42, local.y.div(look.height).abs()));
       const width = max(float(look.width), dist.mul(PIXEL_AT_1M).mul(1.1)).mul(shown);
@@ -147,6 +147,9 @@ class Fall {
     this.mesh.frustumCulled = false;
     this.mesh.layers.set(UNREFLECTED);
     this.mesh.renderOrder = 2;
+    this.mesh.name = name;
+    // (Compiled even when it isn't falling: see `World.compile`.)
+    this.mesh.userData.weather = true;
   }
 
   set(amount: number): void {
@@ -158,8 +161,8 @@ class Fall {
 /** Rain and snow round the camera. */
 export class Precipitation {
   readonly group = new THREE.Group();
-  private rain = new Fall(RAIN, false, 11);
-  private snow = new Fall(SNOW, true, 23);
+  private rain = new Fall(RAIN, false, 11, "rain");
+  private snow = new Fall(SNOW, true, 23, "snowfall");
 
   constructor() {
     this.group.add(this.rain.mesh, this.snow.mesh);

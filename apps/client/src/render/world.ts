@@ -284,7 +284,17 @@ export class World {
 
   /** Compiles what the scene (or `root`, about to join it) needs to be drawn (see `CelPost.compile`). */
   compile(root: THREE.Object3D = this.scene): Promise<void> {
-    return this.cel.compile(root, this.env?.reflects ?? false);
+    // What only some weather shows (`userData.weather`) is compiled shown, so it never compiles when it comes.
+    const shown: THREE.Object3D[] = [];
+    root.traverse((o) => {
+      if (o.userData.weather === true && !o.visible) {
+        o.visible = true;
+        shown.push(o);
+      }
+    });
+    return this.cel.compile(root, this.env?.reflects ?? false).finally(() => {
+      for (const o of shown) o.visible = false;
+    });
   }
 
   /**

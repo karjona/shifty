@@ -8,7 +8,9 @@ import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   Fn,
+  attribute,
   cameraProjectionMatrix,
+  clamp,
   dot,
   float,
   fwidth,
@@ -20,6 +22,7 @@ import {
   positionLocal,
   pow,
   smoothstep,
+  uniform,
   vec2,
   vec3,
   vec4,
@@ -134,7 +137,7 @@ function cumulus(size: number, seed: number): THREE.BufferGeometry {
   for (const t of tiers) {
     for (let i = 0; i < t.n; i++) {
       const rad = size * t.rad * (0.75 + r() * 0.5);
-      const g = new THREE.IcosahedronGeometry(rad, 3);
+      const g = new THREE.IcosahedronGeometry(rad, 2);
       const x = (t.n === 1 ? 0 : (i / (t.n - 1) - 0.5) * 2 * t.spread + (r() - 0.5) * 0.08) * size;
       g.translate(x + (t.n === 1 ? (r() - 0.5) * 0.2 * size : 0), t.y * size + rad * 0.5, (r() - 0.5) * size * 0.25);
       parts.push(g);
@@ -157,59 +160,67 @@ function cumulus(size: number, seed: number): THREE.BufferGeometry {
 const CUMULUS = 24;
 
 /**
- * Cumulus in a ring round a circuit, far out (they never fog): as many of
- * them as the weather's cover asks for, as tall as it lets them stand, in
+ * Cumulus in a ring round a circuit, far out (they never fog), all in one
+ * batch: as many of them as the weather's cover asks for (each one grows
+ * from nothing as the cover reaches it), as tall as it lets them stand, in
  * its colours.
  */
 export class Cumulus {
-  readonly group = new THREE.Group();
-  private clouds: { mesh: THREE.Mesh; rank: number; scale: number; height: number }[] = [];
+  readonly mesh: THREE.Mesh;
+  /** How much of the sky they fill (0-1; a fair day is about 0.6), and how tall they stand (1 = as built). */
+  private cover = uniform(0.5);
+  private tower = uniform(1);
 
   /** `centre`: the ring's middle (x, z) and the height its clouds stand on (y). */
   constructor(centre: THREE.Vector3) {
     const r = rng(77);
+    const parts: THREE.BufferGeometry[] = [];
+    const m = new THREE.Matrix4();
     for (let i = 0; i < CUMULUS; i++) {
       const a = (i / CUMULUS) * Math.PI * 2 + (r() - 0.5) * 0.3;
       // More, bigger clouds over the sierra (north, +z) and out to sea.
       const north = Math.max(0, Math.sin(a));
       const dist = 2500 + r() * 800;
       const size = 260 + r() * 300 + north * 260;
-      const mesh = new THREE.Mesh(
-        cumulus(size, 100 + i * 13),
-        new CelMaterial({
-          colorNode: LOOK.cloud.rgb,
-          lit: new THREE.Color(1.02, 1.0, 0.97),
-          threshold: 0.1,
-          fog: false,
-          silhouette: 1,
-          crease: 0,
-          darkness: 0.45,
-          id: inkId(`cloud${i}`),
-        }),
-      );
-      const material = mesh.material;
-      if (material instanceof CelMaterial) material.shadeNode = LOOK.cloudShade.rgb;
+      const geo = cumulus(size, 100 + i * 13);
       const x = centre.x + Math.cos(a) * dist;
       const z = centre.z + Math.sin(a) * dist;
-      mesh.position.set(x, centre.y + 60 + r() * 220 + north * 100, z);
-      // Broadside to the circuit.
-      mesh.rotation.y = Math.atan2(centre.x - x, centre.z - z);
-      const height = 0.85 + r() * 0.35;
-      mesh.scale.y = height;
-      // The first sixteen fill a fair day's sky; the rest come with the clouds.
-      const rank = i < 16 ? (i / 16) * 0.5 : 0.5 + ((i - 16) / (CUMULUS - 16)) * 0.5;
-      this.clouds.push({ mesh, rank, scale: 1, height });
-      this.group.add(mesh);
+      const y = centre.y + 60 + r() * 220 + north * 100;
+      // Broadside to the circuit, its height varied.
+      m.makeRotationY(Math.atan2(centre.x - x, centre.z - z)).scale(new THREE.Vector3(1, 0.85 + r() * 0.35, 1));
+      geo.applyMatrix4(m);
+      // A fair day's clouds are spread all round the sky; the rest come with the clouds.
+      const rank = i % 3 !== 2 ? (((i * 7) % 16) / 16) * 0.5 : 0.5 + (((i * 5) % 8) / 8) * 0.5;
+      const n = geo.attributes.position!.count;
+      const at = new Float32Array(n * 4);
+      for (let k = 0; k < n; k++) at.set([x, y, z, rank], k * 4);
+      geo.setAttribute("cloud", new THREE.BufferAttribute(at, 4));
+      parts.push(geo);
     }
+    const geo = mergeGeometries(parts);
+    const material = new CelMaterial({
+      colorNode: LOOK.cloud.rgb,
+      lit: new THREE.Color(1.02, 1.0, 0.97),
+      threshold: 0.1,
+      fog: false,
+      silhouette: 1,
+      crease: 0,
+      darkness: 0.45,
+      id: inkId("cloud"),
+    });
+    material.shadeNode = LOOK.cloudShade.rgb;
+    const cloud = attribute<"vec4">("cloud", "vec4");
+    const grow = clamp(this.cover.sub(cloud.w).div(0.06), 0, 1);
+    const s = grow.greaterThan(0.01).select(grow.mul(0.6).add(0.4), 0);
+    material.positionNode = cloud.xyz.add(positionLocal.mul(vec3(s, s.mul(this.tower), s)));
+    this.mesh = new THREE.Mesh(geo, material);
+    // (Placed in the shader: its bounds are the ring's.)
+    this.mesh.frustumCulled = false;
   }
 
-  /** Shows `cover` of the clouds (0-1; a fair day is 0.5), `tower` as tall as built. */
+  /** Shows `cover` of the clouds (0-1; a fair day is about 0.6), `tower` as tall as built. */
   update(cover: number, tower: number): void {
-    for (const c of this.clouds) {
-      const grow = Math.max(0, Math.min(1, (cover - c.rank) / 0.06));
-      c.mesh.visible = grow > 0.01;
-      const s = 0.4 + 0.6 * grow;
-      c.mesh.scale.set(s, s * c.height * tower, s);
-    }
+    this.cover.value = cover;
+    this.tower.value = tower;
   }
 }

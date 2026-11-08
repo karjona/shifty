@@ -19,6 +19,7 @@ import {
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
+import { LOOK } from "./cel/look.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { Precipitation } from "./cel/precip.ts";
 import { type CircuitLook, ConditionsLook } from "./look.ts";
@@ -139,7 +140,7 @@ export class Bay implements Environment {
     if (this.sea) this.sea.mesh.userData.noMerge = true;
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
-    this.group.add(skyDome(), this.cumulus.group, this.precipitation.group);
+    this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
     this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
     this.group.add(this.gulls.group);
   }
@@ -182,8 +183,8 @@ export class Bay implements Environment {
       return p.add(vec3(0, w.h, 0));
     });
     const colour = Fn(() => {
-      const deep = vec3(0.04, 0.32, 0.45);
-      const crest = vec3(0.18, 0.66, 0.72);
+      const deep = LOOK.seaDeep;
+      const crest = LOOK.seaShallow;
       const base = mix(deep, crest, smoothstep(-0.8, 1.2, positionWorld.y));
       // Faint 4 m grid so speed reads even on calm water.
       const gx = step(0.965, fract(positionWorld.x.div(4)));

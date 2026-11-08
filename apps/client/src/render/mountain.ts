@@ -575,7 +575,7 @@ export class Mountain implements Environment {
     );
     this.trails.group.userData.noMerge = true;
     mergeStatic(this.group, { cell: 400 });
-    this.group.add(skyDome(), this.cumulus.group);
+    this.group.add(skyDome(), this.cumulus.mesh);
   }
 
   get sunOffset(): THREE.Vector3 {
