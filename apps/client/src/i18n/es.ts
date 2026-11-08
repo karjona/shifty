@@ -413,7 +413,7 @@ export const es: Messages = {
     ordinal: (n: number) => `${n}.º`,
   },
   intro: {
-    courses: { bay: "La Bahía", mountain: "La Bajada de la Montaña", cape: "El Cabo" },
+    courses: { bay: "La Bahía", mountain: "La Bajada de la Montaña", cape: "El Cabo", glades: "Los Claros" },
     sports: { jetski: "Moto de agua", snow: "Snowboard" },
     tilt: (i: number, n: number) => `El Tilt · carrera ${i} de ${n}`,
     season: "Estación",

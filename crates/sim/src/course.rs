@@ -19,7 +19,7 @@
 use crate::circuit::{Circuit, Corner};
 use crate::conditions::Conditions;
 use crate::math::{PI, Pcg32, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
-use crate::mountain::{MOUNTAIN, Obstacle, Run};
+use crate::mountain::{GLADES, MOUNTAIN, Obstacle, Run};
 use crate::surface::{SeaState, Shelter, Surface, SurfaceKind};
 
 /// The sport a course is raced in. It picks the physics, the rules and how
@@ -114,22 +114,25 @@ pub struct LandDef {
 pub enum CourseId {
     /// Costa Nevada bay: the jetski oval.
     Oval = 0,
-    /// Costa Nevada mountain: the snowboard run.
+    /// Costa Nevada mountain: the mountain run, from the summit to the village.
     Mountain = 1,
     /// Costa Nevada cape: a jetski loop round a rocky headland.
     Cape = 2,
+    /// Costa Nevada mountain: the glades, from the ridge to the lake.
+    Glades = 3,
 }
 
 impl CourseId {
     /// Every circuit, in id order. Each one here can be drawn for a race in
     /// any season its sport rides (see [`crate::conditions`]).
-    pub const ALL: &'static [CourseId] = &[Self::Oval, Self::Mountain, Self::Cape];
+    pub const ALL: &'static [CourseId] = &[Self::Oval, Self::Mountain, Self::Cape, Self::Glades];
 
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::Oval),
             1 => Some(Self::Mountain),
             2 => Some(Self::Cape),
+            3 => Some(Self::Glades),
             _ => None,
         }
     }
@@ -139,6 +142,7 @@ impl CourseId {
             Self::Oval => &OVAL,
             Self::Mountain => &MOUNTAIN,
             Self::Cape => &CAPE,
+            Self::Glades => &GLADES,
         }
     }
 

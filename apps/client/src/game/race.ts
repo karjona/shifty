@@ -522,6 +522,7 @@ export class RaceSession implements Stage {
           heights: (points) => client.heightsAt(points),
         },
         conditions,
+        course.id,
       );
       engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);

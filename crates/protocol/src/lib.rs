@@ -91,7 +91,12 @@ mod tests {
 
     #[test]
     fn snapshot_roundtrip_is_lossless() {
-        for course in [CourseId::Oval, CourseId::Mountain, CourseId::Cape] {
+        for course in [
+            CourseId::Oval,
+            CourseId::Mountain,
+            CourseId::Cape,
+            CourseId::Glades,
+        ] {
             let snap = full_snapshot_on(course);
             let decoded = ServerMsg::decode(&ServerMsg::Snapshot(snap.clone()).encode()).unwrap();
             assert_eq!(decoded, ServerMsg::Snapshot(snap));
