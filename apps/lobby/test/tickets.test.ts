@@ -106,3 +106,37 @@ void test("a ticket for one race carries its picks, the rest left to the draw", 
   );
   assert.equal(ticket.token, RACE_TOKEN);
 });
+
+void test("a time trial ticket sends the rider alone on one course and season", async () => {
+  const ticket = await mintTicket(
+    SEED,
+    {
+      server: { addr: "race.example:443", version: "1.2.3", certHashes: [] },
+      room: "t_test",
+      pid: "user_1",
+      name: "Lord Kylian#0042",
+      plan: { tilt: false, race: { course: 1, season: 2, weather: 0, turns: 0 } },
+      seed: 9,
+      bots: 0,
+      humans: 1,
+      trial: true,
+    },
+    1_000_000 * 1000,
+  );
+  const claims: unknown = JSON.parse(new TextDecoder().decode(b64urlDecode(ticket.token.split(".")[0] ?? "")));
+  assert.deepEqual(claims, {
+    v: 1,
+    aud: "race.example:443",
+    room: "t_test",
+    pid: "user_1",
+    name: "Lord Kylian#0042",
+    exp: 1_000_600,
+    iat: 1_000_000,
+    bots: 0,
+    surface: 1,
+    races: [{ course: 1, season: 2, weather: 0, turns: 0 }],
+    seed: 9,
+    humans: 1,
+    trial: true,
+  });
+});

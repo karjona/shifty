@@ -29,6 +29,13 @@
       "when": 1794011502676,
       "tag": "0003_match_ended",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794094091751,
+      "tag": "0004_time_trials",
+      "breakpoints": true
     }
   ]
 }

@@ -64,6 +64,10 @@ pub struct JoinClaims {
     /// `sim::Setup` bytes, locked for the whole room plan.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub setups: Vec<[u8; 4]>,
+    /// A time trial: one race on a circuit in a season (both picked), the
+    /// rider alone (no bots), every run recorded, restarted on request.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trial: bool,
 }
 
 /// One race of a plan as asked for (`sim::conditions::EventSpec` in wire
@@ -242,6 +246,12 @@ pub fn verify(
     {
         return Err(TokenError::BadClaims("look"));
     }
+    if claims.trial
+        && !matches!(&claims.races[..], [RaceClaims { course: Some(c), season: Some(s), .. }]
+            if sim::CourseId::from_u8(*c).zip(Season::from_u8(*s)).is_some_and(|(c, s)| c.sport().rides(s)))
+    {
+        return Err(TokenError::BadClaims("trial"));
+    }
     if claims.setups.len() > crate::MAX_SETUPS
         || claims
             .setups
@@ -302,7 +312,51 @@ mod tests {
             seed: 99,
             look: b64(&[1, 0, 2, 3]),
             setups: vec![[3, 3, 3, 3], [6, 2, 2, 2]],
+            trial: false,
         }
+    }
+
+    #[test]
+    fn a_time_trial_rides_a_season_its_sport_has() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let vk = key.verifying_key();
+        let trial = |course: u8, season: u8| JoinClaims {
+            trial: true,
+            bots: 0,
+            races: vec![RaceClaims {
+                course: Some(course),
+                season: Some(season),
+                ..RaceClaims::default()
+            }],
+            ..claims()
+        };
+        let ok = verify(
+            &sign(&trial(1, 2), &key),
+            &vk,
+            "race.example:443",
+            1_000_000,
+        )
+        .unwrap();
+        assert!(ok.trial);
+        assert_eq!(ok.events()[0].conditions.season, Season::Winter);
+        assert_eq!(
+            verify(
+                &sign(&trial(1, 0), &key),
+                &vk,
+                "race.example:443",
+                1_000_000
+            ),
+            Err(TokenError::BadClaims("trial"))
+        );
+        assert_eq!(
+            verify(
+                &sign(&trial(0, 4), &key),
+                &vk,
+                "race.example:443",
+                1_000_000
+            ),
+            Err(TokenError::BadClaims("races"))
+        );
     }
 
     #[test]

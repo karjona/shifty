@@ -183,6 +183,10 @@ pub struct Client {
     pending_events: Vec<Event>,
     /// The race (of the room's plan) this screen is ready for, plus one (0 = none).
     ready: u8,
+    /// Time trial: retries asked for so far (wrapping), repeated in every input packet.
+    retries: u8,
+    /// The room is a time trial (from the welcome).
+    trial: bool,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
@@ -224,6 +228,8 @@ impl Client {
             next_event_id: 0,
             pending_events: Vec::new(),
             ready: 0,
+            retries: 0,
+            trial: false,
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -288,6 +294,17 @@ impl Client {
     /// every screen in the room is ready for it.
     pub fn set_ready(&mut self, event: Option<u8>) {
         self.ready = event.map_or(0, |e| e.saturating_add(1));
+    }
+
+    /// Time trial: start the run over from the countdown. The ask rides in
+    /// every input packet until the server's snapshots show it done.
+    pub fn retry(&mut self) {
+        self.retries = self.retries.wrapping_add(1);
+    }
+
+    /// The room is a time trial.
+    pub fn trial(&self) -> bool {
+        self.trial
     }
 
     /// Tilt points by seat (None: no rider there).
@@ -472,6 +489,7 @@ impl Client {
             last_snapshot_tick: self.last_snapshot_tick.unwrap_or(0),
             client_time: Self::time16(now_ms),
             ready: self.ready,
+            retry: self.retries,
             first_tick: first,
             inputs,
         };
@@ -503,6 +521,8 @@ impl Client {
                     w.surface_kind,
                     w.surface_seed,
                 );
+                self.trial = w.trial;
+                self.world.trial = w.trial;
                 self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =

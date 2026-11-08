@@ -1,7 +1,7 @@
 // A race from the menus: the race takes the screen and the controller;
 // Start / Esc (or the button in the corner, or the browser's back) opens
 // the race menu over it (online races don't pause). A Tilt ends on its
-// podium.
+// podium. A time trial starts over from the race menu or its results.
 import { useQueryClient } from "@tanstack/react-query";
 import { useBlocker, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -91,6 +91,7 @@ export function RaceScreen() {
         status: setStatus,
         onJoin: (ok) => setFailed(!ok),
         onOver: (data) => planOver(data),
+        trial: race.trial,
       });
       engine.show(s);
       setSession(s);
@@ -112,14 +113,23 @@ export function RaceScreen() {
     return () => clearInterval(id);
   }, [session]);
 
+  /** A time trial's results: retry or leave. */
+  const trial = race?.trial !== undefined;
+  const trialResults = trial && view?.racePhase === RESULTS && !menu;
+  const retry = () => {
+    session?.retry();
+    setMenu(false);
+  };
+
   // The controller drives the rider; only Start (or Esc) reaches the menus.
   useEffect(() => {
-    nav.setEnabled(menu || failed || outdated || podium !== null);
+    nav.setEnabled(menu || failed || outdated || podium !== null || trialResults);
     session?.setPaused(menu);
     return () => nav.setEnabled(true);
-  }, [menu, failed, outdated, podium, session]);
+  }, [menu, failed, outdated, podium, session, trialResults]);
 
   useAction("menu", () => setMenu((m) => !m), !outdated && podium === null);
+  useAction("play", retry, trialResults);
   // The browser's back (a swipe in from the screen's edge on a phone) opens the race menu instead of leaving.
   useBlocker({
     shouldBlockFn: ({ action }) => {
@@ -130,7 +140,11 @@ export function RaceScreen() {
     disabled: outdated || failed || podium !== null,
     enableBeforeUnload: false,
   });
-  useAction("back", () => (failed || outdated ? back() : setMenu(false)), menu || failed || outdated);
+  useAction(
+    "back",
+    () => (failed || outdated || trialResults ? back() : setMenu(false)),
+    menu || failed || outdated || trialResults,
+  );
   useAutoFocus();
 
   if (podium) return <PodiumScreen data={podium} onDone={back} />;
@@ -168,9 +182,19 @@ export function RaceScreen() {
           ))}
         </div>
       )}
+      {trialResults && (
+        <div className="trial-actions" data-nav-scope="">
+          <Button kind="primary" glyph="play" onClick={retry} autoFocus>
+            {t.trial.retry}
+          </Button>
+          <Button glyph="back" onClick={back}>
+            {t.race.leave}
+          </Button>
+        </div>
+      )}
       {!menu && !failed && (
         <div className="race-menu-hint">
-          {view?.watching && (
+          {view?.watching && !trialResults && (
             <button type="button" tabIndex={-1} className="race-camera" onClick={() => session?.nextCamera()}>
               <Glyph action="play" />
               {t.race.camera}
@@ -196,6 +220,7 @@ export function RaceScreen() {
                 {t.race.resume}
               </Button>
             )}
+            {!failed && trial && <Button onClick={retry}>{t.trial.retry}</Button>}
             <Button glyph={failed ? "back" : undefined} onClick={back} autoFocus={failed}>
               {t.race.leave}
             </Button>

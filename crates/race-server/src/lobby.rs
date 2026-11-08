@@ -1,5 +1,6 @@
-//! Talking to the lobby: heartbeats (so it can send players here) and race
-//! results. Both authenticate with the shared `RACE_SERVER_SECRET`.
+//! Talking to the lobby: heartbeats (so it can send players here), race
+//! results and time trial runs. All authenticate with the shared
+//! `RACE_SERVER_SECRET`.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -10,6 +11,7 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
+use crate::record::RunReport;
 use crate::room::RaceReport;
 use crate::rooms::Rooms;
 use crate::tls::CertInfo;
@@ -99,24 +101,60 @@ impl Lobby {
         }
     }
 
-    /// A channel for finished races; a task sends them to the lobby, retrying
-    /// a few times when it can't be reached.
+    /// Posts `body`, retrying a few times when the lobby can't be reached.
+    async fn post_retrying<T: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        body: &T,
+    ) -> anyhow::Result<()> {
+        let mut wait = Duration::from_secs(1);
+        for attempt in 1..=REPORT_RETRIES {
+            match self.post(path, body).await {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt == REPORT_RETRIES => return Err(e),
+                Err(_) => {
+                    tokio::time::sleep(wait).await;
+                    wait *= 3;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A channel for finished races; a task sends them to the lobby.
     pub fn reporter(self) -> mpsc::Sender<RaceReport> {
         let (tx, mut rx) = mpsc::channel::<RaceReport>(REPORT_QUEUE);
         tokio::spawn(async move {
             while let Some(report) = rx.recv().await {
-                let mut wait = Duration::from_secs(1);
-                for attempt in 1..=REPORT_RETRIES {
-                    match self.post("/api/servers/results", &report).await {
-                        Ok(()) => break,
-                        Err(e) if attempt == REPORT_RETRIES => {
-                            warn!(room = %report.room, error = %e, "race result not reported")
-                        }
-                        Err(_) => {
-                            tokio::time::sleep(wait).await;
-                            wait *= 3;
-                        }
+                if let Err(e) = self.post_retrying("/api/servers/results", &report).await {
+                    warn!(room = %report.room, error = %e, "race result not reported");
+                }
+            }
+        });
+        tx
+    }
+
+    /// A channel for finished time trial runs; a task sends them to the
+    /// lobby, saying which server (`addr`) recorded them.
+    pub fn run_reporter(self, addr: String) -> mpsc::Sender<RunReport> {
+        #[derive(Serialize)]
+        struct Run<'a> {
+            server: &'a str,
+            #[serde(flatten)]
+            run: &'a RunReport,
+        }
+        let (tx, mut rx) = mpsc::channel::<RunReport>(REPORT_QUEUE);
+        tokio::spawn(async move {
+            while let Some(run) = rx.recv().await {
+                let body = Run {
+                    server: &addr,
+                    run: &run,
+                };
+                match self.post_retrying("/api/servers/runs", &body).await {
+                    Ok(()) => {
+                        info!(room = %run.room, run = run.run, ms = run.time_ms, "time trial run reported")
                     }
+                    Err(e) => warn!(room = %run.room, error = %e, "time trial run not reported"),
                 }
             }
         });

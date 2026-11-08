@@ -12,6 +12,8 @@ use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 use wasm_bindgen::prelude::*;
 
+mod ghost;
+
 /// Floats per rider in the render buffer: `[slot, x, y, z, yaw, pitch, roll,
 /// speed, grounded, is_me, is_bot, vx, vy, vz, bailing, charge, grab, lean,
 /// steer, wobble]`.
@@ -172,6 +174,16 @@ impl WasmClient {
     #[wasm_bindgen(js_name = setReady)]
     pub fn set_ready(&mut self, event: i32) {
         self.inner.set_ready(u8::try_from(event).ok());
+    }
+
+    /// Time trial: start the run over from the countdown.
+    pub fn retry(&mut self) {
+        self.inner.retry();
+    }
+
+    /// The room is a time trial (once joined).
+    pub fn trial(&self) -> bool {
+        self.inner.trial()
     }
 
     /// Advance the clock with this frame's input (analog values in [-1, 1]).

@@ -46,6 +46,8 @@ export interface JoinClaims {
   setups?: number[][];
   /** How many people the room's first race waits for on the grid. */
   humans?: number;
+  /** A time trial: one race with its circuit and season picked, the rider alone, every run recorded. */
+  trial?: true;
 }
 
 /** The race server a ticket is for. */
@@ -129,6 +131,8 @@ export interface TicketRequest {
   rider?: { look: string; setups: number[][] };
   /** Everyone sent to this race (its first one waits on the grid until they have all arrived). */
   humans?: number;
+  /** A time trial (its plan: one race, its circuit and season picked). */
+  trial?: boolean;
 }
 
 export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Date.now()): Promise<JoinTicket> {
@@ -148,6 +152,7 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
   if (req.rider?.look) claims.look = req.rider.look;
   if (req.rider?.setups.length) claims.setups = req.rider.setups;
   if (req.humans) claims.humans = req.humans;
+  if (req.trial) claims.trial = true;
   return {
     token: await signJoinToken(seedB64, claims),
     room: req.room,
@@ -159,7 +164,7 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
 
 const ROOM_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 
-/** A random race server room id with a prefix (`m_…` online, `s_…` single player). */
+/** A random race server room id with a prefix (`m_…` online, `s_…` single player, `t_…` time trial). */
 export function roomId(prefix: string): string {
   const bytes = new Uint8Array(20);
   crypto.getRandomValues(bytes);

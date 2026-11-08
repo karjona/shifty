@@ -130,6 +130,7 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         seed: m.get("seed").map_or(Ok(0), |b| b.parse())?,
         look: String::new(),
         setups: Vec::new(),
+        trial: m.get("trial").is_some_and(|t| t == "1"),
     })
 }
 

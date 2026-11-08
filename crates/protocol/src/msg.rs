@@ -22,7 +22,7 @@ use sim::{Conditions, CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -81,6 +81,9 @@ pub struct InputPacket {
     /// shows, plus one (0 = none yet). The race waits on the grid until
     /// every screen is ready.
     pub ready: u8,
+    /// Time trial: how many times this screen has asked to start the run
+    /// over (wrapping). A new count restarts the run from the countdown.
+    pub retry: u8,
     /// Tick of `inputs[0]`; `inputs[i]` is for tick `first_tick + i`.
     pub first_tick: u32,
     pub inputs: Vec<Input>,
@@ -117,6 +120,7 @@ impl ClientMsg {
                 w.u32(p.last_snapshot_tick);
                 w.u16(p.client_time);
                 w.u8(p.ready);
+                w.u8(p.retry);
                 w.u32(p.first_tick);
                 w.u8(p.inputs.len() as u8);
                 for i in &p.inputs {
@@ -153,6 +157,7 @@ impl ClientMsg {
                 let last_snapshot_tick = r.u32()?;
                 let client_time = r.u16()?;
                 let ready = r.u8()?;
+                let retry = r.u8()?;
                 let first_tick = r.u32()?;
                 let n = r.u8()? as usize;
                 if n > MAX_INPUTS_PER_PACKET {
@@ -167,6 +172,7 @@ impl ClientMsg {
                     last_snapshot_tick,
                     client_time,
                     ready,
+                    retry,
                     first_tick,
                     inputs,
                 }))
@@ -223,6 +229,8 @@ pub struct Welcome {
     /// Server tick when the welcome was sent.
     pub server_tick: u32,
     pub echo_client_time: u16,
+    /// A time trial: one rider, the results stay up until a retry.
+    pub trial: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -565,6 +573,7 @@ impl ServerMsg {
                 w.u32(m.surface_seed);
                 w.u32(m.server_tick);
                 w.u16(m.echo_client_time);
+                w.u8(u8::from(m.trial));
             }
             Self::Reject(reason) => {
                 w.u8(kind::REJECT);
@@ -612,6 +621,7 @@ impl ServerMsg {
                 let surface_seed = r.u32()?;
                 let server_tick = r.u32()?;
                 let echo_client_time = r.u16()?;
+                let trial = r.u8()? & 1 != 0;
                 if slot as usize >= MAX_RIDERS {
                     return Err(DecodeError::Invalid("slot"));
                 }
@@ -627,6 +637,7 @@ impl ServerMsg {
                     surface_seed,
                     server_tick,
                     echo_client_time,
+                    trial,
                 }))
             }
             kind::REJECT => Ok(Self::Reject(RejectReason::from_u8(r.u8()?)?)),

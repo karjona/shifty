@@ -213,6 +213,53 @@ export async function playSingle(plan: PlanRequest): Promise<JoinTicket> {
   return parseJoinTicket(ticket);
 }
 
+/** A time trial on a circuit (`sim::CourseId`) in a season (0 summer, 1 fall, 2 winter, 3 spring). */
+export async function playTimeTrial(course: number, season: number): Promise<JoinTicket> {
+  const { ticket } = await call("/api/play/time-trial", { method: "POST", body: JSON.stringify({ course, season }) });
+  return parseJoinTicket(ticket);
+}
+
+/** A row of a time trial board: a player's best. */
+export interface BoardRow {
+  rank: number;
+  handle: string;
+  timeMs: number;
+  /** The run's ghost. */
+  ghost: string;
+  me: boolean;
+}
+
+/** A circuit and season's board: the best ten, and yours. */
+export interface Board {
+  total: number;
+  top: BoardRow[];
+  mine: BoardRow | null;
+}
+
+function parseRow(v: unknown): BoardRow | null {
+  if (!isObj(v) || typeof v.ghost !== "string" || typeof v.timeMs !== "number") return null;
+  return { rank: num(v, "rank"), handle: str(v, "handle"), timeMs: v.timeMs, ghost: v.ghost, me: v.me === true };
+}
+
+export async function fetchBoard(course: number, season: number): Promise<Board> {
+  const o = await call(`/api/time-trial/board?course=${course}&season=${season}`);
+  return {
+    total: num(o, "total"),
+    top: list(o.top).flatMap((r) => parseRow(r) ?? []),
+    mine: parseRow(o.mine),
+  };
+}
+
+export const boardQuery = (course: number, season: number) =>
+  queryOptions({ queryKey: ["board", course, season], queryFn: () => fetchBoard(course, season), staleTime: 15_000 });
+
+/** A ghost's recording (see `protocol::ghost`). */
+export async function fetchGhost(id: string): Promise<Uint8Array> {
+  const res = await fetch(`/api/time-trial/ghosts/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new ApiError(res.status, `http_${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export async function createRoom(plan: PlanRequest, bots: number): Promise<string> {
   const { code } = await call("/api/rooms", { method: "POST", body: JSON.stringify({ plan, bots }) });
   if (typeof code !== "string") throw new ApiError(500, "bad_response");
@@ -236,10 +283,29 @@ export function lobbySocket(path: string): WebSocket {
   return new WebSocket(url);
 }
 
+/** A ghost to race in a time trial: whose run, and its time. */
+export interface GhostPick {
+  id: string;
+  /** "best" (yours), "record" (the top of the board), or the rider's handle. */
+  label: string;
+  timeMs: number;
+}
+
+/** A time trial's circuit and season, the ghosts raced, and the times to beat. */
+export interface TrialRace {
+  course: number;
+  season: number;
+  ghosts: GhostPick[];
+  /** Your best and the record (ms), if any. */
+  best: number | null;
+  record: number | null;
+}
+
 /** Where a race goes back to when it's over. */
 export interface PendingRace {
   ticket: JoinTicket;
   back: { to: "/play"; search: { mode: Mode } } | { to: "/room/$code"; params: { code: string } };
+  trial?: TrialRace;
 }
 
 let pending: PendingRace | null = null;

@@ -1,5 +1,6 @@
 //! Wire protocol shared by the race server (native) and the browser (WASM).
 
+pub mod ghost;
 pub mod msg;
 pub mod token;
 pub mod wire;
@@ -121,6 +122,7 @@ mod tests {
             surface_seed: 77,
             server_tick: 1234,
             echo_client_time: 5,
+            trial: true,
         };
         let msg = ServerMsg::Welcome(w);
         assert_eq!(ServerMsg::decode(&msg.encode()).unwrap(), msg);
@@ -136,6 +138,7 @@ mod tests {
             last_snapshot_tick: 100,
             client_time: 55,
             ready: 2,
+            retry: 9,
             first_tick: 90,
             inputs: vec![Input::from_analog(-1.0, 1.0, 1.0, 0xFF); MAX_INPUTS_PER_PACKET],
         });
@@ -158,7 +161,7 @@ mod tests {
             let _ = ClientMsg::decode(&buf);
         }
         // Too many inputs is refused.
-        let mut bad = vec![kind::INPUTS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 200];
+        let mut bad = vec![kind::INPUTS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 200];
         bad.extend(std::iter::repeat_n(0, 600));
         assert!(ClientMsg::decode(&bad).is_err());
     }

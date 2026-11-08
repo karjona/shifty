@@ -12,6 +12,7 @@ use protocol::{InputPacket, RejectReason, ServerMsg};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use crate::record::RunReport;
 use crate::room::{ConnId, RaceReport, Room, RoomConfig};
 
 /// Rooms with no humans for this long shut down.
@@ -67,6 +68,8 @@ pub struct Rooms {
     pub metrics: Metrics,
     /// Where finished races go (the lobby reporter), if anywhere.
     reports: OnceLock<mpsc::Sender<RaceReport>>,
+    /// Where finished time trial runs go, if anywhere.
+    runs: OnceLock<mpsc::Sender<RunReport>>,
 }
 
 impl Rooms {
@@ -77,6 +80,11 @@ impl Rooms {
     /// Sends every finished race to `tx` from now on.
     pub fn report_to(&self, tx: mpsc::Sender<RaceReport>) {
         let _ = self.reports.set(tx);
+    }
+
+    /// Sends every finished time trial run to `tx` from now on.
+    pub fn report_runs_to(&self, tx: mpsc::Sender<RunReport>) {
+        let _ = self.runs.set(tx);
     }
 
     pub fn room_count(&self) -> usize {
@@ -230,6 +238,13 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
                 warn!(room = %room.config.id, "result report dropped (reporter backed up)");
             }
         }
+        for run in out.runs {
+            if let Some(tx) = rooms.runs.get()
+                && tx.try_send(run).is_err()
+            {
+                warn!(room = %room.config.id, "time trial run dropped (reporter backed up)");
+            }
+        }
         let now_humans = room.human_count();
         if now_humans != humans {
             rooms
@@ -282,6 +297,7 @@ mod tests {
             seed: 0,
             look: String::new(),
             setups: Vec::new(),
+            trial: false,
         }
     }
 
