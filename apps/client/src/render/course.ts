@@ -11,13 +11,28 @@ import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
 import type { RiderView } from "./world.ts";
 
+/** Which water course: the bay's oval, or the cape's loop. */
+export type WaterPlace = "bay" | "cape";
+
+/** A point on a loop's centre line: how sharply it turns there (1 / radius, positive to the right). */
+export interface PathPoint {
+  s: number;
+  x: number;
+  z: number;
+  yaw: number;
+  curve: number;
+}
+
 export interface CourseData {
+  place: WaterPlace;
   length: number;
   laps: number;
+  /** The bay's oval (zero on other loops). */
   straightHalf: number;
   radius: number;
   laneHalf: number;
   breakwaterRadius: number;
+  /** On the oval, from the breakwater's axis; on other loops, either side of the centre line. */
   outerLimit: number;
   rampSink: number;
   /** A buoy's radius at the water line and its height above it, and a rider's radius (see `sim::buoy`). */
@@ -25,10 +40,14 @@ export interface CourseData {
   buoyHeight: number;
   riderRadius: number;
   start: { x: number; z: number; yaw: number };
-  buoys: { x: number; z: number; yaw: number; keep: "left" | "right" }[];
+  buoys: { x: number; z: number; s: number; yaw: number; keep: "left" | "right" }[];
   ramps: { x: number; z: number; yaw: number; length: number; width: number; height: number }[];
   land: LandData[];
+  /** The centre line every 2 m. */
+  path: PathPoint[];
 }
+
+export type LandKind = "town" | "island" | "rock" | "headland" | "coast" | "beach" | "mole" | "stack" | "arch";
 
 /** Solid land: a capsule around the segment a-b (see `sim::course::LandDef`). */
 export interface LandData {
@@ -37,7 +56,7 @@ export interface LandData {
   bx: number;
   bz: number;
   radius: number;
-  kind: "town" | "island" | "rock";
+  kind: LandKind;
 }
 
 const RED = 0xe8402a;
@@ -81,6 +100,62 @@ function wedge(length: number, width: number, height: number): THREE.BufferGeome
   return g;
 }
 
+/** A llaüt's hull: 5.2 m, pinched at bow and stern, rising toward them, a round bilge. */
+function llautHull(): THREE.BufferGeometry {
+  const hull = new THREE.BoxGeometry(5.2, 1, 1.9, 8, 2, 2);
+  const pos = hull.attributes.position!;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) / 2.6;
+    const k = Math.abs(x);
+    pos.setZ(i, pos.getZ(i) * (1 - Math.pow(k, 2.6)) * (pos.getY(i) < 0 ? 0.75 : 1));
+    pos.setY(i, pos.getY(i) + k * k * (x > 0 ? 0.55 : 0.3));
+  }
+  hull.computeVertexNormals();
+  return hull;
+}
+
+/** Where a boat lies moored: the middle of its hull at the water line, and its heading. */
+export interface Mooring {
+  x: number;
+  z: number;
+  yaw: number;
+}
+
+/**
+ * Fishing boats (llaüts), one per mooring, riding the swell as a few
+ * batches (hulls, rails, cabins, masts). `seed` picks their colours.
+ */
+export function mooredBoats(spots: readonly Mooring[], seed: number): BobbingBatch[] {
+  const hull = llautHull();
+  const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
+  const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
+  let s = seed;
+  const rnd = () => {
+    s = (s * 16807) % 2147483647;
+    return s / 2147483647;
+  };
+  const bodies: (Bobbing & { color: number })[] = [];
+  const rails: (Bobbing & { color: number })[] = [];
+  const cabins: Bobbing[] = [];
+  const masts: Bobbing[] = [];
+  for (const { x, z, yaw } of spots) {
+    const body = colours[Math.floor(rnd() * colours.length)]!;
+    const rail = stripes[Math.floor(rnd() * stripes.length)]!;
+    bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
+    rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
+    if (rnd() < 0.6) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
+    if (rnd() < 0.5) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
+  }
+  const batches = [
+    new BobbingBatch(hull, std(0xffffff), bodies),
+    new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
+    new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
+    new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
+  ];
+  for (const b of batches) b.mesh.castShadow = true;
+  return batches;
+}
+
 interface Floating {
   obj: THREE.Object3D;
   x: number;
@@ -103,14 +178,16 @@ export class CourseView {
 
   constructor(data: CourseData) {
     this.data = data;
-    this.buildBreakwater();
-    this.group.add(buildLand(this.data.land));
+    if (data.place === "bay") {
+      this.buildBreakwater();
+      this.group.add(buildLand(this.data.land));
+    }
     this.buildStartGate();
     this.buoys = new BuoyMarks(this.data);
     this.chevrons = new ChevronBoards(this.data);
     this.buildRamps();
     this.boundary = this.buildBoundary();
-    this.buildBoats();
+    if (data.place === "bay") this.buildBoats();
     for (const g of [this.buoys.group, this.chevrons.group]) {
       g.userData.noMerge = true;
       this.group.add(g);
@@ -176,16 +253,7 @@ export class CourseView {
       nx = -nx;
       nz = -nz;
     }
-    const hull = new THREE.BoxGeometry(5.2, 1, 1.9, 8, 2, 2);
-    const pos = hull.attributes.position!;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i) / 2.6;
-      const k = Math.abs(x);
-      // Pinched at bow and stern, rising toward them, a round bilge.
-      pos.setZ(i, pos.getZ(i) * (1 - Math.pow(k, 2.6)) * (pos.getY(i) < 0 ? 0.75 : 1));
-      pos.setY(i, pos.getY(i) + k * k * (x > 0 ? 0.55 : 0.3));
-    }
-    hull.computeVertexNormals();
+    const hull = llautHull();
     const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
     const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
     let seed = 11;
@@ -309,8 +377,35 @@ export class CourseView {
     }
   }
 
+  /** Markers along the outer limit on a loop's straights and gentle bends, off the land. */
+  private loopBoundary(): void {
+    const d = this.data;
+    let next = 0;
+    for (const p of d.path) {
+      if (p.s < next) continue;
+      next = p.s + BOUNDARY_SPACING;
+      if (Math.abs(p.curve) > 1 / 90) continue;
+      for (const side of [-1, 1]) {
+        const x = p.x - Math.cos(p.yaw) * side * d.outerLimit;
+        const z = p.z + Math.sin(p.yaw) * side * d.outerLimit;
+        if (d.land.some((l) => landDistance(l, x, z) < 3)) continue;
+        this.boundaryPoints.push({ x, z });
+      }
+    }
+  }
+
   private buildBoundary(): THREE.InstancedMesh {
     const d = this.data;
+    if (d.place !== "bay") {
+      this.loopBoundary();
+      const mesh = new THREE.InstancedMesh(
+        new THREE.SphereGeometry(0.45, 8, 6),
+        std(0xff9a3c, { roughness: 0.5 }),
+        this.boundaryPoints.length,
+      );
+      this.group.add(mesh);
+      return mesh;
+    }
     const r = d.outerLimit;
     const straight = d.straightHalf * 2;
     const perimeter = straight * 2 + Math.PI * 2 * r;

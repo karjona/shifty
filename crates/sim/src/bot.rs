@@ -15,7 +15,7 @@ use crate::world::{Rider, World};
 /// What a bot does this tick, for whatever sport the course is.
 pub fn bot_input(world: &World, slot: usize) -> Input {
     match world.course().line {
-        Line::Stadium(_) => jetski_input(world, slot),
+        Line::Stadium(_) | Line::Loop(_) => jetski_input(world, slot),
         Line::Run(run) => snowboard_input(world, run, slot),
     }
 }

@@ -406,8 +406,26 @@ html {
   stroke-linecap: round;
 }
 #minimap .land.island,
-#minimap .land.rock {
+#minimap .land.rock,
+#minimap .land.headland,
+#minimap .land.stack,
+#minimap .land.arch,
+#minimap .land.mole {
   stroke: #8a8072;
+}
+#minimap .sea-edge,
+#minimap .sea-band {
+  fill: none;
+  stroke-linejoin: round;
+}
+#minimap .sea-edge {
+  stroke: #1d1b17;
+}
+#minimap .sea-band {
+  stroke: rgb(243 237 225 / 0.94);
+}
+#minimap.loop .lane {
+  stroke-linejoin: round;
 }
 #minimap .start {
   stroke: #1d1b17;

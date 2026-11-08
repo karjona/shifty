@@ -292,7 +292,9 @@ impl World {
     fn rest_height(&self, x: f32, z: f32) -> f32 {
         match self.course().line {
             Line::Run(run) => snowboard::rest_height(run, x, z),
-            Line::Stadium(_) => jetski::rest_height(self.surface.height(x, z, self.tick)),
+            Line::Stadium(_) | Line::Loop(_) => {
+                jetski::rest_height(self.surface.height(x, z, self.tick))
+            }
         }
     }
 
@@ -414,7 +416,7 @@ impl World {
                     .map_or(r.last_input, Input::sanitized);
                 let setup = self.setups[slot].sanitized();
                 let landing = match course.line {
-                    Line::Stadium(_) => {
+                    Line::Stadium(_) | Line::Loop(_) => {
                         jetski::integrate(r, input, setup, &self.surface, course, tick)
                     }
                     Line::Run(run) => snowboard::integrate_on(r, input, setup, run, snow[slot]),
@@ -469,7 +471,7 @@ impl World {
                 let spot = course.grid_spot(slot);
                 match course.line {
                     Line::Run(run) => snowboard::hold(r, spot, run),
-                    Line::Stadium(_) => {
+                    Line::Stadium(_) | Line::Loop(_) => {
                         r.pos.x = spot.x;
                         r.pos.z = spot.z;
                         r.yaw = spot.yaw;
