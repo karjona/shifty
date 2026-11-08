@@ -1,9 +1,9 @@
 // Dev: `/?name=You` skips the menus and races straight away, with a join
 // ticket from the dev server (see vite.config.ts); a Tilt ends on its
 // podium. The netcode e2e tests use it too. URL options: name, room, bots,
-// event (snow, glades, gp for the Tilt, or a circuit's id), season, weather, turns,
+// event (snow, gp for the Tilt, or a circuit's id or name: cape, glades), season, weather, turns,
 // time, seed, surface, pid, render=0, autopilot=1, scale, water.
-import { SEASONS, TIMES_OF_DAY, WEATHERS, circuit, timeOf } from "@shifty/rider";
+import { CIRCUITS, SEASONS, TIMES_OF_DAY, WEATHERS, circuit, timeOf } from "@shifty/rider";
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -32,8 +32,8 @@ function indexOf(names: readonly string[], v: string | null): number | null {
 
 /**
  * The quick race's plan from the URL, as the dev join takes it: `event=gp`
- * (the Tilt), or one race on `event` (snow = the mountain run, glades, or a
- * circuit's id; the bay by default) in `season` (its sport's first by default: summer
+ * (the Tilt), or one race on `event` (snow = the mountain, or a circuit's
+ * id or name, as `cape` or `glades`; the bay by default) in `season` (its sport's first by default: summer
  * on the water, winter on the snow), with `weather`, `turns` (names or wire
  * numbers) and `time` (10-minute steps, HH:MM, or dawn...dusk) when given,
  * the rest drawn with `seed` (0 by default).
@@ -43,7 +43,8 @@ function quickPlan(params: URLSearchParams): Map<string, string> {
   const event = params.get("event");
   if (event === "gp") plan.set("tilt", "1");
   else {
-    const course = event === "snow" ? 1 : event === "glades" ? 3 : event && circuit(Number(event)) ? Number(event) : 0;
+    const byName = CIRCUITS.find((c) => c.key === event)?.id;
+    const course = event === "snow" ? 1 : (byName ?? (event && circuit(Number(event)) ? Number(event) : 0));
     plan.set("course", String(course));
     const season = indexOf(SEASONS, params.get("season")) ?? (circuit(course)?.sport === "snow" ? 2 : 0);
     plan.set("season", String(season));

@@ -8,6 +8,10 @@
 //! integer power, which gives pointed crests and long flat troughs, like
 //! real swells, and makes crests launch riders.
 //!
+//! Sheltered water (a harbour behind its mole, the lee of a headland) takes
+//! less of the swell: the height is scaled down near each shelter, smoothly,
+//! as a pure function of position.
+//!
 //! A race's sea can turn: each wave has a height at the start and one at
 //! the end, and the race's clock (see [`SeaClock`]) blends between them, so
 //! a storm builds lap by lap. The waves' lengths and directions stay.
@@ -23,6 +27,12 @@ use crate::math::{Pcg32, TAU, Vec3, clamp, cos, sin, sqrt};
 pub const MAX_WAVES: usize = 8;
 /// Floats per wave in [`Surface::wave_params`].
 pub const WAVE_FIELDS: usize = 8;
+/// Shelters a sea can have, and floats per shelter in [`Surface::wave_params`]
+/// (after the waves).
+pub const MAX_SHELTERS: usize = 4;
+pub const SHELTER_FIELDS: usize = 8;
+/// Length of [`Surface::wave_params`].
+pub const PARAMS_LEN: usize = MAX_WAVES * WAVE_FIELDS + MAX_SHELTERS * SHELTER_FIELDS;
 const GRAVITY_WAVES: f32 = 9.81;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +89,19 @@ pub struct SeaState {
     /// Sharpness (power) of the first `sharp_waves` waves. 1 = plain sine.
     pub sharpness: u8,
     pub sharp_waves: usize,
+    /// Sheltered water (at most [`MAX_SHELTERS`]).
+    pub shelter: &'static [Shelter],
+}
+
+/// Sheltered water round a point: the swell is `calm` times its height
+/// within `inner` metres of it, and comes back to full by `outer`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shelter {
+    pub x: f32,
+    pub z: f32,
+    pub inner: f32,
+    pub outer: f32,
+    pub calm: f32,
 }
 
 impl SeaState {
@@ -96,6 +119,7 @@ impl SeaState {
         max_amplitude: 1.15,
         sharpness: 3,
         sharp_waves: 1,
+        shelter: &[],
     };
 }
 
@@ -200,6 +224,7 @@ pub struct Surface {
     pub clock: SeaClock,
     waves: [Wave; MAX_WAVES],
     wave_count: usize,
+    shelter: &'static [Shelter],
 }
 
 impl Surface {
@@ -251,6 +276,7 @@ impl Surface {
             clock: SeaClock::Start,
             waves,
             wave_count,
+            shelter: &sea.shelter[..sea.shelter.len().min(MAX_SHELTERS)],
         }
     }
 
@@ -290,6 +316,38 @@ impl Surface {
         w.k * (w.dir_x * x + w.dir_z * z) - w.omega * t + w.phase
     }
 
+    /// How much of the swell reaches `(x, z)` (0-1), and how fast that
+    /// changes along x and z.
+    pub fn exposure(&self, x: f32, z: f32) -> (f32, f32, f32) {
+        let (mut f, mut gx, mut gz) = (1.0, 0.0, 0.0);
+        for sh in self.shelter {
+            let dx = x - sh.x;
+            let dz = z - sh.z;
+            let d = sqrt(dx * dx + dz * dz);
+            if d >= sh.outer {
+                continue;
+            }
+            let span = sh.outer - sh.inner;
+            let (k, dk) = if d <= sh.inner {
+                (0.0, 0.0)
+            } else {
+                let t = (d - sh.inner) / span;
+                (t * t * (3.0 - 2.0 * t), 6.0 * t * (1.0 - t) / span)
+            };
+            let fi = sh.calm + (1.0 - sh.calm) * k;
+            let dfi = (1.0 - sh.calm) * dk;
+            let (ux, uz) = if d > 1e-4 {
+                (dx / d, dz / d)
+            } else {
+                (0.0, 0.0)
+            };
+            gx = gx * fi + f * dfi * ux;
+            gz = gz * fi + f * dfi * uz;
+            f *= fi;
+        }
+        (f, gx, gz)
+    }
+
     /// Height of the surface at `(x, z)` at the given tick.
     pub fn height(&self, x: f32, z: f32, tick: u32) -> f32 {
         let t = Self::time(tick);
@@ -298,7 +356,11 @@ impl Surface {
         for w in &self.waves[..self.wave_count] {
             h += w.shape(Self::argument(w, x, z, t), w.amplitude_at(turn)).0;
         }
-        h
+        if self.shelter.is_empty() {
+            h
+        } else {
+            h * self.exposure(x, z).0
+        }
     }
 
     /// Height, slope and vertical speed of the surface at `(x, z)`.
@@ -312,6 +374,13 @@ impl Surface {
             s.dhdx += dh * w.k * w.dir_x;
             s.dhdz += dh * w.k * w.dir_z;
             s.dhdt -= dh * w.omega;
+        }
+        if !self.shelter.is_empty() {
+            let (f, gx, gz) = self.exposure(x, z);
+            s.dhdx = s.dhdx * f + s.height * gx;
+            s.dhdz = s.dhdz * f + s.height * gz;
+            s.dhdt *= f;
+            s.height *= f;
         }
         s
     }
@@ -327,10 +396,19 @@ impl Surface {
 
     /// Flat array for shaders: `[dir_x, dir_z, k, amplitude, omega, phase,
     /// sharpness, amplitude_to]` per wave, `MAX_WAVES` entries (unused ones
-    /// are zero). The amplitude now is `amplitude` blended toward
-    /// `amplitude_to` by [`Surface::turn`].
-    pub fn wave_params(&self) -> [f32; MAX_WAVES * WAVE_FIELDS] {
-        let mut out = [0.0; MAX_WAVES * WAVE_FIELDS];
+    /// are zero; the amplitude now is `amplitude` blended toward
+    /// `amplitude_to` by [`Surface::turn`]), then `[x, z, inner, outer, calm,
+    /// 0, 0, 0]` per shelter, `MAX_SHELTERS` entries (unused ones have `calm`
+    /// 1: no shelter).
+    pub fn wave_params(&self) -> [f32; PARAMS_LEN] {
+        let mut out = [0.0; PARAMS_LEN];
+        for i in 0..MAX_SHELTERS {
+            let o = MAX_WAVES * WAVE_FIELDS + i * SHELTER_FIELDS;
+            out[o + 4] = 1.0;
+            if let Some(sh) = self.shelter.get(i) {
+                out[o..o + 5].copy_from_slice(&[sh.x, sh.z, sh.inner, sh.outer, sh.calm]);
+            }
+        }
         for (i, w) in self.waves[..self.wave_count].iter().enumerate() {
             out[i * WAVE_FIELDS..(i + 1) * WAVE_FIELDS].copy_from_slice(&[
                 w.dir_x,

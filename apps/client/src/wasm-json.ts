@@ -1,11 +1,11 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
-import type { CourseData } from "./render/course.ts";
+import type { CourseData, LandKind } from "./render/course.ts";
 import type { GateData, LipData, ObstacleData, RunData, RunPoint, SpineData, TableData } from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
 import type { RosterName } from "./ui/results.ts";
 
-/** A course (`id`: `sim::CourseId`): the bay (jetski) or a run down the mountain (snowboard). */
+/** A course (`id`: `sim::CourseId`): on the water (jetski: the bay or the cape) or a run down the mountain (snowboard). */
 export type CourseInfo = { sport: "jetski"; id: number; bay: CourseData } | { sport: "snow"; id: number; run: RunData };
 
 type Obj = Record<string, unknown>;
@@ -149,9 +149,23 @@ function parseRun(o: Obj): RunData {
   };
 }
 
+const LAND_KINDS: readonly LandKind[] = [
+  "town",
+  "island",
+  "rock",
+  "headland",
+  "coast",
+  "beach",
+  "mole",
+  "stack",
+  "arch",
+];
+const landKind = (v: unknown): LandKind => LAND_KINDS.find((k) => k === v) ?? "rock";
+
 function parseBay(o: Obj): CourseData {
   const start = isObj(o.start) ? o.start : {};
   return {
+    place: o.place === "cape" ? "cape" : "bay",
     length: num(o, "length"),
     laps: num(o, "laps"),
     straightHalf: num(o, "straightHalf"),
@@ -167,6 +181,7 @@ function parseBay(o: Obj): CourseData {
     buoys: list(o.buoys).map((b) => ({
       x: num(b, "x"),
       z: num(b, "z"),
+      s: num(b, "s"),
       yaw: num(b, "yaw"),
       keep: b.keep === "left" ? "left" : "right",
     })),
@@ -184,7 +199,14 @@ function parseBay(o: Obj): CourseData {
       bx: num(l, "bx"),
       bz: num(l, "bz"),
       radius: num(l, "radius"),
-      kind: l.kind === "town" ? "town" : l.kind === "island" ? "island" : "rock",
+      kind: landKind(l.kind),
+    })),
+    path: list(o.path).map((p) => ({
+      s: num(p, "s"),
+      x: num(p, "x"),
+      z: num(p, "z"),
+      yaw: num(p, "yaw"),
+      curve: num(p, "curve"),
     })),
   };
 }

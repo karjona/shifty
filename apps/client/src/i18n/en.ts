@@ -402,7 +402,7 @@ export const en = {
     },
   },
   intro: {
-    courses: { bay: "The Bay", mountain: "The Mountain Run", glades: "The Glades" },
+    courses: { bay: "The Bay", mountain: "The Mountain Run", cape: "The Cape", glades: "The Glades" },
     sports: { jetski: "Jetski", snow: "Snowboard" },
     tilt: (i: number, n: number) => `The Tilt · race ${i} of ${n}`,
     season: "Season",

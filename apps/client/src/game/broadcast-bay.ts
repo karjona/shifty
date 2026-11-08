@@ -15,6 +15,8 @@ const FRAME = 5.5;
 /** The helicopter's distance out from the rider and height (m). */
 const HELI_OUT = 72;
 const HELI_UP = 24;
+/** The least the helicopter flies over what it passes over (m). */
+const HELI_CLEAR = 16;
 /** The camera boats' eye over the water (m): high enough to see over the chevron boards. */
 const BOAT_EYE = 5.5;
 /** Standing camera's eye over what it stands on (m). */
@@ -67,7 +69,7 @@ function lighthouse(course: CourseData): { x: number; z: number } {
 }
 
 /** A camera standing at `eye` (floating if `afloat`), following your rider. */
-function spot(
+export function spot(
   name: string,
   eye: THREE.Vector3,
   solidAt: (x: number, z: number) => number,
@@ -130,7 +132,7 @@ function spot(
  * land), high and wide, circling slowly: the rider small against the bay
  * and the far shore.
  */
-function helicopter(solidAt: (x: number, z: number) => number): Rig {
+export function helicopter(solidAt: (x: number, z: number) => number): Rig {
   let angle = 0;
   let from = 0;
   return {
@@ -148,7 +150,10 @@ function helicopter(solidAt: (x: number, z: number) => number): Rig {
     },
     aim(w, r, out) {
       const a = angle + (w.t - from) * 0.06;
-      out.eye.set(r.x + Math.cos(a) * HELI_OUT, HELI_UP, r.z + Math.sin(a) * HELI_OUT);
+      const x = r.x + Math.cos(a) * HELI_OUT;
+      const z = r.z + Math.sin(a) * HELI_OUT;
+      // High over the water, and clear of any cliff it passes over.
+      out.eye.set(x, Math.max(HELI_UP, solidAt(x, z) + HELI_CLEAR), z);
       out.look.set(r.x + r.vx * 0.2, r.y + 0.5, r.z + r.vz * 0.2);
       out.frame = 30;
       out.follow = 3;

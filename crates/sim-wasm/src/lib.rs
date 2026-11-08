@@ -699,8 +699,14 @@ fn course_json_on(world: &World) -> String {
         "rampSink": course_tuning::RAMP_SINK,
         "start": { "x": start.x, "z": start.z, "yaw": start.yaw },
     });
+    out["place"] = json!(match world.course {
+        CourseId::Oval => "bay",
+        CourseId::Mountain => "mountain",
+        CourseId::Cape => "cape",
+        CourseId::Glades => "glades",
+    });
     match c.line {
-        Line::Stadium(st) => {
+        Line::Stadium(_) | Line::Loop(_) => {
             let buoys: Vec<serde_json::Value> = (0..c.buoys.len())
                 .map(|i| {
                     let (x, z) = c.buoy_pos(i);
@@ -708,42 +714,67 @@ fn course_json_on(world: &World) -> String {
                     json!({
                         "x": x,
                         "z": z,
+                        "s": b.s,
                         "yaw": c.centerline(b.s).yaw,
                         "keep": if b.keep == Keep::Left { "left" } else { "right" },
                     })
                 })
                 .collect();
             let ramps: Vec<serde_json::Value> = c
-                    .ramps
-                    .iter()
-                    .map(|d| {
-                        let f = c.centerline(d.s + d.length * 0.5);
-                        let (x, z) = f.at_offset(d.offset);
-                        json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
-                    })
-                    .collect();
+                .ramps
+                .iter()
+                .map(|d| {
+                    let f = c.centerline(d.s + d.length * 0.5);
+                    let (x, z) = f.at_offset(d.offset);
+                    json!({ "x": x, "z": z, "yaw": f.yaw, "length": d.length, "width": d.width, "height": d.height })
+                })
+                .collect();
             let land: Vec<serde_json::Value> = c
-                    .land
-                    .iter()
-                    .map(|l| {
-                        let kind = match l.kind {
-                            LandKind::Town => "town",
-                            LandKind::Island => "island",
-                            LandKind::Rock => "rock",
-                        };
-                        json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
-                    })
-                    .collect();
-            out["straightHalf"] = json!(st.straight_half);
-            out["radius"] = json!(st.radius);
-            out["breakwaterRadius"] = json!(st.breakwater_radius);
-            out["outerLimit"] = json!(st.outer_limit);
+                .land
+                .iter()
+                .map(|l| {
+                    let kind = match l.kind {
+                        LandKind::Town => "town",
+                        LandKind::Island => "island",
+                        LandKind::Rock => "rock",
+                        LandKind::Headland => "headland",
+                        LandKind::Coast => "coast",
+                        LandKind::Beach => "beach",
+                        LandKind::Mole => "mole",
+                        LandKind::Stack => "stack",
+                        LandKind::Arch => "arch",
+                    };
+                    json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+                })
+                .collect();
+            // The centre line every 2 m, with how sharply it turns there.
+            let length = c.length();
+            let steps = (length / 2.0) as usize;
+            let path: Vec<serde_json::Value> = (0..steps)
+                .map(|i| {
+                    let s = length * i as f32 / steps as f32;
+                    let f = c.centerline(s);
+                    let curve = c.circuit().map_or(0.0, |l| l.curvature(s));
+                    json!({ "s": s, "x": f.x, "z": f.z, "yaw": f.yaw, "curve": curve })
+                })
+                .collect();
+            match c.line {
+                Line::Stadium(st) => {
+                    out["straightHalf"] = json!(st.straight_half);
+                    out["radius"] = json!(st.radius);
+                    out["breakwaterRadius"] = json!(st.breakwater_radius);
+                    out["outerLimit"] = json!(st.outer_limit);
+                }
+                Line::Loop(l) => out["outerLimit"] = json!(l.limit),
+                Line::Run(_) => {}
+            }
             out["buoyRadius"] = json!(sim::buoy::tuning::RADIUS);
             out["buoyHeight"] = json!(sim::buoy::tuning::HEIGHT);
             out["riderRadius"] = json!(c.sport.rider_radius());
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
+            out["path"] = json!(path);
         }
         Line::Run(run) => out["run"] = run_json(c, run, world.cover_rocks()),
     }
@@ -801,8 +832,8 @@ pub struct Scenery {
 
 #[wasm_bindgen]
 impl Scenery {
-    /// `course`: a `sim::CourseId` (0 = the bay, 1 = the mountain), in its
-    /// sport's home conditions (see `setConditions`).
+    /// `course`: a `sim::CourseId` (0 = the bay, 1 = the mountain, 2 = the
+    /// cape), in its sport's home conditions (see `setConditions`).
     #[wasm_bindgen(constructor)]
     pub fn new(course: u8, surface_kind: u8, seed: u32) -> Self {
         let course = CourseId::from_u8(course).unwrap_or(CourseId::Oval);

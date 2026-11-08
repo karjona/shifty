@@ -12,6 +12,7 @@ import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
+import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
@@ -28,7 +29,6 @@ import {
   type Season,
   WEATHERS,
   type WeatherHere,
-  circuitName,
   eventKey,
   homeConditions,
   readWeather,
@@ -463,13 +463,14 @@ export class RaceSession implements Stage {
       engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {
-      this.env = new Bay({
+      const water = {
         water: engine.view.water,
         topSpeed: client.topSpeed(),
         waves: client.waveParams(),
         course: course.bay,
         conditions,
-      });
+      };
+      this.env = course.bay.place === "cape" ? new Cape(water) : new Bay(water);
       engine.world.setSunOffset(30, 60, 15);
       this.minimap = new Minimap(this.mapRoot, course.bay);
     }
@@ -568,7 +569,7 @@ export class RaceSession implements Stage {
         const card = this.card;
         if (card) {
           card.season = race.season;
-          card.circuit = circuitName(race.course, circuit(race.course)?.sport ?? "snow");
+          card.course = race.course;
         }
         void this.setCourse(engine, client, render).finally(() => {
           if (this.card === card) this.card = null;
@@ -584,11 +585,11 @@ export class RaceSession implements Stage {
         this.seasonChange = new SeasonChange(
           engine,
           race.season,
-          circuitName(race.course, circuit(race.course)?.sport ?? "snow"),
           () => this.setCourse(engine, client, render),
           () => {
             this.covered = false;
           },
+          race.course,
         );
       }
     }

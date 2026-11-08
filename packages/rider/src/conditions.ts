@@ -31,6 +31,7 @@ export interface Circuit {
 export const CIRCUITS: readonly Circuit[] = [
   { id: 0, key: "bay", sport: "jetski" },
   { id: 1, key: "mountain", sport: "snow" },
+  { id: 2, key: "cape", sport: "jetski" },
   { id: 3, key: "glades", sport: "snow" },
 ];
 
