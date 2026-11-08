@@ -28,7 +28,16 @@ import { JetskiModel } from "./rider.ts";
 import { buildScenery } from "./scenery.ts";
 import { Spray } from "./spray.ts";
 import { SeaWater, type WakeSource } from "./water.ts";
-import { MAX_SHELTERS, MAX_WAVES, PARAMS_LEN, WATER_SNAP, WaveUniforms, waterGrid, waveHeight } from "./waves.ts";
+import {
+  MAX_SHELTERS,
+  MAX_WAVES,
+  PARAMS_LEN,
+  WATER_SNAP,
+  WAVE_FIELDS,
+  WaveUniforms,
+  waterGrid,
+  waveHeight,
+} from "./waves.ts";
 import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
@@ -95,7 +104,11 @@ export class Bay implements Environment {
   private sky = new THREE.Color(0xa8d8f0);
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES, MAX_SHELTERS);
+  /** The swells now: the sim's, each wave's height turned as far as the race's weather has (and the shelters after them). */
   private waveParams = new Float32Array(PARAMS_LEN);
+  /** The sim's swells as given: each wave's height at the start (field 3) and at the end (field 7). */
+  private waveTurn = new Float32Array(PARAMS_LEN);
+  private turned = 0;
   private course: CourseView;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
@@ -123,7 +136,8 @@ export class Bay implements Environment {
     }
     // Chop seed only needs to be stable per room: derive it from the swells.
     this.sea?.setWaves(opts.waves, Math.round(Math.abs(opts.waves[5] ?? 1) * 1e6));
-    this.waveParams.set(opts.waves.subarray(0, PARAMS_LEN));
+    this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
+    this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
     this.course = new CourseView(opts.course);
     this.group.add(this.course.group);
@@ -191,8 +205,28 @@ export class Bay implements Environment {
     this.water = water;
   }
 
+  /** Turns the swells' heights as far as the race's weather has turned (a storm builds lap by lap). */
+  private turnSwells(turn: number): void {
+    if (Math.abs(turn - this.turned) < 1e-4) return;
+    this.turned = turn;
+    let changed = false;
+    for (let i = 0; i < MAX_WAVES; i++) {
+      const o = i * WAVE_FIELDS;
+      const from = this.waveTurn[o + 3] ?? 0;
+      const amp = from + ((this.waveTurn[o + 7] ?? from) - from) * turn;
+      if (amp !== this.waveParams[o + 3]) {
+        this.waveParams[o + 3] = amp;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.swells.setFromSim(this.waveParams);
+    this.sea?.setSwells(this.waveParams);
+  }
+
   update(f: Frame): void {
     this.time.value = f.t;
+    this.turnSwells(f.turn);
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
     this.scenery?.update(this.waveParams, f.t);

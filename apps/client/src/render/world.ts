@@ -8,6 +8,7 @@ import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
 import { CelPost } from "./cel/post.ts";
 import { PIXEL_AT_1M } from "./cel/rider.ts";
+import { NO_WEATHER, type WeatherHere } from "../game/conditions.ts";
 
 export interface RiderView {
   slot: number;
@@ -136,14 +137,16 @@ export interface Frame {
    * the start, 1 at the finish: on a loop by the race clock, on a run by
    * where the camera is down it), and how far the weather has turned from
    * the conditions' `weather` (0) to `turns` (1; see game/conditions.ts).
-   * Both 0 outside a race.
+   * Both 0 outside a race. `weather` has them too, with the wind, the sea
+   * and the snow there.
    */
   progress: number;
   turn: number;
+  weather: Readonly<WeatherHere>;
 }
 
-/** The race's weather at a point (x, z): `[progress, turn]` (see `Frame`). */
-export type WeatherSource = (x: number, z: number) => ArrayLike<number>;
+/** The race's weather at a point (x, z) (see `Frame`). */
+export type WeatherSource = (x: number, z: number) => Readonly<WeatherHere>;
 
 const DT = 1 / 60;
 /** Landing jolt: falls slower than this (m/s) don't move the camera. */
@@ -375,6 +378,7 @@ export class World {
       nextBuoy: null,
       progress: 0,
       turn: 0,
+      weather: NO_WEATHER,
     });
     this.draw();
     this.camReady = false;
@@ -431,7 +435,7 @@ export class World {
       if (!this.seen.has(slot)) model.mesh.visible = false;
     }
 
-    const weather = this.weatherAt?.(this.camera.position.x, this.camera.position.z);
+    const weather = this.weatherAt?.(this.camera.position.x, this.camera.position.z) ?? NO_WEATHER;
     env.update({
       riders,
       models: this.models,
@@ -441,8 +445,9 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy,
-      progress: weather?.[0] ?? 0,
-      turn: weather?.[1] ?? 0,
+      progress: weather.progress,
+      turn: weather.turn,
+      weather,
     });
     this.draw();
   }

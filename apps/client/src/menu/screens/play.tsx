@@ -109,10 +109,10 @@ export function ModeSelect() {
           />
           <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
             <p>{t.play.about[mode]}</p>
-            {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} full={false} />}
+            {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
             {mode === "room" && (
               <>
-                <PlanPickers plan={plan} onChange={setPlan} full={false} />
+                <PlanPickers plan={plan} onChange={setPlan} fields="event" />
                 <Picker
                   label={t.room.bots}
                   options={[0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}

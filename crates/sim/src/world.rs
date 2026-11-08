@@ -1,12 +1,12 @@
-use crate::MAX_RIDERS;
-use crate::conditions::{Conditions, Event};
-use crate::course::{Course, CourseId, Frame, Line, Sport};
+use crate::conditions::{self, Conditions, Event, Rock, SnowCover};
+use crate::course::{Course, CourseId, Frame, Line, Sport, collide_obstacles};
 use crate::input::Input;
 use crate::math::{Vec3, clamp, cos, sin};
 use crate::quant;
 use crate::race::{self, Phase, Progress, Race, SimEvent, Standing};
 use crate::setup::Setup;
-use crate::surface::{Surface, SurfaceKind};
+use crate::surface::{SeaClock, Surface, SurfaceKind};
+use crate::{DT, MAX_RIDERS};
 use crate::{bot, buoy, jetski, snowboard};
 
 /// World-level tuning shared by every sport.
@@ -130,6 +130,8 @@ pub struct World {
     /// The season, weather and time of day the race is run in. Not part of
     /// snapshots' rider state: it is set with the course for each race.
     pub conditions: Conditions,
+    /// Where the wind blows toward (yaw convention), for the whole race.
+    pub wind: f32,
     pub surface: Surface,
     pub race: Race,
     pub riders: [Option<Rider>; MAX_RIDERS],
@@ -141,12 +143,13 @@ pub struct World {
 pub type Inputs = [Option<Input>; MAX_RIDERS];
 
 impl World {
-    /// A world on a course in its sport's home conditions.
+    /// A world on a course in its sport's home conditions, on this sea.
     pub fn new(course: CourseId, surface: Surface) -> Self {
         Self {
             tick: 0,
             course,
             conditions: Conditions::home(course.sport()),
+            wind: conditions::wind_heading(surface.heading(), surface.seed),
             surface,
             race: Race::new(0),
             riders: [None; MAX_RIDERS],
@@ -157,14 +160,88 @@ impl World {
     /// A world on a course, with the course's sea, in its sport's home
     /// conditions.
     pub fn on_course(course: CourseId, kind: SurfaceKind, seed: u32) -> Self {
-        Self::new(course, course.course().surface(kind, seed))
+        Self::for_event(Event::home(course), kind, seed)
     }
 
-    /// A world for one race of a plan: its course, its sea and its conditions.
+    /// A world for one race of a plan: its course, and its sea and wind in
+    /// its conditions (`seed` picks the waves and where the wind blows).
     pub fn for_event(event: Event, kind: SurfaceKind, seed: u32) -> Self {
-        let mut w = Self::on_course(event.course, kind, seed);
+        let surface = event
+            .course
+            .course()
+            .surface_in(kind, seed, event.conditions);
+        let mut w = Self::new(event.course, surface);
         w.conditions = event.conditions;
+        w.sync_weather();
         w
+    }
+
+    /// Sets the sea's clock from the race (see `SeaClock`): the sea's
+    /// state is a function of the race, kept with it whenever the race
+    /// changes, so the server and every screen ride the same sea.
+    pub fn sync_weather(&mut self) {
+        let course = self.course();
+        self.surface.clock = match self.race.phase {
+            Phase::Grid | Phase::Intro | Phase::Countdown => SeaClock::Start,
+            Phase::Results => SeaClock::End,
+            Phase::Racing => SeaClock::Racing {
+                from: self.race.phase_tick,
+                par: (f32::from(course.laps) * course.length() / conditions::LOOP_PAR_SPEED
+                    * crate::TICK_HZ as f32) as u32,
+                laps: course.laps,
+            },
+        };
+    }
+
+    /// Fall's rocks poking through the thin cover, on a run (none otherwise).
+    pub fn cover_rocks(&self) -> &'static [Rock] {
+        if self.conditions.season == conditions::Season::Fall {
+            conditions::cover_rocks(self.course)
+        } else {
+            &[]
+        }
+    }
+
+    /// How far down the run (0 at the top, 1 at the finish) arc length `s` is.
+    fn run_progress(&self, s: f32) -> f32 {
+        let course = self.course();
+        let Some(run) = course.run() else {
+            return 0.0;
+        };
+        clamp(
+            (s - course.start_s) / (run.finish_s - course.start_s),
+            0.0,
+            1.0,
+        )
+    }
+
+    /// The wind (m/s, x and z) at arc length `s` of the course now.
+    fn wind_at_s(&self, s: f32) -> (f32, f32) {
+        let course = self.course();
+        let looped = course.looped();
+        let (progress, turn) = if looped {
+            (0.0, self.surface.turn(self.tick))
+        } else {
+            let p = self.run_progress(s);
+            (p, conditions::turn_blend(p, false, 1))
+        };
+        let speed = conditions::wind_speed(self.conditions, looped, progress, turn);
+        (sin(self.wind) * speed, cos(self.wind) * speed)
+    }
+
+    /// The wind at `(x, z)` now (m/s, x and z).
+    pub fn wind_at(&self, x: f32, z: f32) -> (f32, f32) {
+        self.wind_at_s(self.course().project(x, z).0)
+    }
+
+    /// The snow at `(x, z)` now (nothing on the water).
+    pub fn snow_at(&self, x: f32, z: f32) -> SnowCover {
+        let course = self.course();
+        if course.looped() {
+            return SnowCover::NONE;
+        }
+        let p = self.run_progress(course.project(x, z).0);
+        self.conditions.snow(p, conditions::turn_blend(p, false, 1))
     }
 
     /// The race raced in this world.
@@ -187,25 +264,20 @@ impl World {
                 Phase::Results => return 1.0,
                 Phase::Grid | Phase::Intro | Phase::Countdown => 0,
             };
-            let par = f32::from(course.laps) * course.length() / crate::conditions::LOOP_PAR_SPEED;
+            let par = f32::from(course.laps) * course.length() / conditions::LOOP_PAR_SPEED;
             return clamp(racing as f32 * crate::DT / par, 0.0, 1.0);
         }
-        let Some(run) = course.run() else {
-            return 0.0;
-        };
-        let s = course.project(x, z).0;
-        clamp(
-            (s - course.start_s) / (run.finish_s - course.start_s),
-            0.0,
-            1.0,
-        )
+        self.run_progress(course.project(x, z).0)
     }
 
     /// How far the weather has turned at `(x, z)` now (0 = `weather`,
-    /// 1 = `turns`).
+    /// 1 = `turns`): on a loop the sea's own turn.
     pub fn weather_turn(&self, x: f32, z: f32) -> f32 {
         let course = self.course();
-        crate::conditions::turn_blend(self.weather_progress(x, z), course.looped(), course.laps)
+        if course.looped() {
+            return self.surface.turn(self.tick);
+        }
+        conditions::turn_blend(self.weather_progress(x, z), false, course.laps)
     }
 
     pub fn course(&self) -> &'static Course {
@@ -245,6 +317,7 @@ impl World {
     pub fn restart(&mut self) {
         self.race = Race::new(self.tick);
         self.line_up();
+        self.sync_weather();
     }
 
     /// Ends the wait on the grid (every screen is ready, or the wait is
@@ -257,6 +330,7 @@ impl World {
                 phase: Phase::Intro,
                 phase_tick: self.tick,
             };
+            self.sync_weather();
         }
     }
 
@@ -304,9 +378,24 @@ impl World {
                 auto_inputs[slot] = Some(bot::bot_input(self, slot));
             }
         }
+        // The weather where each rider is: the wind, and the snow under them.
+        let mut wind = [(0.0f32, 0.0f32); MAX_RIDERS];
+        let mut snow = [conditions::SnowGrip::PACKED; MAX_RIDERS];
+        for (slot, r) in self.riders.iter().enumerate() {
+            if let Some(r) = r {
+                s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
+                wind[slot] = self.wind_at_s(s_prev[slot]);
+                if !course.looped() {
+                    let p = self.run_progress(s_prev[slot]);
+                    snow[slot] = self
+                        .conditions
+                        .snow(p, conditions::turn_blend(p, false, 1))
+                        .grip();
+                }
+            }
+        }
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             if let Some(r) = rider {
-                s_prev[slot] = course.project(r.pos.x, r.pos.z).0;
                 let input = auto_inputs[slot]
                     .or(inputs[slot])
                     .map_or(r.last_input, Input::sanitized);
@@ -315,8 +404,12 @@ impl World {
                     Line::Stadium(_) | Line::Loop(_) => {
                         jetski::integrate(r, input, setup, &self.surface, course, tick)
                     }
-                    Line::Run(run) => snowboard::integrate(r, input, setup, run),
+                    Line::Run(run) => snowboard::integrate_on(r, input, setup, run, snow[slot]),
                 };
+                // The wind pushes everyone alike, on the water, the snow and in the air.
+                let (wx, wz) = wind[slot];
+                r.vel.x += wx * conditions::WIND_PUSH * DT;
+                r.vel.z += wz * conditions::WIND_PUSH * DT;
                 if let Some(landing) = landing {
                     race::landed(&mut r.race, &self.race, slot, landing, &mut events);
                 }
@@ -324,10 +417,25 @@ impl World {
         }
         self.resolve_collisions(&auto);
         let holding = self.race.phase.before_start();
+        let rocks = self.cover_rocks();
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
             buoy::bump(r, course, &self.surface, next);
-            let impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            let mut impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            if !rocks.is_empty() {
+                let radius = course.sport.rider_radius();
+                let hit = collide_obstacles(
+                    &mut r.pos,
+                    &mut r.vel,
+                    rocks.iter().map(|k| k.obstacle),
+                    radius,
+                    true,
+                );
+                impact = match (impact, hit) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                };
+            }
             if course.sport == Sport::Snowboard
                 && impact.is_some_and(|i| {
                     i > snowboard::tuning::CRASH_SPEED * self.setups[slot].sanitized().stability()
@@ -376,6 +484,7 @@ impl World {
         }
         self.tick = next;
         self.advance_phase();
+        self.sync_weather();
         events
     }
 

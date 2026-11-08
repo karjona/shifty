@@ -171,7 +171,7 @@ export function RoomScreen() {
                     <PlanPickers
                       plan={room.plan}
                       onChange={(plan) => send({ t: "settings", plan, bots: room.bots })}
-                      full
+                      fields="all"
                     />
                     <Picker
                       label={t.room.bots}

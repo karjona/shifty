@@ -2,12 +2,19 @@
 //! speed, how turns build up, how long tricks take off a ramp, how often and
 //! how high crests launch you, and how deep the hull dives. For tuning.
 //!
-//! `cargo run -p sim --example jetski_lab --release [seed] [surface] [cape]`
-//! (surface: 1 = the course's sea, 2 = calm, 3 = rough; `cape` adds how
-//! much swell reaches each part of the cape)
+//! Then the sea in every season and a spread of weathers (each turning
+//! circuit's sea at the start and at the end of a race): wave heights and
+//! steepness, and how a ski pulling back off the crests flies on it.
+//!
+//! `cargo run -p sim --example jetski_lab --release [seed] [surface] [course]`
+//! (surface: 1 = the course's sea, 2 = calm, 3 = rough; course: a water
+//! circuit's id or name, `oval` by default; on the cape it adds how much
+//! swell reaches each part of it)
 
+use sim::conditions::{Conditions, Season, Weather};
 use sim::course::{CAPE, OVAL};
 use sim::math::{angle_diff, clamp};
+use sim::surface::SeaClock;
 use sim::{CourseId, Input, Inputs, MAX_RIDERS, Surface, SurfaceKind, World};
 
 struct Run {
@@ -169,7 +176,18 @@ fn main() {
 
     turning();
     tricks();
-    if std::env::args().any(|a| a == "cape") {
+    let course = std::env::args()
+        .nth(3)
+        .and_then(|a| {
+            CourseId::ALL
+                .iter()
+                .copied()
+                .find(|c| a == (*c as u8).to_string() || a.eq_ignore_ascii_case(&format!("{c:?}")))
+        })
+        .filter(|c| c.sport() == sim::Sport::Jetski)
+        .unwrap_or(CourseId::Oval);
+    seas(course, seed);
+    if course == CourseId::Cape {
         cape_shelter(seed);
     }
 
@@ -398,6 +416,59 @@ fn tricks() {
             }
         });
         println!("  {rot_name} + {stunt_name}: {}", j.result);
+    }
+}
+
+/// The sea by conditions on a water circuit: the main wave's height and
+/// steepness at the start and the end of the race, the wind, and how a ski
+/// pulling back off the crests into the swell flies on the start's sea.
+fn seas(course: CourseId, seed: u32) {
+    println!("\n== the sea on {course:?} by conditions");
+    println!(
+        "{:<8} {:<16} {:>12} {:>13} {:>6} {:>6} {:>7} {:>6}",
+        "season", "weather", "height m", "steepness", "wind", "air%", "maxair", "dive"
+    );
+    let c = course.course();
+    for season in Season::ALL {
+        for (weather, turns) in [
+            (Weather::Fog, Weather::Fog),
+            (Weather::Clear, Weather::Clear),
+            (Weather::Windy, Weather::Windy),
+            (Weather::Storm, Weather::Storm),
+            (Weather::Cloudy, Weather::Storm),
+        ] {
+            if !season.has(weather) || !season.has(turns) {
+                continue;
+            }
+            let conditions = Conditions {
+                season,
+                weather,
+                turns,
+                time: sim::conditions::NOON,
+            };
+            let mut s = c.surface_in(SurfaceKind::Swells, seed, conditions);
+            s.clock = SeaClock::Start;
+            let main = s.waves()[0];
+            let dir = libm::atan2f(main.dir_x, main.dir_z);
+            let r = run(s.clone(), dir + std::f32::consts::PI, true, 40, false);
+            println!(
+                "{:<8} {:<16} {:>5.2} > {:<5.2} {:>5.3} > {:<5.3} {:>5.1} {:>5.1}% {:>6.2}s {:>5.2}m",
+                format!("{season:?}"),
+                if weather == turns {
+                    format!("{weather:?}")
+                } else {
+                    format!("{weather:?} > {turns:?}")
+                },
+                2.0 * main.amplitude,
+                2.0 * main.amplitude_to,
+                main.amplitude * main.k,
+                main.amplitude_to * main.k,
+                conditions.wind(1.0),
+                r.air_frac * 100.0,
+                r.max_air_s,
+                r.max_depth
+            );
+        }
     }
 }
 
