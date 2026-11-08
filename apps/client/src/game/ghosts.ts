@@ -19,6 +19,8 @@ const FIRST_SLOT = 100;
 /** A ghost fades out as the camera comes closer than `FAR` (m), and is gone at `NEAR`. */
 const NEAR = 2.5;
 const FAR = 7;
+/** How far (m) from your rider's middle, seen from the camera, a ghost counts as behind them. */
+const BEHIND_ME = 0.9;
 /** Through its finish a ghost fades out over this long (s). */
 const FINISH_FADE = 1;
 /** Tints that stand out on blue water and white snow alike: your best, the record, anyone else's. */
@@ -91,6 +93,7 @@ export class Ghosts {
   private tags: NameTags;
   private names = new Map<number, string>();
   private at = new THREE.Vector3();
+  private ahead = new THREE.Vector3();
   /** The ghosts placed this frame, for their labels. */
   private views: RiderView[] = [];
   private on = false;
@@ -220,10 +223,23 @@ export class Ghosts {
     }
   }
 
-  /** The ghosts' labels, once the frame's camera is set (`t`: sim time, s). */
-  label(camera: THREE.PerspectiveCamera, t: number, dt: number): void {
+  /**
+   * The ghosts' labels, once the frame's camera is set (`t`: sim time, s).
+   * A ghost straight on behind your rider (`me`) goes unlabelled: its
+   * label would sit on your rider's back.
+   */
+  label(camera: THREE.PerspectiveCamera, t: number, dt: number, me?: RiderView): void {
     this.tags.hidden = !this.on;
-    this.tags.update(camera, this.env, this.views, this.names, t, dt);
+    const eye = camera.position;
+    const toMe = me && this.at.set(me.x, me.y + 1, me.z).sub(eye);
+    const near = toMe?.length() ?? 0;
+    const views = toMe
+      ? this.views.filter((v) => {
+          const toGhost = this.ahead.set(v.x, v.y + 1, v.z).sub(eye);
+          return toGhost.length() < near || toGhost.angleTo(toMe) > Math.atan2(BEHIND_ME, near);
+        })
+      : this.views;
+    this.tags.update(camera, this.env, views, this.names, t, dt);
   }
 
   /** A ghost `ticks` into its run, between its two nearest frames. */

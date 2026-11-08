@@ -220,6 +220,9 @@ export class RaceSession implements Stage {
   /** A time trial (its times to beat move as you beat them), and its ghosts. */
   private trial: TrialRace | null = null;
   private ghosts: Ghosts | null = null;
+  /** What the last run set (a new best or record), and the ghosts it raced, for its results. */
+  private trialCallout: string | null = null;
+  private trialRaced: { label: string; ticks: number }[] = [];
 
   private opts: RaceOptions;
 
@@ -274,8 +277,7 @@ export class RaceSession implements Stage {
     const m = messages().trial;
     const record = trial.record === null || ms < trial.record;
     const best = trial.best === null || ms < trial.best;
-    if (record) this.hud.popup(m.newRecord, "big");
-    else if (best) this.hud.popup(m.newBest, "big");
+    this.trialCallout = record ? m.newRecord : best ? m.newBest : null;
     if (best) trial.best = ms;
     if (record) trial.record = ms;
     // The race server reports the run as it ends; the lobby has it a moment later.
@@ -644,7 +646,14 @@ export class RaceSession implements Stage {
     // server can start the race as far as this screen goes. (After a
     // race's results, the grid waits for the plan's next course.)
     if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
-    else if (this.trial) this.resultsEvent = -1;
+    else if (this.trial) {
+      this.resultsEvent = -1;
+      // A run's results stand against the ghosts it raced (a new best replaces yours after).
+      this.trialRaced = (this.ghosts?.list ?? [])
+        .filter((r) => r.course === race.course)
+        .map((r) => ({ label: ghostLabel(r.pick), ticks: r.finishTicks }));
+      if (race.phase !== RACING) this.trialCallout = null;
+    }
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
@@ -682,7 +691,12 @@ export class RaceSession implements Stage {
           this.ghosts.place(ticks, on, engine.world.camera, dt);
         }
         engine.world.render(riders, tick, dt, nextBuoy, shot);
-        this.ghosts?.label(engine.world.camera, tick / race.tickHz, dt);
+        this.ghosts?.label(
+          engine.world.camera,
+          tick / race.tickHz,
+          dt,
+          riders.find((r) => r.isMe),
+        );
         const tagged = race.phase === RESULTS ? [] : riders;
         this.hud.tags.hidden = shot !== null && shot.chase < 1;
         this.hud.tags.update(engine.world.camera, this.env, tagged, this.names, tick / race.tickHz, dt);
@@ -706,7 +720,7 @@ export class RaceSession implements Stage {
       standings: () => parseStandings(client.standingsJson()),
       riders: this.riders,
       gp,
-      trial: this.trial !== null,
+      trial: this.trial ? { ghosts: this.trialRaced, callout: this.trialCallout } : undefined,
     });
     this.minimap?.update(riders, nextBuoy);
     this.updateDebug(now);

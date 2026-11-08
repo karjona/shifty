@@ -460,6 +460,7 @@ export const en = {
     ],
   },
   trial: {
+    title: "Time trial",
     about: "Ride alone against the clock, in clear and steady weather, and chase the ghosts of the best runs.",
     circuit: "Circuit",
     season: "Season",

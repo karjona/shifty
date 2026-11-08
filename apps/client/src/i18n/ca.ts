@@ -460,6 +460,7 @@ export const ca: Messages = {
     ],
   },
   trial: {
+    title: "Contrarellotge",
     about:
       "Corre sol contra el rellotge, amb el temps serè i estable, i persegueix els fantasmes de les millors curses.",
     circuit: "Circuit",

@@ -468,6 +468,7 @@ export const es: Messages = {
     ],
   },
   trial: {
+    title: "Contrarreloj",
     about:
       "Corre solo contra el reloj, con tiempo despejado y estable, y persigue a los fantasmas de las mejores carreras.",
     circuit: "Circuito",
