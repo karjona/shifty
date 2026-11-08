@@ -9,6 +9,7 @@ import * as THREE from "three/webgpu";
 import { NOON, SEASONS, WEATHERS, botAppearance } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
+import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { parseCourse } from "../wasm-json.ts";
@@ -69,13 +70,14 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
     });
   } else {
     const bay = data.bay;
-    env = new Bay({
+    const water = {
       water: engine.view.water,
       topSpeed: scenery.topSpeed(),
       waves: scenery.waveParams(),
       course: bay,
       conditions,
-    });
+    };
+    env = bay.place === "cape" ? new Cape(water) : new Bay(water);
     const spots = [bay.start, ...bay.buoys.filter((_, i) => i % 3 === 1).slice(0, 2)];
     for (const [i, buoy] of spots.entries()) {
       // Short of a buoy, to the side it is passed on.
