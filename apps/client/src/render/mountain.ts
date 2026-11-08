@@ -78,6 +78,8 @@ export interface ObstacleData {
   radius: number;
   height: number;
   kind: "pine" | "rock" | "tower";
+  /** A rock poking through a thin cover (fall). */
+  cover?: boolean;
 }
 
 export interface TableData {
@@ -110,6 +112,8 @@ export interface Terrain {
   grid(x0: number, z0: number, step: number, nx: number, nz: number): Float32Array;
   /** Heights at `[x0, z0, x1, z1, ...]`. */
   heights(points: Float32Array): Float32Array;
+  /** The snow under each `[x, z]` of `points`, as the sim rides it: `[depth, powder, slush, hard]` per point. */
+  snow?(points: Float32Array): Float32Array;
 }
 
 /**
@@ -240,14 +244,15 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
       const hollow = attribute("shade", "float").max(0).mul(0.8);
       off = off.add(hollow);
       const run = attribute("run", "float");
+      // A thin cover (the sim's depth, m) is patchy at the run's edges, with tufts poking through.
+      const thin = clamp(float(0.45).sub(attribute<"vec4">("snow", "vec4").x).div(0.3), 0, 1);
       const groomed = run
         .mul(2.2)
         .sub(1)
-        .sub(LOOK.thin.mul(fine.x.mul(0.45).add(0.55)));
-      // Bare tufts poking through a thin cover.
+        .sub(thin.mul(fine.x.mul(0.6).add(1.2)));
       const tufts = noise4(p.xz.mul(0.9))
-        .w.sub(float(1).sub(LOOK.thin.mul(0.1)))
-        .mul(4);
+        .w.sub(float(1).sub(thin.mul(0.42)))
+        .mul(5);
       off = max(off, groomed).sub(max(tufts, 0));
     }
     return clamp(cut0(off), 0, 1);
@@ -302,14 +307,22 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
         .add(0.5);
       const groomed = smoothstep(17, 13, abs(o)).mul(clamp(float(1).sub(px.div(0.12)), 0, 1));
       c = c.mul(float(1).sub(ridge.mul(0.07).mul(groomed).mul(float(1).sub(tracked))));
-      // Spring slush down the lower run: wetter, greyer, darker, the tracks cut deep into it.
-      const slush = cut0(
-        LOOK.slushLine
-          .sub(p.y)
-          .add(noise4(p.xz.mul(0.02)).z.mul(18))
-          .div(14),
-      );
-      c = mix(c, c.mul(vec3(0.8, 0.8, 0.82)).mul(float(1).sub(tracked.mul(0.15))), slush);
+      // The snow the sim has here: slush wetter, greyer and darker, the tracks cut deep into it; hard
+      // snow icy and polished; fresh powder bright, filling the old tracks in.
+      const snow = attribute<"vec4">("snow", "vec4");
+      const polish = smoothstep(0.2, 0.7, noise4(vec2(s.mul(0.05), o.mul(0.35))).y)
+        .mul(0.5)
+        .add(0.5);
+      c = mix(c, c.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94)), snow.w);
+      // A thin cover is scratchy: grass and earth showing through in specks.
+      const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
+      const speck = cut0(noise4(p.xz.mul(2.3)).x.sub(float(0.8).sub(thinHere.mul(0.4))))
+        .mul(smoothstep(0.05, 0.3, thinHere))
+        .mul(near);
+      c = mix(c, LOOK.ground2, speck.mul(0.85));
+      const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
+      c = mix(c, c.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z);
+      c = mix(c, mix(c, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
@@ -547,7 +560,6 @@ export class Mountain implements Environment {
       fogFar: 330,
       fogTint: [1.026, 0.91, 0.92],
       snowLine: { summer: top + 600, fall: top - drop * 0.08, winter: bottom - 3000, spring: bottom + drop * 0.6 },
-      slushLine: bottom + drop * 0.45,
       mountain: true,
     });
     let cx = 0;
@@ -591,7 +603,7 @@ export class Mountain implements Environment {
     sun.intensity = 3.1;
     this.sun = sun;
     this.hemi = hemi;
-    this.look.apply(0, 0, this.run.path[0]!.y, this.fog, this.background, sun, hemi);
+    this.look.apply(0, 0, this.run.path[0]!.y, null, this.fog, this.background, sun, hemi);
   }
 
   ground(x: number, z: number): number {
@@ -648,6 +660,7 @@ export class Mountain implements Environment {
       }
     }
     const { shade, dye } = this.shapeOf(xyz, rows, offsets);
+    const snowRows = this.snowAlong(xyz, rows.length, cols);
     const mat = snowMaterial(true);
     for (let start = 0; start < n - 1; start += ROWS_PER_CHUNK) {
       const end = Math.min(n - 1, start + ROWS_PER_CHUNK);
@@ -659,6 +672,7 @@ export class Mountain implements Environment {
       const dyed = dye.slice(start * cols, (end + 1) * cols);
       // How far inside the riding width (1 = on the run, 0 = a few metres past its edge).
       const onRun = new Float32Array(count);
+      const snowType = new Float32Array(count * 4);
       for (let r = start; r <= end; r++) {
         const limit = this.limitAt(rows[r]!);
         for (let c = 0; c < cols; c++) {
@@ -673,6 +687,7 @@ export class Mountain implements Environment {
           nor.set(normals.subarray(src, src + 3), dst);
           uvs[((r - start) * cols + c) * 2] = rows[r]!;
           uvs[((r - start) * cols + c) * 2 + 1] = offsets[c]!;
+          snowType.set(snowRows.subarray(r * 4, r * 4 + 4), ((r - start) * cols + c) * 4);
           onRun[(r - start) * cols + c] = Math.max(
             0,
             Math.min(1, (limit + RUN_EDGE - Math.abs(offsets[c]!)) / RUN_EDGE),
@@ -698,6 +713,7 @@ export class Mountain implements Environment {
       geo.setAttribute("shade", new THREE.BufferAttribute(shaded, 1));
       geo.setAttribute("dye", new THREE.BufferAttribute(dyed, 1));
       geo.setAttribute("run", new THREE.BufferAttribute(onRun, 1));
+      geo.setAttribute("snow", new THREE.BufferAttribute(snowType, 4));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
@@ -706,6 +722,25 @@ export class Mountain implements Environment {
       mesh.userData.noMerge = true;
       this.group.add(mesh);
     }
+  }
+
+  /**
+   * The snow the sim has on the run, row by row (it changes down the run,
+   * not across it): `[depth, powder, slush, hard]` per row of the ribbon,
+   * from its centre. Without the sim's snow, a deep, packed cover.
+   */
+  private snowAlong(xyz: Float32Array, rows: number, cols: number): Float32Array {
+    const middle = (cols - 1) / 2;
+    const points = new Float32Array(rows * 2);
+    for (let r = 0; r < rows; r++) {
+      points[r * 2] = xyz[(r * cols + middle) * 3]!;
+      points[r * 2 + 1] = xyz[(r * cols + middle) * 3 + 2]!;
+    }
+    const snow = this.terrain.snow?.(points);
+    if (snow && snow.length >= rows * 4) return snow;
+    const packed = new Float32Array(rows * 4);
+    for (let r = 0; r < rows; r++) packed[r * 4] = 1;
+    return packed;
   }
 
   /**
@@ -1110,8 +1145,23 @@ export class Mountain implements Environment {
     const rock = flat(0x6c6a6e);
     rock.userData.outdoor = FOLIAGE.none;
     const snow = rock;
+    // Rocks poking through a thin cover: dark and jagged, bare ground round their foot.
+    const bare = flat(0x4a4038);
+    const ground = flat(0x6e5a3c);
     for (const o of this.run.obstacles) {
       if (o.kind !== "rock") continue;
+      if (o.cover) {
+        const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.05, 0), bare);
+        r.position.set(o.x, o.y + o.radius * 0.2, o.z);
+        r.scale.set(1, 0.6 + (o.height / Math.max(o.radius, 0.1)) * 0.2, 0.85);
+        r.rotation.y = o.x * 1.7 + o.z;
+        const skirt = new THREE.Mesh(new THREE.CircleGeometry(o.radius * 1.7, 7), ground);
+        skirt.rotation.x = -Math.PI / 2;
+        skirt.position.set(o.x, this.ground(o.x, o.z) + 0.03, o.z);
+        r.castShadow = true;
+        this.group.add(r, skirt);
+        continue;
+      }
       const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.1, 0), rock);
       r.position.set(o.x, o.y + o.radius * 0.35, o.z);
       r.scale.y = 0.75;
@@ -1151,7 +1201,7 @@ export class Mountain implements Environment {
       const sphere = cell.boundingSphere!;
       cell.visible = sphere.center.distanceTo(f.eye) - sphere.radius < FOREST_FAR;
     }
-    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, this.fog, this.background, this.sun, this.hemi);
+    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);

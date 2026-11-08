@@ -19,8 +19,6 @@ export interface CircuitLook {
   fogTint?: [number, number, number];
   /** Where snow lies down to in each season (m), on the scenery and off the run. */
   snowLine: Record<Season, number>;
-  /** Slush on the run below this height in spring (m). */
-  slushLine?: number;
   /** Rain falls as snow above the snow line, and everywhere in winter (and winter brings flurries). */
   mountain?: boolean;
 }
@@ -69,7 +67,7 @@ interface Sky {
   /** The fog's range, as multiples of the circuit's clear-day range. */
   fogNear: number;
   fogFar: number;
-  /** The wind (m/s): how hard (the direction is the circuit's). */
+  /** The wind (m/s) when the sim has none to tell: how hard (the direction is the circuit's). */
   wind: number;
 }
 
@@ -202,7 +200,7 @@ const BASE: WeatherLook = {
   snow: 0,
   fogNear: 1,
   fogFar: 1,
-  wind: 3,
+  wind: 0,
 };
 
 const WEATHER: Record<Weather, WeatherLook> = {
@@ -224,7 +222,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     haze: 0.15,
     fogNear: 0.85,
     fogFar: 0.85,
-    wind: 4,
+    wind: 3,
   },
   windy: {
     ...BASE,
@@ -238,7 +236,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     chop: 1.7,
     fogNear: 1.15,
     fogFar: 1.1,
-    wind: 11,
+    wind: 10,
   },
   fog: {
     ...BASE,
@@ -255,7 +253,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     chop: 0.7,
     fogNear: 0.16,
     fogFar: 0.36,
-    wind: 1,
+    wind: 0,
   },
   rain: {
     ...BASE,
@@ -329,7 +327,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     snow: 1,
     fogNear: 0.45,
     fogFar: 0.55,
-    wind: 3,
+    wind: 4,
   },
 };
 
@@ -344,7 +342,6 @@ const SEASON: Record<
     evergreen: number;
     blossom: number;
     ground: [number, number];
-    thin: number;
   }
 > = {
   summer: {
@@ -355,7 +352,6 @@ const SEASON: Record<
     evergreen: 0x2f5e34,
     blossom: 0,
     ground: [0x9a8a58, 0x7c6c44],
-    thin: 1,
   },
   fall: {
     greens: [0.85, 0.95, 0.35],
@@ -365,7 +361,6 @@ const SEASON: Record<
     evergreen: 0x2c5232,
     blossom: 0,
     ground: [0x8a7650, 0x6a5638],
-    thin: 1,
   },
   winter: {
     greens: [0.8, 0.95, 0.6],
@@ -375,7 +370,6 @@ const SEASON: Record<
     evergreen: 0x223f2c,
     blossom: 0,
     ground: [0x7a7056, 0x5e5644],
-    thin: 0,
   },
   spring: {
     greens: [0.9, 0.9, 0.2],
@@ -385,7 +379,6 @@ const SEASON: Record<
     evergreen: 0x2f6234,
     blossom: 0.6,
     ground: [0x74a64c, 0x5a8a3e],
-    thin: 0.4,
   },
 };
 
@@ -551,19 +544,19 @@ export class ConditionsLook {
     LOOK.blossom.value = s.blossom;
     LOOK.ground.value.setHex(s.ground[0]);
     LOOK.ground2.value.setHex(s.ground[1]);
-    LOOK.thin.value = s.thin;
-    LOOK.slushLine.value = season === "spring" ? (this.circuit.slushLine ?? -1e5) : -1e5;
   }
 
   /**
    * Puts the look on screen for how far the weather has turned (`turn`,
-   * 0-1), at `t` seconds, with the camera at height `eyeY`: the uniforms,
+   * 0-1), at `t` seconds, with the camera at height `eyeY` (in `wind`): the uniforms,
    * the fog and the background, and the lights for what isn't cel-shaded.
    */
   apply(
     turn: number,
     t: number,
     eyeY: number,
+    /** The sim's wind where the camera is (m/s), if it has one. */
+    wind: { windX: number; windZ: number; wind: number } | null,
     fog: THREE.Fog,
     background: THREE.Color,
     sun: THREE.DirectionalLight | null,
@@ -598,7 +591,8 @@ export class ConditionsLook {
     LOOK.rainRings.value = s.rainRings;
     LOOK.chop.value = s.chop;
     LOOK.time.value = t;
-    LOOK.wind.value.copy(this.wind).multiplyScalar(s.wind);
+    if (wind && wind.wind > 0) LOOK.wind.value.set(wind.windX, wind.windZ);
+    else LOOK.wind.value.copy(this.wind).multiplyScalar(s.wind);
     this.cover = s.cover;
     this.tower = s.tower;
     // Rain falls as snow in the cold: in winter on the mountain, and above the cold line.

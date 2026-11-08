@@ -455,6 +455,7 @@ export class RaceSession implements Stage {
           ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
           grid: (x0, z0, spacing, nx, nz) => client.terrainGrid(x0, z0, spacing, nx, nz),
           heights: (points) => client.heightsAt(points),
+          snow: (points) => client.snowAt(points),
         },
         conditions,
       );

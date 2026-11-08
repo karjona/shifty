@@ -78,12 +78,9 @@ export const LOOK = {
   whitecaps: uniform(0),
   rainRings: uniform(0),
   chop: uniform(1),
-  /** On the mountain: bare ground where the snow is off it (two tones), and slush below this height (m). */
+  /** On the mountain: bare ground where the snow is off it (two tones). */
   ground: colour(0x8a7650),
   ground2: colour(0x6e5a3c),
-  slushLine: uniform(-1e5),
-  /** How thin the cover on the run is (0 = deep, 1 = patchy at its edges). */
-  thin: uniform(0),
   /** Seconds, and the wind (m/s, x and z) the sky and the precipitation drift with. */
   time: uniform(0),
   wind: uniform(new THREE.Vector2(0.6, -0.3)),

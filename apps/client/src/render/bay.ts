@@ -165,7 +165,7 @@ export class Bay implements Environment {
     sun.intensity = 2.6;
     this.sun = sun;
     this.hemi = hemi;
-    this.look.apply(0, 0, 0, this.fog, this.background, sun, hemi);
+    this.look.apply(0, 0, 0, null, this.fog, this.background, sun, hemi);
   }
 
   ground(x: number, z: number, t: number): number {
@@ -229,7 +229,7 @@ export class Bay implements Environment {
   update(f: Frame): void {
     this.time.value = f.t;
     this.turnSwells(f.turn);
-    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, this.fog, this.background, this.sun, this.hemi);
+    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
     this.gulls?.update(f.t);

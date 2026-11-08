@@ -46,6 +46,7 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
         ribbon: (rows, offsets) => scenery.runRibbon(rows, offsets),
         grid: (x0, z0, step, nx, nz) => scenery.terrainGrid(x0, z0, step, nx, nz),
         heights: (points) => scenery.heightsAt(points),
+        snow: (points) => scenery.snowAt(points),
       },
       conditions,
     );
