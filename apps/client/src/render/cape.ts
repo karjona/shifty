@@ -52,7 +52,7 @@ export const COAST_LOOK = {
 const SEASON_LOOK: Record<Season, { grass: number; pines: number; snowLine: number; snowCover: number }> = {
   summer: { grass: 0xb0a65a, pines: 0x3d6a35, snowLine: 1e4, snowCover: 0 },
   fall: { grass: 0x9c8a4c, pines: 0x3a6034, snowLine: 1e4, snowCover: 0 },
-  winter: { grass: 0x7d8a5a, pines: 0x2f5530, snowLine: 6, snowCover: 0.9 },
+  winter: { grass: 0x7d8a5a, pines: 0x2f5530, snowLine: 2.5, snowCover: 0.9 },
   spring: { grass: 0x7fae4a, pines: 0x40703a, snowLine: 1e4, snowCover: 0 },
 };
 
@@ -640,7 +640,7 @@ function pines(ground: CoastGround): THREE.Group {
     for (let x = -800; x < 800; x += 20) {
       k++;
       if (x > NEAR.x0 && x < NEAR.x1 && z > NEAR.z0 && z < NEAR.z1) continue;
-      tryAt(x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.3, k * 3.1);
+      tryAt(x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.2, k * 3.1);
     }
   }
   const crowns = new THREE.InstancedMesh(crown, needles, items.length);
