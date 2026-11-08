@@ -7,7 +7,7 @@
 use client_core::{Client, Phase};
 use serde_json::json;
 use sim::course::{Keep, LandKind, Line, Sport, tuning as course_tuning};
-use sim::mountain::{Feature, ObstacleKind, Run};
+use sim::mountain::{Feature, LipKind, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 use wasm_bindgen::prelude::*;
@@ -495,9 +495,9 @@ impl WasmClient {
         top_speed_on(self.inner.predicted_world())
     }
 
-    /// The course, for drawing it (positions in metres, angles in radians).
-    /// Bay courses carry `stadium`, buoys, ramps and land; mountain runs
-    /// carry `run`.
+    /// The course, for drawing it (positions in metres, angles in radians):
+    /// its `id` (`sim::CourseId`), then bay courses carry `stadium`, buoys,
+    /// ramps and land; mountain runs carry `run`.
     #[wasm_bindgen(js_name = courseJson)]
     pub fn course_json(&self) -> String {
         course_json_on(self.inner.predicted_world())
@@ -563,7 +563,8 @@ impl WasmClient {
 }
 
 /// The run, for drawing it: its centre line every 4 m (with half width,
-/// walls and riding limit), gates, obstacles and what is built on it.
+/// walls and riding limit), gates, obstacles and what is built on it
+/// (tables, natural lips, spines).
 fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serde_json::Value {
     let length = run.length();
     let mut path = Vec::new();
@@ -616,6 +617,54 @@ fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serd
             _ => None,
         })
         .collect();
+    let lips: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Lip {
+                s,
+                offset,
+                half_width,
+                height,
+                ramp,
+                kind,
+                ..
+            } => Some(json!({
+                "s": s,
+                "lip": s + ramp,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+                "kind": match kind {
+                    LipKind::Wind => "wind",
+                    LipKind::Log => "log",
+                    LipKind::Rock => "rock",
+                },
+            })),
+            _ => None,
+        })
+        .collect();
+    let spines: Vec<serde_json::Value> = run
+        .features
+        .iter()
+        .filter_map(|f| match *f {
+            Feature::Spine {
+                s,
+                length,
+                ease,
+                offset,
+                half_width,
+                height,
+            } => Some(json!({
+                "s": s,
+                "end": s + length + 2.0 * ease,
+                "offset": offset,
+                "halfWidth": half_width,
+                "height": height,
+            })),
+            _ => None,
+        })
+        .collect();
     json!({
         "length": length,
         "startS": c.start_s,
@@ -626,6 +675,8 @@ fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serd
         "path": path,
         "obstacles": obstacles,
         "tables": tables,
+        "lips": lips,
+        "spines": spines,
     })
 }
 
@@ -640,6 +691,7 @@ fn course_json_on(world: &World) -> String {
     let c = world.course();
     let start = c.centerline(c.start_s);
     let mut out = json!({
+        "id": world.course as u8,
         "sport": if c.sport == Sport::Snowboard { "snow" } else { "jetski" },
         "length": c.length(),
         "laps": c.laps,
@@ -651,6 +703,7 @@ fn course_json_on(world: &World) -> String {
         CourseId::Oval => "bay",
         CourseId::Mountain => "mountain",
         CourseId::Cape => "cape",
+        CourseId::Glades => "glades",
     });
     match c.line {
         Line::Stadium(_) | Line::Loop(_) => {

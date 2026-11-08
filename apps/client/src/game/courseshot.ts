@@ -50,6 +50,7 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
         snow: (points) => scenery.snowAt(points),
       },
       conditions,
+      course,
     );
     for (const f of [0.12, 0.42, 0.62, 0.86]) {
       const p = run.path[Math.floor(f * (run.path.length - 1))]!;

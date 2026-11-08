@@ -1200,7 +1200,8 @@ mod tests {
                         .iter()
                         .all(|&g| (g - k.s).abs() > ROCK_CLEAR_GATE)
                 );
-                assert_eq!(run.features_at(k.s, k.offset), 0.0);
+                // Off anything built; a bowl's dish or a gully's floor is just snow.
+                assert!(run.features_at(k.s, k.offset).abs() <= 0.05);
             }
             let fall = World::for_event(
                 Event {

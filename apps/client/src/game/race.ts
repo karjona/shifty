@@ -459,6 +459,7 @@ export class RaceSession implements Stage {
           snow: (points) => client.snowAt(points),
         },
         conditions,
+        course.id,
       );
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {

@@ -1,13 +1,13 @@
-//! Prints how the snowboard and the mountain run behave: the run's profile
-//! (pitch, banks, widths), how fast a rider goes standing tall and tucked,
-//! how much air the tables and the drop give with and without a pop, and a
-//! bots-only race down the whole run (times, falls, tricks, cost per tick),
-//! and the snow in every season and a spread of weathers: what lies at the
-//! top, the middle and the bottom, how fast a tuck goes on it, and the
-//! bots' times against the home conditions'. For tuning.
+//! Prints how the snowboard and the mountain's runs behave: each run's
+//! profile (pitch, banks, widths), how fast a rider goes standing tall and
+//! tucked, how much air its tables, lips and drops give with and without a
+//! pop, a bots-only race down the whole run (times, falls and where, tricks,
+//! cost per tick), and the snow in every season and a spread of weathers:
+//! what lies at the top, the middle and the bottom, how fast a tuck goes on
+//! it, and the bots' times against the home conditions'. For tuning.
 //!
-//! `cargo run -p sim --example snow_lab --release [seed] [course]`
-//! (`course`: a run's id or name, `mountain` by default)
+//! `cargo run -p sim --example snow_lab --release [mountain|glades] [seed]`
+//! (every run by default; the arguments in any order).
 
 use std::time::Instant;
 
@@ -16,38 +16,58 @@ use sim::conditions::{Conditions, Event, Season, TimeOfDay, Weather};
 use sim::course::Line;
 use sim::input::buttons;
 use sim::math::{angle_diff, atan2, clamp};
-use sim::mountain::{Feature, Run};
+use sim::mountain::{Feature, LipKind, Run};
 use sim::race::{EventKind, Phase};
 use sim::{CourseId, Input, Inputs, MAX_RIDERS, Sport, SurfaceKind, World};
 
+/// A run to try: its course, where its open slope is, and its jumps that
+/// are not built features (drops, rollers): name and lip.
+struct Lab {
+    course: CourseId,
+    open_s: f32,
+    extra: &'static [(&'static str, f32)],
+}
+
+const LABS: [Lab; 2] = [
+    Lab {
+        course: CourseId::Mountain,
+        open_s: 100.0,
+        extra: &[("drop", 1061.0), ("rollers", 1440.0)],
+    },
+    Lab {
+        course: CourseId::Glades,
+        open_s: 200.0,
+        extra: &[
+            ("step-down", 1537.5),
+            ("glade rollers", 900.0),
+            ("rollers", 1700.0),
+        ],
+    },
+];
+
 fn main() {
-    let seed: u32 = std::env::args()
-        .nth(1)
-        .and_then(|a| a.parse().ok())
-        .unwrap_or(1);
-    let course = std::env::args()
-        .nth(2)
-        .and_then(|a| {
-            CourseId::ALL
-                .iter()
-                .copied()
-                .find(|c| a == (*c as u8).to_string() || a.eq_ignore_ascii_case(&format!("{c:?}")))
-        })
-        .filter(|c| c.sport() == Sport::Snowboard)
-        .or_else(|| {
-            CourseId::ALL
-                .iter()
-                .copied()
-                .find(|c| c.sport() == Sport::Snowboard)
-        })
-        .expect("a run to ride");
-    let run = course.course().run().expect("a run");
-    println!("== {course:?}");
-    profile(run);
-    speeds(course);
-    jumps(course);
-    let home = race(Event::home(course), seed, true);
-    conditions(course, seed, home);
+    let mut seed = 1;
+    let mut only = None;
+    for a in std::env::args().skip(1) {
+        if let Ok(n) = a.parse() {
+            seed = n;
+        } else {
+            only = CourseId::ALL.iter().copied().find(|c| {
+                a.eq_ignore_ascii_case(&format!("{c:?}")) && c.sport() == Sport::Snowboard
+            });
+        }
+    }
+    for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
+        let course = lab.course;
+        let run = course.course().run().expect("a run");
+        println!("== {course:?}");
+        profile(run);
+        speeds(lab);
+        jumps(lab);
+        let home = race(Event::home(course), seed, true);
+        conditions(lab, seed, home);
+        println!();
+    }
 }
 
 fn profile(run: &Run) {
@@ -129,39 +149,65 @@ fn ride(event: Event, s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     (out, falls)
 }
 
-fn speeds(course: CourseId) {
-    println!("\n== speed down the open slope (s = 100), km/h each second");
+fn speeds(lab: &Lab) {
+    println!(
+        "\n== speed down the open slope (s = {}), km/h each second",
+        lab.open_s
+    );
     for (name, lean) in [("tall ", 0.0), ("tuck ", 1.0), ("brake", -0.5)] {
-        let (v, falls) = ride(Event::home(course), 100.0, lean, 12);
+        let (v, falls) = ride(Event::home(lab.course), lab.open_s, lean, 12);
         let line: Vec<String> = v.iter().map(|s| format!("{:3.0}", s * 3.6)).collect();
         println!("{name} {}  falls {falls}", line.join(" "));
     }
 }
 
-/// Approaches a table (or the drop) along the centre line at the speed the
-/// slope gives, popping at the lip or not. Prints airtime, distance, and how
-/// it landed.
-fn jumps(course: CourseId) {
-    println!("\n== air: tables and the drop (approach from 120 m up, tucked)");
+/// Approaches a table, a lip or a drop along the centre line at the speed
+/// the slope gives, popping at the lip or not. Prints airtime, distance, and
+/// how it landed.
+fn jumps(lab: &Lab) {
+    println!("\n== air: tables, lips and drops (approach from 120 m up, tucked)");
+    let course = lab.course;
     let run = course.course().run().expect("a run");
     let mut spots: Vec<(String, f32, f32)> = Vec::new();
     for f in run.features {
-        if let Feature::Table {
-            s, ramp, offset, ..
-        } = *f
-        {
-            spots.push((format!("table s={s:.0}"), s + ramp, offset));
+        match *f {
+            Feature::Table {
+                s, ramp, offset, ..
+            } => spots.push((format!("table s={s:.0}"), s + ramp, offset)),
+            Feature::Lip {
+                s,
+                ramp,
+                offset,
+                kind,
+                ..
+            } => {
+                let kind = match kind {
+                    LipKind::Wind => "wind lip",
+                    LipKind::Log => "log",
+                    LipKind::Rock => "rock lip",
+                };
+                spots.push((format!("{kind} s={s:.0}"), s + ramp, offset));
+            }
+            _ => {}
         }
     }
-    spots.push(("drop".into(), 1061.0, 0.0));
-    spots.push(("rollers".into(), 1440.0, 0.0));
+    for &(name, lip) in lab.extra {
+        spots.push((name.into(), lip, 0.0));
+    }
     for (name, lip, offset) in spots {
         for pop in [false, true] {
             let mut w = World::on_course(course, SurfaceKind::Flat, 0);
             w.spawn(0);
             w.ride_free();
             let mut r = w.riders[0].unwrap();
-            let f = run.centerline(lip - 120.0);
+            // From 120 m up, or from past the last trunk in the way.
+            let from = run
+                .obstacles
+                .iter()
+                .filter(|o| o.s < lip && (o.offset - offset).abs() < o.radius + 1.5)
+                .map(|o| o.s + 4.0)
+                .fold(lip - 120.0, f32::max);
+            let f = run.centerline(from);
             let (x, z) = f.at_offset(offset);
             r.pos.x = x;
             r.pos.z = z;
@@ -227,8 +273,13 @@ fn jumps(course: CourseId) {
                     break;
                 }
             }
+            let short = if from > lip - 120.0 {
+                format!(", from {:.0} m up", lip - from)
+            } else {
+                String::new()
+            };
             println!(
-                "{name:14} pop {:5}: {:4.2} s in the air, {:4.0} m, off at {:3.0} km/h ({outcome})",
+                "{name:14} pop {:5}: {:4.2} s in the air, {:4.0} m, off at {:3.0} km/h ({outcome}{short})",
                 pop,
                 longest as f32 / 60.0,
                 distance,
@@ -252,6 +303,7 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
     w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut falls = [0u32; MAX_RIDERS];
+    let mut fell_at: Vec<String> = Vec::new();
     let mut max_speed = [0.0f32; MAX_RIDERS];
     let mut air = [0u32; MAX_RIDERS];
     let mut longest = [0u32; MAX_RIDERS];
@@ -264,6 +316,10 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
         for e in w.step(&inputs) {
             if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
                 falls[e.slot as usize] += 1;
+                if let (Some(r), Some(run)) = (w.riders[e.slot as usize], w.course().run()) {
+                    let (s, off) = run.project(r.pos.x, r.pos.z);
+                    fell_at.push(format!("bot {} s={s:.0} off={off:.1}", e.slot + 1));
+                }
             }
         }
         ticks += 1;
@@ -295,6 +351,9 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
             times.first().copied().unwrap_or(f32::NAN),
             MAX_RIDERS - times.len()
         );
+        if !fell_at.is_empty() {
+            println!("   falls at: {}", fell_at.join(", "));
+        }
         return median;
     }
     for st in w.standings() {
@@ -316,6 +375,9 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
             longest[slot] as f32 / 60.0
         );
     }
+    if !fell_at.is_empty() {
+        println!("falls at: {}", fell_at.join(", "));
+    }
     println!("whole sim: {per_tick:.1} µs/tick with 8 riders");
     median
 }
@@ -324,7 +386,8 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
 /// what lies at the top, the middle and the bottom (depth in m, and the
 /// share of powder, slush and hard snow), a tuck's speed after 10 s from
 /// the top, and the bots against the home conditions' median time.
-fn conditions(course: CourseId, seed: u32, home: f32) {
+fn conditions(lab: &Lab, seed: u32, home: f32) {
+    let course = lab.course;
     println!("\n== the snow by conditions (bots' median vs home {home:.2} s)");
     let cover = |c: Conditions, p: f32| {
         let s = c.snow(p, sim::conditions::turn_blend(p, false, 1));
@@ -356,7 +419,7 @@ fn conditions(course: CourseId, seed: u32, home: f32) {
                 course,
                 conditions: c,
             };
-            let (v, _) = ride(event, 100.0, 1.0, 10);
+            let (v, _) = ride(event, lab.open_s, 1.0, 10);
             println!(
                 "{season:?} {weather:?}>{turns:?} {time:?}: top {}  mid {}  bottom {}  tuck {:.0} km/h",
                 cover(c, 0.0),

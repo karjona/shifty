@@ -1,22 +1,32 @@
-//! Winter: the run down the Costa Nevada mountain, and the snow it is ridden
-//! on.
+//! The runs down the Costa Nevada mountain, and the snow they are ridden on.
 //!
-//! The mountain is one height function of position, the same on the server
-//! and on every client:
-//! - The slope falls toward +Z in bands: steep pitches, flatter benches and a
-//!   cliff band. The run goes down the fall line (it crosses every Z once),
+//! A run is data ([`Run`]): its centre line, widths, slope bands, valley,
+//! what is built on it and what stands on it. One generator turns that into
+//! one height function of position, the same on the server and on every
+//! client:
+//! - The slope falls toward +Z in bands: steep pitches, flatter benches and
+//!   cliff bands. The run goes down the fall line (it crosses every Z once),
 //!   so how fast it rides comes from where it goes.
-//! - A valley follows the run, so the mountain rises on both sides of it.
+//! - A valley follows the run: the mountain rises on both sides of it (or
+//!   falls away, on a ridge), wide and gentle or close and steep as rock.
 //! - Gentle noise rolls it, like any snowfield.
 //!
-//! The run is carved into it: a groomed bench as wide as the run (level
-//! across, banked in turns), with tables and rollers built on it and a gully
-//! dug into it. Over the run's walls the carving fades back into the
-//! mountain, so a wall is as steep as the step it closes. Walls always rise:
-//! where the mountain falls away beside the run, a berm holds riders in.
+//! The run is carved into it: a bench as wide as the run (level across,
+//! banked in turns, dished in a bowl), with tables, rollers, lips and spines
+//! on it and gullies dug into it. Over the run's walls the carving fades back
+//! into the mountain, so a wall is as steep as the step it closes. Walls
+//! always rise: where the mountain falls away beside the run, a berm holds
+//! riders in.
 //!
 //! The centre line is built from pieces (straights and arcs joined
 //! smoothly), so any position projects exactly onto `(s, offset)`.
+//!
+//! The runs: [`MOUNTAIN`] (the mountain run, from the summit to the village)
+//! and [`glades::GLADES`] (the glades, from the ridge to the lake).
+
+pub mod glades;
+
+pub use glades::{GLADES, GLADES_RUN};
 
 use std::sync::OnceLock;
 
@@ -32,8 +42,9 @@ pub mod tuning {
     pub const MAX_BANK: f32 = 0.4;
     /// Curvature is averaged over this far either side, so banks ease in.
     pub const BANK_WINDOW: f32 = 14.0;
-    /// The valley floor is this wide either side of the run (horizontally),
-    /// then its sides rise, steepening toward `VALLEY_RISE` (rise per metre).
+    /// The usual valley (see [`super::Valley`]): its floor this wide either
+    /// side of the run (horizontally), then its sides rise, steepening toward
+    /// `VALLEY_RISE` (rise per metre).
     pub const VALLEY_FLAT: f32 = 50.0;
     pub const VALLEY_RISE: f32 = 0.45;
     pub const VALLEY_SOFT: f32 = 60.0;
@@ -80,6 +91,29 @@ pub struct Slope {
     pub slope: f32,
 }
 
+/// The valley the run lies in, from arc length `s` on (linear in between,
+/// placed in Z): its floor is level `flat` m either side of the centre line
+/// (horizontally), then its sides rise, steepening toward `rise` per metre
+/// over about `soft` m. A negative `rise` falls away: a ridge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Valley {
+    pub s: f32,
+    pub flat: f32,
+    pub rise: f32,
+    pub soft: f32,
+}
+
+/// What a natural lip is, for drawing it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LipKind {
+    /// A wind lip: a drift with a sharp crest.
+    Wind,
+    /// A fallen log under the snow: round over the top.
+    Log,
+    /// A rock under the snow, its face kicking up.
+    Rock,
+}
+
 /// Something built on (or dug into) the run.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Feature {
@@ -112,6 +146,39 @@ pub enum Feature {
         length: f32,
         depth: f32,
         ease: f32,
+    },
+    /// The run dished across from `s` for `length` metres (easing in and out
+    /// over `ease`): its sides rise `depth` by the run's edges.
+    Bowl {
+        s: f32,
+        length: f32,
+        depth: f32,
+        ease: f32,
+    },
+    /// A ridge down the run at `offset`, `height` at its sharp crest, its
+    /// concave faces down to the run `half_width` either side. It rises from
+    /// `s` over `ease`, runs `length` and sinks back over `ease`: ride across
+    /// it and the crest throws you.
+    Spine {
+        s: f32,
+        length: f32,
+        ease: f32,
+        offset: f32,
+        half_width: f32,
+        height: f32,
+    },
+    /// A natural lip across part of the run, centred at `offset`,
+    /// `half_width` either side (sloped sides): the snow rises over `ramp`
+    /// metres to a crest `height` up and falls back to the run over `fall`
+    /// behind it. A wind lip or a rock kicks up to its crest; a log is round.
+    Lip {
+        s: f32,
+        offset: f32,
+        half_width: f32,
+        height: f32,
+        ramp: f32,
+        fall: f32,
+        kind: LipKind,
     },
 }
 
@@ -153,6 +220,7 @@ pub struct Run {
     /// Height of the mountain where the run starts.
     pub top: f32,
     pub slope: &'static [Slope],
+    pub valley: &'static [Valley],
     pub features: &'static [Feature],
     /// Arc lengths of the checkpoints, in order.
     pub checkpoints: &'static [f32],
@@ -197,6 +265,8 @@ struct Geometry {
     length: f32,
     /// The centre line's x on a regular grid in z (it crosses each z once).
     x_at_z: Vec<f32>,
+    /// And its arc length, on the same grid.
+    s_at_z: Vec<f32>,
     z_first: f32,
     /// Slope bands placed in z: `(z, slope, fall at z)`.
     bands: Vec<(f32, f32, f32)>,
@@ -263,6 +333,7 @@ impl Run {
         width: &'static [Width],
         top: f32,
         slope: &'static [Slope],
+        valley: &'static [Valley],
         features: &'static [Feature],
         checkpoints: &'static [f32],
         finish_s: f32,
@@ -275,6 +346,7 @@ impl Run {
             width,
             top,
             slope,
+            valley,
             features,
             checkpoints,
             finish_s,
@@ -340,11 +412,12 @@ impl Run {
             segs,
             length: s,
             x_at_z: Vec::new(),
+            s_at_z: Vec::new(),
             z_first: 0.0,
             bands: Vec::new(),
         };
 
-        // The centre line's x by z, for the valley.
+        // The centre line's x (and arc length) by z, for the valley.
         let samples: Vec<(f32, f32)> = (0..=(geo.length as u32))
             .map(|i| {
                 let (x, z, _) = geo.at(i as f32);
@@ -368,6 +441,7 @@ impl Run {
                 0.0
             };
             geo.x_at_z.push(xa + (xb - xa) * t);
+            geo.s_at_z.push(j as f32 + t);
         }
 
         // Slope bands, placed in z, with the fall accumulated band by band.
@@ -456,13 +530,32 @@ impl Run {
         w.half + (w.wall * 0.5).min(WALL_RIDE)
     }
 
+    /// The valley where the run is at arc length `s`.
+    pub fn valley_at(&self, s: f32) -> Valley {
+        piecewise(
+            self.valley,
+            s,
+            |v| v.s,
+            |a, b, t| Valley {
+                s,
+                flat: a.flat + (b.flat - a.flat) * t,
+                rise: a.rise + (b.rise - a.rise) * t,
+                soft: a.soft + (b.soft - a.soft) * t,
+            },
+        )
+    }
+
     /// The mountain without the run carved into it.
     pub fn mountain(&self, x: f32, z: f32) -> f32 {
         let geo = self.geo();
         let fall = geo.fall(z);
         let dx = (x - geo.x_at(z)).abs();
-        let d = (dx - VALLEY_FLAT).max(0.0);
-        let valley = VALLEY_RISE * d * d / (d + VALLEY_SOFT);
+        let v = match self.valley {
+            [one] => *one,
+            _ => self.valley_at(geo.s_at(z)),
+        };
+        let d = (dx - v.flat).max(0.0);
+        let valley = v.rise * d * d / (d + v.soft);
         let noise = 0.35 * value_noise(x * (1.0 / 34.0), z * (1.0 / 34.0), self.seed)
             + 0.12 * value_noise(x * (1.0 / 11.0), z * (1.0 / 11.0), self.seed ^ 0x9E37_79B9);
         self.top - fall + valley + noise
@@ -541,6 +634,63 @@ impl Run {
                         * smoothstep(s0 + length + ease, s0 + length, s);
                     -depth * open
                 }
+                Feature::Bowl {
+                    s: s0,
+                    length,
+                    depth,
+                    ease,
+                } => {
+                    let open = smoothstep(s0 - ease, s0, s)
+                        * smoothstep(s0 + length + ease, s0 + length, s);
+                    if open <= 0.0 {
+                        continue;
+                    }
+                    let k = offset / self.width_at(s).half;
+                    depth * k * k * open
+                }
+                Feature::Spine {
+                    s: s0,
+                    length,
+                    ease,
+                    offset: c,
+                    half_width,
+                    height,
+                } => {
+                    let t = 1.0 - (offset - c).abs() / half_width;
+                    if t <= 0.0 {
+                        continue;
+                    }
+                    let open = smoothstep(s0, s0 + ease, s)
+                        * smoothstep(s0 + length + 2.0 * ease, s0 + length + ease, s);
+                    height * t * t * open
+                }
+                Feature::Lip {
+                    s: s0,
+                    offset: c,
+                    half_width,
+                    height,
+                    ramp,
+                    fall,
+                    kind,
+                } => {
+                    let u = s - s0;
+                    if u <= 0.0 || u >= ramp + fall {
+                        continue;
+                    }
+                    let side = smoothstep(half_width + 2.0, half_width, (offset - c).abs());
+                    let profile = if u < ramp {
+                        match kind {
+                            LipKind::Log => height * smoothstep(0.0, ramp, u),
+                            LipKind::Wind | LipKind::Rock => {
+                                let t = u / ramp;
+                                height * t * t
+                            }
+                        }
+                    } else {
+                        height * (1.0 - smoothstep(0.0, fall, u - ramp))
+                    };
+                    profile * side
+                }
             };
         }
         h
@@ -610,17 +760,26 @@ impl Geometry {
     }
 
     fn x_at(&self, z: f32) -> f32 {
+        self.by_z(&self.x_at_z, z)
+    }
+
+    fn s_at(&self, z: f32) -> f32 {
+        self.by_z(&self.s_at_z, z)
+    }
+
+    /// A table on the grid in z, at `z` (clamped at both ends).
+    fn by_z(&self, table: &[f32], z: f32) -> f32 {
         let f = (z - self.z_first) / X_AT_Z_STEP;
-        let n = self.x_at_z.len();
+        let n = table.len();
         if f <= 0.0 {
-            return self.x_at_z[0];
+            return table[0];
         }
         let i = f as usize;
         if i + 1 >= n {
-            return self.x_at_z[n - 1];
+            return table[n - 1];
         }
         let t = f - i as f32;
-        self.x_at_z[i] + (self.x_at_z[i + 1] - self.x_at_z[i]) * t
+        table[i] + (table[i + 1] - table[i]) * t
     }
 
     /// How far the mountain has fallen from the top at `z` (the slope bands
@@ -676,6 +835,15 @@ const fn slope(s: f32, slope: f32) -> Slope {
     Slope { s, slope }
 }
 
+const fn valley(s: f32, flat: f32, rise: f32, soft: f32) -> Valley {
+    Valley {
+        s,
+        flat,
+        rise,
+        soft,
+    }
+}
+
 const fn pine(s: f32, offset: f32) -> ObstacleDef {
     ObstacleDef {
         s,
@@ -710,7 +878,7 @@ const fn turn(radius: f32, degrees: f32) -> Piece {
     Piece::Turn { radius, degrees }
 }
 
-/// Winter: a ~2 km run from the summit lift station down to the village.
+/// The mountain run: ~2 km from the summit lift station down to the village.
 /// A flat start, a steep start ramp onto a wide open slope (sweeping turns,
 /// rollers, a big table), tree-lined S-turns past the chairlift, a bench
 /// that ends in a cliff drop, a winding gully, more open slope with side
@@ -784,6 +952,7 @@ pub static RUN: Run = Run::new(
         slope(2050.0, 0.04),
         slope(2150.0, -0.15),
     ],
+    &[valley(0.0, VALLEY_FLAT, VALLEY_RISE, VALLEY_SOFT)],
     &[
         Feature::Table {
             s: 262.0,
@@ -881,7 +1050,7 @@ pub static RUN: Run = Run::new(
     0x5_EA50,
 );
 
-/// Winter: the snowboard run, raced once from the top.
+/// The mountain run, raced once from the top.
 pub static MOUNTAIN: Course = Course {
     sport: Sport::Snowboard,
     line: Line::Run(&RUN),
@@ -899,9 +1068,16 @@ mod tests {
     use super::*;
     use crate::math::angle_diff;
 
+    const RUNS: [&Run; 2] = [&RUN, &GLADES_RUN];
+
     #[test]
     fn centre_line_and_projection_agree() {
-        let run = &RUN;
+        for run in RUNS {
+            centre_line_and_projection_agree_on(run);
+        }
+    }
+
+    fn centre_line_and_projection_agree_on(run: &Run) {
         let mut s = 0.5;
         while s < run.length() {
             let f = run.centerline(s);
@@ -920,7 +1096,12 @@ mod tests {
 
     #[test]
     fn the_run_always_goes_downhill_and_crosses_each_z_once() {
-        let run = &RUN;
+        for run in RUNS {
+            goes_downhill(run);
+        }
+    }
+
+    fn goes_downhill(run: &Run) {
         let mut last_z = f32::MIN;
         let mut s = 0.0;
         while s < run.length() {
@@ -938,10 +1119,15 @@ mod tests {
 
     #[test]
     fn the_snow_is_continuous() {
-        // Walk across and along the run in small steps: no steps in the snow.
-        // Where riders go, nothing steeper than a gully wall; beyond, walls
-        // may be steeper.
-        let run = &RUN;
+        for run in RUNS {
+            continuous(run);
+        }
+    }
+
+    /// Walk across and along the run in small steps: no steps in the snow.
+    /// Where riders go, nothing steeper than a gully wall; beyond, walls may
+    /// be steeper.
+    fn continuous(run: &Run) {
         let mut s = 0.0;
         while s < run.length() {
             let f = run.centerline(s);
@@ -987,13 +1173,100 @@ mod tests {
         assert!(run.height(rx, rz) > run.height(lx, lz));
     }
 
+    /// Every height, bank and limit of a run on a dense sample (along it,
+    /// across it and far around it), and its obstacles, hashed bit for bit.
+    fn fingerprint(run: &Run) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut mix = |v: f32| {
+            h ^= u64::from(v.to_bits());
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        };
+        let mut s = -20.0;
+        while s < run.length() + 40.0 {
+            let f = run.centerline(s);
+            let mut off = -70.0;
+            while off <= 70.0 {
+                let (x, z) = f.at_offset(off);
+                mix(run.height(x, z));
+                off += 1.7;
+            }
+            mix(run.bank(s));
+            mix(run.limit(s));
+            s += 2.3;
+        }
+        for i in 0..60 {
+            for j in 0..60 {
+                mix(run.height(-600.0 + i as f32 * 20.0, -300.0 + j as f32 * 45.0));
+            }
+        }
+        for o in run.obstacles() {
+            for v in [o.x, o.y, o.z, o.radius, o.height] {
+                mix(v);
+            }
+        }
+        h
+    }
+
+    #[test]
+    fn the_first_run_never_changes() {
+        assert_eq!(fingerprint(&RUN), 0xaedb_f188_b704_ade5);
+    }
+
     #[test]
     fn obstacles_stand_inside_the_run() {
-        let run = &RUN;
-        for o in run.obstacles() {
-            let (s, off) = run.project(o.x, o.z);
-            assert!(off.abs() < run.limit(s), "{o:?}");
+        for run in RUNS {
+            for o in run.obstacles() {
+                let (s, off) = run.project(o.x, o.z);
+                assert!(off.abs() < run.limit(s), "{o:?}");
+            }
+            assert_eq!(run.obstacles().len(), run.obstacles.len());
         }
-        assert_eq!(run.obstacles().len(), run.obstacles.len());
+    }
+
+    #[test]
+    fn checkpoints_are_in_order_on_the_run() {
+        for run in RUNS {
+            let mut last = 0.0;
+            for &c in run.checkpoints {
+                assert!(c > last, "{c}");
+                last = c;
+            }
+            assert!(run.finish_s > last && run.finish_s + 80.0 < run.length());
+        }
+    }
+
+    #[test]
+    fn the_glades_have_their_sections() {
+        let run = &GLADES_RUN;
+        // A steep couloir, narrow between rock walls.
+        let pitch = |s: f32| {
+            let a = run.centerline(s - 3.0);
+            let b = run.centerline(s + 3.0);
+            (run.height(a.x, a.z) - run.height(b.x, b.z)) / 6.0
+        };
+        assert!(pitch(100.0) > 0.6, "{}", pitch(100.0));
+        assert!(run.width_at(100.0).half < 8.0);
+        let f = run.centerline(100.0);
+        let (wx, wz) = f.at_offset(run.width_at(100.0).half + 5.0);
+        assert!(run.height(wx, wz) > run.height(f.x, f.z) + 4.0);
+        // A wide bowl whose sides rise.
+        assert!(run.width_at(400.0).half > 20.0);
+        let f = run.centerline(300.0);
+        let (sx, sz) = f.at_offset(-20.0);
+        assert!(run.height(sx, sz) > run.height(f.x, f.z) + 1.5);
+        // Pines in the glades.
+        let pines = run
+            .obstacles
+            .iter()
+            .filter(|o| o.kind == ObstacleKind::Pine && (640.0..1200.0).contains(&o.s))
+            .count();
+        assert!(pines > 12, "{pines}");
+        // The spine stands proud of the bowl.
+        let f = run.centerline(420.0);
+        let at = |off: f32| {
+            let (x, z) = f.at_offset(off);
+            run.height(x, z)
+        };
+        assert!(at(-2.0) > (at(-11.0) + at(7.0)) * 0.5 + 1.5);
     }
 }
