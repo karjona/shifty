@@ -152,8 +152,10 @@ pub struct Client {
     phase: Phase,
     last_hello_ms: f64,
     slot: usize,
-    surface: Surface,
-    /// The room's sea, rebuilt for each course of a Tilt.
+    /// The race's world without riders (its course, conditions, sea and
+    /// wind), rebuilt for each race of a Tilt: snapshots fill it in.
+    base: World,
+    /// The room's sea.
     surface_kind: SurfaceKind,
     surface_seed: u32,
     /// Which race of the room's plan is on, out of how many.
@@ -199,7 +201,7 @@ impl Client {
             phase: Phase::Connecting,
             last_hello_ms: f64::NEG_INFINITY,
             slot: 0,
-            surface: Surface::flat(),
+            base: World::new(CourseId::Oval, Surface::flat()),
             surface_kind: SurfaceKind::Flat,
             surface_seed: 0,
             event_index: 0,
@@ -250,7 +252,7 @@ impl Client {
     }
 
     pub fn surface(&self) -> &Surface {
-        &self.surface
+        &self.world.surface
     }
 
     pub fn roster(&self) -> &[Option<RosterEntry>; MAX_RIDERS] {
@@ -501,7 +503,7 @@ impl Client {
                     w.surface_kind,
                     w.surface_seed,
                 );
-                self.surface = self.world.surface.clone();
+                self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
                     w.server_tick + (rtt_ticks + self.target_lead + 1.0).ceil() as u32;
@@ -625,10 +627,14 @@ impl Client {
         // smooth from the old one.
         let new_course = s.course != self.world.course || s.conditions != self.world.conditions;
         if new_course {
-            self.surface = s
-                .course
-                .course()
-                .surface(self.surface_kind, self.surface_seed);
+            self.base = World::for_event(
+                sim::conditions::Event {
+                    course: s.course,
+                    conditions: s.conditions,
+                },
+                self.surface_kind,
+                self.surface_seed,
+            );
         }
 
         // Reconcile: authoritative state at s.tick, re-simulated to the present.
@@ -645,15 +651,12 @@ impl Client {
                     sim::Setup::for_sport(&e.setups, sport)
                 })
         });
-        let mut world = World {
-            tick: s.tick,
-            course: s.course,
-            conditions: s.conditions,
-            surface: self.surface.clone(),
-            race: s.race,
-            riders,
-            setups,
-        };
+        let mut world = self.base.clone();
+        world.tick = s.tick;
+        world.race = s.race;
+        world.riders = riders;
+        world.setups = setups;
+        world.sync_weather();
         let mut prev = world.riders;
         if target_tick.wrapping_sub(s.tick) as usize >= HISTORY - 8 {
             target_tick = s.tick;

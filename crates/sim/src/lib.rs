@@ -54,14 +54,39 @@ pub const MAX_RIDERS: usize = 8;
 pub const MAX_HUMANS: usize = 4;
 
 /// A fixed scenario used to compare native and WASM builds bit for bit:
-/// a full room of riders on every course (swells, then snow), driven by
-/// seeded pseudo-random inputs and bots through the intro, the countdown
-/// and the race, where one rider leaves and comes back mid-race (on
-/// autopilot from then on).
+/// a full room of riders on every course, in its home conditions and in
+/// weather that turns (a storm building on the water; on the snow, fall's
+/// rocks and wind, and spring's hard snow and slush), driven by seeded
+/// pseudo-random inputs and bots through the intro, the countdown and the
+/// race, where one rider leaves and comes back mid-race (on autopilot from
+/// then on).
 pub fn determinism_scenario(ticks: u32) -> u64 {
+    use conditions::{Conditions, Event};
     let mut hash: u64 = 0;
-    for course in [CourseId::Oval, CourseId::Mountain] {
-        let mut world = World::on_course(course, SurfaceKind::Swells, 0xC0FFEE);
+    let mut events = Vec::new();
+    for &course in CourseId::ALL {
+        events.push(Event::home(course));
+        let turning = match course.sport() {
+            Sport::Jetski => [(Season::Winter, Weather::Cloudy, Weather::Storm)].as_slice(),
+            Sport::Snowboard => &[
+                (Season::Fall, Weather::Windy, Weather::Rain),
+                (Season::Spring, Weather::Storm, Weather::Clear),
+            ],
+        };
+        for &(season, weather, turns) in turning {
+            events.push(Event {
+                course,
+                conditions: Conditions {
+                    season,
+                    weather,
+                    turns,
+                    time: season.time_of(conditions::TimeOfDay::Afternoon),
+                },
+            });
+        }
+    }
+    for event in events {
+        let mut world = World::for_event(event, SurfaceKind::Swells, 0xC0FFEE);
         for slot in 0..MAX_RIDERS {
             world.spawn(slot);
         }

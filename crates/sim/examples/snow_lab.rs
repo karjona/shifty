@@ -1,34 +1,56 @@
 //! Prints how the snowboard and the mountain run behave: the run's profile
 //! (pitch, banks, widths), how fast a rider goes standing tall and tucked,
 //! how much air the tables and the drop give with and without a pop, and a
-//! bots-only race down the whole run (times, falls, tricks, cost per tick).
-//! For tuning.
+//! bots-only race down the whole run (times, falls, tricks, cost per tick),
+//! and the snow in every season and a spread of weathers: what lies at the
+//! top, the middle and the bottom, how fast a tuck goes on it, and the
+//! bots' times against the home conditions'. For tuning.
 //!
-//! `cargo run -p sim --example snow_lab --release [seed]`
+//! `cargo run -p sim --example snow_lab --release [seed] [course]`
+//! (`course`: a run's id or name, `mountain` by default)
 
 use std::time::Instant;
 
 use sim::bot::bot_input;
+use sim::conditions::{Conditions, Event, Season, TimeOfDay, Weather};
 use sim::course::Line;
 use sim::input::buttons;
 use sim::math::{angle_diff, atan2, clamp};
-use sim::mountain::{Feature, RUN};
+use sim::mountain::{Feature, Run};
 use sim::race::{EventKind, Phase};
-use sim::{CourseId, Input, Inputs, MAX_RIDERS, SurfaceKind, World};
+use sim::{CourseId, Input, Inputs, MAX_RIDERS, Sport, SurfaceKind, World};
 
 fn main() {
     let seed: u32 = std::env::args()
         .nth(1)
         .and_then(|a| a.parse().ok())
         .unwrap_or(1);
-    profile();
-    speeds();
-    jumps();
-    race(seed);
+    let course = std::env::args()
+        .nth(2)
+        .and_then(|a| {
+            CourseId::ALL
+                .iter()
+                .copied()
+                .find(|c| a == (*c as u8).to_string() || a.eq_ignore_ascii_case(&format!("{c:?}")))
+        })
+        .filter(|c| c.sport() == Sport::Snowboard)
+        .or_else(|| {
+            CourseId::ALL
+                .iter()
+                .copied()
+                .find(|c| c.sport() == Sport::Snowboard)
+        })
+        .expect("a run to ride");
+    let run = course.course().run().expect("a run");
+    println!("== {course:?}");
+    profile(run);
+    speeds(course);
+    jumps(course);
+    let home = race(Event::home(course), seed, true);
+    conditions(course, seed, home);
 }
 
-fn profile() {
-    let run = &RUN;
+fn profile(run: &Run) {
     println!(
         "== run: {:.0} m, finish at {:.0} m",
         run.length(),
@@ -64,15 +86,16 @@ fn profile() {
 
 /// One rider from `s0` down the centre line, holding `lean`, for `secs`.
 /// Returns (speed every second, falls).
-fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
-    let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+fn ride(event: Event, s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
+    let mut w = World::for_event(event, SurfaceKind::Flat, 0);
+    let run = w.course().run().expect("a run");
     w.spawn(0);
     w.ride_free();
     let mut r = w.riders[0].unwrap();
-    let f = RUN.centerline(s0);
+    let f = run.centerline(s0);
     r.pos.x = f.x;
     r.pos.z = f.z;
-    r.pos.y = RUN.height(f.x, f.z);
+    r.pos.y = run.height(f.x, f.z);
     r.yaw = f.yaw;
     r.quantize();
     w.riders[0] = Some(r);
@@ -81,8 +104,8 @@ fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     let mut falls = 0;
     for t in 0..secs * 60 {
         let r = w.riders[0].unwrap();
-        let (s, _) = RUN.project(r.pos.x, r.pos.z);
-        let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(0.0);
+        let (s, _) = run.project(r.pos.x, r.pos.z);
+        let (tx, tz) = run.centerline(s + 10.0 + r.speed() * 0.5).at_offset(0.0);
         let heading = if r.speed() > 3.0 {
             atan2(r.vel.x, r.vel.z)
         } else {
@@ -106,10 +129,10 @@ fn ride(s0: f32, lean: f32, secs: u32) -> (Vec<f32>, u32) {
     (out, falls)
 }
 
-fn speeds() {
+fn speeds(course: CourseId) {
     println!("\n== speed down the open slope (s = 100), km/h each second");
     for (name, lean) in [("tall ", 0.0), ("tuck ", 1.0), ("brake", -0.5)] {
-        let (v, falls) = ride(100.0, lean, 12);
+        let (v, falls) = ride(Event::home(course), 100.0, lean, 12);
         let line: Vec<String> = v.iter().map(|s| format!("{:3.0}", s * 3.6)).collect();
         println!("{name} {}  falls {falls}", line.join(" "));
     }
@@ -118,10 +141,11 @@ fn speeds() {
 /// Approaches a table (or the drop) along the centre line at the speed the
 /// slope gives, popping at the lip or not. Prints airtime, distance, and how
 /// it landed.
-fn jumps() {
+fn jumps(course: CourseId) {
     println!("\n== air: tables and the drop (approach from 120 m up, tucked)");
+    let run = course.course().run().expect("a run");
     let mut spots: Vec<(String, f32, f32)> = Vec::new();
-    for f in RUN.features {
+    for f in run.features {
         if let Feature::Table {
             s, ramp, offset, ..
         } = *f
@@ -133,15 +157,15 @@ fn jumps() {
     spots.push(("rollers".into(), 1440.0, 0.0));
     for (name, lip, offset) in spots {
         for pop in [false, true] {
-            let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);
+            let mut w = World::on_course(course, SurfaceKind::Flat, 0);
             w.spawn(0);
             w.ride_free();
             let mut r = w.riders[0].unwrap();
-            let f = RUN.centerline(lip - 120.0);
+            let f = run.centerline(lip - 120.0);
             let (x, z) = f.at_offset(offset);
             r.pos.x = x;
             r.pos.z = z;
-            r.pos.y = RUN.height(x, z);
+            r.pos.y = run.height(x, z);
             r.yaw = f.yaw;
             r.quantize();
             w.riders[0] = Some(r);
@@ -153,8 +177,8 @@ fn jumps() {
             let mut outcome = String::from("-");
             for _ in 0..60 * 12 {
                 let r = w.riders[0].unwrap();
-                let (s, _) = RUN.project(r.pos.x, r.pos.z);
-                let (tx, tz) = RUN.centerline(s + 10.0 + r.speed() * 0.5).at_offset(offset);
+                let (s, _) = run.project(r.pos.x, r.pos.z);
+                let (tx, tz) = run.centerline(s + 10.0 + r.speed() * 0.5).at_offset(offset);
                 let heading = if r.speed() > 3.0 {
                     atan2(r.vel.x, r.vel.z)
                 } else {
@@ -191,7 +215,7 @@ fn jumps() {
                 } else {
                     if air > longest && flew_at > lip - 30.0 {
                         longest = air;
-                        landed_at = RUN.project(r2.pos.x, r2.pos.z).0;
+                        landed_at = run.project(r2.pos.x, r2.pos.z).0;
                         distance = landed_at - flew_at;
                         if outcome == "-" {
                             outcome = "ok".into();
@@ -214,9 +238,13 @@ fn jumps() {
     }
 }
 
-fn race(seed: u32) {
-    println!("\n== bots race the run (seed {seed})");
-    let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, seed);
+/// A bots-only race down the run in some conditions: prints every rider
+/// (with `print`), and returns the median finish time (s).
+fn race(event: Event, seed: u32, print: bool) -> f32 {
+    if print {
+        println!("\n== bots race the run (seed {seed})");
+    }
+    let mut w = World::for_event(event, SurfaceKind::Flat, seed);
     assert!(matches!(w.course().line, Line::Run(_)));
     for slot in 0..MAX_RIDERS {
         w.spawn(slot);
@@ -252,6 +280,23 @@ fn race(seed: u32) {
         }
     }
     let per_tick = start.elapsed().as_secs_f64() * 1e6 / f64::from(ticks);
+    let mut times: Vec<f32> = w
+        .standings()
+        .iter()
+        .filter(|st| st.progress.finished())
+        .map(|st| st.progress.finish_ticks as f32 / 60.0)
+        .collect();
+    times.sort_by(f32::total_cmp);
+    let median = times.get(times.len() / 2).copied().unwrap_or(f32::NAN);
+    if !print {
+        let falls: u32 = falls.iter().sum();
+        println!(
+            "   bots: winner {:6.2} s, median {median:6.2} s, {} DNF, {falls} falls",
+            times.first().copied().unwrap_or(f32::NAN),
+            MAX_RIDERS - times.len()
+        );
+        return median;
+    }
     for st in w.standings() {
         let p = st.progress;
         let slot = st.slot as usize;
@@ -272,4 +317,73 @@ fn race(seed: u32) {
         );
     }
     println!("whole sim: {per_tick:.1} µs/tick with 8 riders");
+    median
+}
+
+/// The snow in every season the run is ridden, in a spread of weathers:
+/// what lies at the top, the middle and the bottom (depth in m, and the
+/// share of powder, slush and hard snow), a tuck's speed after 10 s from
+/// the top, and the bots against the home conditions' median time.
+fn conditions(course: CourseId, seed: u32, home: f32) {
+    println!("\n== the snow by conditions (bots' median vs home {home:.2} s)");
+    let cover = |c: Conditions, p: f32| {
+        let s = c.snow(p, sim::conditions::turn_blend(p, false, 1));
+        let g = s.grip();
+        format!(
+            "{:.2}m p{:.1} s{:.1} h{:.1} f{:.2} e{:.2}",
+            s.depth, s.powder, s.slush, s.hard, g.friction, g.edge
+        )
+    };
+    for &season in Sport::Snowboard.seasons() {
+        for (weather, turns, time) in [
+            (Weather::Clear, Weather::Clear, TimeOfDay::Morning),
+            (Weather::Clear, Weather::Clear, TimeOfDay::Afternoon),
+            (Weather::Snow, Weather::Snow, TimeOfDay::Noon),
+            (Weather::Windy, Weather::Clear, TimeOfDay::Noon),
+            (Weather::Storm, Weather::Cloudy, TimeOfDay::Noon),
+            (Weather::Rain, Weather::Rain, TimeOfDay::Noon),
+        ] {
+            if !season.has(weather) || !season.has(turns) {
+                continue;
+            }
+            let c = Conditions {
+                season,
+                weather,
+                turns,
+                time: season.time_of(time),
+            };
+            let event = Event {
+                course,
+                conditions: c,
+            };
+            let (v, _) = ride(event, 100.0, 1.0, 10);
+            println!(
+                "{season:?} {weather:?}>{turns:?} {time:?}: top {}  mid {}  bottom {}  tuck {:.0} km/h",
+                cover(c, 0.0),
+                cover(c, 0.5),
+                cover(c, 1.0),
+                v.last().copied().unwrap_or(0.0) * 3.6
+            );
+            let median = race(event, seed, false);
+            println!("   {:+.1}% vs home", (median / home - 1.0) * 100.0);
+        }
+    }
+    let world = World::for_event(
+        Event {
+            course,
+            conditions: Conditions::clear(Season::Fall),
+        },
+        SurfaceKind::Flat,
+        seed,
+    );
+    let rocks: Vec<String> = world
+        .cover_rocks()
+        .iter()
+        .map(|k| format!("{:.0}/{:+.1}", k.s, k.offset))
+        .collect();
+    println!(
+        "fall rocks ({}), s/offset: {}",
+        rocks.len(),
+        rocks.join(" ")
+    );
 }
