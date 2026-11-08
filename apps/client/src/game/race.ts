@@ -4,7 +4,7 @@
 // session, with a short season change in between. Each race starts with its intro (see intro.ts), once
 // every screen has told the server its course is on show.
 import { type Appearance, SEASONS, SPORT_SEASONS, botAppearance, circuit, decodeAppearance } from "@shifty/rider";
-import { WasmClient, raceFields, renderStride, statsFields } from "../wasm/sim.js";
+import { WasmClient, raceFields, renderStride, statsFields, weatherFields } from "../wasm/sim.js";
 import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
@@ -22,7 +22,17 @@ import { WrongWay } from "../ui/wrong-way.ts";
 import { parseCourse, parseEvents, parseGrandPrix, parseRosterNames, parseStandings } from "../wasm-json.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { Broadcast, onAir } from "./broadcast.ts";
-import { type Conditions, type Season, WEATHERS, circuitName, eventKey, homeConditions } from "./conditions.ts";
+import {
+  type Conditions,
+  NO_WEATHER,
+  type Season,
+  WEATHERS,
+  type WeatherHere,
+  circuitName,
+  eventKey,
+  homeConditions,
+  readWeather,
+} from "./conditions.ts";
 import { disposeTree } from "./dispose.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
@@ -464,7 +474,12 @@ export class RaceSession implements Stage {
       this.minimap = new Minimap(this.mapRoot, course.bay);
     }
     engine.world.setEnvironment(this.env);
-    engine.world.weatherAt = (x, z) => client.weatherAt(x, z);
+    const fields = weatherFields();
+    const here: WeatherHere = { ...NO_WEATHER };
+    engine.world.weatherAt = (x, z) => {
+      const ptr = client.updateWeather(x, z);
+      return readWeather(fields, new Float32Array(engine.wasm.memory.buffer, ptr, fields.length), here);
+    };
     this.intro?.setCourse(this.event, course, this.env);
     this.tv?.setCourse(course, this.env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
     if (old) disposeTree(old.group);
@@ -686,6 +701,12 @@ export class RaceSession implements Stage {
         // Fresh, not the last rendered frame (frames can be slow without a GPU).
         riders: () => this.readRiders(),
         race: () => this.readRace(),
+        /** The race's weather where the camera is (null outside a race). */
+        weather: () => {
+          const eye = engine.world.camera.position;
+          const at = engine.world.weatherAt;
+          return at ? { ...at(eye.x, eye.z) } : null;
+        },
         standings: () => (this.client ? parseStandings(this.client.standingsJson()) : []),
         names: () => Object.fromEntries(this.names),
         grandPrix: () => Object.fromEntries(this.gpPoints),

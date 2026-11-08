@@ -2,7 +2,7 @@
 //! through a simulated network with latency, jitter and packet loss.
 
 use client_core::{Client, Phase};
-use protocol::token::JoinClaims;
+use protocol::token::{JoinClaims, RaceClaims};
 use protocol::{ClientMsg, InputPacket, ServerMsg};
 use race_server::room::{ConnId, Room, RoomConfig};
 use sim::bot::bot_input;
@@ -83,7 +83,7 @@ struct Harness {
     server_log: Option<Vec<(u32, [Option<Rider>; MAX_RIDERS])>>,
 }
 
-fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinClaims {
+fn claims(pid: &str, bots: u8, surface: SurfaceKind, race: RaceClaims) -> JoinClaims {
     JoinClaims {
         v: 1,
         aud: "test".into(),
@@ -96,10 +96,7 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, course: CourseId) -> JoinCl
         humans: 0,
         surface: surface as u8,
         tilt: false,
-        races: vec![protocol::token::RaceClaims {
-            course: Some(course as u8),
-            ..Default::default()
-        }],
+        races: vec![race],
         seed: 1,
         look: String::new(),
         // Lopsided setups, so prediction has to know each rider's.
@@ -113,7 +110,19 @@ impl Harness {
     }
 
     fn on(course: CourseId, bots: u8, surface: SurfaceKind) -> Self {
-        let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface, course)));
+        Self::racing(
+            RaceClaims {
+                course: Some(course as u8),
+                ..Default::default()
+            },
+            bots,
+            surface,
+        )
+    }
+
+    /// A room racing one race as asked for.
+    fn racing(race: RaceClaims, bots: u8, surface: SurfaceKind) -> Self {
+        let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface, race)));
         Self {
             frame_ms: 8,
             stall: None,
@@ -132,7 +141,7 @@ impl Harness {
             client: Client::new("token"),
             up: Link::new(cond, 100 + i as u64),
             down: Link::new(cond, 200 + i as u64),
-            claims: claims(pid, 0, SurfaceKind::Flat, CourseId::Oval),
+            claims: claims(pid, 0, SurfaceKind::Flat, RaceClaims::default()),
             loaded: true,
         });
         i
@@ -570,6 +579,51 @@ fn predicts_the_snowboard_run_exactly() {
     let spot = sim::mountain::MOUNTAIN.grid_spot(slot);
     let moved = (r.pos.x - spot.x).hypot(r.pos.z - spot.z);
     assert!(moved > 15.0, "rode off the start: {moved} m");
+}
+
+/// One race in some conditions (wire numbers: season, weather, turns).
+fn race_in(course: CourseId, season: u8, weather: u8, turns: u8) -> RaceClaims {
+    RaceClaims {
+        course: Some(course as u8),
+        season: Some(season),
+        weather: Some(weather),
+        turns: Some(turns),
+        time: Some(80),
+    }
+}
+
+#[test]
+fn predicts_a_storm_at_sea_exactly() {
+    // Winter, cloudy turning to a storm: a bigger sea, and wind.
+    let mut h = Harness::racing(race_in(CourseId::Oval, 2, 1, 5), 3, SurfaceKind::Swells);
+    h.add_peer("a", PERFECT);
+    h.run(500.0, |_, _| Input::default());
+    assert!(h.room.world().surface.turns());
+    assert_eq!(h.peers[0].client.conditions(), h.room.world().conditions);
+    h.start_race();
+    let before = h.peers[0].client.stats().mispredictions;
+    h.run(8000.0, driving);
+    let s = h.peers[0].client.stats();
+    assert_eq!(s.mispredictions - before, 0, "stats: {s:?}");
+}
+
+#[test]
+fn predicts_fall_rocks_and_spring_slush_exactly() {
+    // Fall, windy turning to rain (rocks, wind up high); spring, a storm
+    // clearing (hard snow up top, slush below).
+    for race in [
+        race_in(CourseId::Mountain, 1, 2, 4),
+        race_in(CourseId::Mountain, 3, 5, 0),
+    ] {
+        let mut h = Harness::racing(race, 3, SurfaceKind::Flat);
+        h.add_peer("a", PERFECT);
+        h.run(500.0, |_, _| Input::default());
+        h.start_race();
+        let before = h.peers[0].client.stats().mispredictions;
+        h.run(8000.0, snowboarding);
+        let s = h.peers[0].client.stats();
+        assert_eq!(s.mispredictions - before, 0, "stats: {s:?}");
+    }
 }
 
 #[test]

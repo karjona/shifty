@@ -197,6 +197,9 @@ fn stunt_stick(id: u8) -> (f32, f32) {
     }
 }
 
+/// Slower than this (m/s) on the snow, a bot skates whatever the bend.
+const STUCK_SPEED: f32 = 3.0;
+
 /// Snowboard bots ride their own line down the run, round spines and trees,
 /// scrub speed before turns too tight to carve at full speed and tuck where
 /// it is open. Tricksters line up with every table and lip they meet, load a
@@ -279,23 +282,37 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
 
     // Steer round whatever stands in the line ahead (to the side nearer
     // the middle of the run).
-    for o in run.obstacles {
-        let ahead = o.s - s;
-        let clear = o.radius + 2.5;
-        if (0.0..50.0).contains(&ahead) && (o.offset - lane).abs() < clear {
-            lane = if o.offset > 0.0 {
-                o.offset - clear
+    let rocks = world
+        .cover_rocks()
+        .iter()
+        .map(|k| (k.s, k.offset, k.obstacle.radius));
+    for (os, offset, radius) in run
+        .obstacles
+        .iter()
+        .map(|o| (o.s, o.offset, o.radius))
+        .chain(rocks)
+    {
+        let ahead = os - s;
+        let clear = radius + 2.5;
+        if (0.0..50.0).contains(&ahead) && (offset - lane).abs() < clear {
+            lane = if offset > 0.0 {
+                offset - clear
             } else {
-                o.offset + clear
+                offset + clear
             };
         }
     }
     // Among trees, dodging one can lead into the next: then the nearest
-    // lane clear of every trunk close ahead.
+    // lane clear of every trunk (and rock) close ahead.
     let blocked = |l: f32| {
-        run.obstacles.iter().any(|o| {
-            (0.0..TREE_LOOK).contains(&(o.s - s)) && (o.offset - l).abs() < o.radius + TREE_CLEAR
-        })
+        let near = |os: f32, offset: f32, radius: f32| {
+            (0.0..TREE_LOOK).contains(&(os - s)) && (offset - l).abs() < radius + TREE_CLEAR
+        };
+        run.obstacles.iter().any(|o| near(o.s, o.offset, o.radius))
+            || world
+                .cover_rocks()
+                .iter()
+                .any(|k| near(k.s, k.offset, k.obstacle.radius))
     };
     if blocked(lane) {
         let room = half - 1.5;
@@ -312,7 +329,12 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
         }
     }
 
-    let look = 8.0 + speed * 0.5;
+    // Nearly stopped, aim close by: a short way round whatever is in front.
+    let look = if speed < STUCK_SPEED {
+        3.0
+    } else {
+        8.0 + speed * 0.5
+    };
     let (tx, tz) = run.centerline(s + look).at_offset(lane);
     let desired = atan2(tx - r.pos.x, tz - r.pos.z);
     let heading = if speed > 3.0 {
@@ -339,6 +361,9 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
     };
     let lean = if speed > safe + 1.5 {
         -clamp((speed - safe) / 4.0, 0.3, 1.0)
+    } else if speed < STUCK_SPEED {
+        // Nearly stopped (back up after a fall, held up by a rock): skate on.
+        1.0
     } else if speed < safe - 2.0 && bend < 1.0 / 250.0 {
         // Tuck only where it is open: tucked, you carve wider.
         pace
