@@ -695,6 +695,12 @@ export class RaceSession implements Stage {
         // Fresh, not the last rendered frame (frames can be slow without a GPU).
         riders: () => this.readRiders(),
         race: () => this.readRace(),
+        /** The race's weather where the camera is (null outside a race). */
+        weather: () => {
+          const eye = engine.world.camera.position;
+          const at = engine.world.weatherAt;
+          return at ? { ...at(eye.x, eye.z) } : null;
+        },
         standings: () => (this.client ? parseStandings(this.client.standingsJson()) : []),
         names: () => Object.fromEntries(this.names),
         grandPrix: () => Object.fromEntries(this.gpPoints),
