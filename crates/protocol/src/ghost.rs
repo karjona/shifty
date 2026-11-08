@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn a_run_round_trips_within_budget() {
-        for course in [CourseId::Oval, CourseId::Mountain] {
+        for &course in CourseId::ALL {
             let ghost = bot_run(course);
             assert_eq!(ghost.frames.len(), frames_for(ghost.finish_ticks));
             let bytes = ghost.encode();
