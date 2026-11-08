@@ -602,7 +602,11 @@ export class ConditionsLook {
     this.rain = cold ? 0 : s.rain;
     this.snow = Math.max(s.snow, cold ? s.rain : 0, winterFlurry * (1 - s.rain));
     const tint = this.circuit.fogTint ?? [1, 1, 1];
-    fog.color.copy(s.horizon).multiply(rgb(...tint));
+    // The haze away from a low sun is cooler than the horizon under it.
+    fog.color
+      .copy(s.horizon)
+      .lerp(s.upper, s.dusk * 0.3)
+      .multiply(rgb(...tint));
     fog.near = this.circuit.fogNear * s.fogNear;
     fog.far = this.circuit.fogFar * s.fogFar;
     background.copy(fog.color);
