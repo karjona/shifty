@@ -116,3 +116,68 @@ export function circuitName(course: number, sport: CircuitSport): string {
   const names: Record<string, string> = i.courses;
   return names[circuit(course)?.key ?? ""] ?? (sport === "snow" ? i.courses.mountain : i.courses.bay);
 }
+
+/**
+ * The race's weather at a point, as the sim rides it (`updateWeather` in
+ * sim-wasm, read at the camera every frame): how far along the race it is
+ * (`progress`, 0 at the start and 1 at the finish) and how far the weather
+ * has turned (`turn`, 0 = `weather`, 1 = `turns`); the wind (m/s, toward
+ * x and z, and its speed); how big the sea runs against the course's
+ * sea as designed (1; 0 on land); the snow (`snowDepth` in m,
+ * and how much of it, 0-1, is powder, slush and hard snow: the rest is
+ * packed); and how hard it snows and rains (0-1).
+ */
+export interface WeatherHere {
+  progress: number;
+  turn: number;
+  windX: number;
+  windZ: number;
+  wind: number;
+  seaHeight: number;
+  snowDepth: number;
+  powder: number;
+  slush: number;
+  hard: number;
+  snowing: number;
+  raining: number;
+}
+
+/** No race: no wind, the sea as designed, no snow. */
+export const NO_WEATHER: Readonly<WeatherHere> = {
+  progress: 0,
+  turn: 0,
+  windX: 0,
+  windZ: 0,
+  wind: 0,
+  seaHeight: 1,
+  snowDepth: 0,
+  powder: 0,
+  slush: 0,
+  hard: 0,
+  snowing: 0,
+  raining: 0,
+};
+
+const WEATHER_KEYS: readonly (keyof WeatherHere)[] = [
+  "progress",
+  "turn",
+  "windX",
+  "windZ",
+  "wind",
+  "seaHeight",
+  "snowDepth",
+  "powder",
+  "slush",
+  "hard",
+  "snowing",
+  "raining",
+];
+
+/** Reads a weather buffer laid out as `fields` (sim-wasm's `weatherFields()`) into `out`. */
+export function readWeather(fields: readonly string[], values: ArrayLike<number>, out: WeatherHere): WeatherHere {
+  for (const k of WEATHER_KEYS) {
+    const i = fields.indexOf(k);
+    if (i >= 0) out[k] = values[i] ?? 0;
+  }
+  return out;
+}

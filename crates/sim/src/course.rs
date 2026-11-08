@@ -14,8 +14,9 @@
 //! Everything here is static data plus pure functions, so the server and
 //! every client agree on it without sending it over the network.
 
-use crate::math::{PI, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
-use crate::mountain::{MOUNTAIN, Run};
+use crate::conditions::Conditions;
+use crate::math::{PI, Pcg32, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
+use crate::mountain::{MOUNTAIN, Obstacle, Run};
 use crate::surface::{SeaState, Surface, SurfaceKind};
 
 /// The sport a course is raced in. It picks the physics, the rules and how
@@ -410,6 +411,19 @@ impl Course {
         }
     }
 
+    /// The sea this course is raced on in some conditions. Only the sea as
+    /// designed (`SurfaceKind::Swells`) follows them: flat, calm and rough
+    /// seas (dev) stay as they are.
+    pub fn surface_in(&self, kind: SurfaceKind, seed: u32, conditions: Conditions) -> Surface {
+        match self.line {
+            Line::Stadium(_) if kind == SurfaceKind::Swells => {
+                let veer = Pcg32::new(u64::from(seed) ^ 0x0BEE_7000).range(-1.0, 1.0);
+                Surface::turning(kind, seed, &self.sea, conditions.sea(veer))
+            }
+            _ => self.surface(kind, seed),
+        }
+    }
+
     /// Wraps an arc length into `[0, length)` on a loop; unchanged on a run.
     pub fn wrap_s(&self, s: f32) -> f32 {
         if !self.looped() {
@@ -566,20 +580,10 @@ impl Course {
                     // little, and hits count for less.
                     note(slide(pos, vel, rx * sign, rz * sign, depth) * SOFT_WALL);
                 }
-                for o in run.obstacles() {
-                    let dx = pos.x - o.x;
-                    let dz = pos.z - o.z;
-                    let min = o.radius + radius;
-                    let dd = dx * dx + dz * dz;
-                    if dd < min * min && pos.y < o.y + o.height {
-                        let dist = sqrt(dd);
-                        let (nx, nz) = if dist > 1e-4 {
-                            (dx / dist, dz / dist)
-                        } else {
-                            (1.0, 0.0)
-                        };
-                        note(slide(pos, vel, nx, nz, min - dist));
-                    }
+                if let Some(impact) =
+                    collide_obstacles(pos, vel, run.obstacles().iter().copied(), radius, false)
+                {
+                    note(impact);
                 }
             }
         }
@@ -721,6 +725,41 @@ impl LandDef {
 
 /// Moves `pos` by `depth` along `(nx, nz)` and bounces the velocity off
 /// that wall. Returns the speed of the impact (into the wall).
+/// Keeps a body of `radius` out of obstacles standing on a run (it slides
+/// along them, or clears them in the air). Returns the hardest impact.
+/// `rounded` obstacles (rocks through the snow) shed you without holding
+/// you back: pressed against one, you slip round it.
+pub fn collide_obstacles(
+    pos: &mut Vec3,
+    vel: &mut Vec3,
+    obstacles: impl IntoIterator<Item = Obstacle>,
+    radius: f32,
+    rounded: bool,
+) -> Option<f32> {
+    let mut hit: Option<f32> = None;
+    for o in obstacles {
+        let dx = pos.x - o.x;
+        let dz = pos.z - o.z;
+        let min = o.radius + radius;
+        let dd = dx * dx + dz * dz;
+        if dd < min * min && pos.y < o.y + o.height {
+            let dist = sqrt(dd);
+            let (nx, nz) = if dist > 1e-4 {
+                (dx / dist, dz / dist)
+            } else {
+                (1.0, 0.0)
+            };
+            let impact = if rounded {
+                glance(pos, vel, nx, nz, min - dist)
+            } else {
+                slide(pos, vel, nx, nz, min - dist)
+            };
+            hit = Some(hit.map_or(impact, |h: f32| h.max(impact)));
+        }
+    }
+    hit
+}
+
 fn push(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
     pos.x += nx * depth;
     pos.z += nz * depth;
@@ -738,6 +777,20 @@ fn push(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
 
 /// Like [`push`], but friction along the wall grows with the impact, so
 /// sliding along it barely slows you. Returns the speed of the impact.
+/// Moves a body out of something round and takes away the speed into it,
+/// keeping the rest. Returns the speed into it.
+fn glance(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
+    pos.x += nx * depth;
+    pos.z += nz * depth;
+    let vn = vel.x * nx + vel.z * nz;
+    if vn >= 0.0 {
+        return 0.0;
+    }
+    vel.x -= nx * vn;
+    vel.z -= nz * vn;
+    -vn
+}
+
 fn slide(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32) -> f32 {
     pos.x += nx * depth;
     pos.z += nz * depth;

@@ -8,12 +8,17 @@
 //! integer power, which gives pointed crests and long flat troughs, like
 //! real swells, and makes crests launch riders.
 //!
+//! A race's sea can turn: each wave has a height at the start and one at
+//! the end, and the race's clock (see [`SeaClock`]) blends between them, so
+//! a storm builds lap by lap. The waves' lengths and directions stay.
+//!
 //! The client's water shader evaluates the same wave parameters with the
 //! same formula (see [`Surface::wave_params`]), so the water you see is the
 //! water the physics rides.
 
 use crate::DT;
-use crate::math::{Pcg32, TAU, Vec3, cos, sin, sqrt};
+use crate::conditions::turn_blend;
+use crate::math::{Pcg32, TAU, Vec3, clamp, cos, sin, sqrt};
 
 pub const MAX_WAVES: usize = 8;
 /// Floats per wave in [`Surface::wave_params`].
@@ -101,8 +106,10 @@ pub struct Wave {
     pub dir_z: f32,
     /// Wavenumber `2π / wavelength`.
     pub k: f32,
-    /// Half the crest-to-trough height.
+    /// Half the crest-to-trough height at the start of the race...
     pub amplitude: f32,
+    /// ...and at the end (see [`SeaClock`]).
+    pub amplitude_to: f32,
     /// Angular frequency (rad/s), from deep-water dispersion `ω = √(g·k)`.
     pub omega: f32,
     pub phase: f32,
@@ -112,15 +119,20 @@ pub struct Wave {
 }
 
 impl Wave {
-    /// Height and `d height / d argument` for argument `a`.
+    /// Half the crest-to-trough height `turn` of the way from the start to
+    /// the end.
+    pub fn amplitude_at(&self, turn: f32) -> f32 {
+        self.amplitude + (self.amplitude_to - self.amplitude) * turn
+    }
+
+    /// Height and `d height / d argument` for argument `a`, at amplitude `amp`.
     ///
     /// With `u = (1 + sin a) / 2`, the shape is `2A (uᵖ - mean(uᵖ))`: zero
     /// mean, crest-to-trough `2A`, crests sharper as `p` grows.
-    fn shape(&self, a: f32) -> (f32, f32) {
+    fn shape(&self, a: f32, amp: f32) -> (f32, f32) {
         let s = sin(a);
         let c = cos(a);
         let u = (1.0 + s) * 0.5;
-        let amp = self.amplitude;
         match self.sharpness {
             2 => (2.0 * amp * (u * u - 0.375), 2.0 * amp * u * c),
             3 => (2.0 * amp * (u * u * u - 0.3125), 3.0 * amp * u * u * c),
@@ -145,10 +157,47 @@ impl WaterSample {
     }
 }
 
+/// How a sea runs against its recipe: its waves' heights multiplied at the
+/// start and at the end of the race, and how far (radians) the swell veers
+/// from the recipe's direction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SeaTurn {
+    pub from: f32,
+    pub to: f32,
+    pub veer: f32,
+}
+
+impl SeaTurn {
+    /// The sea as its recipe has it, all race long.
+    pub const STEADY: Self = Self {
+        from: 1.0,
+        to: 1.0,
+        veer: 0.0,
+    };
+}
+
+/// Where the race's clock stands for the sea: before the start it is the
+/// start's sea, through the race it turns (from `from`, the tick the race
+/// started, at a par pace of `par` ticks for `laps` laps; see
+/// [`turn_blend`]), and after it it is the end's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SeaClock {
+    #[default]
+    Start,
+    Racing {
+        from: u32,
+        par: u32,
+        laps: u8,
+    },
+    End,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Surface {
     pub kind: SurfaceKind,
     pub seed: u32,
+    /// The race's clock, set by the world (see `World::sync_weather`).
+    pub clock: SeaClock,
     waves: [Wave; MAX_WAVES],
     wave_count: usize,
 }
@@ -159,25 +208,33 @@ impl Surface {
     }
 
     pub fn with_sea(kind: SurfaceKind, seed: u32, sea: &SeaState) -> Self {
+        Self::turning(kind, seed, sea, SeaTurn::STEADY)
+    }
+
+    /// A sea that runs as `turn` says against its recipe (the waves are the
+    /// same; their heights change).
+    pub fn turning(kind: SurfaceKind, seed: u32, sea: &SeaState, turn: SeaTurn) -> Self {
         let mut waves = [Wave::default(); MAX_WAVES];
         let mut wave_count = 0;
         if let Some((steep, height)) = kind.scale() {
             let mut rng = Pcg32::new(u64::from(seed) ^ 0x5157_E115);
             let picked = rng.range(0.0, TAU);
-            let main_dir = sea.direction.unwrap_or(picked);
+            let main_dir = sea.direction.unwrap_or(picked) + turn.veer;
             wave_count = sea.waves.min(MAX_WAVES);
             for (i, w) in waves.iter_mut().take(wave_count).enumerate() {
                 let angle = main_dir + rng.range(-sea.spread, sea.spread);
                 let wavelength = rng.range(sea.wavelength.0, sea.wavelength.1)
                     / (1.0 + i as f32 * sea.shortening);
                 let k = TAU / wavelength;
-                let amplitude = steep * rng.range(sea.steepness.0, sea.steepness.1) / k;
+                let amplitude = (steep * rng.range(sea.steepness.0, sea.steepness.1) / k)
+                    .min(sea.max_amplitude * height);
                 *w = Wave {
                     // Yaw convention: direction (sin, cos).
                     dir_x: sin(angle),
                     dir_z: cos(angle),
                     k,
-                    amplitude: amplitude.min(sea.max_amplitude * height),
+                    amplitude: amplitude * turn.from,
+                    amplitude_to: amplitude * turn.to,
                     omega: sqrt(GRAVITY_WAVES * k),
                     phase: rng.range(0.0, TAU),
                     sharpness: if i < sea.sharp_waves {
@@ -191,9 +248,34 @@ impl Surface {
         Self {
             kind,
             seed,
+            clock: SeaClock::Start,
             waves,
             wave_count,
         }
+    }
+
+    /// How far the sea has turned from its start (0) to its end (1) at a tick.
+    pub fn turn(&self, tick: u32) -> f32 {
+        match self.clock {
+            SeaClock::Start => 0.0,
+            SeaClock::End => 1.0,
+            SeaClock::Racing { from, par, laps } => {
+                let progress = tick.saturating_sub(from) as f32 / par.max(1) as f32;
+                turn_blend(clamp(progress, 0.0, 1.0), true, laps)
+            }
+        }
+    }
+
+    /// Whether the waves change height along the race.
+    pub fn turns(&self) -> bool {
+        self.waves().iter().any(|w| w.amplitude != w.amplitude_to)
+    }
+
+    /// The main direction the swell travels (yaw convention), if there is a swell.
+    pub fn heading(&self) -> Option<f32> {
+        self.waves()
+            .first()
+            .map(|w| crate::math::atan2(w.dir_x, w.dir_z))
     }
 
     pub fn flat() -> Self {
@@ -211,9 +293,10 @@ impl Surface {
     /// Height of the surface at `(x, z)` at the given tick.
     pub fn height(&self, x: f32, z: f32, tick: u32) -> f32 {
         let t = Self::time(tick);
+        let turn = self.turn(tick);
         let mut h = 0.0;
         for w in &self.waves[..self.wave_count] {
-            h += w.shape(Self::argument(w, x, z, t)).0;
+            h += w.shape(Self::argument(w, x, z, t), w.amplitude_at(turn)).0;
         }
         h
     }
@@ -221,9 +304,10 @@ impl Surface {
     /// Height, slope and vertical speed of the surface at `(x, z)`.
     pub fn sample(&self, x: f32, z: f32, tick: u32) -> WaterSample {
         let t = Self::time(tick);
+        let turn = self.turn(tick);
         let mut s = WaterSample::default();
         for w in &self.waves[..self.wave_count] {
-            let (h, dh) = w.shape(Self::argument(w, x, z, t));
+            let (h, dh) = w.shape(Self::argument(w, x, z, t), w.amplitude_at(turn));
             s.height += h;
             s.dhdx += dh * w.k * w.dir_x;
             s.dhdz += dh * w.k * w.dir_z;
@@ -242,7 +326,9 @@ impl Surface {
     }
 
     /// Flat array for shaders: `[dir_x, dir_z, k, amplitude, omega, phase,
-    /// sharpness, 0]` per wave, `MAX_WAVES` entries (unused ones are zero).
+    /// sharpness, amplitude_to]` per wave, `MAX_WAVES` entries (unused ones
+    /// are zero). The amplitude now is `amplitude` blended toward
+    /// `amplitude_to` by [`Surface::turn`].
     pub fn wave_params(&self) -> [f32; MAX_WAVES * WAVE_FIELDS] {
         let mut out = [0.0; MAX_WAVES * WAVE_FIELDS];
         for (i, w) in self.waves[..self.wave_count].iter().enumerate() {
@@ -254,7 +340,7 @@ impl Surface {
                 w.omega,
                 w.phase,
                 f32::from(w.sharpness),
-                0.0,
+                w.amplitude_to,
             ]);
         }
         out
