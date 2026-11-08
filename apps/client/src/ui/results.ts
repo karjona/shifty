@@ -253,7 +253,7 @@ export class Scoreboard {
       : `<div class="board-mine"><b>${m.dnf}</b></div>`;
     const callout = trial.callout ? `<p class="board-callout">${escapeHtml(trial.callout)}</p>` : "";
     this.board.innerHTML =
-      `<section class="board-panel board-race board-trial" style="--n: 0">` +
+      `<section class="board-panel board-race board-trial">` +
       `<header class="board-head"><div><span class="board-label">${messages().trial.title}</span>` +
       `<b class="board-title">${season}</b>${callout}</div>${hero}</header>` +
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span></div>${body}</section>`;

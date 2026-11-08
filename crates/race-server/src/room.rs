@@ -43,6 +43,9 @@ pub const IDLE_TIMEOUT_MS: u64 = 10_000;
 /// The grid waits at most this long for every screen to be ready; screens
 /// still loading then see the race wherever it is.
 pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
+/// A time trial's results stay up this long at most (a forgotten tab):
+/// then its room is over.
+pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
 /// Packet rate limit per connection: burst and sustained packets per second.
 const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
@@ -762,6 +765,12 @@ impl Room {
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
             (Phase::Results, Phase::Grid) => self.results_done(),
+            (_, Phase::Results)
+                if self.trial.is_some()
+                    && self.world.race.elapsed(self.world.tick) >= TRIAL_RESULTS_TICKS =>
+            {
+                self.over = true;
+            }
             _ => {}
         }
 

@@ -337,6 +337,10 @@
   }
 }
 /* A time trial's results: your run among the ghosts you raced, and what it set. */
+.board-trial .board-cols,
+.board-trial .board-row {
+  grid-template-columns: 72px 1fr 152px;
+}
 .board-trial .c-name.ghost {
   font-style: italic;
   font-weight: 500;

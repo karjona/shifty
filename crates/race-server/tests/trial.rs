@@ -5,7 +5,7 @@ use protocol::InputPacket;
 use protocol::ghost::{Ghost, frames_for};
 use protocol::token::{JoinClaims, RaceClaims};
 use race_server::record::RunReport;
-use race_server::room::{Room, RoomConfig};
+use race_server::room::{Room, RoomConfig, TRIAL_RESULTS_TICKS};
 use sim::race::tuning::RESULTS_TICKS;
 use sim::{CourseId, Phase, Season, SurfaceKind, TICK_HZ, Weather};
 
@@ -151,6 +151,17 @@ fn a_run_to_the_finish_is_recorded_and_the_results_wait_for_a_retry() {
             .join(1, &claims("ana", CourseId::Mountain, 2), 0, run.now)
             .is_ok()
     );
+
+    // A forgotten tab: the results stay up only so long.
+    run.until(true, |r| r.world().race.phase == Phase::Results);
+    for _ in 0..TRIAL_RESULTS_TICKS - 60 {
+        run.tick(false);
+    }
+    assert!(!run.room.is_over());
+    for _ in 0..120 {
+        run.tick(false);
+    }
+    assert!(run.room.is_over());
 }
 
 #[test]
