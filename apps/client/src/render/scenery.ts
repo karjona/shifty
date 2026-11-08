@@ -2,12 +2,16 @@
 // green hills and snow-capped peaks behind them, so the bay sits between
 // the sea and the ski slopes. Winter: the sierra's peaks all around the
 // run. Far and cheap: low-poly, flat-shaded; hills and peaks are tinted
-// toward the sky by hand (the scene fog would hide them).
+// toward the sky by hand (the scene fog would hide them), and more on a
+// hazy day. Everything here is out in the weather: in the season's
+// colours, snowed on above the snow line (see cel/look.ts).
 import * as THREE from "three/webgpu";
-import { SKY } from "./cel/sky.ts";
+import { FOLIAGE, LOOK } from "./cel/look.ts";
+import { HAZE } from "./cel/material.ts";
 import { celPeak } from "./cel/terrain.ts";
 import {
   Fn,
+  clamp,
   color,
   float,
   fract,
@@ -46,7 +50,6 @@ function peak(
     snowline,
     haze: haze * 0.75,
     footHaze: Math.max(footHaze, 0.35),
-    sky: SKY.fog,
   });
   m.position.y = -20;
   return m;
@@ -58,7 +61,6 @@ function hillTrees(
   radius: number,
   squash: number,
   seed: number,
-  sky: THREE.Color,
   out: { matrices: THREE.Matrix4[]; colours: THREE.Color[] },
 ): void {
   const count = 46;
@@ -77,7 +79,7 @@ function hillTrees(
         new THREE.Vector3(s, s * 1.1, s),
       ),
     );
-    out.colours.push(new THREE.Color(hash(i + seed) < 0.3 ? 0x3f6e32 : 0x335f2c).lerp(sky, 0.35));
+    out.colours.push(new THREE.Color(hash(i + seed) < 0.3 ? 0x3f6e32 : 0x335f2c));
   }
 }
 
@@ -117,23 +119,35 @@ function fields(): THREE.Node<"vec3"> {
   })();
 }
 
+/** How far scenery at this distance behind the shore fades into the distance: by hand, and more on a hazy day. */
+function hazeBehind(from: number, span: number, most: number): THREE.Node<"float"> {
+  const k = clamp(positionWorld.z.sub(from).div(span), 0, most);
+  return k.add(LOOK.haze.mul(float(1).sub(k)).mul(0.7));
+}
+
+/** A material for scenery out in the weather. */
+function outdoor(
+  kind: number,
+  params: THREE.MeshStandardNodeMaterialParameters,
+  haze?: THREE.Node<"float">,
+): THREE.MeshStandardNodeMaterial {
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1, ...params });
+  m.userData.outdoor = kind;
+  if (haze) HAZE.set(m, haze);
+  return m;
+}
+
 /** Umbrella pines and cypresses in clumps on the coastal plain behind the town. */
-function plainTrees(sky: THREE.Color): THREE.Group {
+function plainTrees(): THREE.Group {
   const g = new THREE.Group();
   const pineGeo = new THREE.IcosahedronGeometry(1, 1);
   pineGeo.scale(1, 0.45, 1);
   const cypressGeo = new THREE.ConeGeometry(0.5, 1, 8, 2);
   cypressGeo.translate(0, 0.5, 0);
-  const pines = new THREE.InstancedMesh(
-    pineGeo,
-    new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1 }),
-    220,
-  );
-  const cypresses = new THREE.InstancedMesh(
-    cypressGeo,
-    new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1 }),
-    160,
-  );
+  const haze = hazeBehind(170, 400, 0.45);
+  const evergreen = outdoor(FOLIAGE.evergreen, { color: 0xffffff }, haze);
+  const pines = new THREE.InstancedMesh(pineGeo, evergreen, 220);
+  const cypresses = new THREE.InstancedMesh(cypressGeo, evergreen, 160);
   const trunks = new THREE.InstancedMesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardNodeMaterial({ color: 0x6b4a30, roughness: 1 }),
@@ -152,13 +166,12 @@ function plainTrees(sky: THREE.Color): THREE.Group {
     for (let i = 0; i < n; i++) {
       const x = cx + (hash(k * 31 + i) - 0.5) * 40;
       const z = cz + (hash(k * 17 + i * 3) - 0.5) * 30;
-      const haze = Math.min(0.45, Math.max(0, (z - 170) / 400));
       if (hash(k * 5 + i) < 0.55 && np < 220) {
         const s = 5 + hash(k + i * 11) * 4;
         const h = 6 + hash(k * 2 + i) * 4;
         m.compose(new THREE.Vector3(x, 0.8 + h, z), q, new THREE.Vector3(s, s, s));
         pines.setMatrixAt(np, m);
-        pines.setColorAt(np, c.setHex(0x3f7034).lerp(sky, haze));
+        pines.setColorAt(np, c.setHex(0x3f7034));
         m.compose(new THREE.Vector3(x, 0.8 + h / 2, z), q, new THREE.Vector3(0.5, h, 0.5));
         trunks.setMatrixAt(np, m);
         trunks.setColorAt(np, c.setHex(0xffffff));
@@ -167,7 +180,7 @@ function plainTrees(sky: THREE.Color): THREE.Group {
         const h = 9 + hash(k * 9 + i) * 6;
         m.compose(new THREE.Vector3(x, 0.8, z), q, new THREE.Vector3(2.2, h, 2.2));
         cypresses.setMatrixAt(nc, m);
-        cypresses.setColorAt(nc, c.setHex(0x2c5530).lerp(sky, haze));
+        cypresses.setColorAt(nc, c.setHex(0x2c5530));
         nc++;
       }
     }
@@ -182,26 +195,21 @@ function plainTrees(sky: THREE.Color): THREE.Group {
   return g;
 }
 
-export function buildScenery(sky: THREE.Color): THREE.Group {
+export function buildScenery(): THREE.Group {
   const g = new THREE.Group();
 
   // North shore: the coastal plain the town stands on (its beach runs off
   // past the turns), then low hills. The hills are hazed by hand, not by
   // the scene fog (fogged, they would turn sky-coloured and hide the peaks).
-  const hazed = (hex: number, haze: number) => new THREE.Color(hex).lerp(sky, haze);
-  const sand = new THREE.MeshStandardNodeMaterial({ color: 0xe8d6a8, roughness: 1, flatShading: true });
+  const sand = outdoor(FOLIAGE.grass, { color: 0xe8d6a8, flatShading: true });
   sand.userData.colorNode = fields();
   const plain = new THREE.Mesh(new THREE.BoxGeometry(2400, 4, 240), sand);
   plain.position.set(0, -1.2, 240);
   plain.receiveShadow = true;
   g.add(plain);
-  g.add(plainTrees(sky));
-  const green = new THREE.MeshStandardNodeMaterial({
-    color: hazed(0x5f8a46, 0.4),
-    roughness: 1,
-    flatShading: true,
-    fog: false,
-  });
+  g.add(plainTrees());
+  const hills = float(0.4).add(LOOK.haze.mul(0.45));
+  const green = outdoor(FOLIAGE.grass, { color: 0x5f8a46, flatShading: true, fog: false }, hills);
   const trees = { matrices: [] as THREE.Matrix4[], colours: [] as THREE.Color[] };
   for (let i = 0; i < 18; i++) {
     const r = 70 + hash(i) * 90;
@@ -209,11 +217,11 @@ export function buildScenery(sky: THREE.Color): THREE.Group {
     hill.scale.y = 0.12 + hash(i + 50) * 0.12;
     hill.position.set(-1150 + i * 135 + hash(i + 9) * 60, 0, 380 + hash(i + 3) * 90);
     g.add(hill);
-    hillTrees(hill.position, r, hill.scale.y, i, sky, trees);
+    hillTrees(hill.position, r, hill.scale.y, i, trees);
   }
   const crowns = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 1),
-    new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1, fog: false }),
+    outdoor(FOLIAGE.leaf, { color: 0xffffff, fog: false }, float(0.35).add(LOOK.haze.mul(0.5))),
     trees.matrices.length,
   );
   trees.matrices.forEach((m, i) => {

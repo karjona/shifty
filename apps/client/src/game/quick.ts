@@ -38,7 +38,7 @@ function indexOf(names: readonly string[], v: string | null): number | null {
  * numbers) and `time` (10-minute steps, HH:MM, or dawn...dusk) when given,
  * the rest drawn with `seed` (0 by default).
  */
-function quickPlan(params: URLSearchParams): Map<string, string> {
+export function quickPlan(params: URLSearchParams): Map<string, string> {
   const plan = new Map<string, string>();
   const event = params.get("event");
   if (event === "gp") plan.set("tilt", "1");

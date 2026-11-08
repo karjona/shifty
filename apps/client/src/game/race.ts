@@ -449,7 +449,6 @@ export class RaceSession implements Stage {
         },
         conditions,
       );
-      engine.world.setSunOffset(-30, 35, 60);
       this.minimap = new RunMap(this.mapRoot, course.run);
     } else {
       this.env = new Bay({
@@ -459,7 +458,6 @@ export class RaceSession implements Stage {
         course: course.bay,
         conditions,
       });
-      engine.world.setSunOffset(30, 60, 15);
       this.minimap = new Minimap(this.mapRoot, course.bay);
     }
     engine.world.setEnvironment(this.env);

@@ -15,6 +15,7 @@
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
 import { landDistance } from "./land.ts";
+import { LOOK } from "./cel/look.ts";
 import { celWaterMaterial } from "./cel/water.ts";
 import { MAX_WAVES, WaveUniforms, waterGrid } from "./waves.ts";
 import {
@@ -247,9 +248,13 @@ export class SeaWater {
     const displaced = Fn(() => {
       const p = positionLocal.add(vec3(origin.x, 0, origin.y));
       const swell = swells.sum(p, t);
+      // The wind roughens the chop.
       const ripple = chop.sum(p, t);
-      normalLocal.assign(vec3(swell.dx.add(ripple.dx).negate(), 1, swell.dz.add(ripple.dz).negate()).normalize());
-      return positionLocal.add(vec3(0, swell.h.add(ripple.h), 0));
+      const rough = LOOK.chop;
+      normalLocal.assign(
+        vec3(swell.dx.add(ripple.dx.mul(rough)).negate(), 1, swell.dz.add(ripple.dz.mul(rough)).negate()).normalize(),
+      );
+      return positionLocal.add(vec3(0, swell.h.add(ripple.h.mul(rough)), 0));
     });
 
     // The slope (x, z) of the fine ripples at this pixel, faded by distance.
@@ -268,7 +273,7 @@ export class SeaWater {
       return vec2(dx, dz);
     });
     const fine = ripples();
-    const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.y.negate())).normalize();
+    const surfaceNormal = normalWorldGeometry.add(vec3(fine.x.negate(), 0, fine.y.negate()).mul(LOOK.chop)).normalize();
 
     // Distance from this pixel to the nearest shore (metres), from the baked field.
     const shoreAt = Fn(() => {

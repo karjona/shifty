@@ -1,13 +1,14 @@
 // The cel look's sky: a painted gradient from a deep zenith to a pale
-// horizon, warmer toward the sun, and towering cumulus made of cel-shaded
-// puffs (flat bottoms, lobes that each catch the light), far out over the
-// sea and behind the sierra.
+// horizon, warmer toward the sun (and along the horizon at dawn and dusk),
+// cirrus wisps the wind streaks, a cloud deck that closes in with the
+// weather, and towering cumulus made of cel-shaded puffs (flat bottoms,
+// lobes that each catch the light), far out over the sea and behind the
+// sierra. Its colours are the conditions' (see look.ts).
 import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   Fn,
   cameraProjectionMatrix,
-  color,
   dot,
   float,
   fwidth,
@@ -23,18 +24,20 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import { LOOK, cut0 } from "./look.ts";
 import { CelMaterial, SUN_DIR, inkId, inklessBasic } from "./material.ts";
 import { noise4 } from "./noise.ts";
 
 /** Where the sky sits in the depth range (1 = the far plane): behind all else, but never clipped by it. */
 const SKY_DEPTH = 0.999999;
 
+/** The sky's colours (the conditions' uniforms), and the clear summer horizon as a THREE.Color. */
 export const SKY = {
-  zenith: color(0x1f6dd2),
-  upper: color(0x4b9ff0),
-  horizon: color(0xc4e9f8),
-  glow: color(0xfff1d2),
-  /** The horizon colour as a THREE.Color, for fog. */
+  zenith: LOOK.zenith,
+  upper: LOOK.upper,
+  horizon: LOOK.horizon,
+  glow: LOOK.glow,
+  /** The clear summer horizon, for what starts out tinted toward it. */
   fog: new THREE.Color(0xc4e9f8),
 };
 
@@ -64,21 +67,47 @@ export function skyDome(): THREE.Mesh {
   m.colorNode = Fn(() => {
     const d = normalize(positionLocal);
     const y = max(d.y, float(0));
-    let c: THREE.Node<"vec3"> = mix(SKY.horizon, SKY.upper, smoothstep(0.0, 0.28, pow(y, 0.8)));
-    c = mix(c, SKY.zenith, smoothstep(0.25, 0.9, y));
+    let c: THREE.Node<"vec3"> = mix(LOOK.horizon, LOOK.upper, smoothstep(0.0, 0.28, pow(y, 0.8)));
+    c = mix(c, LOOK.zenith, smoothstep(0.25, 0.9, y));
+    // Low sun: its warmth spreads along the horizon, most on its side of the sky.
+    const flat = d.xz.div(max(d.xz.length(), float(1e-3)));
+    const sunFlat = SUN_DIR.xz.div(max(SUN_DIR.xz.length(), float(1e-3)));
+    const side = dot(flat, sunFlat).mul(0.5).add(0.5);
+    const low = float(1).sub(smoothstep(0.0, 0.32, y));
+    c = mix(c, LOOK.glow, pow(side, 3).mul(low).mul(LOOK.dusk).mul(0.75));
     const sun = max(dot(d, SUN_DIR), float(0));
-    c = mix(c, SKY.glow, pow(sun, 24).mul(0.55).add(pow(sun, 4).mul(0.12)));
-    // Wisps of cirrus high up: thin streaks along one wind, broken up, hard-edged.
+    c = mix(c, LOOK.glow, pow(sun, 24).mul(0.55).add(pow(sun, 4).mul(0.12)));
+    // Where a ray through this pixel meets a flat ceiling of cloud.
     const plane = d.xz.div(max(d.y, float(0.05)));
-    const n = mx_noise_float(vec3(plane.x.mul(0.22), plane.y.mul(3.2), 0.5));
+    const drift = LOOK.wind.mul(LOOK.time.mul(0.0015));
+    // Wisps of cirrus high up: thin streaks along one wind, broken up, hard-edged; the wind draws them out.
+    const n = mx_noise_float(vec3(plane.x.add(drift.x).mul(0.22), plane.y.add(drift.y).mul(3.2), 0.5));
     const band = n.sub(0.25).abs();
     const w = max(fwidth(band), float(1e-4));
-    const patch = smoothstep(0.1, 0.35, noise4(vec2(plane.x.mul(0.5), plane.y.mul(0.7))).x);
-    const wisp = smoothstep(float(0.05).add(w), float(0.05).sub(w), band)
+    const thick = float(0.05).add(LOOK.streaks.mul(0.05));
+    const patch = smoothstep(
+      float(0.1).sub(LOOK.streaks.mul(0.35)),
+      0.35,
+      noise4(vec2(plane.x.mul(0.5), plane.y.mul(0.7)).add(drift)).x,
+    );
+    const wisp = smoothstep(thick.add(w), thick.sub(w), band)
       .mul(patch)
       .mul(smoothstep(0.16, 0.26, y))
-      .mul(smoothstep(0.55, 0.35, y));
+      .mul(smoothstep(0.55, 0.35, y))
+      .mul(LOOK.cirrus);
     c = mix(c, mix(c, vec3(1), 0.3), wisp);
+    // The cloud deck: masses that close in with the weather, lighter at their edges, fading into the horizon.
+    const q = plane.mul(0.32).add(drift.mul(4));
+    const mass = noise4(q.mul(0.55))
+      .x.mul(0.6)
+      .add(noise4(q.mul(1.6)).y.mul(0.28))
+      .add(noise4(q.mul(4.3)).z.mul(0.1));
+    const edge = mass.sub(mix(float(0.62), float(-0.55), LOOK.overcast));
+    const cloud = cut0(edge)
+      .mul(smoothstep(0.015, 0.14, y))
+      .mul(LOOK.overcast.greaterThan(0.001).select(1, 0));
+    const deck = mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14)));
+    c = mix(c, deck, cloud);
     return c;
   })();
   const dome = new THREE.Mesh(geo, m);
@@ -124,38 +153,63 @@ function cumulus(size: number, seed: number): THREE.BufferGeometry {
   return geo;
 }
 
-/** Clouds in a ring round the bay, far out (they never fog). */
-export function clouds(centre: THREE.Vector2): THREE.Group {
-  const g = new THREE.Group();
-  const r = rng(77);
-  const shade = new THREE.Color(0.66, 0.72, 0.93);
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2 + (r() - 0.5) * 0.3;
-    // More, bigger clouds over the sierra (north, +z) and out to sea.
-    const north = Math.max(0, Math.sin(a));
-    const dist = 2500 + r() * 800;
-    const size = 260 + r() * 300 + north * 260;
-    const mesh = new THREE.Mesh(
-      cumulus(size, 100 + i * 13),
-      new CelMaterial({
-        color: 0xffffff,
-        shade,
-        lit: new THREE.Color(1.02, 1.0, 0.97),
-        threshold: 0.1,
-        fog: false,
-        silhouette: 1,
-        crease: 0,
-        darkness: 0.45,
-        id: inkId(`cloud${i}`),
-      }),
-    );
-    const x = centre.x + Math.cos(a) * dist;
-    const z = centre.y + Math.sin(a) * dist;
-    mesh.position.set(x, 60 + r() * 220 + north * 100, z);
-    // Broadside to the bay.
-    mesh.rotation.y = Math.atan2(centre.x - x, centre.y - z);
-    mesh.scale.y = 0.85 + r() * 0.35;
-    g.add(mesh);
+/** How many cumulus a sky can hold. */
+const CUMULUS = 24;
+
+/**
+ * Cumulus in a ring round a circuit, far out (they never fog): as many of
+ * them as the weather's cover asks for, as tall as it lets them stand, in
+ * its colours.
+ */
+export class Cumulus {
+  readonly group = new THREE.Group();
+  private clouds: { mesh: THREE.Mesh; rank: number; scale: number; height: number }[] = [];
+
+  /** `centre`: the ring's middle (x, z) and the height its clouds stand on (y). */
+  constructor(centre: THREE.Vector3) {
+    const r = rng(77);
+    for (let i = 0; i < CUMULUS; i++) {
+      const a = (i / CUMULUS) * Math.PI * 2 + (r() - 0.5) * 0.3;
+      // More, bigger clouds over the sierra (north, +z) and out to sea.
+      const north = Math.max(0, Math.sin(a));
+      const dist = 2500 + r() * 800;
+      const size = 260 + r() * 300 + north * 260;
+      const mesh = new THREE.Mesh(
+        cumulus(size, 100 + i * 13),
+        new CelMaterial({
+          colorNode: LOOK.cloud.rgb,
+          lit: new THREE.Color(1.02, 1.0, 0.97),
+          threshold: 0.1,
+          fog: false,
+          silhouette: 1,
+          crease: 0,
+          darkness: 0.45,
+          id: inkId(`cloud${i}`),
+        }),
+      );
+      const material = mesh.material;
+      if (material instanceof CelMaterial) material.shadeNode = LOOK.cloudShade.rgb;
+      const x = centre.x + Math.cos(a) * dist;
+      const z = centre.z + Math.sin(a) * dist;
+      mesh.position.set(x, centre.y + 60 + r() * 220 + north * 100, z);
+      // Broadside to the circuit.
+      mesh.rotation.y = Math.atan2(centre.x - x, centre.z - z);
+      const height = 0.85 + r() * 0.35;
+      mesh.scale.y = height;
+      // The first sixteen fill a fair day's sky; the rest come with the clouds.
+      const rank = i < 16 ? (i / 16) * 0.5 : 0.5 + ((i - 16) / (CUMULUS - 16)) * 0.5;
+      this.clouds.push({ mesh, rank, scale: 1, height });
+      this.group.add(mesh);
+    }
   }
-  return g;
+
+  /** Shows `cover` of the clouds (0-1; a fair day is 0.5), `tower` as tall as built. */
+  update(cover: number, tower: number): void {
+    for (const c of this.clouds) {
+      const grow = Math.max(0, Math.min(1, (cover - c.rank) / 0.06));
+      c.mesh.visible = grow > 0.01;
+      const s = 0.4 + 0.6 * grow;
+      c.mesh.scale.set(s, s * c.height * tower, s);
+    }
+  }
 }

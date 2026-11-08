@@ -19,7 +19,9 @@ import {
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
-import { SKY, clouds, skyDome } from "./cel/sky.ts";
+import { Cumulus, skyDome } from "./cel/sky.ts";
+import { Precipitation } from "./cel/precip.ts";
+import { type CircuitLook, ConditionsLook } from "./look.ts";
 import { Gulls } from "./cel/gulls.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
@@ -57,6 +59,18 @@ const CAMERA: CameraTuning = {
   tilt: 0,
 };
 
+/**
+ * The bay under the sky: noon's sun stands over the town's side of the bay
+ * (+x, +z), and snow lies down to the shore in winter.
+ */
+const BAY_LOOK: CircuitLook = {
+  south: [30, 15],
+  swing: 1,
+  fogNear: 140,
+  fogFar: 700,
+  snowLine: { summer: 290, fall: 175, winter: -4, spring: 200 },
+};
+
 export interface BayOptions {
   /** "sea" = swells + GPU chop, ripples, foam and reflections (see water.ts); "basic" = swells only, cheap. */
   water: "basic" | "sea";
@@ -67,6 +81,8 @@ export interface BayOptions {
   course: CourseData;
   /** The race's season, weather and time of day (a clear summer noon if left out). */
   conditions?: Conditions;
+  /** How the circuit sits under the sky (the bay's if left out). */
+  look?: CircuitLook;
 }
 
 export class Bay implements Environment {
@@ -77,7 +93,8 @@ export class Bay implements Environment {
   /** The season, weather and time of day it is drawn in. */
   readonly conditions: Conditions;
 
-  private sky = new THREE.Color(0xa8d8f0);
+  /** What the conditions look like (see look.ts). */
+  readonly look: ConditionsLook;
   private time = uniform(0);
   private swells = new WaveUniforms(MAX_WAVES);
   private waveParams = new Float32Array(MAX_WAVES * WAVE_FIELDS);
@@ -90,14 +107,20 @@ export class Bay implements Environment {
   private wakeSources = new Map<number, WakeSource>();
   private spray: Spray;
   private gulls: Gulls | null = null;
+  private cumulus = new Cumulus(new THREE.Vector3(0, 0, 300));
+  private precipitation = new Precipitation();
+  private sun: THREE.DirectionalLight | null = null;
+  private hemi: THREE.HemisphereLight | null = null;
+  private background = new THREE.Color();
 
   constructor(opts: BayOptions) {
     this.conditions = opts.conditions ?? homeConditions("jetski");
+    this.look = new ConditionsLook(this.conditions, opts.look ?? BAY_LOOK);
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
-    this.group.add(buildScenery(this.sky));
+    this.group.add(buildScenery());
     if (opts.water === "sea") {
       this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS);
       this.group.add(this.sea.mesh);
@@ -116,23 +139,27 @@ export class Bay implements Environment {
     if (this.sea) this.sea.mesh.userData.noMerge = true;
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
-    this.group.add(skyDome(), clouds(new THREE.Vector2(0, 300)));
+    this.group.add(skyDome(), this.cumulus.group, this.precipitation.group);
     this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
     this.group.add(this.gulls.group);
   }
 
   private fog: THREE.Fog | null = null;
 
+  get sunOffset(): THREE.Vector3 {
+    return this.look.sun;
+  }
+
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
-    scene.background = SKY.fog;
     // (One fog for the bay: a new one would rebuild every shader that draws in it.)
-    this.fog ??= new THREE.Fog(SKY.fog, 140, 700);
+    this.fog ??= new THREE.Fog(0xc4e9f8, 140, 700);
     scene.fog = this.fog;
-    hemi.color.set(0xfff4e0);
-    hemi.groundColor.set(0x2a6f8f);
+    scene.background = this.background;
     hemi.intensity = 1.2;
-    sun.color.set(0xfff1d6);
     sun.intensity = 2.6;
+    this.sun = sun;
+    this.hemi = hemi;
+    this.look.apply(0, 0, 0, this.fog, this.background, sun, hemi);
   }
 
   ground(x: number, z: number, t: number): number {
@@ -176,6 +203,9 @@ export class Bay implements Environment {
 
   update(f: Frame): void {
     this.time.value = f.t;
+    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, this.fog, this.background, this.sun, this.hemi);
+    this.cumulus.update(this.look.cover, this.look.tower);
+    this.precipitation.update(this.look.rain, this.look.snow);
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);

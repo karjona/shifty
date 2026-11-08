@@ -1,9 +1,12 @@
 // Land along the course, drawn from the sim's capsules (`courseJson`), so
 // the shore you see is the shore you hit: the town quay with its waterfront,
 // the island with its pines and chapel, and rocks. Low-poly and
-// flat-shaded; anything repeated is instanced.
+// flat-shaded; anything repeated is instanced. All of it is out in the
+// weather (see cel/look.ts): snow on roofs and rocks in winter, the
+// island's grass and trees in the season's colours.
 import * as THREE from "three/webgpu";
 import type { LandData } from "./course.ts";
+import { FOLIAGE } from "./cel/look.ts";
 import { Fn, float, fract, fwidth, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 
 /** Distance from (x, z) to a piece of land's shore (negative inside it). */
@@ -26,8 +29,16 @@ function rng(seed: number): () => number {
   };
 }
 
-const mat = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
-  new THREE.MeshStandardNodeMaterial({ color, roughness: 0.9, flatShading: true, ...opts });
+/** A flat-shaded material out in the weather, as foliage of `kind` (see `FOLIAGE`). */
+const mat = (
+  color: number,
+  opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {},
+  kind: number = FOLIAGE.none,
+) => {
+  const m = new THREE.MeshStandardNodeMaterial({ color, roughness: 0.9, flatShading: true, ...opts });
+  m.userData.outdoor = kind;
+  return m;
+};
 
 const STONE = 0xb4a58c;
 const PAVING = 0xd9cbb0;
@@ -232,7 +243,7 @@ function town(l: LandData, seed: number): THREE.Group {
     roofs.build(unitRoof(), tiledRoof()),
     windows.build(unitBox(), mat(0xffffff, { roughness: 0.3 }), false),
     trunks.build(unitBox(), plain),
-    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide })),
+    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide }, FOLIAGE.evergreen)),
     awnings.build(unitBox(), plain),
   );
   return g;
@@ -293,7 +304,7 @@ function island(l: LandData, seed: number): THREE.Group {
   rock.position.y = -1;
   const cap = new THREE.Mesh(
     roughen(new THREE.CylinderGeometry(l.radius * 0.62, l.radius * 0.74, 1.2, 14, 1), 0.08, seed + 1),
-    mat(GRASS),
+    mat(GRASS, {}, FOLIAGE.grass),
   );
   cap.position.y = 4.4;
   rock.castShadow = cap.castShadow = true;
@@ -311,7 +322,7 @@ function island(l: LandData, seed: number): THREE.Group {
     trunks.add(x, 4.8, z, 0.4, 1.4, 0.4, TRUNK);
     pines.add(x, 5.8, z, 2.6 + r(), h, 2.6 + r(), PINE);
   }
-  const plain = mat(0xffffff);
+  const plain = mat(0xffffff, {}, FOLIAGE.evergreen);
   g.add(pines.build(unitCone(), plain), trunks.build(unitBox(), plain));
 
   // A small chapel facing the course.

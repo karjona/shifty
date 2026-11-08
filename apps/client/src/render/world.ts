@@ -6,6 +6,7 @@ import * as THREE from "three/webgpu";
 import type { Appearance } from "@shifty/rider";
 import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
+import { resetLook } from "./cel/look.ts";
 import { CelPost } from "./cel/post.ts";
 import { PIXEL_AT_1M } from "./cel/rider.ts";
 
@@ -109,6 +110,8 @@ export interface Environment {
   readonly topSpeed: number;
   /** Something in it reflects the world (the sea). */
   readonly reflects?: boolean;
+  /** Where its sun shines from, relative to what it lights (see `World.setSunOffset`), if it has its own. */
+  readonly sunOffset?: THREE.Vector3;
   /** Colours the sky, the fog and the lights. */
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
@@ -322,7 +325,9 @@ export class World {
     if (this.env) this.scene.remove(this.env.group);
     this.env = env;
     this.scene.add(env.group);
+    resetLook();
     env.light(this.scene, this.sun, this.hemi);
+    if (env.sunOffset) this.sunOffset.copy(env.sunOffset);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();
     for (const r of this.models.values()) {
@@ -337,6 +342,7 @@ export class World {
   clearEnvironment(): void {
     if (this.env) this.scene.remove(this.env.group);
     this.env = null;
+    resetLook();
     for (const r of this.models.values()) {
       this.scene.remove(r.mesh);
       r.dispose?.();
@@ -351,10 +357,10 @@ export class World {
 
   /**
    * Draws the surroundings from a set viewpoint, without the chase camera
-   * (menus, the season change). `riders` are drawn by their own models,
-   * placed by the caller.
+   * (menus, the season change), its weather turned by `turn` (see `Frame`).
+   * Riders are drawn by their own models, placed by the caller.
    */
-  renderFrom(eye: THREE.Vector3, look: THREE.Vector3, t: number, dt: number, fov = 50): void {
+  renderFrom(eye: THREE.Vector3, look: THREE.Vector3, t: number, dt: number, fov = 50, turn = 0): void {
     this.camera.position.copy(eye);
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(look);
@@ -373,8 +379,8 @@ export class World {
       dt,
       renderer: this.renderer,
       nextBuoy: null,
-      progress: 0,
-      turn: 0,
+      progress: turn,
+      turn,
     });
     this.draw();
     this.camReady = false;
