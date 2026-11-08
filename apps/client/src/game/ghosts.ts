@@ -21,8 +21,8 @@ const NEAR = 2.5;
 const FAR = 7;
 /** Through its finish a ghost fades out over this long (s). */
 const FINISH_FADE = 1;
-/** Tints: your best, the record, anyone else's. */
-const TINTS = { best: 0x6fe6ff, record: 0xffc23d, other: 0xc9a2ff } as const;
+/** Tints that stand out on blue water and white snow alike: your best, the record, anyone else's. */
+const TINTS = { best: 0xff4fd8, record: 0xffb21f, other: 0x8cff4a } as const;
 
 /** A recorded run, unpacked. */
 export interface GhostRun {
@@ -262,6 +262,17 @@ export class Ghosts {
     out.steer = lerp(11);
     out.wobble = lerp(12);
     return out;
+  }
+
+  /** The ghosts on the course: where, and how much of each shows (tests). */
+  shownState(): { label: string; ready: boolean; shown: number; x: number; z: number }[] {
+    return this.shown.map((g) => ({
+      label: g.run.pick.label,
+      ready: g.ready,
+      shown: g.look.shown.value,
+      x: g.view.x,
+      z: g.view.z,
+    }));
   }
 
   dispose(): void {

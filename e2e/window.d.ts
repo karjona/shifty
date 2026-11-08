@@ -34,7 +34,9 @@ declare global {
       /** Rides with the bot's inputs (or not). */
       autopilot(on: boolean): void;
       /** A time trial's ghosts, once loaded. */
-      ghosts(): { label: string; finishTicks: number }[];
+      ghosts(): { label: string; finishTicks: number; splits: number[] }[];
+      /** The ghosts on the course: where, and how much of each shows. */
+      ghostsShown(): { label: string; ready: boolean; shown: number; x: number; z: number }[];
     };
   }
 }

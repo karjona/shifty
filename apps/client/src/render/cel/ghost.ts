@@ -8,12 +8,12 @@ import { abs, dot, float, mix, normalView, output, positionViewDirection, pow, u
 import { UNREFLECTED, inkNode } from "./material.ts";
 
 /** How much of a ghost shows at most (0-1), and how far its paint is washed toward the tint. */
-const OPACITY = 0.5;
-const WASH = 0.45;
+const OPACITY = 0.62;
+const WASH = 0.55;
 /** The outline's share of the ghost's opacity. */
-const INK = 0.5;
+const INK = 0.6;
 /** Strength of the rim of tint on the silhouette. */
-const RIM = 0.7;
+const RIM = 0.9;
 
 export class GhostLook {
   /** 0-1: how much of the ghost shows (fades as the camera comes close, and as it finishes). */

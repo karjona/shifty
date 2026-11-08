@@ -778,7 +778,9 @@ export class RaceSession implements Stage {
         autopilot: (on: boolean) => {
           this.autopilot = on;
         },
-        ghosts: () => this.ghosts?.list.map((g) => ({ label: g.pick.label, finishTicks: g.finishTicks })) ?? [],
+        ghosts: () =>
+          this.ghosts?.list.map((g) => ({ label: g.pick.label, finishTicks: g.finishTicks, splits: g.splits })) ?? [],
+        ghostsShown: () => this.ghosts?.shownState() ?? [],
       },
     });
   }
