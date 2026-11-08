@@ -88,7 +88,7 @@ const CLEAR: {
     upper: 0x8a88b8,
     horizon: 0xdcb4b0,
     glow: 0xffa060,
-    lit: rgb(1.08, 0.8, 0.62),
+    lit: rgb(1.06, 0.84, 0.68),
     shade: rgb(0.76, 0.74, 0.96),
     dusk: 1,
   },
@@ -98,7 +98,7 @@ const CLEAR: {
     upper: 0x7e9fd4,
     horizon: 0xe2d4cc,
     glow: 0xffc488,
-    lit: rgb(1.06, 0.9, 0.76),
+    lit: rgb(1.04, 0.92, 0.8),
     shade: rgb(0.86, 0.86, 1.0),
     dusk: 0.55,
   },
@@ -138,7 +138,7 @@ const SEA: Record<Season, [number, number, number, number]> = {
 /** The light's colour by season (on top of the time of day's). */
 const SEASON_LIGHT: Record<Season, RGB> = {
   summer: rgb(1, 1, 1),
-  fall: rgb(1.03, 0.98, 0.9),
+  fall: rgb(1.02, 0.98, 0.93),
   winter: rgb(0.97, 0.99, 1.04),
   spring: rgb(1, 1, 0.98),
 };

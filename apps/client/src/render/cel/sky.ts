@@ -214,6 +214,7 @@ export class Cumulus {
     const s = grow.greaterThan(0.01).select(grow.mul(0.6).add(0.4), 0);
     material.positionNode = cloud.xyz.add(positionLocal.mul(vec3(s, s.mul(this.tower), s)));
     this.mesh = new THREE.Mesh(geo, material);
+    this.mesh.name = "cumulus";
     // (Placed in the shader: its bounds are the ring's.)
     this.mesh.frustumCulled = false;
   }

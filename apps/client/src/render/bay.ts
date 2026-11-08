@@ -147,6 +147,7 @@ export class Bay implements Environment {
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
     this.gulls = new Gulls(new THREE.Vector3(40, 0, 40));
+    this.gulls.group.userData.weather = true;
     this.group.add(this.gulls.group);
   }
 
@@ -232,6 +233,8 @@ export class Bay implements Environment {
     if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
+    // The gulls shelter from the rain.
+    if (this.gulls) this.gulls.group.visible = this.look.rain < 0.3 && this.look.snow < 0.5;
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
