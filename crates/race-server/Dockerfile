@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo about generate --locked --fail -m crates/race-server/Cargo.toml \
       --target "$(rustc -vV | sed -n 's/^host: //p')" -o /THIRD-PARTY-NOTICES.md about.hbs
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:08476c244888bfb425bae1ae4dd7c17f093e972aab8426883d97f3c6f280f7c1
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab
 LABEL org.opencontainers.image.source="https://github.com/karjona/shifty" \
       org.opencontainers.image.description="23.4° Shifty race server: WebTransport rooms on UDP 4433" \
       org.opencontainers.image.licenses="Apache-2.0"
