@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show # installs the toolchain pinned in rust-toolchain.toml
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: cargo-deny@0.20.2
       - run: cargo fmt --all --check
@@ -58,10 +58,10 @@ jobs:
       - name: wasm-bindgen CLI version from Cargo.lock
         id: wasm-bindgen
         run: echo "version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')" >> "$GITHUB_OUTPUT"
-      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
+      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }},cargo-about@0.9.3
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
