@@ -11,7 +11,7 @@ import { Bay } from "../render/bay.ts";
 import { CLUB, buildClub, clubReady } from "../render/club.ts";
 import { SUN_DIR, SUN_STRENGTH, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
 import { CelPost } from "../render/cel/post.ts";
-import { PIXEL_AT_1M } from "../render/cel/rider.ts";
+import { PIXEL_AT_1M, SHADOW_LIFT } from "../render/cel/rider.ts";
 import { devParams } from "../dev-params.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { quietly } from "../loading.ts";
@@ -364,6 +364,7 @@ class SeasonField implements Stage {
     SUN_STRENGTH.value = (k.color.r + k.color.g + k.color.b) * k.intensity;
     SUN_DIR.value.copy(KEY_OFFSET).normalize();
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    SHADOW_LIFT.value = 0;
     this.post.render();
   }
 

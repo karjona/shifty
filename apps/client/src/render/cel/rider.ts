@@ -24,6 +24,7 @@ import {
   normalLocal,
   positionGeometry,
   positionLocal,
+  positionWorld,
   pow,
   smoothstep,
   texture,
@@ -38,6 +39,14 @@ export type TintKind = "kit" | "look" | "hair";
 
 /** World size of one pixel of the drawing buffer at one metre away (set per frame). */
 export const PIXEL_AT_1M = uniform(0.001);
+/**
+ * How far toward the sun a rider looks up the shadow map from (m): past
+ * their own body, so a coarse shadow map (a race's covers 80 m) never
+ * shades a rider with blocks of their own limbs, only with what stands
+ * between them and the sun. 0 where the map is fine enough for a rider's
+ * own shadows (the menus).
+ */
+export const SHADOW_LIFT = uniform(0);
 /** How much darker than its surroundings a brush stroke must be to draw as an inner line. */
 const INNER_LINES = 0.1;
 /** Outline width of the riders, in pixels. */
@@ -124,6 +133,7 @@ export class CelTintMaterial extends CelMaterial {
       silhouette: 0,
       crease: 0.7,
     });
+    this.receivedShadowPositionNode = positionWorld.add(SUN_DIR.mul(SHADOW_LIFT));
     if (regions) {
       const region = floor(attribute<"float">("_region", "float").add(0.5));
       this.regionMask = mod(floor(this.hidden.div(pow(2, region))), 2).lessThan(0.5);
