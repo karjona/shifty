@@ -54,6 +54,7 @@ import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { CelMaterial, celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
+import { PALETTE } from "../game/seasons.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, runAt, runPoint } from "./mountain-props.ts";
@@ -597,7 +598,14 @@ export class Mountain implements Environment {
     this.buildFences();
     this.buildRocks(models);
     this.buildProps();
-    this.built = new Built(run, this.scenery, this.buildings, models, (x, z) => this.ground(x, z));
+    this.built = new Built(
+      run,
+      this.scenery,
+      this.buildings,
+      models,
+      (x, z) => this.ground(x, z),
+      PALETTE[this.conditions.season].accent,
+    );
     this.props.add(this.built.group);
     // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
     const plain = new Set<THREE.Mesh>();
@@ -1054,9 +1062,9 @@ export class Mountain implements Environment {
         if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < LIFT_SWATHE * LIFT_SWATHE) return true;
       }
       // The crowd's side of the fences, from the last pitch to the end of the outrun.
-      for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 20; i--) {
+      for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 72; i--) {
         const p = path[i]!;
-        if ((x - p.x) ** 2 + (z - p.z) ** 2 < (p.limit + 7) ** 2) return true;
+        if ((x - p.x) ** 2 + (z - p.z) ** 2 < (p.limit + 12) ** 2) return true;
       }
       return false;
     };
