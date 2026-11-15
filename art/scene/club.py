@@ -86,14 +86,15 @@ def landing(sc):
     sc.define("palm.a", P.palm(sc, 7.2, 0.7, 3))
     sc.define("palm.b", P.palm(sc, 6.4, -0.5, 8))
     sc.place("palm.a", T(-3.6, STAGE, -14.6) @ RY(0.4))
-    sc.place("palm.b", T(11.8, STAGE, -12.2) @ RY(2.1))
+    sc.place("palm.b", T(9.6, STAGE, -11.6) @ RY(2.1))
     sc.place("palm.b", T(-12.5, STAGE, -12.8) @ RY(4.0))
     # The forecourt: lamp posts, benches and bollards along the quay's rim, west of the stair's foot.
     sc.define("lamp-post", P.lamp_post())
     sc.define("bench", P.bench())
     sc.define("bollard", P.bollard())
-    cx, cz, rim = -35.0, 26.0, 60.0
-    for k, deg in enumerate((-71, -66, -61, -56, -51)):
+    # (The quay's east end is round: its middle and radius, from the terrace's.)
+    cx, cz, rim = -33.0, 26.0, 60.0
+    for k, deg in enumerate((-73, -67, -61, -55)):
         a = math.radians(deg)
         out = np.array([math.cos(a), math.sin(a)])
         facing = math.atan2(out[0], out[1])
@@ -107,14 +108,16 @@ def landing(sc):
             sc.place("bench", T(seat[0], STAGE, seat[1]) @ RY(facing))
     for x, z in ((17.4, 3.5), (18.6, 9.5)):
         sc.place("lamp-post", T(x, STAGE if z < 4 else 0.0, z))
-    # The jetty off the quay's edge, steps down to it.
+    # A jetty off the quay's edge, steps down to it, and boats rocking at their moorings: only seen from the
+    # terrace (riders cross that water, and nothing stands in it for them to hit).
+    sc.level = NEAR
     sc.add(box(1.8, 0.16, 12.0, P.WOOD_PALE).at(-1.5, -4.0, -29.8))
     for k in range(3):
         sc.add(box(1.8, 0.2, 0.4, P.STONE).at(-1.5, -3.4 - 0.2 * k, -23.2 - 0.4 * k))
     for z in np.arange(-35.5, -23.5, 2.4):
         for x in (-2.35, -0.65):
             sc.add(kit.rod((x, -8.0, z), (x, -3.6, z), 0.11, 6, P.WOOD_DARK))
-    # The boats, rocking at their moorings: only seen from the terrace (the bay's own fleet rides the swell).
+    sc.level = 0
     moored = (
         (P.sailboat(6.0, 7.6), T(0.6, -5.2, -27.5) @ RY(math.pi / 2)),
         (P.sailboat(5.2, 6.6, 0xF2E8D0, 0x2F7D5B, flag=0x2B3FD0), T(-3.6, -5.2, -32.0) @ RY(-math.pi / 2)),

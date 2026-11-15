@@ -24,7 +24,7 @@ import { warmUp } from "./warm.ts";
 /** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
-  x: 155,
+  x: 153,
   z: 100,
   /** Height of the terrace floor: the town's first terrace, and a finger over its cobbles. */
   floor: 5.23,
