@@ -4,7 +4,7 @@
 //  `/?celshot=bay&eye=x,y,z&look=x,y,z&fov=50`: the bay and its course from there.
 //  `/?celshot=course&event=snow&season=fall&weather=storm&time=dusk`: a circuit in its conditions (courseshot.ts).
 //  `/?celshot=menu&shot=hero|body|face`: a rider on the main menu's colours, with the look test's rider options
-//  (lookdev.ts: seed, body, skin, hair, wear, bare, sport...).
+//  (lookdev.ts: seed, body, skin, hair, wear, bare, sport...); `stand` puts their ride beside them.
 //  `/?celshot=hero`: your rider on the club's terrace, framed like a
 //  character select. Options: yaw (rider), sun=x,y,z (offset), cx, cy, dist,
 //  fov, orbit, lift, t (freeze the idle), pose (idle, crossed), seed, bare (slots to empty).
@@ -23,6 +23,7 @@ import {
   setMenuShot,
   sharedBay,
   showClubRide,
+  showMenuRide,
   showMenuRider,
 } from "./backdrops.ts";
 import { Engine } from "./engine.ts";
@@ -60,6 +61,7 @@ export async function celshot(params: URLSearchParams): Promise<void> {
     );
     setMenuShot(shot === "face" || shot === "body" ? shot : "hero", null);
     showMenuRider(true);
+    showMenuRide(params.has("stand"));
     engine.show(backdrop("shader"));
     return;
   }
