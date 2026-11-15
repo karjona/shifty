@@ -7,6 +7,7 @@ import * as THREE from "three/webgpu";
 import { BobbingBatch, type Bobbing, at, placed } from "./bobbing.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
+import { type Lantern, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
 import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
 import type { RiderView } from "./world.ts";
@@ -59,7 +60,6 @@ export interface LandData {
   kind: LandKind;
 }
 
-const RED = 0xe8402a;
 const BOUNDARY_SPACING = 18;
 
 const std = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
@@ -173,6 +173,8 @@ export class CourseView {
   private boundary: THREE.InstancedMesh;
   private boundaryPoints: { x: number; z: number }[] = [];
   private matrix = new THREE.Matrix4();
+  /** The breakwater's lamps. */
+  private lanterns: Lantern[] = [];
 
   readonly data: CourseData;
 
@@ -197,45 +199,9 @@ export class CourseView {
 
   private buildBreakwater(): void {
     const d = this.data;
-    const rock = std(0x8a8072, { roughness: 0.95, flatShading: true });
-    const geo = new THREE.CapsuleGeometry(d.breakwaterRadius, d.straightHalf * 2, 6, 14);
-    geo.rotateZ(Math.PI / 2);
-    // Jitter the vertices so it reads as piled rocks, not a pill.
-    const pos = geo.attributes.position!;
-    for (let i = 0; i < pos.count; i++) {
-      const n = Math.sin(i * 12.9898) * 43758.5453;
-      const j = (n - Math.floor(n) - 0.5) * 1.6;
-      pos.setY(i, pos.getY(i) + j);
-      pos.setZ(i, pos.getZ(i) + j * 0.6);
-    }
-    geo.computeVertexNormals();
-    const mound = new THREE.Mesh(geo, rock);
-    mound.scale.set(1, 0.22, 1);
-    mound.position.y = -0.6;
-    mound.castShadow = true;
-    mound.receiveShadow = true;
-    this.group.add(mound);
-    this.group.add(this.armourStones());
-
-    // Lighthouse on the east tip.
-    const lh = new THREE.Group();
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.8, 13, 12), std(0xf4f1ea));
-    tower.position.y = 6.5;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.42, 1.55, 2, 12), std(RED));
-    band.position.y = 8;
-    const lamp = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.1, 1.4, 10),
-      std(0xfff2b0, { emissive: 0xffd760, emissiveIntensity: 0.8 }),
-    );
-    lamp.position.y = 13.7;
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.8, 12), std(RED));
-    cap.position.y = 15.3;
-    for (const m of [tower, band, lamp, cap]) {
-      m.castShadow = true;
-      lh.add(m);
-    }
-    lh.position.set(d.straightHalf + d.breakwaterRadius * 0.45, 1.6, 0);
-    this.group.add(lh);
+    const breakwater = buildBreakwater(d.straightHalf, d.breakwaterRadius, d.straightHalf + d.breakwaterRadius * 0.45);
+    this.lanterns.push(...breakwater.lanterns);
+    this.group.add(breakwater.group);
   }
 
   /** Fishing boats (llaüts) moored off the town quay, riding the swell. */
@@ -290,53 +256,6 @@ export class CourseView {
       this.group.add(b.mesh);
       this.bobbing.push(b);
     }
-  }
-
-  /** The mound faced with big squared stones, so it draws as a breakwater. */
-  private armourStones(): THREE.InstancedMesh {
-    const d = this.data;
-    const len = d.straightHalf * 2 + d.breakwaterRadius * 2;
-    const per = Math.floor(len / 2.4);
-    const items: THREE.Matrix4[] = [];
-    const colours: number[] = [];
-    let seed = 7;
-    const rnd = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-    const greys = [0xa49c8e, 0x958d80, 0xb3ab9c, 0x8c8578];
-    for (const side of [-1, 1]) {
-      for (const row of [0, 1]) {
-        for (let i = 0; i < per; i++) {
-          const x = -len / 2 + (i + 0.5 + (rnd() - 0.5) * 0.5) * (len / per);
-          // Round the ends of the capsule.
-          const end = Math.max(0, Math.abs(x) - d.straightHalf) / d.breakwaterRadius;
-          const reach = d.breakwaterRadius * (row === 0 ? 0.95 : 0.6) * Math.sqrt(Math.max(0, 1 - end * end));
-          const s = 1.5 + rnd() * 1.4;
-          const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * Math.PI, rnd() * 0.6));
-          items.push(
-            new THREE.Matrix4().compose(
-              new THREE.Vector3(x, row === 0 ? -0.3 : 0.9, side * reach),
-              q,
-              new THREE.Vector3(s, s * 0.8, s),
-            ),
-          );
-          colours.push(greys[Math.floor(rnd() * greys.length)]!);
-        }
-      }
-    }
-    const mesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      std(0xffffff, { roughness: 0.95, flatShading: true }),
-      items.length,
-    );
-    items.forEach((m, i) => {
-      mesh.setMatrixAt(i, m);
-      mesh.setColorAt(i, new THREE.Color(colours[i]));
-    });
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
   }
 
   private buildStartGate(): void {
@@ -453,6 +372,7 @@ export class CourseView {
     this.boundary.instanceMatrix.needsUpdate = true;
 
     for (const b of this.bobbing) b.update(waves, t);
+    flashLanterns(this.lanterns, t);
     this.buoys.update(waves, t, dt, riders, nextBuoy);
     this.chevrons.update(waves, t);
   }
