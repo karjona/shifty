@@ -378,7 +378,15 @@ function snowMaterial(ribbon: boolean): CelMaterial {
         const polish = smoothstep(0.2, 0.7, noise4(vec2(s.mul(0.05), o.mul(0.35))).y)
           .mul(0.5)
           .add(0.5);
-        sc.assign(mix(sc, sc.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94)), snow.w));
+        const hard = sc.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94));
+        // Sheets of blue ice where the snow has been scraped off, long down the run, their edges cut clean.
+        const sheet = noise4(vec2(s.mul(0.03), o.mul(0.22))).w.add(noise4(vec2(s.mul(0.11), o.mul(0.6))).x.mul(0.35));
+        const iced = mix(hard, vec3(0.66, 0.8, 0.96), cut0(sheet.sub(0.3)).mul(0.6));
+        // (A glint along each sheet's upper edge.)
+        const glint = cut0(sheet.sub(0.3))
+          .sub(cut0(sheet.sub(0.36)))
+          .mul(LOOK.shadow);
+        sc.assign(mix(sc, mix(iced, vec3(1), glint.mul(0.7)), snow.w));
       });
       // A thin cover is scratchy: grass and earth showing through in specks.
       If(LOOK.runSnow.x.greaterThan(0.001), () => {
@@ -392,7 +400,12 @@ function snowMaterial(ribbon: boolean): CelMaterial {
       });
       If(LOOK.runSnow.y.greaterThan(0.001), () => {
         const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
-        sc.assign(mix(sc, sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z));
+        const slush = sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2)));
+        // Wet hollows where the melt stands: darker and bluer, in soft-cornered patches, and mounds pushed up between them.
+        const lie = noise4(vec2(s.mul(0.09), o.mul(0.3))).y.add(noise4(p.xz.mul(0.55)).w.mul(0.3));
+        const wet = mix(slush, vec3(0.5, 0.58, 0.68), cut0(lie.sub(0.28)).mul(0.55));
+        const heaped = mix(wet, vec3(0.86, 0.87, 0.9), cut0(lie.negate().sub(0.34)).mul(0.5));
+        sc.assign(mix(sc, heaped, snow.z));
       });
       c = mix(sc, mix(sc, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
       // Snow blown along the run in a wind: pale streaks snaking downwind.
@@ -414,6 +427,9 @@ function snowMaterial(ribbon: boolean): CelMaterial {
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
+      // The crest of a lip or a roller catches the sun: a warm rim along it.
+      const crest = smoothstep(0.45, 0.95, shade.negate()).mul(LOOK.shadow);
+      c = mix(c, vec3(1.0, 0.985, 0.93), crest.mul(0.55));
     }
     // Rain greys the snow.
     c = c.mul(float(1).sub(LOOK.wet.mul(0.1)));
