@@ -298,7 +298,7 @@ def paint_vest(maps):
     mask[..., 0] = 1
     # Side panels and the shoulders in the second colour, with a mesh texture.
     side = 1 - pan
-    shoulder = smoothstep(1.43, 1.45, z) * (1 - smoothstep(0.0, 0.02, -y - 0.09))
+    shoulder = smoothstep(1.436, 1.442, z) * (1 - smoothstep(0.0, 0.004, -y - 0.09))
     second = np.clip(np.maximum(side, shoulder * (pan < 0.99)), 0, 1)
     mesh = (np.sin(x * 700 + z * 120) * np.sin(z * 700) > 0.25) * second
     detail = detail * (1 - 0.1 * mesh[..., None])
