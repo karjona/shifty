@@ -335,7 +335,18 @@ export function addBeach(
     const a = site.at(z, inland);
     const b = site.at(z + beat, inland);
     const length = Math.hypot(b.x - a.x, b.z - a.z);
-    walkers.add(a.x, (a.y + b.y) / 2, a.z, (b.x - a.x) / length, (b.z - a.z) / length, length, 0.9 + r() * 0.4, 400 + i * 17, SAND_SHADE, true);
+    walkers.add(
+      a.x,
+      (a.y + b.y) / 2,
+      a.z,
+      (b.x - a.x) / length,
+      (b.z - a.z) / length,
+      length,
+      0.9 + r() * 0.4,
+      400 + i * 17,
+      SAND_SHADE,
+      true,
+    );
   }
   // Towels on the sand, with sunbathers.
   const towels = Math.round(18 * crowd);

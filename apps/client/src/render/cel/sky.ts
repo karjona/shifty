@@ -40,6 +40,13 @@ const SUN_RING = Math.cos((5 * Math.PI) / 180);
 /** The line the cirrus is drawn out along, over the ceiling's plane (x, z; unit). */
 const WISP = new THREE.Vector2(0.94, 0.34);
 
+/** The cloud deck's big shapes at a point of the ceiling's plane: where it is thick (about -1 to 1). */
+function billows(p: THREE.Node<"vec2">): THREE.Node<"float"> {
+  return noise4(p.mul(0.55))
+    .x.mul(0.6)
+    .add(noise4(p.mul(1.6)).y.mul(0.28));
+}
+
 /** Where the sky sits in the depth range (1 = the far plane): behind all else, but never clipped by it. */
 const SKY_DEPTH = 0.999999;
 
@@ -99,8 +106,14 @@ export function skyDome(): THREE.Mesh {
     const drift = LOOK.wind.mul(LOOK.time.mul(0.0015));
     // High cirrus: on a fair day a few soft tufts, faint and far apart; the wind draws them out along one
     // line into mares' tails with an edge.
-    const along = plane.x.mul(WISP.x).add(plane.y.mul(WISP.y)).mul(mix(float(2.4), float(0.7), LOOK.streaks));
-    const across = plane.y.mul(WISP.x).sub(plane.x.mul(WISP.y)).mul(mix(float(5.2), float(8.5), LOOK.streaks));
+    const along = plane.x
+      .mul(WISP.x)
+      .add(plane.y.mul(WISP.y))
+      .mul(mix(float(2.4), float(0.7), LOOK.streaks));
+    const across = plane.y
+      .mul(WISP.x)
+      .sub(plane.x.mul(WISP.y))
+      .mul(mix(float(5.2), float(8.5), LOOK.streaks));
     const fibres = noise4(vec2(along, across).add(drift));
     const strand = fibres.x.mul(0.7).add(noise4(vec2(along, across).mul(2.3).add(drift.mul(2))).y.mul(0.3));
     // (They gather in a few drifts and leave most of the sky plain.)
@@ -141,10 +154,6 @@ export function skyDome(): THREE.Mesh {
     const sky = c.toVar();
     If(LOOK.overcast.greaterThan(0.001), () => {
       const q = plane.mul(0.32).add(drift.mul(4));
-      const billows = (p: THREE.Node<"vec2">) =>
-        noise4(p.mul(0.55))
-          .x.mul(0.6)
-          .add(noise4(p.mul(1.6)).y.mul(0.28));
       const fine = noise4(q.mul(4.3)).z.mul(0.1);
       const mass = billows(q).add(fine);
       const edge = mass.sub(mix(float(0.62), float(-0.55), LOOK.overcast));
@@ -164,14 +173,17 @@ export function skyDome(): THREE.Mesh {
       // The shelf: a dark roll low across the side the wind comes from, its foot scalloped and catching
       // the light, the sky pale under it.
       const windward = atan(LOOK.wind.y.negate(), LOOK.wind.x.negate().add(1e-4));
-      const off = az.sub(windward).add(Math.PI * 3).mod(Math.PI * 2).sub(Math.PI);
+      const off = az
+        .sub(windward)
+        .add(Math.PI * 3)
+        .mod(Math.PI * 2)
+        .sub(Math.PI);
       const arc = float(1).sub(off.mul(off).mul(0.36)).max(0);
       const scallop = noise4(vec2(az.mul(5.5), 1.3).add(drift.mul(6)));
-      const foot = arc
-        .mul(0.15)
-        .add(scallop.x.mul(0.014))
-        .add(scallop.y.mul(0.007));
-      const shelf = cut0(y.sub(foot)).mul(cut0(arc.mul(0.3).add(scallop.z.mul(0.03)).sub(y))).mul(cut0(arc.sub(0.12)));
+      const foot = arc.mul(0.15).add(scallop.x.mul(0.014)).add(scallop.y.mul(0.007));
+      const shelf = cut0(y.sub(foot))
+        .mul(cut0(arc.mul(0.3).add(scallop.z.mul(0.03)).sub(y)))
+        .mul(cut0(arc.sub(0.12)));
       // (Its face is laid in terraces: a lit lip along the foot, and a paler band or two up its flank.)
       const up = y.sub(foot);
       const lip = cut0(float(0.016).sub(up));
@@ -182,13 +194,19 @@ export function skyDome(): THREE.Mesh {
       // trailing off; softer veils in lighter weather.
       const lean = az.mul(2.3).sub(y.mul(1.7));
       const columns = noise4(vec2(lean, 0.4).add(drift.mul(3))).x;
-      const shaft = mix(smoothstep(-0.05, 0.35, columns), cut0(columns.sub(0.16)).mul(smoothstep(0.62, 0.2, columns)), storm);
+      const shaft = mix(
+        smoothstep(-0.05, 0.35, columns),
+        cut0(columns.sub(0.16)).mul(smoothstep(0.62, 0.2, columns)),
+        storm,
+      );
       const strokes = noise4(vec2(lean.mul(14), y.mul(1.5))).y;
       const hang = smoothstep(0.36, 0.14, y)
         .mul(smoothstep(0, 0.05, y))
         .mul(float(1).sub(shelf.mul(storm)));
       const veil = shaft.mul(hang).mul(LOOK.veil);
-      sky.assign(mix(sky, LOOK.deckShade.mul(0.86), veil.mul(strokes.mul(0.12).add(mix(float(0.45), float(0.62), storm)))));
+      sky.assign(
+        mix(sky, LOOK.deckShade.mul(0.86), veil.mul(strokes.mul(0.12).add(mix(float(0.45), float(0.62), storm)))),
+      );
     });
     c = sky;
     return c;

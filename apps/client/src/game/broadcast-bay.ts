@@ -197,9 +197,7 @@ export function bayRigs(course: CourseData, env: Environment): Rig[] {
   if (island) {
     // On the island's shore facing the course.
     const toward = Math.sign(-island.az) || 1;
-    rigs.push(
-      spot("island", v(island.ax, ISLAND_RIM + EYE, island.az + toward * (island.radius + 0.4)), solidAt, env),
-    );
+    rigs.push(spot("island", v(island.ax, ISLAND_RIM + EYE, island.az + toward * (island.radius + 0.4)), solidAt, env));
   }
   const town = course.land.find((l) => l.kind === "town");
   if (town) {

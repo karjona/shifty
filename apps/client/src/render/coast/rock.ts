@@ -209,7 +209,14 @@ const HOLLOW_WATER = new THREE.Color(0x14303c);
 const scratch = { a: new THREE.Vector3(), b: new THREE.Vector3(), n: new THREE.Vector3() };
 
 /** A triangle through three points, wound to face `toward` (a direction). */
-function facing(shape: Shape, p: THREE.Vector3, q: THREE.Vector3, w: THREE.Vector3, toward: THREE.Vector3, paint: Paint): void {
+function facing(
+  shape: Shape,
+  p: THREE.Vector3,
+  q: THREE.Vector3,
+  w: THREE.Vector3,
+  toward: THREE.Vector3,
+  paint: Paint,
+): void {
   scratch.a.subVectors(q, p);
   scratch.b.subVectors(w, p);
   scratch.n.crossVectors(scratch.a, scratch.b);
@@ -257,11 +264,7 @@ function addHollow(
 ): void {
   const [a1, a2, a3] = a;
   const [b1, b2, b3] = b;
-  const at = (u: number, v: number) =>
-    a1
-      .clone()
-      .lerp(b1, u)
-      .lerp(a3.clone().lerp(b3, u), v);
+  const at = (u: number, v: number) => a1.clone().lerp(b1, u).lerp(a3.clone().lerp(b3, u), v);
   const last = outline.length - 1;
   const mouth = outline.map((_, k) => {
     const [u, v] = flip ? [1 - outline[last - k]![0], outline[last - k]![1]] : outline[k]!;
@@ -486,7 +489,12 @@ export function sweepCliff(
     const depth = 1.5 + hollowed() * 0.9;
     const reach = 4.5 + hollowed() * 3.5;
     const roll = hollowed();
-    if (style.hollows && a.length === b.length && a[1]!.distanceTo(b[1]!) > 3.6 && Math.min(here.height, next.height) > 6) {
+    if (
+      style.hollows &&
+      a.length === b.length &&
+      a[1]!.distanceTo(b[1]!) > 3.6 &&
+      Math.min(here.height, next.height) > 6
+    ) {
       const mx = (a[1]!.x + b[1]!.x) / 2;
       const mz = (a[1]!.z + b[1]!.z) / 2;
       const inside = (d: number) => style.inside?.(mx - out.x * d, mz - out.z * d) ?? d;
@@ -619,7 +627,12 @@ export function addStack(shape: Shape, x: number, z: number, radius: number, hei
   // The summit: a white cap, scrub at its middle.
   const top = rings[rings.length - 1]!;
   const mid = top.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / sides);
-  const crown = top.map((p) => p.clone().lerp(mid, 0.55).setY(mid.y + 0.45));
+  const crown = top.map((p) =>
+    p
+      .clone()
+      .lerp(mid, 0.55)
+      .setY(mid.y + 0.45),
+  );
   mid.y += 0.7;
   for (let i = 0; i < sides; i++) {
     const j = (i + 1) % sides;

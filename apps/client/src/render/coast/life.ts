@@ -13,6 +13,9 @@ export const DOWNWIND = -2.42;
 /** Costa Nevada's colours: sea, snow and sun. */
 export const COSTA_NEVADA = [0x2a6fb0, 0xf6f2ea, 0xf2c14e];
 
+/** `v`, `d` m lower. */
+const down = (v: THREE.Vector3, d: number) => v.clone().setY(v.y - d);
+
 export class Life {
   private cloth = new Shape();
   private flags = 0;
@@ -37,7 +40,10 @@ export class Life {
       const p = a.clone().lerp(b, k / n);
       const q = a.clone().lerp(b, (k + 1) / n);
       // (Scalloped: each stripe hangs to a point.)
-      const tip = p.clone().lerp(q, 0.5).setY(p.y - drop);
+      const tip = p
+        .clone()
+        .lerp(q, 0.5)
+        .setY(p.y - drop);
       const low = (v: THREE.Vector3) => v.clone().setY(v.y - drop * 0.65);
       const colour = colours[k % colours.length]!;
       const weight = (v: THREE.Vector3) => (a.y - v.y) * 1.6;
@@ -58,7 +64,6 @@ export class Life {
       const p = a.clone().lerp(b, at / length);
       const q = a.clone().lerp(b, Math.min(1, (at + w) / length));
       const colour = colours[Math.floor(r() * colours.length)] ?? colours[0]!;
-      const down = (v: THREE.Vector3, d: number) => v.clone().setY(v.y - d);
       const top = (p.y + q.y) / 2;
       this.cloth.quad(down(p, h / 2), down(q, h / 2), q, p, colour);
       this.cloth.quad(down(p, h), down(q, h), down(q, h / 2), down(p, h / 2), colour);

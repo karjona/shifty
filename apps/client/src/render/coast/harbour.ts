@@ -331,11 +331,14 @@ export function breakwaterCameras(
   startX: number,
   startSide: number,
 ): { x: number; y: number; z: number }[] {
-  const at = (x: number, side: number) =>
-    side < 0
-      ? { x, y: DECK.top + DECK.parapet + CAMERA_EYE, z: -(DECK.half - 0.35) }
-      : { x, y: DECK.top + CAMERA_STAND + CAMERA_EYE, z: DECK.half - 0.5 };
-  return [at(startX + 20, startSide), at(straightHalf * 0.2, -startSide)];
+  return [onDeck(startX + 20, startSide), onDeck(straightHalf * 0.2, -startSide)];
+}
+
+/** A camera's lens at `x` along the breakwater, on the side of `side`'s sign. */
+function onDeck(x: number, side: number): { x: number; y: number; z: number } {
+  return side < 0
+    ? { x, y: DECK.top + DECK.parapet + CAMERA_EYE, z: -(DECK.half - 0.35) }
+    : { x, y: DECK.top + CAMERA_STAND + CAMERA_EYE, z: DECK.half - 0.5 };
 }
 
 /**
@@ -346,7 +349,13 @@ function addCamera(shape: Shape, x: number, eye: number, z: number, yaw: number,
   const body = 0x2c3038;
   const y = eye - 0.5;
   shape.take(box(0.34, 0.3, 0.7).translate(0, -0.15, 0), body, place(x, y, z, yaw));
-  shape.take(post(0.13, 0.11, 0.3, 8).rotateX(Math.PI / 2).translate(0, 0, 0.35), 0x15171c, place(x, y, z, yaw));
+  shape.take(
+    post(0.13, 0.11, 0.3, 8)
+      .rotateX(Math.PI / 2)
+      .translate(0, 0, 0.35),
+    0x15171c,
+    place(x, y, z, yaw),
+  );
   shape.take(box(0.1, 0.16, 0.3).translate(0, 0.15, -0.1), body, place(x, y, z, yaw));
   // The tripod: three legs spread from under the head.
   const head = y - 0.32;
@@ -435,8 +444,7 @@ export function buildBreakwater(
     if (kind < 0.4) addPerson(works, x, top + 0.02, half - 0.15, 0, r, { pose: "fish" });
     else if (kind < 0.6)
       wavers.add(works, x, top, r() < 0.5 ? half - 1 : wallZ + 0.9, r() < 0.5 ? 0 : Math.PI, r, false, shade);
-    else
-      addPerson(works, x, top, -0.3 - r() * 1.7, (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk", shade });
+    else addPerson(works, x, top, -0.3 - r() * 1.7, (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk", shade });
   }
   // A few walk the breakwater out to the lighthouse and back.
   const walkers = new Walkers();
@@ -445,7 +453,17 @@ export function buildBreakwater(
     const beat = 40 + r() * 50;
     const from = -straightHalf + 8 + r() * (straightHalf * 2 - 16 - beat);
     const way = r() < 0.5 ? 1 : -1;
-    walkers.add(way > 0 ? from : from + beat, top, 1.2 + r() * 1.2, way, 0, beat, 1.05 + r() * 0.5, 700 + i * 31, CONCRETE);
+    walkers.add(
+      way > 0 ? from : from + beat,
+      top,
+      1.2 + r() * 1.2,
+      way,
+      0,
+      beat,
+      1.05 + r() * 0.5,
+      700 + i * 31,
+      CONCRETE,
+    );
   }
   // The television's cameras: on the parapet, or on a stand at the deck's edge.
   for (const c of cameras) {

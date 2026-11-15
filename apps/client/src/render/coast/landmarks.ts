@@ -199,14 +199,26 @@ export function addMarketHall(
   L.front(-fw / 2, fw / 2, base, 6.4, fz, TRIM, TILE.portal);
   L.front(-fw / 2, fw / 2, 6.4, gable - 0.4, fz, wall);
   L.front(-1.55, 1.55, eaves - 1.3, eaves + 1.8, fz + 0.04, WHITE, TILE.clock);
-  L.quad([-fw / 2 - 0.3, gable - 0.4, fz], [fw / 2 + 0.3, gable - 0.4, fz], [0, gable + 1.7, fz], [0, gable + 1.7, fz], TRIM);
+  L.quad(
+    [-fw / 2 - 0.3, gable - 0.4, fz],
+    [fw / 2 + 0.3, gable - 0.4, fz],
+    [0, gable + 1.7, fz],
+    [0, gable + 1.7, fz],
+    TRIM,
+  );
   for (const sx of [-1, 1]) {
     const px = (sx * fw) / 2;
     const [from, to] = sx > 0 ? [fz, zf] : [zf, fz];
     L.quad([px, base, from], [px, base, to], [px, gable - 0.4, to], [px, gable - 0.4, from], side);
     L.box(px, base, fz + 0.05, 0.5, gable - 0.4 - base, 0.3, TRIM);
   }
-  L.quad([-fw / 2, gable - 0.4, fz], [fw / 2, gable - 0.4, fz], [fw / 2, gable - 0.4, zf - 2], [-fw / 2, gable - 0.4, zf - 2], TRIM);
+  L.quad(
+    [-fw / 2, gable - 0.4, fz],
+    [fw / 2, gable - 0.4, fz],
+    [fw / 2, gable - 0.4, zf - 2],
+    [-fw / 2, gable - 0.4, zf - 2],
+    TRIM,
+  );
   L.box(0, gable + 1.6, fz - 0.2, 0.1, 3.4, 0.1, IRON);
   const staff = L.p(0, gable + 5, fz - 0.2);
   life.flag(staff.x, staff.y, staff.z, 2.6, 1.6, COSTA_NEVADA);
@@ -229,16 +241,51 @@ export function addMarketHall(
   const e = 0.6;
   const ridge = eaves + 3;
   const hip = 4.2;
-  L.quad([x0 - e, eaves, zf + e], [-x0 + e, eaves, zf + e], [-x0 - hip, ridge, 0], [x0 + hip, ridge, 0], TILES_TINT, TILE.roof);
-  L.quad([-x0 + e, eaves, zb - e], [x0 - e, eaves, zb - e], [x0 + hip, ridge, 0], [-x0 - hip, ridge, 0], TILES_TINT, TILE.roof);
-  L.quad([-x0 + e, eaves, zf + e], [-x0 + e, eaves, zb - e], [-x0 - hip, ridge, 0], [-x0 - hip, ridge, 0], TILES_TINT, TILE.roof);
-  L.quad([x0 - e, eaves, zb - e], [x0 - e, eaves, zf + e], [x0 + hip, ridge, 0], [x0 + hip, ridge, 0], TILES_TINT, TILE.roof);
+  L.quad(
+    [x0 - e, eaves, zf + e],
+    [-x0 + e, eaves, zf + e],
+    [-x0 - hip, ridge, 0],
+    [x0 + hip, ridge, 0],
+    TILES_TINT,
+    TILE.roof,
+  );
+  L.quad(
+    [-x0 + e, eaves, zb - e],
+    [x0 - e, eaves, zb - e],
+    [x0 + hip, ridge, 0],
+    [-x0 - hip, ridge, 0],
+    TILES_TINT,
+    TILE.roof,
+  );
+  L.quad(
+    [-x0 + e, eaves, zf + e],
+    [-x0 + e, eaves, zb - e],
+    [-x0 - hip, ridge, 0],
+    [-x0 - hip, ridge, 0],
+    TILES_TINT,
+    TILE.roof,
+  );
+  L.quad(
+    [x0 - e, eaves, zb - e],
+    [x0 - e, eaves, zf + e],
+    [x0 + hip, ridge, 0],
+    [x0 + hip, ridge, 0],
+    TILES_TINT,
+    TILE.roof,
+  );
   const lw = w - hip * 2 - 1.5;
   for (const sz of [-1, 1]) {
     const lz = sz * 1.3;
     const [a, b] = sz > 0 ? [-lw / 2, lw / 2] : [lw / 2, -lw / 2];
     L.quad([a, ridge - 0.9, lz], [b, ridge - 0.9, lz], [b, ridge + 0.7, lz], [a, ridge + 0.7, lz], TRIM, tiles.small);
-    L.quad([a, ridge + 0.6, sz * 1.7], [b, ridge + 0.6, sz * 1.7], [b, ridge + 1.3, 0], [a, ridge + 1.3, 0], TILES_TINT, TILE.roofOld);
+    L.quad(
+      [a, ridge + 0.6, sz * 1.7],
+      [b, ridge + 0.6, sz * 1.7],
+      [b, ridge + 1.3, 0],
+      [a, ridge + 1.3, 0],
+      TILES_TINT,
+      TILE.roofOld,
+    );
   }
   for (const sx of [-1, 1])
     L.quad(
@@ -255,7 +302,14 @@ export function addMarketHall(
     const a1 = sx > 0 ? -x0 - 0.3 : -fw / 2 - 0.4;
     const out = zf + 3.2;
     L.quad([a0, 3.2, out], [a1, 3.2, out], [a1, 4.5, zf + 0.05], [a0, 4.5, zf + 0.05], WHITE, TILE.awnings[1]);
-    L.quad([a1, 3.2, out], [a0, 3.2, out], [a0, 4.5, zf + 0.05], [a1, 4.5, zf + 0.05], new THREE.Color(0xb9b4c4), TILE.awnings[1]);
+    L.quad(
+      [a1, 3.2, out],
+      [a0, 3.2, out],
+      [a0, 4.5, zf + 0.05],
+      [a1, 4.5, zf + 0.05],
+      new THREE.Color(0xb9b4c4),
+      TILE.awnings[1],
+    );
     life.valance(L.p(a0, 3.2, out), L.p(a1, 3.2, out), 0.42, [0xf6f2ea, 0xd94a3a]);
     for (const px of [a0 + 0.1, a1 - 0.1]) L.box(px, 0.5, out - 0.1, 0.08, 2.7, 0.08, IRON);
     for (let px = a0 + 1; px < a1 - 0.8; px += 1.9) {
@@ -273,7 +327,15 @@ export function addMarketHall(
  * trestles. Its middle at `(x, y, z)`, its front (toward `yaw`) half its
  * depth ahead; the quay's edge is `edge` m in front of that.
  */
-export function addFishMarket(shape: Shape, x: number, y: number, z: number, yaw: number, edge: number, r: () => number): void {
+export function addFishMarket(
+  shape: Shape,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  edge: number,
+  r: () => number,
+): void {
   const L = new Local(shape, x, y, z, yaw);
   const wall = new THREE.Color(0xf4efe2);
   const dado = new THREE.Color(0x3f74aa);
@@ -294,7 +356,13 @@ export function addFishMarket(shape: Shape, x: number, y: number, z: number, yaw
     if (b === 1 || b === 3) {
       L.front(b0 + 0.3, b0 + bay - 0.3, 0, 3.5, zf - 1.2, new THREE.Color(0x2a2c38));
       L.quad([b0 + 0.3, 0, zf], [b0 + 0.3, 0, zf - 1.2], [b0 + 0.3, 3.5, zf - 1.2], [b0 + 0.3, 3.5, zf], dado);
-      L.quad([b0 + bay - 0.3, 0, zf - 1.2], [b0 + bay - 0.3, 0, zf], [b0 + bay - 0.3, 3.5, zf], [b0 + bay - 0.3, 3.5, zf - 1.2], dado);
+      L.quad(
+        [b0 + bay - 0.3, 0, zf - 1.2],
+        [b0 + bay - 0.3, 0, zf],
+        [b0 + bay - 0.3, 3.5, zf],
+        [b0 + bay - 0.3, 3.5, zf - 1.2],
+        dado,
+      );
       L.front(b0, b0 + 0.3, 0, 3.5, zf, wall);
       L.front(b0 + bay - 0.3, b0 + bay, 0, 3.5, zf, wall);
     } else L.front(b0, b0 + bay, 0, 3.5, zf, wall, TILE.boathouse);
@@ -311,8 +379,22 @@ export function addFishMarket(shape: Shape, x: number, y: number, z: number, yaw
   }
   L.quad([x1, -4, zb], [x0, -4, zb], [x0, eaves, zb], [x1, eaves, zb], wall);
   const e = 0.7;
-  L.quad([x0 - e, eaves - 0.2, zf + e], [x1 + e, eaves - 0.2, zf + e], [x1 + e, ridge + 0.1, 0], [x0 - e, ridge + 0.1, 0], TILES_TINT, TILE.roofOld);
-  L.quad([x1 + e, eaves - 0.2, zb - e], [x0 - e, eaves - 0.2, zb - e], [x0 - e, ridge + 0.1, 0], [x1 + e, ridge + 0.1, 0], TILES_TINT, TILE.roofOld);
+  L.quad(
+    [x0 - e, eaves - 0.2, zf + e],
+    [x1 + e, eaves - 0.2, zf + e],
+    [x1 + e, ridge + 0.1, 0],
+    [x0 - e, ridge + 0.1, 0],
+    TILES_TINT,
+    TILE.roofOld,
+  );
+  L.quad(
+    [x1 + e, eaves - 0.2, zb - e],
+    [x0 - e, eaves - 0.2, zb - e],
+    [x0 - e, ridge + 0.1, 0],
+    [x1 + e, ridge + 0.1, 0],
+    TILES_TINT,
+    TILE.roofOld,
+  );
   // The board over its middle: the fish.
   L.box(cx, eaves + 0.3, zf + 0.5, 3.6, 1.9, 0.14, TRIM);
   L.front(cx - 1.6, cx + 1.6, eaves + 0.45, eaves + 2.05, zf + 0.58, WHITE, TILE.fish);
@@ -335,22 +417,35 @@ export function addFishMarket(shape: Shape, x: number, y: number, z: number, yaw
     0,
     true,
   );
-  shape.take(box(0.9, 0.25, 6.4), new THREE.Color(0x8b919b), turned(L.p(ix, 3.6, 4.6).x, y + 3.6, L.p(ix, 3.6, 4.6).z, 0.62, yaw, 0), {
-    uv: TILE.white,
-  });
+  shape.take(
+    box(0.9, 0.25, 6.4),
+    new THREE.Color(0x8b919b),
+    turned(L.p(ix, 3.6, 4.6).x, y + 3.6, L.p(ix, 3.6, 4.6).z, 0.62, yaw, 0),
+    {
+      uv: TILE.white,
+    },
+  );
   for (const pz of [3.4, 6.2]) L.box(ix, 0, pz, 0.12, pz < 4 ? 4.4 : 2.3, 0.12, IRON);
   // On the quay in front: crates in stacks, nets on racks, a boat on trestles, the crane at the edge.
   const crate = [0x3a6ea5, 0xf6f2ea, 0xd94a3a, 0x2d8a7a, 0xf2c14e];
   for (let px = x0 + 1; px < x1 - 6; px += 2.3 + r() * 1.6) {
     const stack = 1 + Math.floor(r() * 4);
     const pz = zf + 1.4 + r() * 2.4;
-    for (let k = 0; k < stack; k++) L.box(px + (r() - 0.5) * 0.1, k * 0.36, pz, 0.9, 0.36, 0.6, new THREE.Color(pick(crate, r)));
+    for (let k = 0; k < stack; k++)
+      L.box(px + (r() - 0.5) * 0.1, k * 0.36, pz, 0.9, 0.36, 0.6, new THREE.Color(pick(crate, r)));
   }
   for (const px of [x0 + 2.5, x0 + 7.5]) {
     for (const dx of [-1.6, 1.6]) L.box(px + dx, 0, zf + 6.2, 0.1, 1.7, 0.1, new THREE.Color(0x8a6a46));
     L.box(px, 1.62, zf + 6.2, 3.4, 0.08, 0.08, new THREE.Color(0x8a6a46));
     L.front(px - 1.6, px + 1.6, 0.35, 1.62, zf + 6.2, WHITE, TILE.net);
-    L.quad([px + 1.6, 0.35, zf + 6.2], [px - 1.6, 0.35, zf + 6.2], [px - 1.6, 1.62, zf + 6.2], [px + 1.6, 1.62, zf + 6.2], WHITE, TILE.net);
+    L.quad(
+      [px + 1.6, 0.35, zf + 6.2],
+      [px - 1.6, 0.35, zf + 6.2],
+      [px - 1.6, 1.62, zf + 6.2],
+      [px + 1.6, 1.62, zf + 6.2],
+      WHITE,
+      TILE.net,
+    );
   }
   const boat = L.p(x1 - 2.2, 0, zf + 4.6);
   shape.take(llaut(63), null, turned(boat.x, y + 1.05, boat.z, 0, yaw + Math.PI / 2 + 0.12, 0.05), { uv: TILE.white });
@@ -360,12 +455,16 @@ export function addFishMarket(shape: Shape, x: number, y: number, z: number, yaw
   }
   const crane = L.p(cx + 4, 0, zf + edge - 1.3);
   shape.take(post(0.2, 0.16, 3.4, 6), IRON, place(crane.x, y, crane.z), { uv: TILE.white });
-  shape.take(box(0.16, 0.16, 3.4).translate(0, 0, 1.2), IRON, turned(crane.x, y + 3.3, crane.z, -0.35, yaw, 0), { uv: TILE.white });
+  shape.take(box(0.16, 0.16, 3.4).translate(0, 0, 1.2), IRON, turned(crane.x, y + 3.3, crane.z, -0.35, yaw, 0), {
+    uv: TILE.white,
+  });
   shape.take(box(0.5, 0.45, 0.5), new THREE.Color(0xd94a3a), place(crane.x, y + 0.9, crane.z, yaw), { uv: TILE.white });
 }
 
 const GULL_BODY = new THREE.SphereGeometry(0.17, 6, 4).scale(0.8, 0.82, 1.5).translate(0, 0.27, 0);
-const GULL_BACK = new THREE.SphereGeometry(0.16, 6, 3, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(0.84, 0.75, 1.75).translate(0, 0.3, -0.07);
+const GULL_BACK = new THREE.SphereGeometry(0.16, 6, 3, 0, Math.PI * 2, 0, Math.PI * 0.5)
+  .scale(0.84, 0.75, 1.75)
+  .translate(0, 0.3, -0.07);
 const GULL_HEAD = new THREE.SphereGeometry(0.085, 5, 4).translate(0, 0.47, 0.2);
 const GULL_BEAK = new THREE.ConeGeometry(0.03, 0.13, 4).rotateX(Math.PI / 2).translate(0, 0.46, 0.33);
 

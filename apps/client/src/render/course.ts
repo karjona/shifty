@@ -127,11 +127,14 @@ function gateSpan(width: number, yaw: number): THREE.Group {
   const shape = new Shape();
   const half = width / 2;
   const tall = 1.6;
-  for (const y of [-0.12, tall + 0.12])
-    shape.take(new THREE.BoxGeometry(width, 0.2, 0.2), MARK.steel, place(0, y, 0));
+  for (const y of [-0.12, tall + 0.12]) shape.take(new THREE.BoxGeometry(width, 0.2, 0.2), MARK.steel, place(0, y, 0));
   const bays = 16;
   for (let k = 0; k <= bays; k++)
-    shape.take(new THREE.BoxGeometry(0.1, tall + 0.24, 0.24), MARK.steel, place(-half + (k / bays) * width, tall / 2, 0));
+    shape.take(
+      new THREE.BoxGeometry(0.1, tall + 0.24, 0.24),
+      MARK.steel,
+      place(-half + (k / bays) * width, tall / 2, 0),
+    );
   // The banner: two rows of squares, seen from both sides.
   const cell = width / bays;
   for (let k = 0; k < bays; k++)

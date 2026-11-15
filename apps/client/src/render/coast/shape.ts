@@ -128,7 +128,7 @@ export class Shape {
   reweigh(count: number, weight: (p: THREE.Vector3) => number): void {
     const n = this.wts.length;
     for (let i = Math.max(0, n - count); i < n; i++)
-      this.wts[i] = weight(this.p.set(this.pos[i * 3]!, this.pos[i * 3 + 1]!, this.pos[i * 3 + 2]!));
+      this.wts[i] = weight(this.p.set(this.pos[i * 3]!, this.pos[i * 3 + 1]!, this.pos[i * 3 + 2]));
   }
 
   /** Adds `geo` and frees it. */

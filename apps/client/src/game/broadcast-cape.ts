@@ -4,15 +4,7 @@
 // on camera boats off the point and off the stacks, a helicopter high and
 // wide, and a drone. They all follow your rider.
 import * as THREE from "three/webgpu";
-import {
-  ARCH_TOP,
-  CoastGround,
-  LIFEGUARD,
-  MOLE_TOP,
-  cameraBoats,
-  onBeach,
-  watchtowerSpot,
-} from "../render/cape.ts";
+import { ARCH_TOP, CoastGround, LIFEGUARD, MOLE_TOP, cameraBoats, onBeach, watchtowerSpot } from "../render/cape.ts";
 import { chevronSpots } from "../render/chevrons.ts";
 import type { CourseData } from "../render/course.ts";
 import { moleCamera } from "../render/coast/harbour.ts";

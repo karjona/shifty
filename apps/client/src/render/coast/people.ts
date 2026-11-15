@@ -307,7 +307,9 @@ function walkerMaterial(): CelMaterial {
     const local = p.xz.sub(a.xy).mul(facing).mul(shown);
     const n = normalLocal;
     normalLocal.assign(vec3(n.x.mul(facing), n.y, n.z.mul(facing)));
-    const bob = sin(along.mul(Math.PI / 0.75)).abs().mul(0.035);
+    const bob = sin(along.mul(Math.PI / 0.75))
+      .abs()
+      .mul(0.035);
     return vec3(
       a.x.add(local.x).add(a.z.mul(along)),
       mix(float(-4), p.y.add(bob), shown),

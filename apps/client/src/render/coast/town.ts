@@ -598,7 +598,10 @@ export function buildTown(
 
   // The landmark's lot on the waterfront, kept free of houses, trees and street furniture.
   const plot = landmark ? (landmark.kind === "market" ? MARKET_HALL : FISH_MARKET) : null;
-  const lot = landmark && plot ? { from: landmark.along - plot.width / 2 - 0.8, to: landmark.along + plot.width / 2 + 0.8 } : null;
+  const lot =
+    landmark && plot
+      ? { from: landmark.along - plot.width / 2 - 0.8, to: landmark.along + plot.width / 2 + 0.8 }
+      : null;
   const front = ROWS[0]!.inland - ROWS[0]!.depth / 2;
   const free = (x: number, z: number) => {
     if (clear(x, z)) return true;
@@ -615,7 +618,7 @@ export function buildTown(
       // Gulls on its ridge, waiting for the boats.
       for (const dx of [-9.5, -6, 1.5, 4]) {
         const g = quayPoint(q, landmark.along + dx, front + plot.depth / 2);
-        addGull(shape, g.x, QUAY_TOP + 6.55, g.z, q.yaw + (dx * 1.7));
+        addGull(shape, g.x, QUAY_TOP + 6.55, g.z, q.yaw + dx * 1.7);
       }
     }
   }
@@ -677,15 +680,15 @@ export function buildTown(
     const from = -room + r() * Math.max(1, q.len + room * 2 - beat);
     const way = r() < 0.5 ? 1 : -1;
     const pace = 1.05 + r() * 0.5;
-    const seed = Math.floor(r() * 9000);
-    let free = true;
+    const dressed = Math.floor(r() * 9000);
+    let open = true;
     for (let a = 0; a <= beat; a += 3) {
       const p = quayPoint(q, from + a, lane);
-      if (clear(p.x, p.z)) free = false;
+      if (clear(p.x, p.z)) open = false;
     }
-    if (!free) continue;
+    if (!open) continue;
     const start = quayPoint(q, way > 0 ? from : from + beat, lane + (r() - 0.5) * 0.5);
-    walkers.add(start.x, QUAY_TOP, start.z, q.ux * way, q.uz * way, beat, pace, seed, PAVING);
+    walkers.add(start.x, QUAY_TOP, start.z, q.ux * way, q.uz * way, beat, pace, dressed, PAVING);
   }
   // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill.
   const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
