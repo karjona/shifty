@@ -114,10 +114,13 @@ def thicken(obj, thickness, inner_uv=(0.0, 0.0, 1.0, 0.05), rim_uv=(0.0, 0.055, 
 
 # ---------------------------------------------------------------- foam vest
 
-VEST_BOTTOM, VEST_TOP = 1.065, 1.53
+VEST_BOTTOM, VEST_TOP = 1.078, 1.53
 VEST_ROWS, VEST_COLS = 40, 32
-ROLLS = 4
-ROLL_LOW, ROLL_HIGH = 1.09, 1.425
+ROLLS = 3
+ROLL_LOW, ROLL_HIGH = 1.1, 1.405
+# The two belts round the vest (their heights) and half their width.
+BELTS = (1.165, 1.3)
+BELT_HALF = 0.0125
 
 
 def _theta(j, cols):
@@ -128,7 +131,7 @@ def _sdeg(a, b):
     return (a - b + 180) % 360 - 180
 
 
-ARMHOLE = (1.358, 0.098, 38.0)
+ARMHOLE = (1.35, 0.114, 45.0)
 
 
 def in_armhole(theta, z):
@@ -149,11 +152,15 @@ def to_armhole(theta, z):
     return side + a / r * half, zc + b / r * bz
 
 
+# The scoop of the neck at the front: its lowest point, and how far round it reaches (degrees).
+NECK_LOW, NECK_HALF = 1.432, 58
+
+
 def neckline(theta):
     """The vest's top edge at the front and back (z), by angle from the front."""
     a = abs(_sdeg(theta, 0))
-    front = 1.478 + 0.045 * (a / 62) ** 1.6
-    return min(front, VEST_TOP + 0.01) if a < 62 else VEST_TOP + 0.01
+    front = NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7
+    return min(front, VEST_TOP + 0.01) if a < NECK_HALF else VEST_TOP + 0.01
 
 
 def panel(theta):
@@ -223,12 +230,15 @@ def vest(body):
             a = math.radians(th)
             d = np.array([math.sin(a), -math.cos(a), 0.0])
             r = surface(th, z)
-            # The vest hangs straight from the chest: below it, it doesn't follow the waist in.
+            # The vest is cut close: below the chest it follows the waist in most of the way.
             if z < 1.27:
-                r = r + 0.55 * max(0.0, surface(th, 1.27) - r)
-            foam = 0.024 + 0.01 * panel(th)
-            roll = 0.026 * roll_bump(z) * panel(th)
-            flare = 0.008 * smoothstep(1.12, VEST_BOTTOM, z)
+                r = r + 0.28 * max(0.0, surface(th, 1.27) - r)
+            foam = 0.011 + 0.008 * panel(th)
+            roll = 0.011 * roll_bump(z) * panel(th)
+            # The belts cinch the foam.
+            belt = max(smoothstep(BELT_HALF * 1.5, BELT_HALF * 0.6, abs(z - b)) for b in BELTS)
+            roll = roll * (1 - 0.6 * belt) + 0.004 * belt
+            flare = 0.005 * smoothstep(1.12, VEST_BOTTOM, z)
             P[i, j] = np.array([0, yc, z]) + d * (r + foam + roll + flare)
             UV[i, j] = ((th / 360 + 0.5) % 1.0, 0.08 + 0.92 * (z - VEST_BOTTOM) / (VEST_TOP - VEST_BOTTOM))
     obj = grid_mesh("vest", P, UV, keep)
@@ -243,7 +253,8 @@ def _edges_dist(pos, z_hem=VEST_BOTTOM):
     r = np.hypot(x, y)
     d = np.abs(z - z_hem)
     a = np.abs((th + 180) % 360 - 180)
-    nl = np.where(a < 62, np.minimum(1.478 + 0.045 * (a / 62) ** 1.6, VEST_TOP), VEST_TOP)
+    nl = np.where(a < NECK_HALF, np.minimum(NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7, VEST_TOP),
+                  VEST_TOP)
     d = np.minimum(d, np.abs(z - nl))
     zc, bz, half = ARMHOLE
     for side in (90, 270):
@@ -277,7 +288,7 @@ def paint_vest(maps):
     in_rolls = (z > ROLL_LOW) & (z < ROLL_HIGH)
     crown = np.exp(-(((frac - 0.62) / 0.16) ** 2)) * in_rolls * pan
     crease = (np.exp(-((frac / 0.07) ** 2)) + np.exp(-(((frac - 1) / 0.07) ** 2))) * in_rolls * pan
-    s = s * (1 + 0.85 * crown - 0.65 * crease)
+    s = s * (1 + 0.3 * crown - 0.7 * crease)
     g = 0.5 * s
     # Sunlit highlights warm toward orange, creases toward a deep wine.
     hi = np.clip(s - 1, 0, 1)[..., None]
@@ -301,9 +312,32 @@ def paint_vest(maps):
     mask = mask * (1 - acc[..., None]) + np.array([0, 0, 1.0]) * acc[..., None]
     teeth = zipline * (np.sin(z * 2400) > 0) * smoothstep(0.0025, 0.001, ax)
     detail = detail * (1 - 0.35 * teeth[..., None])
-    pull = np.exp(-((ax / 0.006) ** 2) - ((z - 1.44) / 0.012) ** 2) * (y < -0.05)
+    pull = np.exp(-((ax / 0.006) ** 2) - ((z - (NECK_LOW - 0.012)) / 0.012) ** 2) * (y < -0.05)
     detail = detail * (1 - pull[..., None]) + np.array([0.06, 0.06, 0.07]) * pull[..., None]
     mask = mask * (1 - pull[..., None])
+    # Two belts right round, in the second colour, each with a buckle either side of the zip.
+    for b in BELTS:
+        band = smoothstep(BELT_HALF, BELT_HALF - 0.002, np.abs(z - b))
+        webbing = 1 - 0.12 * (np.sin(z * 3000) > 0.2)
+        shade = 0.4 * np.clip(s, 0.5, 1.2) * webbing
+        detail = detail * (1 - band[..., None]) + np.repeat(shade[..., None], 3, axis=2) * band[..., None]
+        mask = mask * (1 - band[..., None]) + np.array([0, 1.0, 0]) * band[..., None]
+        edge_line = smoothstep(0.0022, 0.001, np.abs(np.abs(z - b) - BELT_HALF))
+        detail = detail * (1 - 0.55 * edge_line[..., None])
+        buckle = (smoothstep(0.019, 0.016, np.abs(ax - 0.045)) * smoothstep(BELT_HALF + 0.005, BELT_HALF + 0.003,
+                                                                             np.abs(z - b)) * (y < -0.04))
+        detail = detail * (1 - buckle[..., None]) + np.array([0.09, 0.09, 0.1]) * buckle[..., None]
+        mask = mask * (1 - buckle[..., None])
+        catch = smoothstep(0.0045, 0.003, np.abs(ax - 0.045)) * smoothstep(0.006, 0.004, np.abs(z - b)) * (y < -0.04)
+        detail = detail * (1 - catch[..., None]) + 0.55 * catch[..., None]
+        mask = mask * (1 - catch[..., None]) + np.array([0, 0, 1.0]) * catch[..., None]
+    # The brand's patch on the left of the chest.
+    patch = (smoothstep(0.02, 0.018, np.abs(x - 0.062)) * smoothstep(0.0105, 0.009, np.abs(z - 1.372)) * (y < -0.04))
+    detail = detail * (1 - patch[..., None]) + 0.6 * patch[..., None]
+    mask = mask * (1 - patch[..., None]) + np.array([0, 0, 1.0]) * patch[..., None]
+    bar = (smoothstep(0.014, 0.012, np.abs(x - 0.062)) * smoothstep(0.0032, 0.0022, np.abs(z - 1.372)) * (y < -0.04))
+    detail = detail * (1 - bar[..., None]) + 0.12 * bar[..., None]
+    mask = mask * (1 - bar[..., None])
     # The inside and the rims, dark.
     v = np.linspace(1, 0, inside.shape[0])[:, None] * np.ones((1, inside.shape[1]))
     inner = v < 0.078
@@ -682,21 +716,21 @@ def paint_swimsuit(maps):
 # The left shoe's rings, from the collar round the shin down to the toe, on the male-sized foot (see
 # figure.foot_point): centre, axis, outer, inner, top, bottom.
 SHOE_PATH = [
-    ((0.104, 0.006, 0.29), (0, 0, -1), 0.054, 0.052, 0.056, 0.054),
-    ((0.104, 0.01, 0.235), (0, 0, -1), 0.058, 0.056, 0.06, 0.058),
-    ((0.104, 0.016, 0.17), (0, 0, -1), 0.066, 0.062, 0.068, 0.064),
-    ((0.104, 0.022, 0.105), (0, 0, -1), 0.074, 0.068, 0.078, 0.074),
-    ((0.104, 0.024, 0.066), (0, -0.25, -0.97), 0.077, 0.07, 0.092, 0.074),
-    ((0.107, -0.026, 0.054), (0, -0.9, -0.43), 0.077, 0.07, 0.076, 0.064),
-    ((0.109, -0.078, 0.048), (0, -1, -0.12), 0.079, 0.072, 0.062, 0.054),
-    ((0.111, -0.13, 0.044), (0, -1, -0.04), 0.081, 0.072, 0.05, 0.048),
-    ((0.111, -0.176, 0.04), (0, -1, 0.02), 0.075, 0.066, 0.044, 0.044),
-    ((0.11, -0.208, 0.038), (0, -1, 0.1), 0.06, 0.053, 0.035, 0.04),
+    ((0.104, 0.018, 0.15), (0, 0, -1), 0.047, 0.045, 0.052, 0.05),
+    ((0.104, 0.02, 0.112), (0, 0, -1), 0.052, 0.049, 0.06, 0.056),
+    ((0.104, 0.024, 0.066), (0, -0.25, -0.97), 0.056, 0.052, 0.078, 0.062),
+    ((0.107, -0.026, 0.054), (0, -0.9, -0.43), 0.058, 0.053, 0.066, 0.056),
+    ((0.109, -0.078, 0.048), (0, -1, -0.12), 0.06, 0.054, 0.052, 0.048),
+    ((0.111, -0.13, 0.044), (0, -1, -0.04), 0.062, 0.055, 0.043, 0.044),
+    ((0.111, -0.176, 0.04), (0, -1, 0.02), 0.058, 0.051, 0.037, 0.04),
+    ((0.11, -0.206, 0.038), (0, -1, 0.1), 0.046, 0.041, 0.03, 0.036),
 ]
+# Which of its rings is the heel's, and from which on the toes bend.
+SHOE_HEEL, SHOE_TOES = 2, 6
 
 
 def shoes(fig):
-    """Chunky high-top water shoes: a thick sole, a toe bumper, two straps."""
+    """Low water shoes: a collar round the ankle, a rubber sole and toe bumper, two straps over the instep."""
     import uv as uvs
 
     cage = rings.Cage("shoes")
@@ -714,16 +748,16 @@ def shoes(fig):
             e1, e2, _ = rings.frame_of(axis, (0, -1, 0) if vertical else (0, 0, 1))
             if np.dot(e1, (s, 0, 0)) < 0:
                 e1 = -e1
-            o, i_, top, bottom = o * 1.1 * size, i_ * 1.1 * size, top * 1.08 * size, bottom * 1.08 * size
+            o, i_, top, bottom = o * size, i_ * size, top * size, bottom * size
             pts = rings.place(c, e1, e2, rings.outline(n, o, i_, top, bottom, power=2.1 if vertical else 2.4,
                                                        start=math.pi / n))
             # A flat sole: nothing below the ground, a little out at the sole's edge.
             pts = [np.array([p[0], p[1], max(p[2], 0.0)]) for p in pts]
-            if k == 4:
+            if k == SHOE_HEEL:
                 # The heel: out behind.
                 pts = [p + np.array([0, 0.02, 0]) * size * max(0.0, (p[1] - c[1]) / (0.06 * size)) for p in pts]
-            w = {f"foot.{L}": 1.0} if k > 2 else figure.blend_w(f"shin.{L}", f"foot.{L}", 0.1 + 0.3 * k)
-            if k >= 8:
+            w = {f"foot.{L}": 1.0} if k >= SHOE_HEEL else figure.blend_w(f"shin.{L}", f"foot.{L}", 0.4 + 0.35 * k)
+            if k >= SHOE_TOES:
                 w = figure.blend_w(f"foot.{L}", f"toes.{L}", 0.7)
             ring = cage.ring(pts, w, part=f"shoe.{L}")
             if prev is not None:
@@ -733,11 +767,11 @@ def shoes(fig):
             prev = ring
         tip = fig.foot_point(s, np.array(SHOE_PATH[-1][0]) + np.array([0, -0.016, -0.004]))
         cage.cap(prev, tip, figure.blend_w(f"foot.{L}", f"toes.{L}", 0.8), R["feet"], part=f"shoe.{L}")
-        sole = figure._index_toward(made[6], (0, 0, -1))
-        cage.seam([r[sole] for r in made[3:]])
+        sole = figure._index_toward(made[SHOE_HEEL + 2], (0, 0, -1))
+        cage.seam([r[sole] for r in made[SHOE_HEEL:]])
         back = figure._index_toward(made[0], (0, 1, 0))
-        cage.seam([made[0][back], made[1][back], made[2][back], made[3][back]])
-        cage.seam(made[3], closed=True)
+        cage.seam([r[back] for r in made[: SHOE_HEEL + 1]])
+        cage.seam(made[SHOE_HEEL], closed=True)
     obj = cage.finish()
     uvs.unwrap(obj)
     blend.select_only(obj)
@@ -786,29 +820,26 @@ def paint_shoes(maps):
             detail = detail * (1 - area) + shade[..., None] * area
 
     # The sole and toe bumper: rubber in the second colour, ribbed at its edge.
-    sole = smoothstep(0.044, 0.038, z)
-    toe = smoothstep(-0.16, -0.18, y) * smoothstep(0.06, 0.05, z)
-    rib = (np.sin(y * 900) > 0.6) * smoothstep(0.014, 0.008, np.abs(z - 0.018))
+    sole = smoothstep(0.03, 0.026, z)
+    toe = smoothstep(-0.165, -0.18, y) * smoothstep(0.058, 0.05, z)
+    rib = (np.sin(y * 900) > 0.6) * smoothstep(0.012, 0.007, np.abs(z - 0.014))
     put(np.clip(sole + toe, 0, 1), 1, (0.5 * s) * (1 - 0.2 * rib))
+    # The line where the upper meets the sole.
+    welt = smoothstep(0.0035, 0.0015, np.abs(z - 0.031)) * (1 - toe)
+    detail = detail * (1 - 0.6 * welt[..., None])
     # Two straps over the instep with their buckles, and the collar's binding.
-    straps = [smoothstep(0.013, 0.01, np.abs(z - 0.15)), smoothstep(0.013, 0.01, np.abs(z - 0.235))]
-    for yy, zz in ((-0.05, 0.095), (-0.1, 0.075)):
-        straps.append(smoothstep(0.012, 0.009, np.abs((y - yy) * 0.9 + (z - zz) * 0.45)) * (z > 0.04))
+    straps = []
+    for yy, zz in ((-0.045, 0.1), (-0.1, 0.078)):
+        straps.append(smoothstep(0.0125, 0.0095, np.abs((y - yy) * 0.9 + (z - zz) * 0.45)) * (z > 0.034))
     for strap in straps:
         put(strap, 1, 0.42 * np.clip(s, 0.4, 1.3))
-        buckle = strap * smoothstep(0.012, 0.008, np.abs(np.abs(x) - 0.145))
+        buckle = strap * smoothstep(0.011, 0.008, np.abs(np.abs(x) - 0.14))
         put(buckle, 2, 0.6 * np.ones_like(s))
-    collar = smoothstep(0.272, 0.28, z)
-    put(collar, 1)
-    # Laces up the front, over a tongue.
-    lx = np.abs(x) - 0.104 - np.sign(x) * 0.0
-    front = (y < -0.01) & (z > 0.06) & (z < 0.27)
-    tongue = smoothstep(0.022, 0.016, np.abs(np.abs(x) - np.abs(x) + (np.abs(x) - 0.106))) * front
-    put(tongue * 0.9, 1, 0.38 * np.clip(s, 0.4, 1.3))
-    zl = (z - 0.06) / 0.022
-    cross = np.minimum(np.abs((zl % 1) - 0.5 + (np.abs(x) - 0.106) / 0.03), np.abs((zl % 1) - 0.5 - (np.abs(x) - 0.106) / 0.03))
-    laces = smoothstep(0.12, 0.06, cross) * smoothstep(0.018, 0.012, np.abs(np.abs(x) - 0.106)) * front
-    put(laces, 2, 0.6 * np.clip(s, 0.5, 1.3))
-    pull = smoothstep(0.007, 0.005, np.abs(x - np.sign(x) * 0.104)) * smoothstep(0.23, 0.24, z) * (y > 0.04)
+    collar = smoothstep(0.134, 0.14, z)
+    put(collar, 1, 0.45 * np.clip(s, 0.4, 1.3))
+    # A panel up the heel, and its pull tab.
+    heel = smoothstep(0.03, 0.036, y) * smoothstep(0.03, 0.036, z) * (1 - collar)
+    put(heel * smoothstep(0.03, 0.022, np.abs(np.abs(x) - 0.104)), 2, 0.55 * np.clip(s, 0.4, 1.3))
+    pull = smoothstep(0.007, 0.005, np.abs(np.abs(x) - 0.104)) * smoothstep(0.128, 0.136, z) * (y > 0.045)
     put(pull, 2)
     return np.clip(detail, 0, 1), np.clip(mask, 0, 1)
