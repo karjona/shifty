@@ -5,7 +5,7 @@
 import * as THREE from "three/webgpu";
 import { chevronSpots } from "../render/chevrons.ts";
 import { breakwaterCameras } from "../render/coast/harbour.ts";
-import type { CourseData } from "../render/course.ts";
+import { type CourseData, gateTowers } from "../render/course.ts";
 import type { Environment } from "../render/world.ts";
 import { type Rig, type Watch, clear, drone, onRider } from "./broadcast-rig.ts";
 
@@ -18,8 +18,8 @@ const HELI_OUT = 72;
 const HELI_UP = 24;
 /** The least the helicopter flies over what it passes over (m). */
 const HELI_CLEAR = 16;
-/** The camera boats' eye over the water (m): high enough to see over the chevron boards. */
-const BOAT_EYE = 5.5;
+/** The camera boats' eye over the water (m): over the boat's own camera, and high enough to see over the chevron boards. */
+const BOAT_EYE = 5.9;
 /** Standing camera's eye over what it stands on (m). */
 const EYE = 1.7;
 /**
@@ -37,6 +37,8 @@ const LIGHTHOUSE = { radius: 3.2, gallery: 13.6, top: 17.5 };
 const BOOM = { out: 1.4, up: 2.6 };
 /** A camera's sight line clears a ramp's lip by this much (m). */
 const RAMP_CLEAR = 1.2;
+/** The drone keeps off whatever stands this far over its rider (m). */
+const DRONE_CLEAR = 4;
 /** A camera's sight line keeps this far from a buoy (m). */
 const BUOY_CLEAR = 1.3;
 /** A chevron board's half width and top (see render/chevrons.ts). */
@@ -50,6 +52,7 @@ function solid(course: CourseData): (x: number, z: number) => number {
   const bw = course.breakwaterRadius;
   const light = lighthouse(course);
   const boards = chevronSpots(course);
+  const gate = gateTowers(course);
   return (x, z) => {
     let h = 0;
     // The breakwater: its deck with all that stands on it (cameras stand at its edges), armour sloping to the water.
@@ -58,6 +61,7 @@ function solid(course: CourseData): (x: number, z: number) => number {
     else if (out < bw * 0.95) h = DECK.top * (1 - (out - DECK.half) / (bw - DECK.half)) + 0.9;
     if (Math.hypot(x - light.x, z - light.z) < LIGHTHOUSE.radius) h = LIGHTHOUSE.top;
     for (const b of boards) if (Math.hypot(x - b.x, z - b.z) < BOARD.half) h = Math.max(h, BOARD.top);
+    for (const g of gate) if (Math.hypot(x - g.x, z - g.z) < g.radius) h = Math.max(h, g.top);
     for (const r of course.ramps)
       if (Math.hypot(x - r.x, z - r.z) < r.length / 2 + 1) h = Math.max(h, r.height + RAMP_CLEAR);
     for (const b of course.buoys)
@@ -191,7 +195,7 @@ export function bayRigs(course: CourseData, env: Environment): Rig[] {
     spot("boat-east", v(sh + course.outerLimit + 16, BOAT_EYE, 6), solidAt, env, true),
     spot("boat-west", v(-(sh + course.outerLimit + 16), BOAT_EYE, -6), solidAt, env, true),
     helicopter(solidAt),
-    drone("drone", (x, z, t) => env.ground(x, z, t)),
+    drone("drone", (x, z, t) => Math.max(env.ground(x, z, t), solidAt(x, z)), DRONE_CLEAR),
   ];
   const island = course.land.find((l) => l.kind === "island");
   if (island) {

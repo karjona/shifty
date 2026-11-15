@@ -59,8 +59,8 @@ function berths(course: CourseData): Berth[] {
     out.push({ x, z, yaw: Math.PI / 2 + (r() - 0.5) * 0.5, kind, seed: Math.floor(r() * 1000) });
   // The television's boats off each turn (see game/broadcast-bay.ts).
   const off = sh + course.outerLimit + 16;
-  out.push({ x: off + 2.5, z: 6, yaw: -Math.PI / 2, kind: "camera", seed: 1 });
-  out.push({ x: -off - 2.5, z: -6, yaw: Math.PI / 2, kind: "camera", seed: 2 });
+  out.push({ x: off, z: 6, yaw: -Math.PI / 2, kind: "camera", seed: 1 });
+  out.push({ x: -off, z: -6, yaw: Math.PI / 2, kind: "camera", seed: 2 });
   return out;
 }
 

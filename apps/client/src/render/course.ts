@@ -230,6 +230,18 @@ function rampMesh(length: number, width: number, height: number): THREE.Mesh {
 /** The start gate: how high the banner's foot hangs over the water (m), and the banner's height. */
 const GATE = { foot: 6.4, banner: 1.6 };
 
+/** Where the start gate's two towers float, and how tall and wide they stand (m), for what they hide. */
+export function gateTowers(d: CourseData): { x: number; z: number; radius: number; top: number }[] {
+  const { x, z, yaw } = d.start;
+  const half = d.laneHalf + 2;
+  return [-1, 1].map((side) => ({
+    x: x - Math.cos(yaw) * half * side,
+    z: z + Math.sin(yaw) * half * side,
+    radius: 1.8,
+    top: GATE.foot + GATE.banner + 1.2,
+  }));
+}
+
 interface Floating {
   obj: THREE.Object3D;
   x: number;
@@ -296,14 +308,10 @@ export class CourseView {
   private buildStartGate(): void {
     const d = this.data;
     const { x, z, yaw } = d.start;
-    const rx = -Math.cos(yaw);
-    const rz = Math.sin(yaw);
     const half = d.laneHalf + 2;
     const towers: THREE.Mesh[] = [];
-    for (const side of [-1, 1]) {
+    for (const { x: px, z: pz } of gateTowers(d)) {
       const tower = gateTower(GATE.foot + GATE.banner);
-      const px = x + rx * half * side;
-      const pz = z + rz * half * side;
       tower.position.set(px, 0, pz);
       tower.rotation.y = yaw;
       this.group.add(tower);

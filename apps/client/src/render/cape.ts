@@ -591,8 +591,7 @@ function berths(course: CourseData, town: LandData | undefined, mole: LandData |
         seed: seed(),
       });
   }
-  for (const b of cameraBoats(course))
-    spots.push({ x: b.x - Math.cos(b.yaw) * 2.5, z: b.z + Math.sin(b.yaw) * 2.5, yaw: b.yaw, kind: "camera", seed: 1 });
+  for (const b of cameraBoats(course)) spots.push({ x: b.x, z: b.z, yaw: b.yaw, kind: "camera", seed: 1 });
   return spots;
 }
 

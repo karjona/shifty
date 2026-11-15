@@ -6,7 +6,7 @@
 import * as THREE from "three/webgpu";
 import { ARCH_TOP, CoastGround, LIFEGUARD, MOLE_TOP, cameraBoats, onBeach, watchtowerSpot } from "../render/cape.ts";
 import { chevronSpots } from "../render/chevrons.ts";
-import type { CourseData } from "../render/course.ts";
+import { type CourseData, gateTowers } from "../render/course.ts";
 import { moleCamera } from "../render/coast/harbour.ts";
 import { landDistance } from "../render/land.ts";
 import type { Environment } from "../render/world.ts";
@@ -15,7 +15,7 @@ import { type Rig, drone } from "./broadcast-rig.ts";
 
 /** Standing camera's eye over what it stands on (m), and a camera boat's over the water. */
 const EYE = 1.7;
-const BOAT_EYE = 5.5;
+const BOAT_EYE = 5.9;
 /** How tall what stands on the land is (m): the town's houses, a stack, the watchtower. */
 const TOWN_TOP = 14;
 const STACK_TOP = 28;
@@ -23,6 +23,8 @@ const TOWER_TOP = 13;
 /** What stands on the mole's deck (its parapet, people), and the light on its head, over the deck (m). */
 const CROWD = 2;
 const LIGHT = 7;
+/** The drone keeps off whatever stands this far over its rider (m). */
+const DRONE_CLEAR = 4;
 /** A chevron board's half width and top (see render/chevrons.ts). */
 const BOARD = { half: 2.2, top: 2.4 };
 
@@ -31,6 +33,7 @@ const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 /** How high what stands round the cape is at `(x, z)` (0: open water), for what hides a rider. */
 function solid(course: CourseData, ground: CoastGround): (x: number, z: number) => number {
   const boards = chevronSpots(course);
+  const gate = gateTowers(course);
   const tall = course.land.filter((l) => l.kind === "stack" || l.kind === "arch");
   const moles = course.land.filter((l) => l.kind === "mole");
   const tower = watchtowerSpot(ground, course.land);
@@ -55,6 +58,7 @@ function solid(course: CourseData, ground: CoastGround): (x: number, z: number) 
     }
     if (tower && Math.hypot(x - tower.x, z - tower.z) < 3.8) h = Math.max(h, tower.y + TOWER_TOP);
     for (const b of boards) if (Math.hypot(x - b.x, z - b.z) < BOARD.half) h = Math.max(h, BOARD.top);
+    for (const g of gate) if (Math.hypot(x - g.x, z - g.z) < g.radius) h = Math.max(h, g.top);
     for (const r of course.ramps) if (Math.hypot(x - r.x, z - r.z) < r.length / 2) h = Math.max(h, r.height);
     for (const b of course.buoys)
       if (Math.hypot(x - b.x, z - b.z) < course.buoyRadius) h = Math.max(h, course.buoyHeight);
@@ -66,7 +70,7 @@ export function capeRigs(course: CourseData, env: Environment): Rig[] {
   const ground = new CoastGround(course.land);
   const solidAt = solid(course, ground);
   const water = (x: number, z: number, t: number) => Math.max(env.ground(x, z, t), ground.height(x, z));
-  const rigs: Rig[] = [helicopter(solidAt), drone("drone", water)];
+  const rigs: Rig[] = [helicopter(solidAt), drone("drone", water, DRONE_CLEAR)];
 
   const tower = watchtowerSpot(ground, course.land);
   // On the watchtower's top, over the sweeper round the point.
