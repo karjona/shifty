@@ -3,9 +3,9 @@
 // always pays (even when bots fill the seats); a private room pays only
 // races with two or more people in them; single player never pays. Rewards
 // are tuned so a full Tilt earns about a fifth of an average item.
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
-import { ledger, player } from "./db/schema.ts";
+import { ledger, match, matchPlayer, player, raceResult } from "./db/schema.ts";
 import type { ResultReport } from "./results.ts";
 
 /** Credits by finishing place (1st to 8th). */
@@ -71,4 +71,50 @@ export async function pay(db: Db, list: Payout[]): Promise<number> {
     if (done) paid += p.delta;
   }
   return paid;
+}
+
+/** What a match paid a player so far, as the ledger has it. */
+export interface MatchPay {
+  /** `room` or `matchmaking`. */
+  mode: string;
+  /** The races of the match whose results the lobby has (0-based, in the plan). */
+  reported: number[];
+  /** Every payout, by race of the plan. */
+  paid: { event: number; reason: Payout["reason"]; delta: number }[];
+  /** The player's credits now. */
+  credits: number;
+}
+
+/** What a match paid one of its players (null: no such match, or not theirs). */
+export async function matchPay(db: Db, matchId: string, userId: string): Promise<MatchPay | null> {
+  const [m] = await db
+    .select({ mode: match.mode })
+    .from(match)
+    .innerJoin(matchPlayer, and(eq(matchPlayer.matchId, match.id), eq(matchPlayer.userId, userId)))
+    .where(eq(match.id, matchId))
+    .limit(1);
+  if (!m) return null;
+  const prefix = `${matchId}:`;
+  const [results, rows, [me]] = await Promise.all([
+    db
+      .select({ event: raceResult.eventIndex })
+      .from(raceResult)
+      .where(and(eq(raceResult.matchId, matchId), eq(raceResult.userId, userId))),
+    db
+      .select({ reason: ledger.reason, delta: ledger.delta, ref: ledger.ref })
+      .from(ledger)
+      .where(and(eq(ledger.userId, userId), sql`left(${ledger.ref}, ${prefix.length}) = ${prefix}`)),
+    db.select({ credits: player.credits }).from(player).where(eq(player.userId, userId)).limit(1),
+  ]);
+  const paid = rows.flatMap((r) => {
+    const event = Number(r.ref.slice(prefix.length).split(":")[1]);
+    const reason = r.reason === "race" || r.reason === "style" || r.reason === "grand_prix" ? r.reason : null;
+    return reason && Number.isInteger(event) ? [{ event, reason, delta: r.delta }] : [];
+  });
+  return {
+    mode: m.mode,
+    reported: [...new Set(results.map((r) => r.event))].toSorted((a, b) => a - b),
+    paid: paid.toSorted((a, b) => a.event - b.event),
+    credits: me?.credits ?? 0,
+  };
 }
