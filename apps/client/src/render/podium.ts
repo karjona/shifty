@@ -58,7 +58,8 @@ export class PodiumScene {
   readonly group = new THREE.Group();
   /** Resolves once the art is in (and its shaders compiled). */
   readonly ready: Promise<void>;
-  private look = new EnvLook();
+  /** (The podium only ever stands in the menus' summer bay: its materials skip the weather.) */
+  private look = new EnvLook(false);
   private confetti: Confetti;
   private streamers: Streamers;
   /** The crowd's groups: the arms of each of their two poses. */
