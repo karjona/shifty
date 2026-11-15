@@ -5,10 +5,7 @@
 // drawn in a handful of batches; the paving's pattern is a shader, and what
 // moves (boats at their moorings, sails out at sea) is moved here.
 import * as THREE from "three/webgpu";
-import { Fn, float, fwidth, max, mix, positionWorld, smoothstep, step, vec3 } from "three/tsl";
-import { CelMaterial } from "./cel/material.ts";
-import { FOLIAGE, LOOK } from "./cel/look.ts";
-import { noise4 } from "./cel/noise.ts";
+import { LOOK } from "./cel/look.ts";
 import { EnvLook } from "./env/materials.ts";
 import { type EnvAnim, type EnvModel, loadEnv } from "./env/model.ts";
 import { warmUp } from "./warm.ts";
@@ -46,39 +43,6 @@ export function buildClub(): THREE.Group {
   );
   return g;
 }
-
-/** Terracotta and limestone, as shader constants. */
-const tone = (hex: number) => {
-  const c = new THREE.Color(hex);
-  return vec3(c.r, c.g, c.b);
-};
-
-/** The terrace's paving: limestone slabs with grout, a small terracotta tile set in at every corner. */
-function paving(): THREE.Node<"vec3"> {
-  return Fn(() => {
-    const q = positionWorld.xz.div(0.66);
-    const cell = q.floor();
-    const f = q.fract().sub(0.5).abs();
-    // How many slabs a pixel spans: far off, the pattern melts into its average.
-    const span = fwidth(q.x).add(fwidth(q.y));
-    const edge = max(f.x, f.y);
-    const aa = max(fwidth(edge), float(1e-4));
-    const grout = smoothstep(float(0.48).sub(aa), float(0.48).add(aa), edge);
-    const corner = f.x.add(f.y);
-    const ca = max(fwidth(corner), float(1e-4));
-    const inset = smoothstep(float(0.8).sub(ca), float(0.8).add(ca), corner);
-    const n = noise4(cell.mul(5.37).add(0.5));
-    const slab = mix(tone(0xead9b6), tone(0xdcc7a0), smoothstep(-0.5, 0.5, n.x));
-    const k = noise4(q.add(0.5).floor().mul(3.71).add(0.5));
-    const tile = mix(mix(tone(0xc8683f), tone(0xb4552f), smoothstep(-0.4, 0.4, k.y)), tone(0x2f7f9a), step(0.42, k.z));
-    const groutLine = grout.mul(float(1).sub(smoothstep(float(0.86).sub(ca), float(0.86).add(ca), corner)));
-    const pattern = mix(mix(slab, tile, inset), tone(0xb7a27e), groutLine);
-    return mix(pattern, tone(0xdfcba6), smoothstep(0.5, 1.4, span));
-  })();
-}
-
-/** The shade that falls on the paving: deep enough that a rider's shadow grounds them on the pale stone. */
-const PAVING_SHADE = new THREE.Color(0.5, 0.5, 0.78);
 
 /** A group of the art that moves, with where it rests. */
 interface Mover {
@@ -136,10 +100,7 @@ function assemble(model: EnvModel): THREE.Group {
   };
   for (const a of model.anims) animated(a);
   if (floor) {
-    const mesh = new THREE.Mesh(
-      floor,
-      new CelMaterial({ colorNode: paving(), crease: 0, outdoor: FOLIAGE.none, shade: PAVING_SHADE }),
-    );
+    const mesh = new THREE.Mesh(floor, look.material("paving"));
     mesh.name = "env.paving";
     mesh.receiveShadow = true;
     // The floor is in every picture of the terrace: drawing it moves what moves.

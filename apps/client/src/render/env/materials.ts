@@ -2,7 +2,8 @@
 // material class: `solid` (stone, wood, iron: a colour per vertex),
 // `foliage` (leaves and flowers in the season's colours, moving in the
 // breeze), `cloth` (flags, fringes and awnings, flapping) and `glass` (panes
-// that mirror the sky). The breeze is a look: how far a vertex moves is in
+// that mirror the sky) and `paving` (a floor whose pattern is drawn here).
+// The breeze is a look: how far a vertex moves is in
 // the art (its sway weight), which way and when is here.
 import * as THREE from "three/webgpu";
 import {
@@ -10,7 +11,10 @@ import {
   attribute,
   cameraPosition,
   dot,
+  float,
   fract,
+  fwidth,
+  max,
   mix,
   normalWorld,
   positionLocal,
@@ -18,11 +22,13 @@ import {
   reflect,
   sin,
   smoothstep,
+  step,
   uniform,
   vec3,
 } from "three/tsl";
 import { CelMaterial, inkId } from "../cel/material.ts";
 import { FOLIAGE, LOOK } from "../cel/look.ts";
+import { noise4 } from "../cel/noise.ts";
 import type { EnvParts } from "./model.ts";
 
 /** How the breeze moves a class of things: metres at full sway along the wind (in gusts), across it (flapping) and up and down. */
@@ -88,6 +94,8 @@ export class EnvLook {
       m = c;
     } else if (cls === "glass") {
       m = new CelMaterial({ colorNode: glass(), spec: 0.5, specSize: 0.06, crease: 0, id: inkId("env.glass") });
+    } else if (cls === "paving") {
+      m = new CelMaterial({ colorNode: paving(), crease: 0, outdoor: FOLIAGE.none, shade: PAVING_SHADE });
     } else {
       m = new CelMaterial({ vertexColors: true, outdoor: FOLIAGE.none });
     }
@@ -120,5 +128,38 @@ function glass(): THREE.Node<"vec3"> {
     const glint = smoothstep(0.0, 0.02, slant).mul(smoothstep(0.2, 0.18, slant));
     const tint = attribute<"vec3">("color", "vec3");
     return mix(sky.mul(tint), vec3(1), glint.mul(0.45));
+  })();
+}
+
+/** A colour as a shader constant. */
+const tone = (hex: number) => {
+  const c = new THREE.Color(hex);
+  return vec3(c.r, c.g, c.b);
+};
+
+/** The shade that falls on paving: deep enough that a rider's shadow grounds them on the pale stone. */
+const PAVING_SHADE = new THREE.Color(0.5, 0.5, 0.78);
+
+/** Paving: limestone slabs with grout, a small glazed or terracotta tile set in at every corner. */
+function paving(): THREE.Node<"vec3"> {
+  return Fn(() => {
+    const q = positionWorld.xz.div(0.66);
+    const cell = q.floor();
+    const f = q.fract().sub(0.5).abs();
+    // How many slabs a pixel spans: far off, the pattern melts into its average.
+    const span = fwidth(q.x).add(fwidth(q.y));
+    const edge = max(f.x, f.y);
+    const aa = max(fwidth(edge), float(1e-4));
+    const grout = smoothstep(float(0.48).sub(aa), float(0.48).add(aa), edge);
+    const corner = f.x.add(f.y);
+    const ca = max(fwidth(corner), float(1e-4));
+    const inset = smoothstep(float(0.8).sub(ca), float(0.8).add(ca), corner);
+    const n = noise4(cell.mul(5.37).add(0.5));
+    const slab = mix(tone(0xead9b6), tone(0xdcc7a0), smoothstep(-0.5, 0.5, n.x));
+    const k = noise4(q.add(0.5).floor().mul(3.71).add(0.5));
+    const tile = mix(mix(tone(0xc8683f), tone(0xb4552f), smoothstep(-0.4, 0.4, k.y)), tone(0x2f7f9a), step(0.42, k.z));
+    const groutLine = grout.mul(float(1).sub(smoothstep(float(0.86).sub(ca), float(0.86).add(ca), corner)));
+    const pattern = mix(mix(slab, tile, inset), tone(0xb7a27e), groutLine);
+    return mix(pattern, tone(0xdfcba6), smoothstep(0.5, 1.4, span));
   })();
 }
