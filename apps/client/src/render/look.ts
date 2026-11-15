@@ -45,6 +45,8 @@ interface Sky {
   shadow: number;
   cirrus: number;
   streaks: number;
+  puffs: number;
+  veil: number;
   overcast: number;
   deck: RGB;
   deckShade: RGB;
@@ -156,6 +158,9 @@ interface WeatherLook {
   shadow: number;
   cirrus: number;
   streaks: number;
+  /** Fields of small puffs at mid height, and veils of rain under the deck (0-1 each). */
+  puffs: number;
+  veil: number;
   overcast: number;
   deck: [number, number];
   cloud: number;
@@ -184,6 +189,8 @@ const BASE: WeatherLook = {
   shadow: 1,
   cirrus: 1,
   streaks: 0,
+  puffs: 0.3,
+  veil: 0,
   overcast: 0,
   deck: [0xd8dde4, 0x9aa4b4],
   cloud: 0xffffff,
@@ -214,6 +221,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.05, 1.05, 1.04),
     shadow: 0.55,
     cirrus: 0.4,
+    puffs: 0.8,
     overcast: 0.4,
     deck: [0xe4e8ee, 0xa4adbc],
     cloud: 0xeef1f5,
@@ -231,6 +239,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     weight: 0.4,
     cirrus: 1,
     streaks: 1,
+    puffs: 0.12,
     cover: 0.42,
     tower: 0.6,
     whitecaps: 0.8,
@@ -247,6 +256,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.1, 1.1, 1.08),
     shadow: 0.3,
     cirrus: 0,
+    puffs: 0,
     cover: 0,
     haze: 1,
     sea: [0x3c6a86, 0x4f7f98, 0x7c9cb0, 0x6aa0a6],
@@ -264,6 +274,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(0.98, 1.0, 1.04),
     shadow: 0.1,
     cirrus: 0,
+    puffs: 0,
+    veil: 0.7,
     overcast: 0.9,
     deck: [0x8c97a5, 0x5d6878],
     cloud: 0xb6bec8,
@@ -290,6 +302,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(0.92, 0.95, 1.02),
     shadow: 0,
     cirrus: 0,
+    puffs: 0,
+    veil: 1,
     overcast: 1,
     deck: [0x5a6472, 0x343c4a],
     cloud: 0x8a929c,
@@ -316,6 +330,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.1, 1.1, 1.08),
     shadow: 0.35,
     cirrus: 0,
+    puffs: 0,
+    veil: 0.35,
     overcast: 0.95,
     deck: [0xd4d9e0, 0xa8b0bd],
     cloud: 0xdde2e8,
@@ -445,6 +461,8 @@ function skyOf(weather: Weather, season: Season, el: number, morning: boolean): 
     shadow: w.shadow,
     cirrus: w.cirrus,
     streaks: w.streaks,
+    puffs: w.puffs,
+    veil: w.veil,
     overcast: w.overcast,
     deck: tone(w.deck[0]),
     deckShade: tone(w.deck[1]),
@@ -580,6 +598,8 @@ export class ConditionsLook {
     LOOK.shadow.value = s.shadow;
     LOOK.cirrus.value = s.cirrus;
     LOOK.streaks.value = s.streaks;
+    LOOK.puffs.value = s.puffs;
+    LOOK.veil.value = s.veil;
     LOOK.overcast.value = s.overcast;
     LOOK.deck.value.copy(s.deck);
     LOOK.deckShade.value.copy(s.deckShade);

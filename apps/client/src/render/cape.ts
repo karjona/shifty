@@ -15,7 +15,7 @@ import * as THREE from "three/webgpu";
 import { Fn, attribute, clamp, max, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
-import { FOLIAGE, cut0 } from "./cel/look.ts";
+import { cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { CircuitLook } from "./look.ts";
@@ -30,6 +30,7 @@ import { Crowd, crowdOf } from "./coast/people.ts";
 import {
   CLIFF,
   DRY_GRASS,
+  GRASSY,
   LIMESTONE,
   LIMESTONE_TOP,
   SCRUB,
@@ -47,7 +48,7 @@ import { Planting } from "./coast/trees.ts";
 import type { CourseData, LandData } from "./course.ts";
 import { landDistance, rng } from "./land.ts";
 import type { RiderView } from "./world.ts";
-import { hash, peak } from "./scenery.ts";
+import { COAST_SIERRA, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
 
 /** The cape under the sky: the bay's sun, snow down to the beach in winter and only on the sierra otherwise. */
 const CAPE_LOOK: CircuitLook = {
@@ -240,7 +241,7 @@ function groundMaterial(): CelMaterial {
   });
   groundCel = new CelMaterial({
     colorNode: colour(),
-    outdoor: FOLIAGE.grass,
+    outdoor: GRASSY,
     shade: new THREE.Color(0.6, 0.62, 0.82),
     richness: 1.2,
     crease: 0.5,
@@ -496,20 +497,6 @@ function plants(ground: CoastGround): THREE.Group {
   return g;
 }
 
-/** The sierra behind the coast: two ranges, snow-capped, the far one taller and hazier. */
-function sierra(): THREE.Group {
-  const g = new THREE.Group();
-  for (let i = 0; i < 16; i++) {
-    const far = i % 2 === 1;
-    const h = (far ? 340 : 200) + hash(i + 140) * (far ? 180 : 110);
-    const p = peak(h * (1.1 + hash(i + 17) * 0.5), h, i + 61, far ? 0.45 : 0.58, far ? 0.45 : 0.28);
-    p.position.x = -2100 + i * 280 + hash(i + 41) * 140;
-    p.position.z = -(far ? 2500 : 1700) - hash(i + 53) * 260;
-    g.add(p);
-  }
-  return g;
-}
-
 /** The centre line at `s`, `offset` m to its right. */
 function along(course: CourseData, s: number, offset: number): { x: number; z: number; yaw: number } {
   const step = course.path.length > 1 ? course.path[1]!.s : 2;
@@ -722,9 +709,8 @@ export class CapeScenery implements WaterScenery {
     if (arms) this.group.add(arms);
 
     this.group.add(plants(ground));
-    const sierraGroup = sierra();
-    sierraGroup.userData.noMerge = true;
-    this.group.add(sierraGroup);
+    // The distance: foothills and the sierra behind the coast (north, -z), headlands and islets out to sea.
+    this.group.add(foothills(-1, 1000, 950, 3800, 300, 5), sierra(-1, COAST_SIERRA, 5400, 7), seaHorizon(-1, 9));
   }
 
   update(waves: Float32Array, t: number, riders: readonly RiderView[]): void {

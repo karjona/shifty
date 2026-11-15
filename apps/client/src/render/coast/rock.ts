@@ -22,6 +22,12 @@ export const ARMOUR = [0xb4aca0, 0xa69e92, 0xc0b8ac, 0x9c958a].map((h) => new TH
 export const SCRUB = new THREE.Color(0x7f9a4e);
 export const DRY_GRASS = new THREE.Color(0x9aa85a);
 
+/**
+ * What the coast's ground is to the seasons (see `FOLIAGE`): grass, a little less than whole, so its light dry
+ * greens turn with the season without going garish.
+ */
+export const GRASSY = FOLIAGE.grass * 0.8;
+
 let rock: CelMaterial | null = null;
 
 /** The rock material (shared). */
@@ -63,7 +69,7 @@ export function rockMaterial(): CelMaterial {
     vertexColors: true,
     flatShading: true,
     colorNode: tone(),
-    outdoor: FOLIAGE.grass,
+    outdoor: GRASSY,
     shade: new THREE.Color(0.6, 0.58, 0.8),
     richness: 1.25,
     crease: 0.75,
