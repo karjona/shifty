@@ -79,7 +79,7 @@ const TAU = Math.PI * 2;
  * (`peakLocal`, `peakShape`, `peakFoot`), so peaks merge into one mesh.
  */
 export function peakGeometry(radius: number, height: number, seed: number, s: PeakStyle): THREE.BufferGeometry {
-  const geo = new THREE.ConeGeometry(radius, height, 40, 14, true);
+  const geo = new THREE.ConeGeometry(radius, height, 32, 10, true);
   geo.translate(0, height / 2, 0);
   const pos = geo.attributes.position!;
   const v = new THREE.Vector3();

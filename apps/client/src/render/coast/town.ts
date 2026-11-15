@@ -606,7 +606,7 @@ export function buildTown(
     }
   });
   addPromenade(shape, q, r, season, crowd, wavers, clear);
-  // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill, smoking.
+  // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill.
   const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
   flags.forEach((colours, i) => {
     const p = quayPoint(q, q.len * 0.5 + (i - 1) * 3.2, 8.6);
@@ -617,7 +617,6 @@ export function buildTown(
   uphill.take(post(0.75, 0.5, 13, 6), new THREE.Color(0xb86a4a), place(stack.x, groundAt(61), stack.z), {
     uv: TILE.white,
   });
-  life.smoke(stack.x, groundAt(61) + 13.4, stack.z);
   group.add(shape.mesh(townMaterial()));
   const upper = uphill.mesh(townMaterial(), "receive");
   upper.layers.set(UNREFLECTED);

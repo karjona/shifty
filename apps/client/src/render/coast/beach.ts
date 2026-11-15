@@ -269,11 +269,6 @@ export function addBeach(
   const T = addLifeguardTower(shape, towerAt.x, towerAt.y, towerAt.z, sea);
   const staff = T.p(LIFEGUARD_FLAG.x, LIFEGUARD_FLAG.y, LIFEGUARD_FLAG.z);
   life.flag(staff.x, staff.y, staff.z, 1.5, 1, [flag]);
-  if (open) {
-    // The grill behind the bar.
-    const grill = B.p(2.6, 5.3, -2.6);
-    life.smoke(grill.x, grill.y, grill.z);
-  }
   if (open && crowd > 0.3) {
     const seat = T.p(0, 3.26, 1.6);
     addPerson(shape, seat.x, seat.y + 0.45, seat.z, sea, r, { pose: "sit", beach: true });

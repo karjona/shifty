@@ -148,12 +148,15 @@ export function skyDome(): THREE.Mesh {
       const belly = cut0(noise4(q.mul(2.6).add(7.3)).w.sub(0.22)).mul(cut0(edge.sub(0.3)));
       const deck = mix(mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14))), LOOK.deckShade.mul(0.8), belly.mul(0.8));
       sky.assign(mix(sky, deck, cloud));
-      // Veils of rain hanging under it toward the horizon, slanted by the wind.
+      // Veils of rain hanging under it toward the horizon: soft curtains here and there round the sky, faintly streaked.
       const az = atan(d.z, d.x);
-      const sector = cut0(noise4(vec2(az.mul(2.2), 0.4).add(drift.mul(3))).x.sub(0.02));
-      const streaks = cut0(noise4(vec2(az.mul(46).add(y.mul(22)), y.mul(2.5))).y.sub(0.1));
-      const veil = sector.mul(smoothstep(0.34, 0.1, y)).mul(LOOK.veil);
-      sky.assign(mix(sky, LOOK.deckShade.mul(0.86), veil.mul(streaks.mul(0.3).add(0.5))));
+      const sector = smoothstep(-0.05, 0.35, noise4(vec2(az.mul(1.6), 0.4).add(drift.mul(3))).x);
+      const streaks = noise4(vec2(az.mul(30).add(y.mul(14)), y.mul(1.5))).y;
+      const veil = sector
+        .mul(smoothstep(0.36, 0.14, y))
+        .mul(smoothstep(0, 0.05, y))
+        .mul(LOOK.veil);
+      sky.assign(mix(sky, LOOK.deckShade.mul(0.88), veil.mul(streaks.mul(0.1).add(0.45))));
     });
     c = sky;
     return c;

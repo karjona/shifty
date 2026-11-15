@@ -730,7 +730,10 @@ export class CapeScenery implements WaterScenery {
       }
       this.group.add(palms.build(true));
     }
-    this.group.add(works.mesh(townMaterial()));
+    // (Up the beach and on the headland: too far from the water to throw shadows on it or show in it.)
+    const built = works.mesh(townMaterial(), "receive");
+    built.layers.set(UNREFLECTED);
+    this.group.add(built);
     const arms = this.crowd.build();
     if (arms) this.group.add(arms);
     this.group.add(...life.build());
