@@ -5,11 +5,12 @@ import { CIRCUITS, type Circuit, SEASONS, SPORT_SEASONS, type Season } from "@sh
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { circuitName } from "../../game/conditions.ts";
-import { useT } from "../../i18n/index.ts";
+import { useLocale, useT } from "../../i18n/index.ts";
 import { formatTime } from "../../ui/hud.ts";
 import { type Board, type BoardRow, type GhostPick, type TrialRace, boardQuery } from "../api.ts";
+import { useScrollEdges } from "../hooks.ts";
 import { toast } from "../toast.tsx";
-import { Panel, Picker, Spinner } from "../ui.tsx";
+import { Button, Handle, Panel, Picker, Spinner } from "../ui.tsx";
 
 /** Most ghosts in one run. */
 export const MAX_GHOSTS = 3;
@@ -36,8 +37,10 @@ export interface TrialChoice {
   race: TrialRace | null;
 }
 
-export function TrialPanel({ title, onChange }: { title: string; onChange: (c: TrialChoice) => void }) {
+export function TrialPanel({ label, onChange }: { label: string; onChange: (c: TrialChoice) => void }) {
   const t = useT();
+  const locale = useLocale();
+  const edges = useScrollEdges();
   const [course, setCourse] = useState(0);
   const [season, setSeason] = useState<Season>("summer");
   const circuit = CIRCUITS.find((c) => c.id === course) ?? CIRCUITS[0];
@@ -83,8 +86,8 @@ export function TrialPanel({ title, onChange }: { title: string; onChange: (c: T
   if (mine && !rows.some((r) => r.me)) rows.push(mine);
 
   return (
-    <Panel className="mode-panel trial-panel" title={title}>
-      <p>{t.trial.about}</p>
+    <Panel className="mode-panel trial-panel" label={label}>
+      <p className="mode-about small">{t.trial.about(MAX_GHOSTS)}</p>
       <Picker
         label={t.trial.circuit}
         options={CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) }))}
@@ -97,44 +100,54 @@ export function TrialPanel({ title, onChange }: { title: string; onChange: (c: T
         value={shownSeason}
         onChange={setSeason}
       />
-      <div className="trial-best">
-        <span className="label">{t.trial.yourBest}</span>
-        {mine ? (
-          <>
-            <b>{formatTime(mine.timeMs, 1000)}</b>
-            <span className="muted">{t.trial.rank(mine.rank, board.data?.total ?? 0)}</span>
-          </>
-        ) : (
-          <span className="muted">{t.trial.noTime}</span>
-        )}
-      </div>
       <div className="trial-board">
         <header>
-          <span className="label">{t.trial.board}</span>
+          <span className="trial-best">
+            <span className="label">{t.trial.yourBest}</span>
+            {board.data && mine && (
+              <>
+                <b>{formatTime(mine.timeMs, 1000)}</b>
+                <span className="muted">{t.trial.rank(mine.rank, board.data.total)}</span>
+              </>
+            )}
+            {board.data && !mine && <span className="muted">{t.trial.noTime}</span>}
+          </span>
           <span className="label">{t.trial.ghosts(ids.length, MAX_GHOSTS)}</span>
         </header>
-        {board.isPending && <Spinner />}
-        {board.isError && <p className="muted">{t.common.error}</p>}
-        {board.data && rows.length === 0 && <p className="muted">{t.trial.empty}</p>}
-        <ol>
-          {rows.map((r) => (
-            <li key={r.ghost}>
-              <button
-                type="button"
-                data-nav=""
-                className={`trial-row${r.me ? " me" : ""}${ids.includes(r.ghost) ? " picked" : ""}`}
-                aria-pressed={ids.includes(r.ghost)}
-                onClick={() => toggle(r)}
-              >
-                <span className="num">{r.rank}</span>
-                <span className="who">{r.handle}</span>
-                <span className="time">{formatTime(r.timeMs, 1000)}</span>
-                <span className="pick" aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ol>
-        <p className="muted small">{t.trial.ghostHint}</p>
+        <div className="trial-rows" ref={edges}>
+          {board.isPending && (
+            <p className="trial-note">
+              <Spinner />
+            </p>
+          )}
+          {board.isError && (
+            <div className="trial-note">
+              <p className="muted">{t.trial.boardError}</p>
+              <Button onClick={() => void board.refetch()}>{t.common.retry}</Button>
+            </div>
+          )}
+          {board.data && rows.length === 0 && <p className="trial-note muted">{t.trial.empty}</p>}
+          {rows.length > 0 && (
+            <ol>
+              {rows.map((r) => (
+                <li key={r.ghost}>
+                  <button
+                    type="button"
+                    data-nav=""
+                    className={`trial-row${r.me ? " me" : ""}${ids.includes(r.ghost) ? " picked" : ""}`}
+                    aria-pressed={ids.includes(r.ghost)}
+                    onClick={() => toggle(r)}
+                  >
+                    <span className="num">{r.rank.toLocaleString(locale)}</span>
+                    <Handle handle={r.handle} className="who" />
+                    <span className="time">{formatTime(r.timeMs, 1000)}</span>
+                    <span className="pick" aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
       </div>
     </Panel>
   );

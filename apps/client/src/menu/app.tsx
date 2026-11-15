@@ -3,7 +3,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import {
-  ErrorComponent,
   type ErrorComponentProps,
   Outlet,
   RouterProvider,
@@ -12,7 +11,10 @@ import {
   createRouter,
   redirect,
 } from "@tanstack/react-router";
-import { inviteQuery, meQuery, redeemInvite } from "./api.ts";
+import { useT } from "../i18n/index.ts";
+import { ApiError, inviteQuery, meQuery, redeemInvite } from "./api.ts";
+import { useAction, useAutoFocus } from "./hooks.ts";
+import { Button, Panel, Wordmark } from "./ui.tsx";
 import { InfoPage } from "./screens/info.tsx";
 import { Login } from "./screens/login.tsx";
 import { MainMenu, type MenuTab } from "./screens/main-menu.tsx";
@@ -41,10 +43,33 @@ const rootRoute = createRootRouteWithContext<Ctx>()({
   errorComponent: RouteError,
 });
 
-/** A screen that failed to load: shown at once (the boot screen would hide it). */
-function RouteError(props: ErrorComponentProps) {
+const retry = () => window.location.reload();
+
+/**
+ * A screen that failed to load (the lobby out of reach, most often): shown
+ * at once (the boot screen would hide it), with a way to try again.
+ */
+function RouteError({ error }: ErrorComponentProps) {
+  const t = useT();
   useEffect(() => booted(), []);
-  return <ErrorComponent {...props} />;
+  useAutoFocus();
+  useAction("play", retry);
+  const offline = !(error instanceof ApiError);
+  return (
+    <div className="screen login">
+      <header className="screen-top">
+        <Wordmark />
+      </header>
+      <main className="login-main">
+        <Panel className="login-card" title={offline ? t.errors.offlineTitle : t.errors.title}>
+          <p>{offline ? t.common.offline : t.common.error}</p>
+          <Button kind="primary" className="wide" glyph="play" onClick={retry} autoFocus>
+            {t.common.retry}
+          </Button>
+        </Panel>
+      </main>
+    </div>
+  );
 }
 
 async function signedIn(ctx: Ctx) {

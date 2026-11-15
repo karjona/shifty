@@ -122,8 +122,15 @@ function HomeTab() {
         <SeasonWord />
       </div>
       <div className="home-right">
-        {data && data.banners.length > 0 && <HeroBanner banners={data.banners} onOpen={open} />}
-        <Panel title={t.home.news} className="news">
+        {data ? (
+          data.banners.length > 0 && <HeroBanner banners={data.banners} onOpen={open} />
+        ) : (
+          <div className="hero hero-loading" aria-hidden="true">
+            <span className="hero-head" />
+            <span className="hero-block" />
+          </div>
+        )}
+        <Panel title={t.home.news} className={`news${data ? "" : " loading"}`}>
           {data && data.news.length === 0 && <p className="muted">{t.home.newsEmpty}</p>}
           <ul>
             {data?.news.slice(0, 3).map((n) => (
@@ -192,7 +199,7 @@ function HeroBanner({ banners, onOpen }: { banners: Banner[]; onOpen: (b: Banner
       {b.imageUrl && <span className="hero-image" style={{ backgroundImage: `url("${encodeURI(b.imageUrl)}")` }} />}
       <span className="hero-block" key={b.id}>
         <Glyph action="confirm" />
-        <b>{b.title}</b>
+        <b className={b.title.length > 26 ? "long" : undefined}>{b.title}</b>
         {b.subtitle && <span>{b.subtitle}</span>}
       </span>
     </button>

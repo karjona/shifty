@@ -29,6 +29,37 @@ export function useAutoFocus(): void {
   });
 }
 
+/**
+ * A ref for a list that scrolls: it says on the element (`data-more`: up,
+ * down or both) which way more of the list is hidden, for the styles to
+ * fade that edge out.
+ */
+export function useScrollEdges(): (el: HTMLElement | null) => void {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!el) return undefined;
+    const update = () => {
+      const up = el.scrollTop > 2;
+      const down = el.scrollTop + el.clientHeight < el.scrollHeight - 2;
+      const more = up && down ? "both" : up ? "up" : down ? "down" : "";
+      if (more) el.setAttribute("data-more", more);
+      else el.removeAttribute("data-more");
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const sizes = new ResizeObserver(update);
+    sizes.observe(el);
+    const content = new MutationObserver(update);
+    content.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener("scroll", update);
+      sizes.disconnect();
+      content.disconnect();
+    };
+  }, [el]);
+  return setEl;
+}
+
 /** The engine, once it has booted. */
 export function useEngine(): Engine | null {
   const [engine, setEngine] = useState<Engine | null>(null);

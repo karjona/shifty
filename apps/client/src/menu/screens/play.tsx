@@ -113,10 +113,10 @@ export function ModeSelect() {
             ]}
           />
           {mode === "trial" ? (
-            <TrialPanel title={t.play.modes.trial} onChange={setTrial} />
+            <TrialPanel label={t.play.modes.trial} onChange={setTrial} />
           ) : (
-            <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
-              <p>{t.play.about[mode]}</p>
+            <Panel key={mode} className="mode-panel" label={t.play.modes[mode]}>
+              <p className="mode-about">{t.play.about[mode]}</p>
               {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
               {mode === "room" && (
                 <>
@@ -188,7 +188,7 @@ function Races({ tilt }: { tilt: boolean }) {
       <p className="muted">{t.play.eventAbout.gp}</p>
       <ol>
         {seasons.map((s, i) => (
-          <li key={s}>
+          <li key={s} className={`season-${s}`}>
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <b>{t.seasons[s]}</b>
             <span className="muted">
@@ -225,7 +225,7 @@ function JoinRoom({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title={t.play.joinRoom} onClose={onClose}>
-      <form className="stack" onSubmit={(e) => void submit(e)}>
+      <form className="stack" onSubmit={(e) => void submit(e)} noValidate>
         <TextField
           label={t.play.roomCode}
           className="code-input"

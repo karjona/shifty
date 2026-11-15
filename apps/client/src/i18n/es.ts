@@ -16,7 +16,9 @@ export const es: Messages = {
     soonTag: "Pronto",
     error: "Algo ha fallado. Vuelve a intentarlo.",
     noServer: "Ahora mismo no hay ningún servidor de carreras disponible. Prueba de nuevo en un momento.",
+    offline: "No se puede conectar con los servidores del juego. Revisa tu conexión y vuelve a intentarlo.",
   },
+  errors: { title: "Algo ha fallado", offlineTitle: "Sin conexión" },
   languages: { en: "English", es: "Español", ca: "Català" },
   seasons: { summer: "Verano", fall: "Otoño", winter: "Invierno", spring: "Primavera" },
   weathers: {
@@ -123,14 +125,14 @@ export const es: Messages = {
     edit: "Editar rider",
   },
   wardrobe: {
-    season: "Temporada",
-    title: "Vestuario",
+    sport: "Deporte",
+    title: "Armario",
     slots: {
       head: "Cabeza",
       eyes: "Ojos",
-      top: "Arriba",
+      top: "Torso",
       vest: "Chaleco",
-      bottom: "Abajo",
+      bottom: "Piernas",
       hands: "Manos",
       feet: "Pies",
       ride: "Vehículo",
@@ -193,7 +195,7 @@ export const es: Messages = {
   },
   setup: {
     title: "Reglaje",
-    body: "Todos tienen los mismos 12 puntos. Repártelos como quieras: se eligen antes de una partida y se mantienen todo el Tilt.",
+    body: "Todo el mundo tiene los mismos 12 puntos: repártelos como quieras. Se eligen antes de una partida y no cambian en todo el Tilt.",
     stats: { speed: "Velocidad", handling: "Manejo", stability: "Estabilidad", tricks: "Trucos" },
     about: {
       speed: "Un poco más de velocidad punta.",
@@ -208,7 +210,7 @@ export const es: Messages = {
     open: "Reglaje",
   },
   shop: {
-    slot: "Prenda",
+    slot: "Categoría",
     title: "Tienda",
     credits: "Créditos",
     amount: (n: number) => `${n.toLocaleString("es")} cr`,
@@ -469,18 +471,18 @@ export const es: Messages = {
   },
   trial: {
     title: "Contrarreloj",
-    about:
-      "Corre solo contra el reloj, con tiempo despejado y estable, y persigue a los fantasmas de las mejores carreras.",
+    about: (n: number) =>
+      `Contra el reloj, con tiempo despejado y estable. Elige hasta ${n} fantasmas de la clasificación para perseguirlos.`,
     circuit: "Circuito",
     season: "Estación",
     yourBest: "Tu mejor",
     record: "Récord",
     noTime: "Aún sin tiempo",
-    rank: (n: number, total: number) => `${n} de ${total}`,
+    rank: (n: number, total: number) => `${n.toLocaleString("es")} de ${total.toLocaleString("es")}`,
     board: "Clasificación",
     ghosts: (n: number, max: number) => `Fantasmas ${n}/${max}`,
-    empty: "Aún nadie tiene tiempo aquí. ¡Marca el primero!",
-    ghostHint: "Elige una fila para correr contra su fantasma.",
+    empty: "Aún no hay ningún tiempo aquí. ¡Marca el primero!",
+    boardError: "No se ha podido cargar la clasificación.",
     tooMany: (n: number) => `Hasta ${n} fantasmas a la vez.`,
     finish: "¡META!",
     newBest: "¡NUEVO RÉCORD PERSONAL!",

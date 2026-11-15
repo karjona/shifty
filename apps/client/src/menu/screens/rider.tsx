@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop, useRiderShot } from "../hooks.ts";
+import { useAction, useAutoFocus, useBackdrop, useRiderShot, useScrollEdges } from "../hooks.ts";
 import { hexColour } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Panel, Picker } from "../ui.tsx";
@@ -67,6 +67,7 @@ export function RiderScreen() {
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState<"body" | "face">("body");
   const space = useRiderShot(focus);
+  const edges = useScrollEdges();
   useAutoFocus();
 
   useEffect(() => showMenuRider(true), []);
@@ -106,7 +107,7 @@ export function RiderScreen() {
         <div className="rider-space" aria-hidden="true" ref={space} />
         <div className="creator-side">
           <Panel className="creator-panel">
-            <div className="creator-rows numbered">
+            <div className="creator-rows numbered" ref={edges}>
               <Picker
                 label={t.rider.bodyType}
                 autoFocus

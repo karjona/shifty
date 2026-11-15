@@ -1,10 +1,14 @@
 // The menus and the race HUD are laid out on a 1920×1080 canvas; this scales
-// them to fit the window (CSS `zoom`, from --ui-zoom). A short window (a
+// them to fit the window (CSS `zoom`, from --ui-zoom). A window narrower
+// than 16:9 gets a canvas down to 1760 wide (taller than 1080) before it
+// scales down further, so type stays readable in a small window. A short window (a
 // phone on its side) gets a compact canvas instead, about 640 tall and as
 // wide as the window allows, so type and rows stay big enough to read and
 // tap; `data-compact` on the root element lets the layouts tighten for it.
 let zoom = 1;
 
+/** The narrowest canvas a window gets (the layouts hold down to this width). */
+const MIN_WIDTH = 1760;
 /** Below this many CSS pixels tall, the window gets the compact canvas. */
 const COMPACT_BELOW = 600;
 /** The compact canvas's height. */
@@ -12,7 +16,9 @@ const COMPACT_HEIGHT = 640;
 
 const fit = () => {
   const compact = innerHeight < COMPACT_BELOW;
-  const z = compact ? innerHeight / COMPACT_HEIGHT : Math.max(0.4, Math.min(innerWidth / 1920, innerHeight / 1080));
+  const z = compact
+    ? innerHeight / COMPACT_HEIGHT
+    : Math.max(0.4, Math.min(innerWidth / MIN_WIDTH, innerHeight / 1080));
   zoom = Number(z.toFixed(4));
   const root = document.documentElement;
   root.style.setProperty("--ui-zoom", String(zoom));

@@ -12,7 +12,7 @@ import { lobbySocket, meQuery, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { PlanPickers, usePlanSummary } from "../plan.tsx";
-import { Button, Hints, Panel, Picker } from "../ui.tsx";
+import { Button, Handle, Hints, Panel, Picker } from "../ui.tsx";
 import { useLoading } from "../busy.tsx";
 import { TopBar } from "./common.tsx";
 
@@ -147,15 +147,15 @@ export function RoomScreen() {
       <main className="mode-body">
         <div className="party" aria-hidden="true" />
         <div className="mode-side">
-          <Panel className="mode-panel" title={t.room.title(code)}>
+          <Panel className="mode-panel" label={t.room.title(code)}>
             <p className="room-code">{code}</p>
             <p className="muted small">{t.room.share}</p>
             {room && (
               <>
                 <ul className="members">
                   {room.members.map((m) => (
-                    <li key={m.userId}>
-                      <b>{m.handle}</b>
+                    <li key={m.userId} className={m.userId === me ? "me" : undefined}>
+                      <Handle handle={m.handle} />
                       {m.userId === room.hostId ? (
                         <span className="badge">{t.room.host}</span>
                       ) : (

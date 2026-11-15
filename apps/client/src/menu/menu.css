@@ -13,6 +13,10 @@
   --accent: #2b3fd0;
   --on-accent: #f6f1e7;
   --danger: #b8321f;
+  --summer: #2b3fd0;
+  --fall: #c24a1c;
+  --winter: #d4262f;
+  --spring: #24804a;
   --font: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
 
   --fs-label: 20px;
@@ -48,6 +52,7 @@
   font-weight: 420;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
   pointer-events: none;
 }
@@ -386,7 +391,7 @@ a {
   height: 36px;
   padding: 0 9px;
   box-shadow: inset 0 0 0 2px currentColor;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
   font-stretch: 100%;
   letter-spacing: 0.02em;
@@ -395,7 +400,7 @@ a {
 .btn .glyph-key {
   height: 32px;
   min-width: 32px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 /* --- tabs: their shoulder buttons at the ends; the current one is underlined --- */
@@ -464,6 +469,12 @@ a {
 
 /* --- pickers and rows: ◀ value ▶, the arrows show on the focused one --- */
 
+.picker,
+.stat-row,
+.shop-item,
+.trial-row {
+  scroll-margin-block: 56px;
+}
 .picker,
 .stat-row {
   position: relative;
@@ -702,13 +713,14 @@ a {
   width: 720px;
   max-width: 92%;
   max-height: 88%;
-  overflow: auto;
+  overflow: hidden;
   padding: 40px 48px;
   background: var(--paper);
   box-shadow: var(--lift);
   animation: rise 240ms var(--ease) both;
 }
 .modal h2 {
+  flex: none;
   font-size: var(--fs-head);
   line-height: 1.1;
   font-weight: 780;
@@ -721,12 +733,23 @@ a {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  margin: 0 -48px;
+  padding: 0 48px;
+}
+.modal-body > * {
+  flex: none;
 }
 .modal-body > .picker:first-of-type,
 .modal-body > .stat-row:first-of-type {
   margin-top: 4px;
 }
 .modal-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: 16px;
@@ -792,6 +815,9 @@ a {
   font-weight: 400;
   font-stretch: 85%;
   color: var(--ink-2);
+}
+.social-card .who b.long {
+  font-stretch: 82%;
 }
 .social-card .who span {
   font-size: var(--fs-label);
@@ -871,7 +897,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 1040px;
+  max-width: calc(100% - var(--col-r) - var(--gap));
   padding: 28px var(--pad) 28px;
   background: var(--paper);
   box-shadow: var(--lift);
@@ -901,12 +927,18 @@ a {
   display: flex;
   align-items: center;
   gap: 28px;
+  max-width: var(--col-r);
   height: 72px;
   padding: 0 24px 0 8px;
   background: var(--paper);
   box-shadow: var(--lift);
 }
+.account .social-card {
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .account .credits {
+  flex: none;
   padding-left: 28px;
   border-left: 1px solid var(--rule);
   order: 2;
@@ -970,6 +1002,27 @@ a {
 .info-card .panel-title {
   font-size: var(--fs-head);
 }
+/* A handle: the number set lighter, a long name narrower (ui.tsx, Handle). */
+.handle i {
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 85%;
+  color: var(--ink-2);
+}
+.handle.long {
+  font-stretch: 82%;
+}
+:focus .handle i {
+  color: inherit;
+  opacity: 0.75;
+}
+/* A new handle as the login card's title. */
+.handle-title.long {
+  display: block;
+  font-size: var(--fs-head);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
 .or {
   display: flex;
   align-items: center;
@@ -991,6 +1044,10 @@ a {
 .consent {
   font-size: var(--fs-label);
   color: var(--ink-2);
+}
+.login-links {
+  display: flex;
+  flex-direction: column;
 }
 .footer {
   display: flex;
@@ -1107,16 +1164,16 @@ a {
   box-shadow: var(--lift);
 }
 .hero.season-summer {
-  --hero: #2b3fd0;
+  --hero: var(--summer);
 }
 .hero.season-fall {
-  --hero: #c24a1c;
+  --hero: var(--fall);
 }
 .hero.season-winter {
-  --hero: #d4262f;
+  --hero: var(--winter);
 }
 .hero.season-spring {
-  --hero: #24804a;
+  --hero: var(--spring);
 }
 .hero-head {
   display: flex;
@@ -1155,22 +1212,41 @@ a {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 240px;
+  height: 300px;
+  overflow: hidden;
   padding: 28px var(--pad) 32px;
   background: var(--hero, var(--accent));
   color: var(--on-accent);
   transition: background-color 120ms var(--ease);
 }
 .hero-block b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  flex: none;
   margin-top: auto;
-  max-width: 560px;
+  max-width: 600px;
+  padding-bottom: 0.06em;
   font-size: var(--fs-title);
   line-height: 0.98;
   font-weight: 820;
   font-stretch: 118%;
   letter-spacing: -0.03em;
 }
+/* A long title takes three smaller lines. */
+.hero-block b.long {
+  -webkit-line-clamp: 3;
+  max-width: none;
+  font-size: 52px;
+  line-height: 1;
+}
 .hero-block > span:not(.glyph) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  flex: none;
   font-size: var(--fs-body);
   line-height: 32px;
   opacity: 0.92;
@@ -1193,6 +1269,13 @@ a {
 .news {
   padding: 20px var(--pad) 8px;
   gap: 4px;
+}
+/* Room for the banner and the news while they load, so nothing jumps when they come in. */
+.hero-loading .hero-block {
+  background: var(--paper-deep);
+}
+.news.loading ul {
+  min-height: calc(var(--row) * 2);
 }
 .missions {
   flex-direction: row;
@@ -1247,8 +1330,14 @@ a {
   text-transform: uppercase;
 }
 .news-item b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   flex: 1;
+  margin: 10px 0;
   font-size: var(--fs-nav);
+  line-height: 34px;
   font-weight: 600;
 }
 .news-item::after {
@@ -1301,7 +1390,7 @@ a {
 }
 .mode-tabs .tab {
   justify-content: flex-start;
-  height: 72px;
+  height: var(--row);
   padding: 0;
   border-bottom: 1px solid var(--rule);
   color: var(--ink);
@@ -1372,13 +1461,21 @@ a {
   color: inherit;
   opacity: 0.7;
 }
+/* A mode's panel is as tall as what it holds (the time trial's board takes
+   the rest of the column); the actions keep to the bottom. */
 .mode-panel {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   animation: slide-in 220ms var(--ease) both;
 }
-.mode-panel .panel-title {
-  margin-bottom: -4px;
+.mode-side > .actions {
+  margin-top: auto;
+}
+.mode-about {
+  line-height: 32px;
+}
+.mode-about.small {
+  line-height: 28px;
 }
 .mode-panel .btn {
   align-self: flex-start;
@@ -1390,29 +1487,48 @@ a {
 }
 .races ol {
   list-style: none;
-  margin: 8px 0 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
   padding: 0;
-  border-top: 2px solid var(--ink);
 }
 .races li {
+  --season: var(--ink);
   display: flex;
-  align-items: baseline;
-  gap: 16px;
-  min-height: 56px;
-  padding-top: 14px;
-  border-bottom: 1px solid var(--rule);
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 10px;
+  border-top: 6px solid var(--season);
+}
+.races li.season-summer {
+  --season: var(--summer);
+}
+.races li.season-fall {
+  --season: var(--fall);
+}
+.races li.season-winter {
+  --season: var(--winter);
+}
+.races li.season-spring {
+  --season: var(--spring);
 }
 .races li .num {
-  width: 32px;
   font-size: var(--fs-label);
+  line-height: 24px;
   font-weight: 600;
   color: var(--ink-3);
 }
 .races li b {
-  width: 140px;
   font-size: var(--fs-nav);
+  line-height: 1.15;
   font-weight: 760;
   font-stretch: 112%;
+}
+.races li .muted {
+  font-size: var(--fs-label);
+  line-height: 24px;
 }
 .actions {
   display: flex;
@@ -1489,8 +1605,18 @@ a {
   border-bottom: 1px solid var(--rule);
   font-size: var(--fs-nav);
 }
-.members li b {
+.members li {
+  gap: 16px;
+}
+.members .handle {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.members li.me .handle {
+  font-style: italic;
 }
 .members .badge {
   align-self: center;
@@ -1825,6 +1951,20 @@ a {
   margin-top: 8px;
 }
 
+/* Lists that scroll fade out on the side where more of them is hidden (hooks.ts, useScrollEdges). */
+[data-more="down"] {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+}
+[data-more="up"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 56px);
+  mask-image: linear-gradient(transparent, #000 56px);
+}
+[data-more="both"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+
 /* --- setups: a row of pips per stat --- */
 
 .stat-row {
@@ -1943,16 +2083,21 @@ a {
   max-height: 100%;
   min-height: 0;
 }
-.wardrobe .btn {
+/* Save across the panel; the creator and the shop side by side under it. */
+.wardrobe > .row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.wardrobe > .row .btn {
   min-height: 56px;
   padding: 0 20px;
-  font-size: var(--fs-label);
 }
-.wardrobe .row {
-  flex-wrap: wrap;
+.wardrobe > .row .btn-primary {
+  grid-column: 1 / -1;
 }
 
-@media (max-aspect-ratio: 4/3) {
+@media (max-aspect-ratio: 1/1) {
   .home,
   .mode-body,
   .creator {
@@ -2240,10 +2385,11 @@ a {
    picking the ghosts raced --- */
 
 .trial-panel {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  flex: 1 1 auto;
   gap: 12px;
+}
+.trial-panel > * {
+  flex: none;
 }
 .trial-panel .label {
   font-size: var(--fs-label);
@@ -2256,31 +2402,57 @@ a {
 .trial-best {
   display: flex;
   align-items: baseline;
-  gap: 16px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--rule);
+  gap: 12px;
+  min-width: 0;
 }
 .trial-best b {
-  font-size: var(--fs-head);
+  font-size: var(--fs-nav);
   font-weight: 760;
   font-stretch: 75%;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+.trial-panel > .trial-board {
+  flex: 1 1 auto;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
 .trial-board header {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
+  gap: 16px;
 }
-.trial-board ol {
+.trial-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  margin: 0 calc((var(--pad) + var(--bleed)) * -1);
+  padding: 0 calc(var(--pad) + var(--bleed));
+  background: linear-gradient(var(--ink), var(--ink)) no-repeat center top /
+    calc(100% - 2 * (var(--pad) + var(--bleed))) 2px;
+}
+.trial-rows ol {
   list-style: none;
-  margin: 6px 0 8px;
-  padding: 0;
-  border-top: 2px solid var(--ink);
+  margin: 0;
+  padding: 2px 0 0;
+}
+.trial-note {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding-top: 2px;
 }
 .trial-row {
   position: relative;
   display: grid;
-  grid-template-columns: 40px 1fr auto 22px;
+  grid-template-columns: 56px minmax(0, 1fr) auto 22px;
   align-items: center;
   gap: 12px;
   width: 100%;

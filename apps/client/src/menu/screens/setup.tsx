@@ -6,6 +6,7 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveSetups, storeRider } from "../api.ts";
+import { sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Modal, Picker } from "../ui.tsx";
 
@@ -115,12 +116,7 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
       }
     >
       <p className="muted small">{t.setup.body}</p>
-      <Picker
-        label={t.wardrobe.season}
-        value={sport}
-        onChange={setSport}
-        options={(["summer", "winter"] as const).map((sp) => ({ value: sp, label: t.seasons[sp] }))}
-      />
+      <Picker label={t.wardrobe.sport} value={sport} onChange={setSport} options={sportOptions(t)} />
       {STATS.map((stat) => (
         <StatRow
           key={stat}

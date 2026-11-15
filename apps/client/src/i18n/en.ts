@@ -16,7 +16,9 @@ export const en = {
     soonTag: "Soon",
     error: "Something went wrong. Please try again.",
     noServer: "No race server is available right now. Please try again in a moment.",
+    offline: "Can't reach the game's servers. Check your connection and try again.",
   },
+  errors: { title: "Something went wrong", offlineTitle: "Can't connect" },
   languages: { en: "English", es: "Español", ca: "Català" },
   seasons: { summer: "Summer", fall: "Fall", winter: "Winter", spring: "Spring" },
   weathers: {
@@ -123,7 +125,7 @@ export const en = {
     edit: "Edit rider",
   },
   wardrobe: {
-    season: "Season",
+    sport: "Sport",
     title: "Wardrobe",
     slots: {
       head: "Head",
@@ -193,7 +195,7 @@ export const en = {
   },
   setup: {
     title: "Setup",
-    body: "Everyone gets the same 12 points. Spread them how you like: set them before a match, they stay for the whole Tilt.",
+    body: "Everyone gets the same 12 points: spread them however you like. Set them before a match; they stay the same for the whole Tilt.",
     stats: { speed: "Speed", handling: "Handling", stability: "Stability", tricks: "Tricks" },
     about: {
       speed: "A little more top speed.",
@@ -208,7 +210,7 @@ export const en = {
     open: "Setup",
   },
   shop: {
-    slot: "Piece",
+    slot: "Category",
     title: "Pro shop",
     credits: "Credits",
     amount: (n: number) => `${n.toLocaleString()} cr`,
@@ -461,17 +463,18 @@ export const en = {
   },
   trial: {
     title: "Time trial",
-    about: "Ride alone against the clock, in clear and steady weather, and chase the ghosts of the best runs.",
+    about: (n: number) =>
+      `Race the clock in clear, steady weather. Pick up to ${n} ghosts from the leaderboard to chase.`,
     circuit: "Circuit",
     season: "Season",
     yourBest: "Your best",
     record: "Record",
     noTime: "No time yet",
-    rank: (n: number, total: number) => `${n} of ${total}`,
+    rank: (n: number, total: number) => `${n.toLocaleString("en")} of ${total.toLocaleString("en")}`,
     board: "Leaderboard",
     ghosts: (n: number, max: number) => `Ghosts ${n}/${max}`,
     empty: "Nobody has a time here yet. Set the first one!",
-    ghostHint: "Pick a row to race its ghost.",
+    boardError: "Couldn't load the leaderboard.",
     tooMany: (n: number) => `Up to ${n} ghosts at a time.`,
     finish: "FINISH!",
     newBest: "NEW PERSONAL BEST!",

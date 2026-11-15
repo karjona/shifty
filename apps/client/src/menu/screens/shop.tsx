@@ -8,8 +8,8 @@ import { useEffect, useState } from "react";
 import { setClubCloseUp, setClubRider, setClubRiders, showClubRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { ApiError, buyItem, meQuery, storeRider } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
-import { hexColour, itemBrand, itemLabel } from "../items.ts";
+import { useAction, useAutoFocus, useBackdrop, useScrollEdges } from "../hooks.ts";
+import { hexColour, itemBrand, itemLabel, sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
@@ -32,6 +32,7 @@ export function ShopScreen() {
   const [trying, setTrying] = useState<string | null>(null);
   const [buying, setBuying] = useState<Item | null>(null);
   const [busy, setBusy] = useState(false);
+  const edges = useScrollEdges();
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/", search: { tab: "collection" } }), !buying);
   useEffect(() => {
@@ -83,13 +84,13 @@ export function ShopScreen() {
       <main className="menu-body shop">
         <Panel className="shop-panel">
           <Picker
-            label={t.wardrobe.season}
+            label={t.wardrobe.sport}
             value={sport}
             onChange={(s) => {
               setSport(s);
               setTrying(null);
             }}
-            options={(["summer", "winter"] as const).map((s) => ({ value: s, label: t.seasons[s] }))}
+            options={sportOptions(t)}
           />
           <Picker
             label={t.shop.slot}
@@ -103,7 +104,7 @@ export function ShopScreen() {
               label: s === "ride" ? t.wardrobe.rides[sport] : t.wardrobe.slots[s],
             }))}
           />
-          <ul className="shop-items">
+          <ul className="shop-items" ref={edges}>
             {items.map((it, n) => {
               const owned = rider.owned.has(it.id);
               return (

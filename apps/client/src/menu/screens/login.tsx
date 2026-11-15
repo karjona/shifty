@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { getLocale, useT } from "../../i18n/index.ts";
-import { auth, inviteQuery, meQuery, redeemInvite } from "../api.ts";
+import { ApiError, auth, inviteQuery, meQuery, redeemInvite } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { Button, Panel, TextField, Wordmark } from "../ui.tsx";
 import { Footer, LanguagePicker } from "./common.tsx";
@@ -77,9 +77,15 @@ export function Login() {
 
   const github = async () => {
     setBusy(true);
-    const res = await auth.signIn.social({ provider: "github", callbackURL: "/", errorCallbackURL: "/login" });
-    if (res.error) {
-      setError(t.login.githubFailed);
+    setError(null);
+    try {
+      const res = await auth.signIn.social({ provider: "github", callbackURL: "/", errorCallbackURL: "/login" });
+      if (res.error) {
+        setError(res.error.status === 429 ? t.login.tooMany : t.login.githubFailed);
+        setBusy(false);
+      }
+    } catch {
+      setError(t.common.offline);
       setBusy(false);
     }
   };
@@ -95,8 +101,8 @@ export function Login() {
       } else {
         setError(t.login.badInvite);
       }
-    } catch {
-      setError(t.login.tooMany);
+    } catch (err) {
+      setError(err instanceof ApiError ? (err.status === 429 ? t.login.tooMany : t.common.error) : t.common.offline);
     }
     setBusy(false);
   };
@@ -110,12 +116,19 @@ export function Login() {
     }
     setBusy(true);
     setError(null);
-    const res = await auth.emailOtp.sendVerificationOtp({ email: address, type: "sign-in" }, { headers });
-    setBusy(false);
-    if (res.error) {
-      const { status } = res.error;
-      setError(status === 429 ? t.login.tooMany : status === 403 ? t.login.noAccount : t.common.error);
+    setNote(null);
+    try {
+      const res = await auth.emailOtp.sendVerificationOtp({ email: address, type: "sign-in" }, { headers });
+      if (res.error) {
+        const { status } = res.error;
+        setError(status === 429 ? t.login.tooMany : status === 403 ? t.login.noAccount : t.common.error);
+        return;
+      }
+    } catch {
+      setError(t.common.offline);
       return;
+    } finally {
+      setBusy(false);
     }
     if (step === "code") setNote(t.login.resent);
     else go("code");
@@ -123,18 +136,24 @@ export function Login() {
 
   const verify = async (e: FormEvent) => {
     e.preventDefault();
+    if (code.length !== 6) return;
     setBusy(true);
     setError(null);
-    const res = await auth.signIn.emailOtp({ email: email.trim(), otp: code.trim() });
-    if (res.error) {
-      const { status } = res.error;
+    try {
+      const res = await auth.signIn.emailOtp({ email: email.trim(), otp: code.trim() });
+      if (res.error) {
+        const { status } = res.error;
+        setBusy(false);
+        setError(status === 429 ? t.login.tooMany : status === 403 ? t.login.inviteGone : t.login.badCode);
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
+      const me = await queryClient.fetchQuery(meQuery);
+      await navigate({ to: me?.player ? "/" : "/welcome" });
+    } catch {
       setBusy(false);
-      setError(status === 429 ? t.login.tooMany : status === 403 ? t.login.inviteGone : t.login.badCode);
-      return;
+      setError(t.common.offline);
     }
-    await queryClient.invalidateQueries({ queryKey: meQuery.queryKey });
-    const me = await queryClient.fetchQuery(meQuery);
-    await navigate({ to: me?.player ? "/" : "/welcome" });
   };
 
   const title = {
@@ -152,7 +171,7 @@ export function Login() {
       <div className="or">
         <span>{t.login.or}</span>
       </div>
-      <form onSubmit={(e) => void sendCode(e)} className="stack">
+      <form onSubmit={(e) => void sendCode(e)} className="stack" noValidate>
         <TextField
           label={t.login.email}
           type="email"
@@ -181,7 +200,7 @@ export function Login() {
           {step === "invite" && (
             <>
               <p>{t.login.inviteOnly}</p>
-              <form onSubmit={(e) => void applyInvite(e)} className="stack">
+              <form onSubmit={(e) => void applyInvite(e)} className="stack" noValidate>
                 <TextField
                   label={t.login.invite}
                   placeholder="XXXX-XXXX"
@@ -207,7 +226,7 @@ export function Login() {
           )}
           {step === "login" && signInOptions}
           {step === "code" && (
-            <form onSubmit={(e) => void verify(e)} className="stack">
+            <form onSubmit={(e) => void verify(e)} className="stack" noValidate>
               <p>{t.login.codeSent(email.trim())}</p>
               <TextField
                 label={t.login.code}
@@ -223,12 +242,13 @@ export function Login() {
               <Button type="submit" kind="primary" className="wide" disabled={busy || code.length !== 6}>
                 {t.login.signIn}
               </Button>
-              <div className="row">
-                <Button kind="ghost" onClick={() => void sendCode()} disabled={busy}>
+              <div className="login-links">
+                <Button kind="ghost" className="wide" onClick={() => void sendCode()} disabled={busy}>
                   {t.login.resend}
                 </Button>
                 <Button
                   kind="ghost"
+                  className="wide"
                   glyph="back"
                   onClick={() => {
                     go(signInStep);

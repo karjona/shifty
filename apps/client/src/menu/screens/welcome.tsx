@@ -5,7 +5,7 @@ import { type FormEvent, useState } from "react";
 import { labelOf, useT } from "../../i18n/index.ts";
 import { ApiError, auth, claimHandle, meQuery } from "../api.ts";
 import { useAutoFocus, useBackdrop } from "../hooks.ts";
-import { Button, Panel, TextField, Wordmark } from "../ui.tsx";
+import { Button, Handle, Panel, TextField, Wordmark } from "../ui.tsx";
 import { LanguagePicker } from "./common.tsx";
 
 /** A starting suggestion: the GitHub name, or the email's first part. */
@@ -53,7 +53,10 @@ export function Welcome() {
         <LanguagePicker />
       </header>
       <main className="login-main">
-        <Panel className="login-card" title={done ? done : t.welcome.title}>
+        <Panel
+          className="login-card"
+          title={done ? <Handle handle={done} className="handle-title" /> : t.welcome.title}
+        >
           {done ? (
             <Button
               kind="primary"
@@ -65,7 +68,7 @@ export function Welcome() {
               {t.welcome.submit}
             </Button>
           ) : (
-            <form className="stack" onSubmit={(e) => void submit(e)}>
+            <form className="stack" onSubmit={(e) => void submit(e)} noValidate>
               <p>{t.welcome.body}</p>
               <TextField
                 label={t.welcome.label}
