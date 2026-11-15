@@ -84,8 +84,9 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
     }),
   );
   scenery.free();
-  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(18, 45, 40);
-  else world.setSunOffset(-25, 55, -30);
+  // The sun from the camera's left, in front of the riders.
+  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(-18, 45, 40);
+  else world.setSunOffset(25, 55, -30);
   world.scene.add(buildClub());
 
   const shotParam = params.get("shot");
@@ -162,7 +163,7 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   });
 
   let t = 0;
-  const base = new THREE.Vector3(CLUB.x + 3, CLUB.floor, CLUB.z - 4);
+  const base = new THREE.Vector3(CLUB.x + 1.3, CLUB.floor, CLUB.z - 4);
   // Facing the bay (−z), toward the camera.
   const facing = Math.PI;
   const framing: Record<Shot, { cy: number; dist: number; fov: number }> = {

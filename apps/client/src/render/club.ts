@@ -1,144 +1,275 @@
-// The country club: a terrace on a stone pier at the east end of the town
-// quay, over the bay, with the clubhouse behind it and the sierra beyond.
-// Riders gather here before a race. Low-poly and flat-shaded, like the
-// town.
+// The country club: a paved terrace over the sea at the east end of the
+// town quay, a grand stair down to the landing stage with its signal mast
+// and moored boats, and the clubhouse behind. Riders gather here before a
+// race. Its art is modelled in art/scene/club.py (public/env/club.glb) and
+// drawn in a handful of batches; the paving's pattern is a shader, and what
+// moves (boats at their moorings, sails out at sea, a gull, a fan, a waiter
+// and members lifting a glass) is moved here; its lettering is set at
+// runtime (env/signs.ts). The sea in front of it glints.
 import * as THREE from "three/webgpu";
-
-const STONE = 0xc8b89a;
-const PAVING = 0xe9dcc2;
-const WHITE = 0xf6f2ea;
-const ROOF = 0xc0623a;
-const WOOD = 0x8a5a36;
-const GLASS = 0x2c3a46;
-const PLANT = 0x4f8a3a;
-const POT = 0xb5653a;
-const AWNING = [0x2a8fb0, 0xf6f2ea];
-
-const mat = (color: number, rough = 0.9) =>
-  new THREE.MeshStandardNodeMaterial({ color, roughness: rough, flatShading: true });
-
-function block(w: number, h: number, d: number, m: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-  mesh.position.set(x, y + h / 2, z);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** The name of the balustrade's handrail material. */
-export const HANDRAIL = "club.handrail";
+import { Fn, attribute, cameraWorldMatrix, float, max, positionLocal, sin, vec3, vec4 } from "three/tsl";
+import { LOOK } from "./cel/look.ts";
+import { UNREFLECTED, inklessBasic } from "./cel/material.ts";
+import { EnvLook, classOf } from "./env/materials.ts";
+import { type EnvAnim, type EnvModel, loadEnv } from "./env/model.ts";
+import { signs } from "./env/signs.ts";
+import { warmUp } from "./warm.ts";
 
 /** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
-  x: 157,
+  x: 170,
   z: 96,
   /** Height of the terrace floor. */
   floor: 5.2,
   /** The terrace faces the bay (−z). */
 };
 
+/** The medallion in the paving at the head of the stair (on the terrace, from its middle; m). */
+const MEDALLION = { x: 3.9, z: -8.1, radius: 1.1 };
+
+/** The terrace is drawn in squares of ground this size (m), so what the camera has its back to is culled. */
+const CELL = 12;
+
+const ready = new WeakMap<THREE.Object3D, Promise<void>>();
+
+/** Resolves once a club's art is in (and its shaders compiled). */
+export function clubReady(club: THREE.Object3D): Promise<void> {
+  return ready.get(club) ?? Promise.resolve();
+}
+
+/** The club, in the world's coordinates. Its art arrives a moment later (see `clubReady`). */
 export function buildClub(): THREE.Group {
   const g = new THREE.Group();
-  const { x, z, floor } = CLUB;
-  const stone = mat(STONE);
-  const paving = mat(PAVING, 0.8);
-  const white = mat(WHITE);
-  const roof = mat(ROOF);
-  const wood = mat(WOOD, 0.7);
-  const glass = mat(GLASS, 0.3);
+  ready.set(
+    g,
+    loadEnv("club", CELL)
+      .then(async (model) => {
+        const art = assemble(model);
+        const lettering = await signs(model.anchors.get("sign"));
+        if (lettering) {
+          lettering.layers.set(UNREFLECTED);
+          art.add(lettering);
+        }
+        art.position.set(CLUB.x, CLUB.floor, CLUB.z);
+        await warmUp(art);
+        g.add(art);
+      })
+      .catch((e: unknown) => console.error(e)),
+  );
+  return g;
+}
 
-  // The pier: a stone block out of the water, paved on top.
-  g.add(block(30, floor + 6, 22, stone, x, -6, z + 2));
-  g.add(block(29.4, 0.12, 21.4, paving, x, floor - 0.06, z + 2));
-  // Steps down to the water on the east side.
-  for (let i = 0; i < 6; i++) g.add(block(3, floor + 6 - i * 0.9, 1.1, stone, x + 16, -6, z - 4 + i * 1.1));
+/** A number in 0-1 from a whole number, for things that happen now and then. */
+const chance = (n: number) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
 
-  // The balustrade along the front and the sides: a handrail (its own material, inked apart from the posts) on posts.
-  const rail = mat(WHITE, 0.6);
-  rail.name = HANDRAIL;
-  const post = mat(WHITE, 0.6);
-  const front = z - 9;
-  g.add(block(29, 0.12, 0.3, rail, x, floor + 0.95, front));
-  for (let px = -14; px <= 14; px += 0.7) g.add(block(0.14, 0.95, 0.14, post, x + px, floor, front));
-  for (const side of [-1, 1]) {
-    g.add(block(0.3, 0.12, 10, rail, x + side * 14.6, floor + 0.95, z - 4));
-    for (let pz = -9; pz <= 1; pz += 0.7) g.add(block(0.14, 0.95, 0.14, post, x + side * 14.6, floor, z + pz));
-  }
+/** A group of the art that moves, with where it rests. */
+interface Mover {
+  group: THREE.Group;
+  rest: THREE.Matrix4;
+  index: number;
+}
 
-  // The clubhouse: two white storeys with an arcade, a terracotta roof.
-  const back = z + 6;
-  g.add(block(26, 7.2, 8, white, x, floor, back + 4));
-  g.add(block(27, 0.5, 9, white, x, floor + 7.2, back + 4));
-  const roofGeo = new THREE.ConeGeometry(1, 1, 4, 1);
-  roofGeo.rotateY(Math.PI / 4);
-  const roofMesh = new THREE.Mesh(roofGeo, roof);
-  roofMesh.scale.set(19.5, 3, 6.6);
-  roofMesh.position.set(x, floor + 7.7 + 1.5, back + 4);
-  roofMesh.castShadow = true;
-  g.add(roofMesh);
-  // Arches below, windows above.
-  for (let i = -5; i <= 5; i++) {
-    const ax = x + i * 2.2;
-    g.add(block(1.5, 2.6, 0.15, glass, ax, floor + 0.2, back - 0.02));
-    g.add(block(1.1, 1.3, 0.15, glass, ax, floor + 4.3, back - 0.02));
-    g.add(block(1.5, 0.12, 0.6, rail, ax, floor + 4.15, back - 0.3));
-  }
-  // A striped awning over the arcade.
-  for (let i = 0; i < 12; i++) {
-    const a = block(2.2, 0.08, 2.6, mat(AWNING[i % 2]!, 0.7), x - 12.1 + i * 2.2, floor + 3.05, back - 1.2);
-    a.rotation.x = -0.25;
-    g.add(a);
-  }
-  // A flag on the roof.
-  g.add(block(0.08, 4, 0.08, rail, x + 9, floor + 7.7, back + 4));
-  g.add(block(1.4, 0.8, 0.04, mat(0xd94a3a, 0.7), x + 9.72, floor + 10.8, back + 4));
+const up = new THREE.Vector3(0, 1, 0);
+const offset = new THREE.Matrix4();
+const turn = new THREE.Quaternion();
+const lean = new THREE.Euler();
 
-  // Tables with parasols, chairs, loungers, potted palms.
-  const parasolColors = [0xf6f2ea, 0x2a8fb0, 0xf2c14e];
-  [
-    [-9, -1],
-    [9.5, -0.5],
-    [-10.5, 3.5],
-    [10, 3.8],
-  ].forEach(([px, pz], i) => {
-    const tx = x + px!;
-    const tz = z + pz!;
-    g.add(block(1.2, 0.06, 1.2, white, tx, floor + 0.74, tz));
-    g.add(block(0.12, 0.74, 0.12, wood, tx, floor, tz));
-    g.add(block(0.06, 2.6, 0.06, wood, tx, floor + 0.8, tz));
-    const shade = new THREE.Mesh(new THREE.ConeGeometry(1.9, 0.7, 8, 1), mat(parasolColors[i % 3]!, 0.7));
-    shade.position.set(tx, floor + 3.2, tz);
-    shade.castShadow = true;
-    g.add(shade);
-    for (const [cx, cz] of [
-      [0.9, 0],
-      [-0.9, 0],
-      [0, 0.9],
-    ]) {
-      g.add(block(0.45, 0.45, 0.45, wood, tx + cx!, floor, tz + cz!));
-      g.add(block(0.45, 0.5, 0.08, wood, tx + cx! * 1.2, floor + 0.45, tz + cz! * 1.2 + (cz === 0 ? 0 : 0.2)));
+/** A boat at its mooring: it rocks and lifts on the swell. */
+function rock(m: Mover, t: number): void {
+  const k = m.index * 1.9;
+  lean.set(Math.sin(t * 0.83 + k) * 0.055, 0, Math.sin(t * 0.61 + k * 2) * 0.025);
+  offset.makeRotationFromEuler(lean).setPosition(0, Math.sin(t * 0.7 + k) * 0.07, 0);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+/** How far a sail out at sea goes before it comes round again (m). */
+const SAIL_REACH = 520;
+
+/** A boat under sail, far out: it crosses slowly, heeled a little, and comes round again. */
+function sail(m: Mover, t: number): void {
+  const speed = (m.index % 2 === 0 ? 1 : -1) * (2.2 + m.index * 0.5);
+  const x = ((((t * speed + m.index * 170) % SAIL_REACH) + SAIL_REACH) % SAIL_REACH) - SAIL_REACH / 2;
+  turn.setFromAxisAngle(up, speed > 0 ? 0 : Math.PI);
+  offset.makeRotationFromQuaternion(turn).setPosition(x, Math.sin(t * 0.5 + m.index) * 0.2, 0);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+/** A ceiling fan's blades: they turn. */
+function spin(m: Mover, t: number): void {
+  offset.makeRotationY(t * 2.4);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+/** How long a gull holds a look before it turns its head somewhere else (s). */
+const GULL_HOLD = 2.9;
+
+/** A gull standing about: every few seconds it turns to look another way, and now and then dips to preen, on twos. */
+function perch(m: Mover, t: number): void {
+  const held = Math.floor(t * 12) / 12 + m.index * 1.7;
+  const beat = Math.floor(held / GULL_HOLD);
+  const into = held / GULL_HOLD - beat;
+  const heading = (n: number) => (chance(n) - 0.5) * 1.5;
+  const k = Math.min(1, into / 0.1);
+  const yaw = heading(beat - 1) + (heading(beat) - heading(beat - 1)) * k * k * (3 - 2 * k);
+  const dip = chance(beat + 0.5) > 0.6 && into > 0.45 && into < 0.75 ? Math.sin(((into - 0.45) / 0.3) * Math.PI) : 0;
+  lean.set(0, yaw, -dip * 0.5);
+  offset.makeRotationFromEuler(lean);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+/** How long someone sitting takes over a sip (s): now and then they lift their glass. */
+const SIP_EVERY = 5.6;
+
+/** Whether someone sitting has their glass up at `t` (on twos). */
+function sipping(m: Mover, t: number): boolean {
+  const held = Math.floor(t * 12) / 12 + m.index * 2.3;
+  const into = held / SIP_EVERY - Math.floor(held / SIP_EVERY);
+  return into > 0.62 && into < 0.86;
+}
+
+/** The waiter's walk: how fast (m/s), how long he stops at each end (s), and steps a second. */
+const WAITER = { speed: 0.85, stop: 2.6, steps: 3 };
+
+/**
+ * The waiter, going from where he stands to `to` and back, stopping at
+ * each end: where he is at `t` along the way (0-1), which way he faces, and
+ * whether he is mid-stride (the second of his two poses).
+ */
+function waiting(to: THREE.Vector3, t: number): { along: number; back: boolean; stride: boolean } {
+  const walk = Math.max(0.1, to.length() / WAITER.speed);
+  const lap = 2 * (walk + WAITER.stop);
+  const into = t - Math.floor(t / lap) * lap;
+  const half = walk + WAITER.stop;
+  const back = into >= half;
+  const leg = back ? into - half : into;
+  const moving = leg < walk;
+  const k = Math.min(1, leg / walk);
+  const stride = moving && Math.floor(t * WAITER.steps) % 2 === 1;
+  return { along: back ? 1 - k : k, back: back === moving, stride };
+}
+
+/** Two poses of one figure, swapped: which of them (`first`) a group is, and when it is the one on show. */
+function posed(first: boolean, second: (m: Mover, t: number) => boolean): (m: Mover, t: number) => void {
+  return (m, t) => {
+    m.group.visible = second(m, t) !== first;
+  };
+}
+
+/** The waiter's two poses, walking (see `waiting`). */
+function serving(first: boolean, to: THREE.Vector3): (m: Mover, t: number) => void {
+  return (m, t) => {
+    const w = waiting(to, t);
+    m.group.visible = w.stride !== first;
+    turn.setFromAxisAngle(up, Math.atan2(to.x, to.z) + (w.back ? Math.PI : 0));
+    offset.makeRotationFromQuaternion(turn).setPosition(to.x * w.along, 0, to.z * w.along);
+    m.group.matrix.multiplyMatrices(m.rest, offset);
+  };
+}
+
+const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail, fan: spin, gull: perch };
+
+/** Glints on the sea, in the terrace's coordinates: how many, and the sea's level. */
+const GLINTS = 150;
+const SEA = -CLUB.floor;
+
+/**
+ * Sunlight glinting off the sea in front of the terrace: short dashes
+ * facing the camera, each flashing for a moment now and then, bigger the
+ * further out they are (so they hold a pixel or two). One batch, moved on
+ * the GPU.
+ */
+function glints(): THREE.Mesh {
+  const centre = new Float32Array(GLINTS * 18);
+  const corner = new Float32Array(GLINTS * 12);
+  const phase = new Float32Array(GLINTS * 6);
+  const quad = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1];
+  let placed = 0;
+  for (let n = 0; placed < GLINTS && n < GLINTS * 20; n++) {
+    // Out to sea in front of the stair, thinning with distance; not on the breakwater.
+    const d = 30 + chance(n * 3 + 1) ** 1.5 * 260;
+    const x = 4 + (chance(n * 3 + 2) * 0.82 - 0.6) * d;
+    const z = -8 - d;
+    if (Math.abs(z + CLUB.z) < 12 && x + CLUB.x < 175) continue;
+    if (Math.hypot(x + CLUB.x - 80, z + CLUB.z + 63) < 16) continue;
+    const size = 0.5 + d / 110;
+    for (let k = 0; k < 6; k++) {
+      const o = placed * 6 + k;
+      centre.set([x, SEA + 0.25, z], o * 3);
+      corner.set([quad[k * 2]! * 0.42 * size, quad[k * 2 + 1]! * 0.05 * size], o * 2);
+      phase[o] = chance(n * 3 + 3);
     }
-  });
-  // Potted plants along the clubhouse.
-  for (const px of [-12.5, -5.5, 5.5, 12.5]) {
-    g.add(block(0.8, 0.7, 0.8, mat(POT), x + px, floor, back - 2.6));
-    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.75, 0), mat(PLANT));
-    crown.position.set(x + px, floor + 1.4, back - 2.6);
-    crown.castShadow = true;
-    g.add(crown);
+    placed++;
   }
-  // A couple of tall palms beside the clubhouse.
-  for (const side of [-1, 1]) {
-    const px = x + side * 15.5;
-    const pz = back + 1;
-    g.add(block(0.45, 9, 0.45, mat(0x7a5a3c), px, floor, pz));
-    for (let i = 0; i < 6; i++) {
-      const leaf = block(0.5, 0.08, 3.4, mat(PLANT, 0.8), px, floor + 8.8, pz);
-      leaf.geometry.translate(0, 0, 1.6);
-      leaf.rotation.set(0.35, (i / 6) * Math.PI * 2, 0);
-      g.add(leaf);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(centre, 3));
+  geo.setAttribute("corner", new THREE.BufferAttribute(corner, 2));
+  geo.setAttribute("phase", new THREE.BufferAttribute(phase, 1));
+  geo.setDrawRange(0, placed * 6);
+  const mat = inklessBasic({ color: 0xffffff });
+  mat.positionNode = Fn(() => {
+    const c = attribute<"vec2">("corner", "vec2");
+    const p = attribute<"float">("phase", "float");
+    // A glint is there for a moment in each of its turns, and gone the rest of it.
+    const wink = sin(LOOK.time.mul(p.mul(1.3).add(0.9)).add(p.mul(47)));
+    const flash = max(wink, float(0)).pow(10);
+    const across = cameraWorldMatrix.mul(vec4(1, 0, 0, 0)).xyz;
+    return positionLocal.add(across.mul(c.x.mul(flash))).add(vec3(0, 1, 0).mul(c.y.mul(flash)));
+  })();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = "club.glints";
+  mesh.frustumCulled = false;
+  mesh.layers.set(UNREFLECTED);
+  return mesh;
+}
+
+/** The art as meshes: a batch per material, the paving, and what moves. */
+function assemble(model: EnvModel): THREE.Group {
+  const g = new THREE.Group();
+  const look = new EnvLook();
+  look.setBreeze(model.anchors.get("wind")?.[0]?.data.dir);
+  look.medallion.value.set(CLUB.x + MEDALLION.x, CLUB.z + MEDALLION.z, MEDALLION.radius);
+  g.add(...look.meshes(model.parts, ["paving"]));
+  const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
+  const count = new Map<string, number>();
+  const animated = (a: EnvAnim) => {
+    const group = new THREE.Group();
+    group.matrixAutoUpdate = false;
+    group.matrix.copy(a.matrix);
+    group.add(...look.meshes(a.parts));
+    g.add(group);
+    const index = count.get(a.name) ?? 0;
+    count.set(a.name, index + 1);
+    // Figures come as two poses to swap between: `sit0.a` and `sit0.b`.
+    const pose = /^([a-z]+)(\d*)\.([ab])$/u.exec(a.name);
+    let move = MOVES[a.name];
+    if (pose?.[1] === "sit") move = posed(pose[3] === "a", sipping);
+    if (pose?.[1] === "waiter") {
+      const to = new THREE.Vector3().setFromMatrixPosition(model.anchors.get("waiter")?.[0]?.matrix ?? a.matrix);
+      move = serving(pose[3] === "a", to.sub(new THREE.Vector3().setFromMatrixPosition(a.matrix)));
     }
+    if (move)
+      movers.push({ move, mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index } });
+  };
+  for (const a of model.anims) animated(a);
+  g.add(glints());
+  const tick = () => {
+    const t = LOOK.time.value;
+    for (const m of movers) m.move(m.mover, t);
+  };
+  for (const [key, floor] of model.parts) {
+    if (classOf(key) !== "paving") continue;
+    const mesh = new THREE.Mesh(floor, look.material("paving"));
+    mesh.name = "env.paving";
+    mesh.receiveShadow = true;
+    mesh.layers.set(UNREFLECTED);
+    // The floor is in every picture of the terrace: drawing it moves what moves.
+    mesh.frustumCulled = false;
+    mesh.onBeforeRender = tick;
+    g.add(mesh);
   }
   return g;
 }
