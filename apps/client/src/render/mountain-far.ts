@@ -31,7 +31,7 @@ import {
 import { LOOK, cut0 } from "./cel/look.ts";
 import { SUN_DIR, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
-import { MOUNTAIN } from "./mountain-look.ts";
+import { MOUNTAIN, fadingInk } from "./mountain-look.ts";
 import type { RunData } from "./mountain.ts";
 
 /** Where the far land goes round. */
@@ -300,7 +300,7 @@ function landMaterial(sea: number, top: number): THREE.MeshBasicNodeMaterial {
     const d = p.distance(cameraPosition);
     return mix(lit, mix(LOOK.far, LOOK.horizon, smoothstep(3000, 12000, d)), hazeAt(d));
   })();
-  return inkOnlyInPass(m, inkNode(0.5, 0, 0, 0.3));
+  return fadingInk(m, 0.5, 0, 0, 0.3);
 }
 
 /** The sea, out to the horizon: deep water, lighter toward the shore, a path of light under the sun. */

@@ -441,7 +441,8 @@ function snowMaterial(ribbon: boolean): CelMaterial {
   // (Under a closed sky the shade loses its blue: there is no sun to be out of.)
   const shade = mix(vec3(0.8, 0.84, 0.96), vec3(...SNOW_SHADE), LOOK.shadow.mul(0.65).add(0.35));
   mat.shadeNode = mix(shade, vec3(...ROCK_SHADE), rock);
-  return mat;
+  // (Lines where things stand on the snow are drawn on the snow too: they fade into the fog with it.)
+  return fadingInk(mat, 1, 0.4, 0, 1);
 }
 
 /** Second difference of heights `a`, `b`, `c`, spaced `h0` then `h1` apart: curvature (1/m), + = a hollow. */

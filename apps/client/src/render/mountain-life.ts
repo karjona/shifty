@@ -96,7 +96,7 @@ function spindrift(amount: THREE.Node<"float">): THREE.Mesh {
     const side = normalize(cross(along, toCam));
     const dist = local.length();
     // Nothing right at the lens or at the box's edge; past the amount, nothing at all.
-    const shown = smoothstep(1.5, 4, dist)
+    const shown = smoothstep(3, 9, dist)
       .mul(smoothstep(BOX * 0.5, BOX * 0.36, dist))
       .mul(seed.w.lessThan(amount).select(1, 0));
     const width = max(float(0.018), dist.mul(PIXEL_AT_1M).mul(0.9)).mul(shown);
