@@ -113,10 +113,9 @@ function parseRoster(json: string, seed: number): { names: Map<number, string>; 
     if (typeof e !== "object" || e === null) continue;
     const slot: unknown = Reflect.get(e, "slot");
     const name: unknown = Reflect.get(e, "name");
-    const bot: unknown = Reflect.get(e, "bot");
     const look: unknown = Reflect.get(e, "look");
     if (typeof slot !== "number" || typeof name !== "string") continue;
-    names.set(slot, bot === true ? `🤖 ${name}` : name);
+    names.set(slot, name);
     const bytes = Array.isArray(look) && look.every((b) => typeof b === "number") ? Uint8Array.from(look) : null;
     // Bots (and riders without a look) are dressed alike on every screen.
     looks.set(slot, (bytes && decodeAppearance(bytes)) ?? botAppearance(seed, slot));

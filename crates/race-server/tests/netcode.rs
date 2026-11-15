@@ -847,3 +847,42 @@ fn a_rider_whose_screen_goes_quiet_mid_race_lets_go_then_is_dropped() {
     h.run(race_server::room::IDLE_TIMEOUT_MS as f64, driving);
     assert_eq!(h.room.human_count(), 0);
 }
+
+#[test]
+fn bots_have_riders_names_that_every_screen_agrees_on() {
+    let bot_names = |h: &Harness, i: usize| -> Vec<String> {
+        h.peers[i]
+            .client
+            .roster()
+            .iter()
+            .flatten()
+            .filter(|e| e.kind == protocol::RiderKind::Bot)
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    let mut h = Harness::new(7, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    h.add_peer("b", PERFECT);
+    h.run(1000.0, |_, _| Input::default());
+    // Two people took two of the seven bots' seats.
+    let names = bot_names(&h, 0);
+    assert_eq!(names.len(), 6);
+    assert_eq!(names, bot_names(&h, 1));
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), names.len(), "{names:?}");
+    for n in &names {
+        let (initial, surname) = n.split_once(". ").expect("an initial and a surname");
+        assert_eq!(initial.chars().count(), 1, "{n}");
+        assert!(
+            !surname.is_empty() && n.len() <= protocol::NAME_MAX_BYTES,
+            "{n}"
+        );
+    }
+    // A screen that rejoins sees the same names.
+    h.peers[1].conn = 99;
+    h.peers[1].client = Client::new("token");
+    h.run(1000.0, |_, _| Input::default());
+    assert_eq!(bot_names(&h, 1), names);
+}

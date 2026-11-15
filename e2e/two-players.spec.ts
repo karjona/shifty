@@ -39,10 +39,15 @@ test("two players race in one room", async ({ browser }) => {
   await openPlayer(b, "Bea", room);
 
   expect(await a.evaluate(() => window.__shifty.transport)).toBe("webtransport");
-  // Both humans and both bots are in the roster, on both screens.
-  await expect
-    .poll(() => a.evaluate(() => Object.values(window.__shifty.names()).toSorted()))
-    .toEqual(["Ana", "Bea", "🤖 Bot 7", "🤖 Bot 8"]);
+  // Both humans and both bots (an initial and a surname each) are in the roster, the same on both screens.
+  const roster = (p: Page) => p.evaluate(() => Object.values(window.__shifty.names()).toSorted());
+  await expect.poll(() => roster(a)).toHaveLength(4);
+  const names = await roster(a);
+  expect(names.filter((n) => n !== "Ana" && n !== "Bea")).toEqual([
+    expect.stringMatching(/^\p{Lu}\. \p{L}+$/u),
+    expect.stringMatching(/^\p{Lu}\. \p{L}+$/u),
+  ]);
+  await expect.poll(() => roster(b)).toEqual(names);
   await expect.poll(() => b.evaluate(() => window.__shifty.riders().length)).toBe(4);
   // Everyone lines up on the grid; once every screen is ready, the intro
   // and the countdown run (riders held still), then the race on the oval.
