@@ -63,7 +63,7 @@ import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.t
 import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
 import { farLandscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
-import { MOUNTAIN, fadingInk, gustAt, windNow } from "./mountain-look.ts";
+import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -441,9 +441,7 @@ function snowMaterial(ribbon: boolean): CelMaterial {
     // The shade the forest throws across the run.
     cast: ribbon ? float(1).sub(cut0(attribute("tree", "float").sub(0.5))) : undefined,
   });
-  // (Under a closed sky the shade loses its blue: there is no sun to be out of.)
-  const shade = mix(vec3(0.8, 0.84, 0.96), vec3(...SNOW_SHADE), LOOK.shadow.mul(0.65).add(0.35));
-  mat.shadeNode = mix(shade, vec3(...ROCK_SHADE), rock);
+  mat.shadeNode = mix(snowShade(), vec3(...ROCK_SHADE), rock);
   // (Lines where things stand on the snow are drawn on the snow too: they fade into the fog with it.)
   return fadingInk(mat, 1, 0.4, 0, 1);
 }

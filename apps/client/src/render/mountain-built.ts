@@ -25,7 +25,7 @@ import {
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { SCENERY_SNOW, fadingInk, gustAt, snowLoad, windNow } from "./mountain-look.ts";
+import { fadingInk, gustAt, scenerySnow, snowLoad, snowShade, windNow } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import type { GateData, RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
@@ -157,13 +157,15 @@ export function builtMaterial(): CelMaterial {
       const lamp = cut0(dark.mul(1.25).sub(pane).sub(0.1));
       const glass = mix(c.rgb, vec3(1.0, 0.74, 0.36).mul(1.5), lamp);
       const painted = mix(glass, c.rgb, cut0(c.a.sub(0.5)));
-      return mix(painted, vec3(...SCENERY_SNOW), masks.y);
+      return mix(painted, scenerySnow(), masks.y);
     })(),
     shade: new THREE.Color(0.6, 0.6, 0.86),
     richness: 1.15,
     id: inkId("built"),
   });
   fadingInk(m, 1, 0.6, inkId("built"), 0.85);
+  // (Snow on a roof shades as the snow round it does.)
+  m.shadeNode = mix(vec3(0.6, 0.6, 0.86), snowShade(), masks.y);
   m.positionNode = Fn(() => {
     const p = positionLocal;
     return p.sub(
@@ -194,7 +196,7 @@ function clothMaterial(): CelMaterial {
     colorNode: Fn(() => {
       const c = attribute<"vec4">("color", "vec4");
       const painted = mix(c.rgb.mul(attribute<"vec3">("tint", "vec3")), c.rgb, cut0(c.a.sub(0.5)));
-      return mix(painted, vec3(...SCENERY_SNOW), masks.y);
+      return mix(painted, scenerySnow(), masks.y);
     })(),
     side: THREE.DoubleSide,
     shade: new THREE.Color(0.66, 0.62, 0.84),

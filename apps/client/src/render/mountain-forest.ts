@@ -21,7 +21,7 @@ import {
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { SCENERY_SNOW, fadingInk, gustAt, snowLoad, windNow } from "./mountain-look.ts";
+import { scenerySnow, fadingInk, gustAt, snowLoad, windNow } from "./mountain-look.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
 
@@ -328,7 +328,7 @@ function treeMaterial(): CelMaterial {
     const needles = vertexStage(mix(base, LOOK.evergreen.mul(light), LOOK.greens.z.mul(greenness(base)).mul(0.6)));
     const load = vertexStage(snowLoad(positionWorld));
     const snowy = cut0(masks.y.mul(load).sub(0.5));
-    const top = mix(needles, vec3(...SCENERY_SNOW), snowy);
+    const top = mix(needles, scenerySnow(), snowy);
     // Under the boughs: the dark of the crown.
     const under = needles.mul(vec3(0.42, 0.5, 0.56));
     return frontFacing.select(top, under);

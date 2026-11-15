@@ -3,7 +3,21 @@
 // the wind as trees, flags and blown snow feel it (gusts travelling
 // downwind).
 import type * as THREE from "three/webgpu";
-import { clamp, float, max, mrt, output, positionView, sin, smoothstep, uniform, vec2, vec4 } from "three/tsl";
+import {
+  clamp,
+  float,
+  max,
+  mix,
+  mrt,
+  output,
+  positionView,
+  sin,
+  smoothstep,
+  uniform,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import { inkEdge, inkOnlyInPass } from "./cel/material.ts";
 import { LOOK } from "./cel/look.ts";
 import { noise4 } from "./cel/noise.ts";
@@ -21,6 +35,15 @@ export function clearOfFog(): THREE.Node<"float"> {
   return smoothstep(MOUNTAIN.fogFar, MOUNTAIN.fogNear, positionView.z.negate()).pow(1.5);
 }
 
+/**
+ * Snow's shade tone (a multiple of its colour): a cool violet-blue out of
+ * the sun, and nearly neutral under a closed sky, where there is no sun to
+ * be out of.
+ */
+export function snowShade(): THREE.Node<"vec3"> {
+  return mix(vec3(0.8, 0.84, 0.96), vec3(0.6, 0.67, 1.0), LOOK.shadow.mul(0.65).add(0.35));
+}
+
 /** Gives `m` ink lines that fade into the fog with it (weights as `inkNode` takes them). */
 export function fadingInk<M extends THREE.NodeMaterial>(
   m: M,
@@ -33,8 +56,10 @@ export function fadingInk<M extends THREE.NodeMaterial>(
   return inkOnlyInPass(m, mrt({ output, ink, edge: inkEdge(id, 1) }));
 }
 
-/** The colour of snow lying on scenery (lit). */
-export const SCENERY_SNOW = [0.93, 0.95, 1.0] as const;
+/** The colour of snow lying on scenery (lit): greyed by the rain, as the snow on the ground is. */
+export function scenerySnow(): THREE.Node<"vec3"> {
+  return vec3(0.9, 0.93, 0.99).mul(float(1).sub(LOOK.wet.mul(0.1)));
+}
 
 /**
  * How much snow lies on scenery at world point `p`: 0 below the snow line,
