@@ -28,7 +28,7 @@ function hanging(a: Body, side: number, ease: number, t: number): Reach {
   const len = a.upperArm + a.foreArm;
   const sway = Math.sin(t * 0.5 + side) * 0.006;
   return {
-    target: v3(side * (0.045 + 0.02 * ease), -len * (0.972 - 0.03 * ease), 0.045 + 0.07 * ease + sway),
+    target: v3(side * (0.02 + 0.02 * ease), -len * (0.945 - 0.035 * ease), 0.07 + 0.07 * ease + sway),
     fromShoulder: true,
     bend: v3(side * 0.35, 0, -1),
     fingers: v3(side * 0.04, -1, 0.22 + 0.15 * ease).normalize(),
