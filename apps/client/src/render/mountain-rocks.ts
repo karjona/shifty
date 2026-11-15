@@ -16,11 +16,13 @@ import {
   hash,
   max,
   mix,
+  modelWorldMatrix,
   positionLocal,
   positionWorld,
   smoothstep,
   uv,
   vec3,
+  vec4,
   vertexStage,
 } from "three/tsl";
 import { LOOK } from "./cel/look.ts";
@@ -100,7 +102,7 @@ export function rockMaterial(): CelMaterial {
   // Without snow a cap sinks into its rock.
   m.positionNode = Fn(() => {
     const p = positionLocal;
-    const load = snowLoad(p);
+    const load = snowLoad(modelWorldMatrix.mul(vec4(p, 1)).xyz);
     return p.sub(vec3(0, masks.x.mul(float(1).sub(load)).mul(CAP_SINK), 0));
   })();
   shared = m;

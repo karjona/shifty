@@ -200,6 +200,9 @@ const FOG_NEAR = 45;
 const FOG_FAR = 330;
 const CLEAR_NEAR = 80;
 const CLEAR_FAR = 4000;
+/** The forest is cut back this far either side of the chairlift's line (m), from this far past its end towers. */
+const LIFT_SWATHE = 8;
+const LIFT_REACH = 270;
 /** Trees are drawn out to this far (m), fog allowing. */
 const FOREST_FAR = 1300;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
@@ -1024,8 +1027,27 @@ export class Mountain implements Environment {
     const yards = this.buildings.map((b) => ({ ...buildingAt(this.run, b), r: b.yard * b.scale }));
     const path = this.run.path;
     const finish = this.run.finishS;
+    // Under the chairlift: a swathe cut through the forest along its line, from station to station.
+    const towers = this.run.obstacles.filter((o) => o.kind === "tower");
+    const line: { x: number; z: number }[] = [];
+    if (towers.length >= 2) {
+      const first = towers[0]!;
+      const last = towers.at(-1)!;
+      const length = Math.hypot(last.x - first.x, last.z - first.z);
+      const dx = ((last.x - first.x) / length) * LIFT_REACH;
+      const dz = ((last.z - first.z) / length) * LIFT_REACH;
+      line.push({ x: first.x - dx, z: first.z - dz }, ...towers, { x: last.x + dx, z: last.z + dz });
+    }
     const built = (x: number, z: number) => {
       for (const y of yards) if ((x - y.x) ** 2 + (z - y.z) ** 2 < y.r * y.r) return true;
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = line[i]!;
+        const b = line[i + 1]!;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)));
+        if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < LIFT_SWATHE * LIFT_SWATHE) return true;
+      }
       // The crowd's side of the fences, from the last pitch to the end of the outrun.
       for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 20; i--) {
         const p = path[i]!;

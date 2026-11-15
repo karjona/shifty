@@ -12,6 +12,7 @@ import {
   floor,
   hash,
   mix,
+  modelWorldMatrix,
   normalLocal,
   positionLocal,
   positionWorld,
@@ -19,6 +20,7 @@ import {
   smoothstep,
   uv,
   vec3,
+  vec4,
 } from "three/tsl";
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
@@ -169,7 +171,7 @@ export function builtMaterial(): CelMaterial {
         0,
         masks.x
           .mul(masks.y)
-          .mul(float(1).sub(snowLoad(p)))
+          .mul(float(1).sub(snowLoad(modelWorldMatrix.mul(vec4(p, 1)).xyz)))
           .mul(CAP_SINK),
         0,
       ),
@@ -215,7 +217,7 @@ function clothMaterial(): CelMaterial {
         0,
         masks.x
           .mul(masks.y)
-          .mul(float(1).sub(snowLoad(p)))
+          .mul(float(1).sub(snowLoad(modelWorldMatrix.mul(vec4(p, 1)).xyz)))
           .mul(CAP_SINK),
         0,
       ),
