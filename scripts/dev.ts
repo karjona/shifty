@@ -8,6 +8,8 @@
 //  6. once the race server has registered, runs the Vite dev server
 //     (http://localhost:5173): the game, with /api proxied to the lobby, and
 //     dev-only quick join tickets for tests
+// A second checkout runs beside the first with its own ports and database:
+// `VITE_PORT`, `LOBBY_PORT`, `RACE_PORT` and `DATABASE_URL`.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,6 +19,8 @@ import { ensureDevKey, repoRoot } from "./dev-lobby.ts";
 
 const RACE_PORT = process.env.RACE_PORT ?? "4433";
 const LOBBY_PORT = process.env.LOBBY_PORT ?? "8787";
+const VITE_PORT = process.env.VITE_PORT ?? "5173";
+const GAME = `localhost:${VITE_PORT}`;
 const key = ensureDevKey();
 
 /** Dev secrets, made once and kept in .dev/ (gitignored). */
@@ -58,7 +62,7 @@ writeFileSync(
   lobbyEnv,
   Object.entries({
     DATABASE_URL: databaseUrl,
-    BETTER_AUTH_URL: "http://localhost:5173",
+    BETTER_AUTH_URL: `http://${GAME}`,
     BETTER_AUTH_SECRET: secrets.betterAuth,
     LOBBY_SIGNING_KEY: key.privateKey,
     RACE_SERVER_SECRET: secrets.raceServer,
@@ -154,7 +158,7 @@ run(
     // Requests reach the Worker as from the game's dev origin, not as from
     // the production custom domain in wrangler.jsonc (Better Auth checks it).
     "--local-upstream",
-    "localhost:5173",
+    GAME,
     "--upstream-protocol",
     "http",
     "--env-file",
@@ -169,13 +173,13 @@ run(
 let viteStarted = false;
 function startVite() {
   viteStarted = true;
-  run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js"], {
+  run("vite", 35, process.execPath, ["node_modules/vite/bin/vite.js", "--port", VITE_PORT], {
     cwd: join(repoRoot, "apps/client"),
     env: { RACE_SERVER: `localhost:${RACE_PORT}`, LOBBY: `http://127.0.0.1:${LOBBY_PORT}` },
   });
   console.log(`
-  ▸ open http://localhost:5173 (sign-in codes show up in the lobby log)
-    quick race without the menus: http://localhost:5173/?name=YourName
+  ▸ open http://${GAME} (sign-in codes show up in the lobby log)
+    quick race without the menus: http://${GAME}/?name=YourName
     URL options: name, room, bots (0-7), event (snow, gp, or a circuit's id),
                  season, weather, turns, time, seed, surface (0-3),
                  scale (0.25-1), water=basic (plain swells, for slow machines)
