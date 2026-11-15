@@ -231,33 +231,52 @@ def limb(m, a, b, ra, rb, col, sides=4):
         m.quad(ra_[i], ra_[j], rb_[j], rb_[i], col, (0.0, 0.0))
 
 
-def pine(seed, height, green):
-    """A Scots pine: a tall bare trunk, orange up high, its crown in pads."""
+def tier(m, at, radius, col, r, wind=0.0):
+    """A tier of a mountain pine's crown: a flat, lumpy pad, drawn out downwind (+x)."""
+    part = Mesh()
+    pad(part, (0.0, 0.0, 0.0), radius, radius * 0.5, col, r)
+    for i in range(len(part.pos)):
+        p = part.pos[i]
+        # Longer on its lee side, cut short to windward.
+        x = p[0] * (1.3 if p[0] > 0 else 0.85) + wind
+        part.pos[i] = (x, p[1] + p[0] * 0.08, p[2] * 0.9)
+    m.merge(part, at=at, turn=r.uniform(-0.25, 0.25))
+
+
+def pine(seed, height, green, tiers=5):
+    """A mountain pine, shaped by the wind: a trunk that leans and bends,
+    bare and orange up high, and a crown of a few flat tiers one over
+    another, all reaching to leeward (+x), with dead limbs on the windward side."""
     r = rng(seed)
     m = Mesh()
-    lean = (r.uniform(-0.6, 0.6), r.uniform(-0.6, 0.6))
+    lean = height * 0.13
+    bend = lambda t: (lean * t * t + 0.35 * math.sin(t * 5.0) * t, 0.25 * math.sin(t * 3.4) * t)
     rings = []
-    for t, k in ((-0.1, 1.5), (0.0, 1.5), (0.06, 1.0), (0.45, 0.8), (0.8, 0.5), (1.0, 0.12)):
-        y = t * height * 0.92 if t >= 0 else -1.0
+    for t, k in ((-0.1, 1.5), (0.0, 1.5), (0.06, 1.0), (0.3, 0.86), (0.55, 0.7), (0.8, 0.48), (1.0, 0.14)):
+        y = t * height * 0.94 if t >= 0 else -1.0
         tt = max(0.0, t)
-        rings.append(
-            ((lean[0] * tt * tt, y, lean[1] * tt * tt), 0.34 * k, mixc(BARK, PINE_BARK, min(1.0, max(0.0, tt - 0.3) * 2.5)))
-        )
+        bx, bz = bend(tt)
+        rings.append(((bx, y, bz), 0.33 * k, mixc(BARK, PINE_BARK, min(1.0, max(0.0, tt - 0.25) * 2.2))))
     m.tube(rings, BARK, 6)
-    # Pads round the upper trunk, the biggest on top.
-    spots = [(0.93, 0.0, 0.0, 2.7)]
-    turn = r.random() * math.tau
-    for k in range(4):
-        t = lerp(0.66, 0.86, k / 3)
-        turn += 2.3 + r.uniform(-0.4, 0.4)
-        spots.append((t, turn, lerp(2.5, 1.7, k / 3) * r.uniform(0.9, 1.1), lerp(2.2, 1.8, k / 3) * r.uniform(0.9, 1.15)))
-    for t, az, out, rad in spots:
-        tt = t * 0.92
-        base = (lean[0] * tt * tt, height * tt, lean[1] * tt * tt)
-        centre = add(base, (math.cos(az) * out, out * 0.3, math.sin(az) * out))
-        if out > 0:
-            limb(m, add(base, (0, -0.8, 0)), add(centre, (0, -0.2, 0)), 0.13, 0.07, PINE_BARK)
-        pad(m, centre, rad, rad * 0.8, scale(green, r.uniform(0.92, 1.08)), r)
+    # The tiers: the widest low in the crown, each further to leeward than the last, gaps between them.
+    for k in range(tiers):
+        f = k / (tiers - 1)
+        t = lerp(0.56, 0.98, f)
+        bx, bz = bend(t)
+        base = (bx, height * 0.94 * t, bz)
+        rad = lerp(2.3, 1.2, f**0.8) * r.uniform(0.88, 1.12) * height / 13.5
+        side = (1 if k % 2 else -1) * r.uniform(0.5, 1.2) * (1 - f)
+        out = (0.3 + 0.75 * (1 - f)) * r.uniform(0.7, 1.2)
+        centre = add(base, (out, 0.15, side))
+        if k < tiers - 1:
+            limb(m, add(base, (0, -0.5, 0)), add(centre, (0.2, -0.15, 0)), 0.1, 0.05, PINE_BARK)
+        tier(m, centre, rad, scale(green, r.uniform(0.9, 1.08) * lerp(0.92, 1.06, f)), r, wind=rad * 0.2)
+    # Dead limbs to windward, under the crown.
+    for t in (0.38, 0.47, 0.62):
+        bx, bz = bend(t)
+        base = (bx, height * 0.94 * t, bz)
+        length = r.uniform(0.7, 1.5)
+        limb(m, base, add(base, (-length, length * r.uniform(-0.1, 0.3), r.uniform(-0.5, 0.5))), 0.06, 0.015, DEAD_DARK, 3)
     return m
 
 
@@ -330,18 +349,8 @@ def far_fir(seed, height, reach, skirts, green, green_top, points=6):
 
 
 def far_pine(seed, height, green):
-    """A pine for the forest behind: the trunk and three pads."""
-    r = rng(seed)
-    m = Mesh()
-    m.tube(
-        [((0, -1.0, 0), 0.42, BARK), ((0, height * 0.5, 0), 0.26, PINE_BARK), ((0, height * 0.9, 0), 0.08, PINE_BARK)],
-        BARK,
-        4,
-    )
-    pad(m, (0.0, height * 0.86, 0.0), 2.6, 1.6, green, r, 5)
-    pad(m, (1.7, height * 0.7, 0.6), 2.0, 1.2, scale(green, 0.94), r, 5)
-    pad(m, (-1.4, height * 0.76, -1.0), 1.8, 1.1, scale(green, 1.05), r, 5)
-    return m
+    """A mountain pine from far off: the leaning trunk and three tiers."""
+    return pine(seed, height, green, tiers=3)
 
 
 def build():

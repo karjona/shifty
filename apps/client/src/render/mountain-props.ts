@@ -6,7 +6,7 @@ import { Fn, float, fwidth, mix, positionWorld, smoothstep, vec2, vec3, vertexSt
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
-import { snowLoad } from "./mountain-look.ts";
+import { fadingInk, snowLoad } from "./mountain-look.ts";
 import type { LipData, RunData, RunPoint } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
 
@@ -114,7 +114,7 @@ export function lake(run: RunData, spot: NonNullable<RunScenery["lake"]>, height
  * water in the season's colours.
  */
 function lakeMaterial(): CelMaterial {
-  return new CelMaterial({
+  const m = new CelMaterial({
     colorNode: Fn(() => {
       const p = positionWorld;
       const frozen = cut0(vertexStage(snowLoad(p)).sub(0.35));
@@ -133,10 +133,8 @@ function lakeMaterial(): CelMaterial {
       return mix(water, ice, frozen);
     })(),
     shade: new THREE.Color(0.62, 0.68, 0.95),
-    silhouette: 0.5,
-    crease: 0,
-    darkness: 0.5,
   });
+  return fadingInk(m, 0.5, 0, 0, 0.5);
 }
 
 /** The creek along the foot of a gully's wall: a strip of ice in the snow. */

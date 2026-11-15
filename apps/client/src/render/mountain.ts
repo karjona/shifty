@@ -63,7 +63,7 @@ import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.t
 import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
 import { farLandscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
-import { MOUNTAIN, gustAt, windNow } from "./mountain-look.ts";
+import { MOUNTAIN, fadingInk, gustAt, windNow } from "./mountain-look.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -593,7 +593,19 @@ export class Mountain implements Environment {
     this.buildProps();
     this.built = new Built(run, this.scenery, this.buildings, models, (x, z) => this.ground(x, z));
     this.props.add(this.built.group);
+    // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
+    const plain = new Set<THREE.Mesh>();
+    this.props.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardNodeMaterial) plain.add(o);
+    });
     celify(this.props);
+    const lined = new Set<THREE.Material>();
+    for (const mesh of plain) {
+      const material: unknown = mesh.material;
+      if (!(material instanceof CelMaterial) || lined.has(material)) continue;
+      lined.add(material);
+      fadingInk(material, 1, 0.8, 0, 0.9);
+    }
     mergeStatic(this.props, { cell: 400 });
     // Choughs over the summit, over the middle of the run and over the finish.
     const over = (k: number, up: number, aside: number) => {
@@ -1040,13 +1052,19 @@ export class Mountain implements Environment {
   /** Red netting along both edges of the run (not in the gully, whose walls hold you in). */
   private buildFences(): void {
     const tex = nettingTexture();
-    const mat = new THREE.MeshBasicNodeMaterial({
-      map: tex,
-      transparent: true,
-      alphaTest: 0.4,
-      side: THREE.DoubleSide,
-      fog: true,
-    });
+    const mat = fadingInk(
+      new THREE.MeshBasicNodeMaterial({
+        map: tex,
+        transparent: true,
+        alphaTest: 0.4,
+        side: THREE.DoubleSide,
+        fog: true,
+      }),
+      0.6,
+      0,
+      0,
+      0.7,
+    );
     const posts: THREE.Matrix4[] = [];
     for (const side of [-1, 1]) {
       const pos: number[] = [];

@@ -81,7 +81,7 @@ const NEAR: Kind[] = [
     crownFrom: 0.55,
     round: true,
     spacing: 3.6,
-    weight: 0.7,
+    weight: 0.4,
   },
   {
     model: "fir_young",
@@ -111,8 +111,11 @@ const FAR: Kind[] = [
   { model: "far_fir_c", height: 17, reach: 2.8, crownFrom: 0.14, round: false, spacing: 3.2, weight: 1 },
 ];
 const KINDS = [...NEAR, ...FAR];
-/** The trees that stand where the sim has a pine: bare trunks a rider can read. */
-const SOLID = [0, 3, 0, 2];
+/** The trees that stand where the sim has a pine: firs with bare trunks a rider can read. */
+const SOLID = [0, 2, 0, 1];
+/** Mountain pines (`NEAR[PINE]`) grow only this far down the run (0-1 of its length), where the forest is lowest. */
+const PINE = 3;
+const PINES_FROM = 0.62;
 
 /** Trees within this of the riding limit (m) are the detailed ones. */
 const NEAR_RANGE = 30;
@@ -222,7 +225,9 @@ export function plantForest(site: ForestSite): Tree[] {
         const out = 2.2 + rand() * rand() * (FOREST_REACH - p.limit);
         const along = (rand() - 0.5) * 4;
         const far = out > NEAR_RANGE;
-        const kind = far ? NEAR.length + pick(FAR, rand()) : pick(NEAR, rand());
+        let kind = far ? NEAR.length + pick(FAR, rand()) : pick(NEAR, rand());
+        // Up high it is all firs.
+        if (kind === PINE && (p.s < run.length * PINES_FROM || out < 7)) kind = 1;
         spots.push({
           x: p.x + rx * side * (p.limit + out) + Math.sin(p.yaw) * along,
           z: p.z + rz * side * (p.limit + out) + Math.cos(p.yaw) * along,

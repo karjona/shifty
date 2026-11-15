@@ -346,6 +346,7 @@ export class Built {
     lengths: number[];
   } | null = null;
   private random = rng(909);
+  private scratch = { m: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3() };
 
   constructor(
     run: RunData,
@@ -365,6 +366,13 @@ export class Built {
     this.finishArea(scenery);
     this.instances(this.tinted, clothMaterial(), true);
     this.instances(this.crowd, crowdMaterial(), true);
+  }
+
+  /** How far (x, z) is beyond the riding limit (m; negative on the run). */
+  private clearOfRun(x: number, z: number): number {
+    let best = Infinity;
+    for (const p of this.run.path) best = Math.min(best, Math.hypot(p.x - x, p.z - z) - p.limit);
+    return best;
   }
 
   /** Lowest ground under a `w` by `d` footprint at (x, z), turned by `turn`. */
@@ -484,10 +492,23 @@ export class Built {
     const yaw = Math.atan2(down.x, down.z);
     for (const t of towers) this.place("lift_tower", t.x, t.y, t.z, yaw, t.height / 14);
     // The top station (where the run's scenery has it, or up the line) and the bottom one.
-    const topAt = scenery.liftTop
-      ? runAt(this.run, scenery.liftTop.s, scenery.liftTop.offset)
-      : { x: first.x - down.x * 110, z: first.z - down.z * 110 };
-    const bottomAt = { x: last.x + down.x * 110, z: last.z + down.z * 110 };
+    // (Along the line, at the first place well clear of the riding width.)
+    const along = (from: THREE.Vector3, way: number) => {
+      let best = { x: from.x + down.x * way * 110, z: from.z + down.z * way * 110 };
+      let room = -Infinity;
+      for (let d = 70; d <= 260; d += 10) {
+        const at = { x: from.x + down.x * way * d, z: from.z + down.z * way * d };
+        const clear = this.clearOfRun(at.x, at.z);
+        if (clear > room) {
+          room = clear;
+          best = at;
+        }
+        if (clear > STATION_ROOM) break;
+      }
+      return best;
+    };
+    const topAt = scenery.liftTop ? runAt(this.run, scenery.liftTop.s, scenery.liftTop.offset) : along(first, -1);
+    const bottomAt = along(last, 1);
     const ends: THREE.Vector3[] = [];
     for (const [at, toward] of [
       [topAt, first],
@@ -504,7 +525,7 @@ export class Built {
     const tops = [ends[0]!, ...towers.map((t) => new THREE.Vector3(t.x, t.y + t.height - 0.95, t.z)), ends[1]!];
     // Two cables, each a sagging line from support to support.
     const line: THREE.Vector3[][] = [];
-    const wire = new THREE.LineBasicNodeMaterial({ color: 0x30343a });
+    const wire = fadingInk(new THREE.LineBasicNodeMaterial({ color: 0x30343a }), 0, 0, 0, 0);
     for (const side of [-2.6, 2.6]) {
       const pts: THREE.Vector3[] = [];
       for (let i = 0; i < tops.length - 1; i++) {
@@ -545,11 +566,7 @@ export class Built {
   update(t: number): void {
     const c = this.chairs;
     if (!c) return;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    const one = new THREE.Vector3(1, 1, 1);
-    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    const { m, q, p } = this.scratch;
     const each = c.riders.count;
     let empty = 0;
     let full = 0;
@@ -571,17 +588,17 @@ export class Built {
         const a = pts[i - 1]!;
         const b = pts[i]!;
         const f = Math.min(1, (along - walked) / Math.max(1e-3, a.distanceTo(b)));
-        const p = a.clone().lerp(b, f);
+        p.copy(a).lerp(b, f);
         const yaw = Math.atan2(b.x - a.x, b.z - a.z) + (upward ? Math.PI : 0);
-        q.setFromAxisAngle(up, yaw);
-        m.compose(p, q, one);
+        q.setFromAxisAngle(UP, yaw);
+        m.compose(p, q, ONE);
         // Two chairs in three going up have riders on.
         if (upward && k % 3 !== 2) c.riders.setMatrixAt(full++, m);
         else c.mesh.setMatrixAt(empty++, m);
       }
     }
-    for (let i = full; i < c.riders.count; i++) c.riders.setMatrixAt(i, hidden);
-    for (let i = empty; i < c.mesh.count; i++) c.mesh.setMatrixAt(i, hidden);
+    for (let i = full; i < c.riders.count; i++) c.riders.setMatrixAt(i, HIDDEN);
+    for (let i = empty; i < c.mesh.count; i++) c.mesh.setMatrixAt(i, HIDDEN);
     c.mesh.instanceMatrix.needsUpdate = true;
     c.riders.instanceMatrix.needsUpdate = true;
   }
@@ -615,7 +632,7 @@ export class Built {
       this.group.add(beam);
     }
     // The banner reads from up the run and from below it.
-    const printed = new CelMaterial({ map: banner, crease: 0, silhouette: 0.6 });
+    const printed = fadingInk(new CelMaterial({ map: banner }), 0.6, 0, 0, 0.8);
     for (const back of [0, 1]) {
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(wide, wide / 8), printed);
       const out = back ? 0.03 : -0.03;
@@ -720,6 +737,13 @@ export class Built {
 /** A brand's colour, by its place in `BRANDS` (they come round again). */
 const brand = (k: number) => new THREE.Color(BRANDS[k % BRANDS.length]![1]).getHex();
 
+const UP = new THREE.Vector3(0, 1, 0);
+const ONE = new THREE.Vector3(1, 1, 1);
+/** What puts an instance out of sight. */
+const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
+
+/** A lift station stands at least this far beyond the riding limit (m). */
+const STATION_ROOM = 14;
 /** Chairs hang this far apart along the cable (m), and travel this fast (m/s). */
 const CHAIR_GAP = 15;
 const CHAIR_SPEED = 2.4;
