@@ -38,11 +38,23 @@ pub const SNAPSHOT_INTERVAL: u32 = 2;
 pub const MAX_INPUT_LEAD_TICKS: u32 = 60;
 /// Window (in ticks) over which the worst input lead is reported.
 const LEAD_WINDOW_TICKS: u32 = 30;
-/// Players silent for this long are removed.
+/// Players whose screen shows the race and sends nothing for this long are
+/// removed. It matches the connection's own idle timeout (see `tls.rs`): a
+/// player whose browser has gone (a closed lid, a phone that suspended it)
+/// is dropped by the connection, one whose page has stopped (hung) by the
+/// room, both after the same while.
 pub const IDLE_TIMEOUT_MS: u64 = 10_000;
 /// The grid waits at most this long for every screen to be ready; screens
 /// still loading then see the race wherever it is.
 pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
+/// A screen still loading the race (it hasn't said the course is on show)
+/// may go silent this long: building and compiling a course can hold a page
+/// for seconds while its connection lives on. The grid waits as long for it,
+/// so it keeps its seat for the whole wait.
+pub const LOADING_TIMEOUT_MS: u64 = GRID_TIMEOUT_TICKS as u64 * 1000 / TICK_HZ as u64;
+/// A player silent for longer than this lets go of everything (no gas, no
+/// stick) instead of riding on with the last input the server had.
+pub const QUIET_INPUT_MS: u64 = 1_000;
 /// A time trial's results stay up this long at most (a forgotten tab):
 /// then its room is over.
 pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
@@ -749,7 +761,13 @@ impl Room {
                     let p = self.players[slot].as_mut().expect("seated");
                     match p.inputs[next as usize % INPUT_RING].take() {
                         Some((t, input)) if t == next => inputs[slot] = Some(input),
-                        _ => self.stats.missed_inputs += 1, // repeat last input
+                        _ => {
+                            self.stats.missed_inputs += 1;
+                            // A late input repeats the last one; a screen gone quiet lets go.
+                            if now_ms.saturating_sub(p.last_packet_ms) > QUIET_INPUT_MS {
+                                inputs[slot] = Some(Input::default());
+                            }
+                        }
                     }
                 }
             }
@@ -784,12 +802,20 @@ impl Room {
             }
         }
 
-        // Idle players are removed.
+        // Idle players are removed (screens still loading this race get longer).
+        let shown = self.event_index as u8 + 1;
         let idle: Vec<ConnId> = self
             .players
             .iter()
             .flatten()
-            .filter(|p| now_ms.saturating_sub(p.last_packet_ms) > IDLE_TIMEOUT_MS)
+            .filter(|p| {
+                let limit = if p.ready >= shown {
+                    IDLE_TIMEOUT_MS
+                } else {
+                    LOADING_TIMEOUT_MS
+                };
+                now_ms.saturating_sub(p.last_packet_ms) > limit
+            })
             .map(|p| p.conn)
             .collect();
         for conn in idle {
