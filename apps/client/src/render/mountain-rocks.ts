@@ -148,7 +148,6 @@ const SHAPES: Record<string, { half: number; deep: number; height: number }> = {
 const BOULDERS = ["boulder_a", "boulder_b", "boulder_c"];
 const SHARDS = ["shard_a", "shard_b"];
 const CRAGS = ["crag_a", "crag_b", "crag_c", "wall_a", "wall_c"];
-const WALLS = ["wall_a", "wall_b", "wall_c"];
 
 /**
  * Every rock of a run: the sim's rocks (as big as
@@ -216,31 +215,6 @@ export function rockMeshes(
         sink: 0.25 * s,
         tall: 0.85 + rand() * 0.4,
       });
-    }
-  }
-  for (const w of scenery.walls) {
-    for (const side of [-1, 1]) {
-      let at = w.from + rand() * 3;
-      while (at < w.to) {
-        const model = WALLS[Math.floor(rand() * WALLS.length)]!;
-        const shape = SHAPES[model]!;
-        // Lower where the walls begin and end.
-        const ends = Math.min(1, (at - w.from + 6) / 24, (w.to - at + 6) / 24);
-        const s = ((w.height * (0.75 + rand() * 0.5)) / shape.height) * (0.55 + 0.45 * ends);
-        const p = runPoint(run, at);
-        const where = runAt(run, at, side * (p.limit + w.out + shape.deep * s));
-        spots.push({
-          x: where.x,
-          z: where.z,
-          model,
-          s,
-          // Its front to the run.
-          turn: Math.atan2(side * Math.cos(p.yaw), -side * Math.sin(p.yaw)) + (rand() - 0.5) * 0.3,
-          sink: 0.3,
-          tall: 1,
-        });
-        at += shape.half * 2 * s * (0.62 + rand() * 0.2);
-      }
     }
   }
   for (const lip of run.lips) {

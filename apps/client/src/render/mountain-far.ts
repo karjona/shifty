@@ -63,9 +63,9 @@ const COAST = 5200;
 const NEAR_SHELL = 2800;
 const SHELL = 1100;
 
-const fade = (t: number) => t * t * (3 - 2 * t);
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-const ramp = (x: number, a: number, b: number) => fade(Math.min(1, Math.max(0, (x - a) / (b - a))));
+export const fade = (t: number) => t * t * (3 - 2 * t);
+export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+export const ramp = (x: number, a: number, b: number) => fade(Math.min(1, Math.max(0, (x - a) / (b - a))));
 
 /** Seeded hash in [0, 1). */
 function hash2(x: number, y: number, seed: number): number {
@@ -75,7 +75,7 @@ function hash2(x: number, y: number, seed: number): number {
 }
 
 /** Smooth value noise in [-1, 1]. */
-function noise2(x: number, y: number, seed: number): number {
+export function noise2(x: number, y: number, seed: number): number {
   const xi = Math.floor(x);
   const yi = Math.floor(y);
   const u = fade(x - xi);
@@ -88,7 +88,7 @@ function noise2(x: number, y: number, seed: number): number {
 }
 
 /** Ridged fractal noise in [0, 1]: sharp crests, soft valleys. */
-function ridged(x: number, y: number, seed: number, octaves: number): number {
+export function ridged(x: number, y: number, seed: number, octaves: number): number {
   let sum = 0;
   let amp = 0.5;
   let freq = 1;
@@ -104,7 +104,15 @@ function ridged(x: number, y: number, seed: number, octaves: number): number {
 }
 
 /** The land beyond the sim's, as a height at (x, z): see the file's header. */
-function landscape(site: FarSite): { height: (x: number, z: number) => number; sea: number } {
+export function landscape(site: FarSite): {
+  height: (x: number, z: number) => number;
+  /** The valley floor's height at `z`, and where it runs (x). */
+  floor: (z: number) => number;
+  axis: (z: number) => number;
+  /** Halfway down the run (z). */
+  middle: number;
+  sea: number;
+} {
   const path = site.run.path;
   const first = path[0]!;
   const last = path.at(-1)!;
@@ -119,41 +127,37 @@ function landscape(site: FarSite): { height: (x: number, z: number) => number; s
     const i = Math.min(path.length - 2, Math.floor(((z - first.z) / (z1 - first.z)) * (path.length - 1)));
     return path[i]!.x;
   };
-  const height = (x: number, z: number) => {
-    const u = x - axisX(z);
-    // The valley's floor: down the run, over the shelf the finish stands on, and down to the plain and the shore.
-    let axis: number;
+  // The valley's floor: down the run, over the shelf the finish stands on, and down to the plain and the shore.
+  const floor = (z: number) => {
     if (z < 0) {
-      axis = site.ridgeStart
+      return site.ridgeStart
         ? top - 420 * ramp(-z, 200, 2600) + 260 * ramp(-z, 5200, 9000)
         : top + 380 * ramp(-z, 0, 1900) - 300 * ramp(-z, 2600, 5200) + 420 * ramp(-z, 6500, 10000);
-    } else if (z <= z1) {
-      axis = lerp(top, bottom, z / z1);
-    } else {
-      const s = z - z1;
-      const shelf = bottom + 70 * ramp(s, 0, 520);
-      axis = lerp(shelf, sea + 26, ramp(s, 520, 4300));
     }
-    // Mountains either side of it: highest up behind the start, down to headlands at the shore.
+    if (z <= z1) return lerp(top, bottom, z / z1);
+    const s = z - z1;
+    const shelf = bottom + 70 * ramp(s, 0, 520);
+    return lerp(shelf, sea + 26, ramp(s, 520, 4300));
+  };
+  const height = (x: number, z: number) => {
+    const u = x - axisX(z);
+    const axis = floor(z);
+    // Foothills either side of it (the ranges stand on them: see mountain-ranges.ts), down to headlands at the shore.
     const inland = ramp(-z, -z1 - 4600, 2500);
-    const crest = lerp(130, 1050, inland) + 520 * ramp(-z, 1500, 7000);
+    const crest = lerp(80, 300, inland) + 100 * ramp(-z, 1500, 7000);
     const open = ramp(Math.abs(u), 60, 1150);
-    // (Bent a little, so ranges don't run straight.)
+    // (Bent a little, so ridges don't run straight.)
     const wx = x + 600 * noise2(x / 3100, z / 3100, 41);
     const wz = z + 600 * noise2(x / 3100 + 9, z / 3100, 43);
     const range = ridged(wx / 2500 + 3.1, wz / 3600 + 1.7, 11, 5);
     const spur = ridged(wx / 640, wz / 640, 23, 3);
-    // Now and then a peak stands over its range.
-    const peak = Math.max(0, noise2(wx / 1900 + 5, wz / 1900, 57)) ** 2 * 1.5;
-    // Crests are broken into teeth and notches.
-    const jag = ridged(wx / 300 + 7, wz / 300, 71, 2) * range;
-    const hills = crest * open * (0.16 + 1.25 * range ** 1.5 + 0.3 * spur * open + peak * inland + 0.22 * jag * inland);
+    const hills = crest * open * (0.16 + 1.1 * range ** 1.5 + 0.3 * spur * open);
     // The shore: a ragged line across the valley's mouth, the ground running out under the sea.
     const shore = z1 + COAST + 700 * noise2(x / 2600, 0.5, 5) + 260 * noise2(x / 700, 2.5, 7);
     const dry = 1 - ramp(z, shore - 500, shore + 900);
     return lerp(sea - 60, axis + hills, dry);
   };
-  return { height, sea };
+  return { height, floor, axis: axisX, middle: (first.z + z1) / 2, sea };
 }
 
 /** How far from the box `[x0, x0 + w] × [z0, z0 + d]` a point is (m; negative inside). */
@@ -224,7 +228,7 @@ function sheet(site: FarSite, land: (x: number, z: number) => number): THREE.Buf
 }
 
 /** A point drawn no further than the camera sees: past `NEAR_SHELL`, closer along its line of sight. */
-function withinSight(p: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+export function withinSight(p: THREE.Node<"vec3">): THREE.Node<"vec3"> {
   const away = p.sub(cameraPosition);
   const d = away.length();
   const beyond = max(d.sub(NEAR_SHELL), 0);
@@ -237,7 +241,7 @@ function withinSight(p: THREE.Node<"vec3">): THREE.Node<"vec3"> {
  * has it close by, and no more than the haze that distance lays on it (so
  * the far land stays in sight on a clear day, and looms in bad weather).
  */
-function hazeAt(d: THREE.Node<"float">): THREE.Node<"float"> {
+export function hazeAt(d: THREE.Node<"float">): THREE.Node<"float"> {
   const fog = smoothstep(MOUNTAIN.fogNear, MOUNTAIN.fogFar, d);
   const air = float(0.45).add(float(0.5).mul(float(1).sub(exp(d.div(-5500)))));
   const thick = LOOK.haze.pow(0.35);
@@ -245,7 +249,7 @@ function hazeAt(d: THREE.Node<"float">): THREE.Node<"float"> {
 }
 
 /** Two flat tones by the sun, as the cel look lights things (`shade` a multiple of the colour). */
-function toned(c: THREE.Node<"vec3">, n: THREE.Node<"vec3">, shade: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+export function toned(c: THREE.Node<"vec3">, n: THREE.Node<"vec3">, shade: THREE.Node<"vec3">): THREE.Node<"vec3"> {
   const lit = cut0(dot(n, SUN_DIR).sub(0.08));
   return mix(c.pow(vec3(1.12)).mul(shade).mul(LOOK.shade), c.mul(LOOK.lit), lit);
 }
@@ -390,9 +394,8 @@ function town(site: FarSite, land: (x: number, z: number) => number, sea: number
 }
 
 /** The land beyond the mountain: the far ground, the sea and the town on the shore. */
-export function farLandscape(site: FarSite): THREE.Group {
+export function farLandscape(site: FarSite, land = landscape(site)): THREE.Group {
   const g = new THREE.Group();
-  const land = landscape(site);
   const ground = new THREE.Mesh(sheet(site, land.height), landMaterial(land.sea, site.run.path[0]!.y));
   ground.frustumCulled = false;
   g.add(ground, seaMesh(site, land.sea), town(site, land.height, land.sea));

@@ -61,9 +61,11 @@ import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
 import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
-import { farLandscape } from "./mountain-far.ts";
+import { farLandscape, landscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
 import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
+import { alpineRanges } from "./mountain-ranges.ts";
+import { rockWalls } from "./mountain-walls.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -620,14 +622,14 @@ export class Mountain implements Environment {
     this.life = new MountainLife(this.trees, this.built.chimneys, flocks);
     this.props.add(this.life.group);
     const { x0, z0, nx, nz } = this.grid;
-    this.props.add(
-      farLandscape({
-        run,
-        heights: (points) => this.terrain.heights(points),
-        around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
-        ridgeStart: this.scenery.ridgeStart,
-      }),
-    );
+    const site = {
+      run,
+      heights: (points: Float32Array) => this.terrain.heights(points),
+      around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
+      ridgeStart: this.scenery.ridgeStart,
+    };
+    const land = landscape(site);
+    this.props.add(farLandscape(site, land), alpineRanges(site, land));
     this.group.add(this.props);
   }
 
@@ -1140,6 +1142,7 @@ export class Mountain implements Environment {
   private buildRocks(models: Models): void {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
+    for (const mesh of rockWalls(this.run, this.scenery.walls, heights)) this.props.add(mesh);
     const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
     if (patches) this.props.add(patches);
   }
