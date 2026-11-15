@@ -125,7 +125,7 @@ const FOREST_REACH = 86;
 const CHUNK_POINTS = 28;
 const FAR_CELL = 320;
 /** A stretch of the near forest further than this from the camera (m) is drawn as its trees from far off. */
-const DETAIL_FAR = 230;
+const DETAIL_FAR = 170;
 /** A tree's shade is thrown no further than this (m). */
 const SHADE_REACH = 70;
 
