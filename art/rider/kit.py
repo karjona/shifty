@@ -207,6 +207,7 @@ def vest(body):
             elif kinds == {2}:
                 Z[i, j] = min(neckline(th), VEST_TOP)
     radius = {}
+    shoulder, base = body.fig.TORSO[body.fig.SHOULDER], body.fig.TORSO[-1]
 
     def surface(th, z):
         key = (round(th, 3), round(z, 4))
@@ -217,7 +218,7 @@ def vest(body):
             r = math.hypot(hit[0], hit[1] - yc)
             # Above the armholes the straps lie on the trapezius, not out on the shoulder caps.
             side = abs(math.sin(a))
-            cap = 0.2 + (0.105 - 0.2) * smoothstep(1.43, 1.505, z)
+            cap = shoulder[1] + (base[1] - shoulder[1]) * smoothstep(shoulder[0] - 0.022, base[0] - 0.007, z)
             radius[key] = min(r, cap / max(side, 0.35)) if side > 0.35 else r
         return radius[key]
 

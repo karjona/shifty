@@ -21,6 +21,7 @@ import { inkId } from "../cel/material.ts";
 import {
   CelTintMaterial,
   type FaceOverlays,
+  type FaceState,
   NO_OVERLAY,
   type NeckShade,
   faceGeometry,
@@ -31,6 +32,9 @@ import { whileLoading } from "../../loading.ts";
 import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
+
+/** A face at rest: what a pose that says nothing of the face leaves it as. */
+const RESTING: FaceState = { blink: 0 };
 
 /** Standing heights per height preset (m). Both bodies' art is built 1.78 m tall (the male's middle preset). */
 const HEIGHTS = { male: [1.68, 1.73, 1.78, 1.83, 1.88], female: [1.58, 1.63, 1.68, 1.73, 1.78] };
@@ -68,7 +72,8 @@ const SHAPES = ["eyes", "nose", "mouth"] as const;
 /** What a look wears over its face: its eyes', nose's and mouth's paint (the first nose and mouth have none), its
  * brows and beard. */
 async function overlaysFor(look: Look): Promise<FaceOverlays> {
-  const [brows, beard, ...features] = await Promise.all([
+  const [lids, brows, beard, ...features] = await Promise.all([
+    loadOverlay(look.body, "lids"),
     loadOverlay(look.body, `brows.${look.brows}`),
     look.facialHair > 0 ? loadOverlay(look.body, `beard.${look.facialHair}`) : Promise.resolve(null),
     loadOverlay(look.body, `eyes.${look.eyes}`),
@@ -79,6 +84,7 @@ async function overlaysFor(look: Look): Promise<FaceOverlays> {
     brows: brows ?? NO_OVERLAY,
     beard: beard ?? NO_OVERLAY,
     features: features.filter((f): f is THREE.Texture => f !== null),
+    lids: lids ?? NO_OVERLAY,
   };
 }
 
@@ -115,6 +121,7 @@ export class RiderFigure {
   body: Body | null = null;
   private meshes: THREE.SkinnedMesh[] = [];
   private materials: Painted[] = [];
+  private face: CelTintMaterial | null = null;
   /** What the figure is built as (the look but its paint, what it wears, the sport). */
   private key = "";
   /** The latest look asked for: its paint goes on whatever is built. */
@@ -167,8 +174,10 @@ export class RiderFigure {
 
   /** Poses the rig (kept for when the art arrives, if it hasn't yet). */
   pose(p: Pose): void {
-    if (this.rig) this.rig.apply(p);
-    else this.pending = p;
+    if (this.rig) {
+      this.rig.apply(p);
+      this.face?.setFace(p.face ?? RESTING);
+    } else this.pending = p;
   }
 
   /** Model-space units per metre of the art: poses work in the art's size, the group scales it. */
@@ -192,6 +201,7 @@ export class RiderFigure {
     group.scale.setScalar(heightScale(look.body, look.height));
     const meshes: THREE.SkinnedMesh[] = [];
     const materials: Painted[] = [];
+    let faceMat: CelTintMaterial | null = null;
     const hidden = assets.reduce((h, a, i) => (i === 0 ? h : a.pieces.reduce((g, p) => g | p.hides, h)), 0);
     for (const [i, asset] of assets.entries()) {
       const w = wearing[i];
@@ -217,8 +227,10 @@ export class RiderFigure {
           piece.flat,
           face ? overlays : null,
           isNeckShade(neck) ? neck : null,
+          piece.lines,
         );
         if (regions) mat.hide(hidden);
+        if (face) faceMat = mat;
         const colours = w?.colours ?? null;
         mat.setTints(...tintsOf(look, piece.tints, colours));
         const mesh = new THREE.SkinnedMesh(geometry, mat);
@@ -250,6 +262,7 @@ export class RiderFigure {
       rigFor: look.body,
       meshes,
       materials,
+      face: faceMat,
       dispose: () => {
         for (const m of materials) m.mat.dispose();
       },
@@ -266,9 +279,10 @@ export class RiderFigure {
     this.group.add(b.rig.root, ...b.meshes);
     this.meshes = b.meshes;
     this.materials = b.materials;
+    this.face = b.face;
     this.repaint();
     if (this.pending) {
-      b.rig.apply(this.pending);
+      this.pose(this.pending);
       this.pending = null;
     }
     this.markReady();
@@ -288,6 +302,7 @@ export class RiderFigure {
     for (const m of this.materials) m.mat.dispose();
     this.meshes = [];
     this.materials = [];
+    this.face = null;
   }
 
   dispose(): void {
@@ -308,6 +323,7 @@ interface Built {
   rigFor: Look["body"];
   meshes: THREE.SkinnedMesh[];
   materials: Painted[];
+  face: CelTintMaterial | null;
   dispose(): void;
 }
 

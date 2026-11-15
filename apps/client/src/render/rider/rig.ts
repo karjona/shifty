@@ -2,6 +2,7 @@
 // directly, arms and legs reach for targets (two-bone IK, elbows and knees
 // bent toward a hint), hands and feet turn to an orientation.
 import * as THREE from "three/webgpu";
+import type { FaceState } from "../cel/rider.ts";
 import { BONE, BONES, type Body, type BoneName, boneParent } from "./skeleton.ts";
 
 /** An arm reaching for a point (wrist), elbow toward `bend`; the hand turned so the fingers and palm point along `fingers` and `palm`. */
@@ -35,13 +36,13 @@ export interface Pose {
   head: THREE.Quaternion;
   arms: [Reach, Reach];
   legs: [Step, Step];
+  /** What the face does (at rest if absent). */
+  face?: FaceState;
 }
 
 /** How much larger than the art's the head and the hands are drawn. */
 const HEAD_SIZE = 1.12;
 const HAND_SIZE = 1.1;
-/** How wide the shoulders are drawn, against the art's (the arms hang from a little further in). */
-const SHOULDERS = 0.93;
 
 const v = () => new THREE.Vector3();
 const q = () => new THREE.Quaternion();
@@ -116,7 +117,6 @@ export class Rig {
     });
     // Drawn a little larger than life, as cel characters are: the head and the hands read from afar.
     this.bones[BONE.head]!.scale.setScalar(HEAD_SIZE);
-    for (const arm of [BONE["upperarm.L"], BONE["upperarm.R"]]) this.bones[arm]!.position.x *= SHOULDERS;
     for (const hand of [BONE["hand.L"], BONE["hand.R"]]) this.bones[hand]!.scale.setScalar(HAND_SIZE);
     this.root = this.bones[0]!;
     this.root.updateMatrixWorld(true);

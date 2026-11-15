@@ -6,9 +6,11 @@ painted and exported.
         [--preview DIR] [--ref PNG]
 
 Writes one .glb per model (meshes, skin, no materials; the face's presets as morph targets) and its textures
-(`<model>.<part>.detail.png` in grey, `<model>.<part>.mask.png`, the face's colour without its light,
+(`<model>.<part>.detail.png` in grey, `<model>.<part>.mask.png`; for the body's skin its drawn anatomy instead,
+`body.skin.lines.png`: ink lines in red, the shade line's push in green; the face's colour without its light,
 `body.face.flat.png`, the brows and beards it can wear, `body.face.brows.<n>.png` and
-`body.face.beard.<n>.png`, and the eye, nose and mouth presets' paint, `body.face.<part>.<n>.png`) into
+`body.face.beard.<n>.png`, the eye, nose and mouth presets' paint, `body.face.<part>.<n>.png`, and the eyelids'
+map for blinks, `body.face.lids.png`) into
 apps/client/public/riders/<body>/.
 """
 
@@ -30,6 +32,7 @@ import hair  # noqa: E402
 import hairdo  # noqa: E402
 import headwear  # noqa: E402
 import kit  # noqa: E402
+import lines  # noqa: E402
 from female import FEMALE  # noqa: E402
 from male import MALE  # noqa: E402
 import mhface  # noqa: E402
@@ -375,6 +378,7 @@ def build_body(o, log, fig, bake_it=True):
     overlays = {f"brows.{i}": mhface.brows(baked["face"], head_tex[f"brow.{i}"], i) for i in range(BROWS)}
     overlays.update({f"beard.{k}": mhface.beard(baked["face"], head_tex, k) for k in range(1, BEARDS[fig.name])})
     features = mhface.features(baked["face"], offsets, normals, head_tex)
+    features["lids"] = mhface.lids(baked["face"])
     flat = None
     for name, maps in baked.items():
         if name == "face":
@@ -400,16 +404,23 @@ def build_body(o, log, fig, bake_it=True):
         rig.bind(piece, arm)
     out = os.path.join(o.out, fig.name)
     export(os.path.join(out, "body.glb"), list(parts.values()), arm)
-    for name, (detail, mask) in textures.items():
-        bake.save_png(os.path.join(out, f"body.{name}.detail.png"), detail, grey=True)
-        bake.save_png(os.path.join(out, f"body.{name}.mask.png"), mask)
+    detail, mask = textures["face"]
+    bake.save_png(os.path.join(out, "body.face.detail.png"), detail, grey=True)
+    bake.save_png(os.path.join(out, "body.face.mask.png"), mask)
+    # The skin is one flat colour in the game: what it carries is its drawn anatomy.
+    maps = baked["skin"]
+    ink, push = lines.paint(maps["pos"], maps["part"], maps["parts"], fig)
+    drawn = np.stack([ink, 0.5 + 0.5 * push, np.zeros_like(ink)], axis=2)
+    bake.save_png(os.path.join(out, "body.skin.lines.png"), bake.downsample(drawn, size // 1024) if size > 1024
+                  else drawn)
     # The face's colour without its light, for shaders that light it themselves (at half size: plain colour).
     bake.save_png(os.path.join(out, "body.face.flat.png"), bake.downsample(flat, 2))
     # The brows and beards the face can wear: how much of each texel they cover, at the mask's size.
     f = size // 1024
     for name, a in overlays.items():
         bake.save_png(os.path.join(out, f"body.face.{name}.png"), bake.downsample(a, f) if f > 1 else a)
-    # The eye and mouth presets' paint (ink, shade, iris and catchlight), at the mask's size too.
+    # The eye and mouth presets' paint (ink, shade, iris and catchlight) and the eyelids' map, at the mask's size
+    # too.
     for name, a in features.items():
         bake.save_png(os.path.join(out, f"body.face.{name}.png"), bake.downsample(a, f) if f > 1 else a)
     src.remove()
@@ -466,6 +477,15 @@ def build_hair(o, log, high, arm, fig, n):
     return pieces, textures
 
 
+def flat_colours(mask):
+    """A mask with every texel wholly one of its colours (or none of them): a garment's colours meet on hard
+    edges, as cut cloth and cel paint do. (Painted at twice the size it is kept at, so the edges come out
+    smooth.)"""
+    none = 1 - np.clip(mask.sum(axis=2, keepdims=True), 0, 1)
+    most = np.argmax(np.concatenate([mask, none], axis=2), axis=2)
+    return np.stack([most == k for k in range(3)], axis=2).astype(np.float64)
+
+
 def build_garment(o, log, fig, model, pieces, painter, body, arm, hides=(), finish=None, size=1024, rigid=None,
                   own_weights=False):
     """Exports a catalog model for a body: its pieces fitted, weighted from the body (or all on one bone, or as
@@ -483,7 +503,7 @@ def build_garment(o, log, fig, model, pieces, painter, body, arm, hides=(), fini
         maps["fig"] = fig
         paint = painter[name] if isinstance(painter, dict) else painter
         detail, mask = paint(maps)
-        textures[name] = (bake.downsample(detail, 2), bake.downsample(mask, 2))
+        textures[name] = (bake.downsample(detail, 2), bake.downsample(flat_colours(mask), 2))
         fin = finish.get(name) if isinstance(finish, dict) and name in finish else finish
         piece["finish"] = fin if isinstance(fin, dict) and "roughness" in fin else {"roughness": 0.7, "rim": 0.35}
         piece["tints"] = "kit"

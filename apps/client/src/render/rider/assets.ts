@@ -1,6 +1,7 @@
 // Rider art, loaded once and shared: each model is a .glb of skinned
-// pieces (no materials) plus a detail and a mask texture per piece, made by
-// art/rider/build.py into public/riders/<body>/.
+// pieces (no materials) plus a detail and a mask texture per piece (for the
+// body's skin, its drawn anatomy instead), made by art/rider/build.py into
+// public/riders/<body>/.
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Body as BodyKind } from "@shifty/rider";
@@ -23,6 +24,8 @@ export interface Piece {
   mask: THREE.Texture;
   /** The paint without its baked light, where the art has one (the face). */
   flat: THREE.Texture | null;
+  /** The body's skin: its drawn anatomy (ink lines, shapes of shade). Its `detail` and `mask` are blank. */
+  lines: THREE.Texture | null;
   finish: Finish;
   tints: TintSource;
   /** Body regions this piece covers (bits of REGIONS), hidden while it is worn. */
@@ -77,6 +80,10 @@ function tintsOf(v: unknown): TintSource {
   return v === "look" || v === "hair" ? v : "kit";
 }
 const textures = new Map<string, Promise<THREE.Texture>>();
+
+/** A texture of nothing, for pieces that have no paint of a kind. */
+const BLANK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+BLANK.needsUpdate = true;
 
 /** A face overlay of the art (e.g. `brows.2`, `beard.1`): how much of each texel of the face it covers. */
 export function loadOverlay(body: BodyKind, name: string): Promise<THREE.Texture | null> {
@@ -140,10 +147,12 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
         meshes.map(async (m) => {
           // A mesh split into primitives comes back as a group of meshes named after the node.
           const name = m.name.replace(/_\d+$/, "");
-          const [detail, mask, flat] = await Promise.all([
-            loadTexture(`${BASE}/${key}.${name}.detail.png`),
-            loadTexture(`${BASE}/${key}.${name}.mask.png`),
+          const skin = model === "body" && name === "skin";
+          const [detail, mask, flat, lines] = await Promise.all([
+            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.detail.png`),
+            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.mask.png`),
             name === "face" ? loadTexture(`${BASE}/${key}.${name}.flat.png`).catch(() => null) : Promise.resolve(null),
+            skin ? loadTexture(`${BASE}/${key}.${name}.lines.png`) : Promise.resolve(null),
           ]);
           const finish: unknown = Reflect.get(m.userData, "finish");
           const tints: unknown = Reflect.get(m.userData, "tints");
@@ -155,6 +164,7 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
             detail,
             mask,
             flat,
+            lines,
             finish: finishOf(finish),
             tints: tintsOf(tints),
             hides: hidesOf(hides),

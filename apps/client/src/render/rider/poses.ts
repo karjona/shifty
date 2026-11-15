@@ -23,6 +23,29 @@ function gazeAt(t: number): { yaw: number; pitch: number } {
   };
 }
 
+/** How far the eyes are closed at time `t` (s), 0-1: a blink every few seconds, now and then two in a row. */
+export function blinkAt(t: number): number {
+  const EVERY = 3.7;
+  const cell = Math.floor(t / EVERY);
+  const r = hash(cell);
+  const at = cell * EVERY + 0.4 + r * (EVERY - 1.2);
+  const twice = hash(cell + 0.5) < 0.22 ? blinkShape(t - at - 0.34) : 0;
+  return Math.max(blinkShape(t - at), twice);
+}
+
+/** A blink `dt` seconds in: down fast, shut a moment, up a little slower. */
+function blinkShape(dt: number): number {
+  if (dt < 0 || dt > 0.24) return 0;
+  if (dt < 0.07) return dt / 0.07;
+  if (dt < 0.12) return 1;
+  return 1 - (dt - 0.12) / 0.12;
+}
+
+function hash(n: number): number {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
 /** An arm hanging at ease from its shoulder: `ease` (0-1) how far it swings forward and bends. */
 function hanging(a: Body, side: number, ease: number, t: number): Reach {
   const len = a.upperArm + a.foreArm;
@@ -72,6 +95,7 @@ export function idlePose(a: Body, t: number): Pose {
     head: euler(0.01, gaze.yaw * 0.55, w * 0.022),
     arms,
     legs,
+    face: { blink: blinkAt(t) },
   };
 }
 
@@ -101,6 +125,7 @@ export function hipPose(a: Body, t: number): Pose {
     legs: still.legs,
     hips: hip.clone().add(v3(0, breathe * 0.0015, 0)),
     hipsTurn: base.hipsTurn.clone().slerp(still.hipsTurn, 1),
+    face: base.face,
   };
 }
 
@@ -134,5 +159,6 @@ export function crossedPose(a: Body, t: number): Pose {
     neck: euler(0.02, 0.06 + gaze.yaw * 0.25, 0.02),
     head: euler(0.0, 0.12 + gaze.yaw * 0.3, 0.07),
     arms,
+    face: { blink: blinkAt(t) },
   };
 }

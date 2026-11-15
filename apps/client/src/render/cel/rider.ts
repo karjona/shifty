@@ -12,6 +12,7 @@ import {
   attribute,
   clamp,
   dot,
+  exp,
   float,
   floor,
   fwidth,
@@ -24,6 +25,7 @@ import {
   normalLocal,
   positionGeometry,
   positionLocal,
+  positionView,
   positionWorld,
   pow,
   smoothstep,
@@ -74,6 +76,16 @@ export interface FaceOverlays {
   /** The eye, nose and mouth presets' paint: ink lines, how the preset's shape moves the shade line (0.5 not at
    * all), and the iris (in the eye's colour) up to 0.5 then its catchlight. */
   features: readonly THREE.Texture[];
+  /** Where a closing eyelid passes (art/rider/mhface.py): in red how far up an eye's opening a texel is, from
+   * `LID_LOW` at the lower lid to `LID_HIGH` at the upper and on to 1 over the upper lash line; in green what
+   * the lid covers once shut. */
+  lids: THREE.Texture;
+}
+
+/** What a face does besides hold still. */
+export interface FaceState {
+  /** How far the eyes are closed, 0-1. */
+  blink: number;
 }
 
 /** How the overlays paint (tint factors, as the art paints them: art/rider/mhface.py). */
@@ -85,12 +97,27 @@ const GLINT_TONE = 0.95;
 /** How far a face preset's shape can move the shade line. */
 const SHAPE_SHADE = 1.7;
 
+/** The eyelids' map (see `FaceOverlays.lids`). */
+const LID_LOW = 0.2;
+const LID_HIGH = 0.8;
+/** A closed eye's line, as a share of the eye's opening. */
+const LID_LINE = 0.3;
+
 /** Where painted lines cut (coverage, 0-1). */
 const INK_EDGE = 0.32;
 /** How far the front of the face's normals lean toward straight ahead (see `faceGeometry`). */
 const FACE_FLAT = 1.6;
 /** How far the shade line shifts under the jaw (toward shade). */
 const NECK_SHADE = 0.9;
+
+/** How wide the body's drawn lines are, against the outline's. */
+const BODY_LINE = 0.6;
+/** How fast a drawn line's coverage falls off from its centre in the art (m): `SIGMA` in art/rider/lines.py. */
+const LINE_SIGMA = 0.003;
+/** A drawn line's tone, as a multiple of the skin's. */
+const LINE_TONE = new THREE.Color(0.36, 0.22, 0.24);
+/** How far the body's drawn anatomy moves the shade line. */
+const ANATOMY_SHADE = 0.9;
 
 /** An overlay that covers nothing. */
 export const NO_OVERLAY = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
@@ -101,6 +128,7 @@ export class CelTintMaterial extends CelMaterial {
   private second = uniform(new THREE.Color());
   private accent = uniform(new THREE.Color());
   private hidden = uniform(0);
+  private blink = uniform(0);
   /** The flat colour, also used by the outline. */
   readonly albedo: THREE.Node<"vec3">;
   readonly regionMask: THREE.Node<"bool"> | null = null;
@@ -120,6 +148,9 @@ export class CelTintMaterial extends CelMaterial {
     overlays: FaceOverlays | null = null,
     /** The head's neck shade (see `faceGeometry`). */
     neck: NeckShade | null = null,
+    /** The body's drawn anatomy (ink lines, and how far the shade line moves), in place of `detail` and `mask`:
+     * the skin is one flat colour. */
+    lines: THREE.Texture | null = null,
   ) {
     const glossy = finish.roughness < 0.45;
     super({
@@ -140,10 +171,20 @@ export class CelTintMaterial extends CelMaterial {
       this.maskNode = this.regionMask;
     }
     const [t0, t1, t2] = [this.main, this.second, this.accent];
+    if (lines) {
+      const drawn = texture(lines);
+      const skin = t0.rgb;
+      this.albedo = mix(skin, skin.mul(vec3(LINE_TONE.r, LINE_TONE.g, LINE_TONE.b)), penLine(drawn.r));
+      this.colorNode = this.albedo;
+      // (The art stores "no change" as 128.)
+      this.biasNode = drawn.g.sub(128 / 255).mul(-2 * ANATOMY_SHADE);
+      this.shadeNode = warmShade(skin);
+      return;
+    }
     const g = texture(detail).rgb;
     // The face's overlays, in order: the presets' features, the beard, the brows. Each moves the mask (which
     // colour tints a texel) and the flat paint (by how much).
-    let w: THREE.Node<"vec3"> = texture(mask).rgb;
+    let w: THREE.Node<"vec3"> = hardMask(texture(mask).rgb);
     let paint: THREE.Node<"vec3"> | null = flat ? texture(flat).rgb : null;
     const over = (cover: THREE.Node<"float">, tint: THREE.Node<"vec3">, tone: THREE.Node<"vec3">) => {
       w = mix(w, tint, cover);
@@ -164,6 +205,19 @@ export class CelTintMaterial extends CelMaterial {
       );
       over(crisp(o.x), none, vec3(INK_TONE));
       over(crisp(clamp(o.z.mul(2).sub(1), 0, 1)), none, vec3(GLINT_TONE));
+    }
+    if (overlays) {
+      // A blink: the upper lid comes down over the eye in the skin's colour, its lashes on its edge. Closed,
+      // the eye is one line along the lower lid.
+      const lids = texture(overlays.lids);
+      const lid = lids.r;
+      const edge = mix(float(1.05), float(LID_LOW * 0.5), this.blink);
+      const soft = clamp(fwidth(lid), 0.01, 0.2);
+      const under = smoothstep(edge.sub(soft), edge.add(soft), lid).mul(crisp(lids.g));
+      const line = mix(float(0.1), float(LID_LINE * (LID_HIGH - LID_LOW) + LID_LOW * 0.5), this.blink);
+      const lash = under.mul(smoothstep(edge.add(line).add(soft), edge.add(line).sub(soft), lid));
+      over(under, vec3(1, 0, 0), vec3(0.5));
+      over(lash, none, vec3(INK_TONE));
     }
     // The brows and the beard take the hair's colour (the mask's third channel) where they cover the face.
     if (overlays) {
@@ -217,16 +271,15 @@ export class CelTintMaterial extends CelMaterial {
     if (kind === "look") {
       // Skin shades warm, the eyes and hair cool.
       const skin = clamp(w.x.div(max(sum, 1e-4)), 0, 1).mul(clamp(sum, 0, 1));
-      // (Dark skin keeps its shade from sinking to black: the darker the colour, the lighter its shade's multiple.)
-      const depth = smoothstep(0.02, 0.3, dot(this.albedo, vec3(0.299, 0.587, 0.114)));
-      this.shadeNode = mix(
-        vec3(COOL_SHADE.r, COOL_SHADE.g, COOL_SHADE.b),
-        vec3(WARM_SHADE.r, WARM_SHADE.g, WARM_SHADE.b).mul(mix(float(1.55), float(1), depth)),
-        skin,
-      );
+      this.shadeNode = mix(vec3(COOL_SHADE.r, COOL_SHADE.g, COOL_SHADE.b), warmShade(this.albedo), skin);
     } else if (kind === "hair") {
       this.shade.value.setRGB(0.5, 0.52, 0.72);
     }
+  }
+
+  /** Sets what the face is doing (a face's material only). */
+  setFace(face: FaceState): void {
+    this.blink.value = face.blink;
   }
 
   hide(regions: number): void {
@@ -238,6 +291,34 @@ export class CelTintMaterial extends CelMaterial {
     this.second.value.setHex(second);
     this.accent.value.setHex(accent);
   }
+}
+
+/** Skin's shade, as a multiple of its colour: warm, and lighter the darker the skin, so it never sinks to black. */
+function warmShade(colour: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+  const depth = smoothstep(0.02, 0.3, dot(colour, vec3(0.299, 0.587, 0.114)));
+  return vec3(WARM_SHADE.r, WARM_SHADE.g, WARM_SHADE.b).mul(mix(float(1.55), float(1), depth));
+}
+
+/**
+ * A line of the body's drawn anatomy: its coverage (1 on its centre line, falling off as a gaussian of
+ * `LINE_SIGMA` metres) cut where it gives the line the same width on screen at any distance, as the outline
+ * has; thinner where the pen lifted (less coverage).
+ */
+function penLine(cover: THREE.Node<"float">): THREE.Node<"float"> {
+  const half = positionView.z
+    .negate()
+    .mul(PIXEL_AT_1M)
+    .mul(RIDER_LINE)
+    .mul(BODY_LINE / 2);
+  const cut = clamp(exp(half.div(LINE_SIGMA).pow2().negate()), 0.16, 0.82);
+  const w = clamp(fwidth(cover), 0.01, 0.25);
+  return smoothstep(cut.sub(w), cut.add(w), cover);
+}
+
+/** A mask whose colours meet on a hard edge at the screen's size, however close the camera comes. */
+function hardMask(w: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+  const soft = clamp(fwidth(w).mul(0.7), 0.01, 0.5);
+  return smoothstep(vec3(0.5).sub(soft), vec3(0.5).add(soft), w);
 }
 
 /**

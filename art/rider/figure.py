@@ -82,7 +82,7 @@ class Figure:
     Tables: `JOINTS` (the trunk's and one side's joints), `UPPER_ARM`, `FOREARM`, `PALM`, `TORSO` (rings from
     the crotch up: z, half width, front, back, centre y, squareness; `ARMPIT`, `CHEST_HIGH` and `SHOULDER`
     index the rings the arm holes cut), `UPPER`, `FORE`, `HAND` (arm rings: distance along the arm, top,
-    bottom, front, back), `FINGERS` (across the hand, length, radius), `ARM_BUMPS`, `THIGH`, `SHIN` (leg rings:
+    bottom, front, back), `FINGERS` (across the hand, length, radius), `THIGH`, `SHIN` (leg rings:
     distance, outer, inner, front, back), `FOOT` (rings from the ankle to the toes), `CROTCH`, `NECK` (the
     neck's top ring: centre, half width, front, back, muscle), and the head's place (see `head_scaled`).
     """
@@ -190,25 +190,25 @@ class Figure:
 
     def torso_region(self, k, i):
         """Hips (under shorts), torso (under a vest or top: the front and back of the chest and belly), flanks
-        (the sides under the arms) and the yoke (the top of the chest, the shoulders and the top of the back),
+        (the sides under the arms, as far round as a vest's armholes open) and the yoke (the top of the chest, the shoulders and the top of the back),
         which show through a vest's openings."""
         if k < 2:
             return R["hips"]
         if k >= self.CHEST_HIGH:
             return R["yoke"]
-        if i in (3, 4, 11, 12) and k >= 4:
+        if (1 <= i <= 6 or 9 <= i <= 14) and self.TORSO[k][0] >= 1.18:
             return R["flanks"]
         return R["torso"]
 
     # --- arms --------------------------------------------------------------
 
-    def arm_ring(self, s, base, dist, r_top, r_bot, r_front, r_back, bumps=()):
+    def arm_ring(self, s, base, dist, r_top, r_bot, r_front, r_back):
         d = arm_dir(s)
         e1, e2, _ = frame_of(d, (0, -1, 0))
         # e1 must point to the arm's top (outer) side.
         if np.dot(e1, arm_up(s)) < 0:
             e1 = -e1
-        pts = outline(8, r_top, r_bot, r_front, r_back, power=2.1, bumps=bumps)
+        pts = outline(8, r_top, r_bot, r_front, r_back, power=2.1)
         return place(np.asarray(base) + d * dist, e1, e2, pts)
 
     def build_arm(self, cage, s, loop):
@@ -220,16 +220,15 @@ class Figure:
             w = {f"upperarm.{L}": 1.0} if k else {f"upperarm.{L}": 0.75, "chest": 0.25}
             if dist > self.UPPER_ARM - 0.06:
                 w = blend_w(f"upperarm.{L}", f"forearm.{L}", (dist - (self.UPPER_ARM - 0.06)) / 0.12)
-            rings_.append((self.arm_ring(s, sh, dist, a, b, f, bk, self.ARM_BUMPS.get(k, ())), w, R["upperarms"]))
+            rings_.append((self.arm_ring(s, sh, dist, a, b, f, bk), w, R["upperarms"]))
         for k, (dist, a, b, f, bk) in enumerate(self.FORE):
-            k += len(self.UPPER)
             if dist < 0.06:
                 w = blend_w(f"upperarm.{L}", f"forearm.{L}", 0.5 + dist / 0.12)
             elif dist > self.FOREARM - 0.05:
                 w = blend_w(f"forearm.{L}", f"hand.{L}", (dist - (self.FOREARM - 0.05)) / 0.1)
             else:
                 w = {f"forearm.{L}": 1.0}
-            rings_.append((self.arm_ring(s, el, dist, a, b, f, bk, self.ARM_BUMPS.get(k, ())), w, R["forearms"]))
+            rings_.append((self.arm_ring(s, el, dist, a, b, f, bk), w, R["forearms"]))
         for k, (dist, a, b, f, bk) in enumerate(self.HAND):
             if dist <= 0.0:
                 w = blend_w(f"forearm.{L}", f"hand.{L}", 0.55)
