@@ -581,7 +581,7 @@ mod tests {
         // A time trial: its one race, in clear, steady weather.
         let trial = JoinClaims {
             trial: true,
-            races: vec![c.races[1].clone()],
+            races: vec![c.races[1]],
             ..c.clone()
         };
         let [race] = &trial.room_plan()[..] else {

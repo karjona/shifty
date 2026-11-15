@@ -225,8 +225,8 @@ function RaceHead({ end }: { end: RaceEnd }) {
     const me = podium.riders[i];
     return (
       <Head
-        kicker={`${t.end.tilt} · ${t.place}`}
-        title={t.podium.standings}
+        kicker={t.podium.standings}
+        title={t.end.tilt}
         hero={me ? ordinal(i + 1) : t.results.dnf}
         heroSub={me ? t.end.points(me.points) : undefined}
       />
@@ -243,29 +243,19 @@ function RaceHead({ end }: { end: RaceEnd }) {
   );
 }
 
-/** A Tilt's final standings: its champion, the top three and you. */
+/** A Tilt's final standings (its champion stands on the podium behind): the top three, and you. */
 function TiltStandings({ end }: { end: RaceEnd }) {
-  const t = useT();
   const riders = end.podium?.riders ?? [];
-  const champion = riders[0];
   const shown = riders.map((r, i) => ({ r, i })).filter(({ r, i }) => i < 3 || r.me);
   return (
-    <section className="end-block">
-      {champion && (
-        <p className="end-champion">
-          <span className="board-label">{champion.me ? t.end.youChampion : t.end.champion}</span>
-          {!champion.me && <Name name={champion.name} />}
-        </p>
-      )}
-      <div className="end-rows">
-        {shown.map(({ r, i }) => (
-          <div key={r.slot} className={`board-row${r.me ? " me" : ""}`}>
-            <span className="c-place">{i + 1}</span>
-            <Name name={r.name} />
-            <span className="c-total">{r.points}</span>
-          </div>
-        ))}
-      </div>
+    <section className="end-block end-rows">
+      {shown.map(({ r, i }) => (
+        <div key={r.slot} className={`board-row${r.me ? " me" : ""}`}>
+          <span className="c-place">{i + 1}</span>
+          <Name name={r.name} />
+          <span className="c-total">{r.points}</span>
+        </div>
+      ))}
     </section>
   );
 }

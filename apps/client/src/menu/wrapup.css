@@ -16,17 +16,15 @@
 .end-layer .hints {
   pointer-events: auto;
 }
+/* Anchored at the bottom: what it paid comes in above the actions, which stay put. */
 .end-panel {
   position: absolute;
   right: var(--margin-x);
-  top: 0;
-  bottom: 0;
+  bottom: var(--margin-y);
   display: flex;
   flex-direction: column;
   width: 720px;
-  height: fit-content;
   max-height: calc(100% - 2 * var(--margin-y));
-  margin: auto 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -120,19 +118,6 @@
   margin: 0 var(--pad);
   padding: 16px 0;
   border-bottom: 1px solid var(--rule);
-}
-.end-champion {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  margin: 0;
-  min-width: 0;
-}
-.end-champion .c-name {
-  font-size: 30px;
-  font-weight: 900;
-  font-stretch: 118%;
-  font-style: italic;
 }
 .end-rows .board-row,
 .end-panel .end-rows.board-row {

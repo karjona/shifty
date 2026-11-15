@@ -493,8 +493,6 @@ export const ca: Messages = {
     tilt: "El Tilt",
     timeTrial: "Contrarellotge",
     points: (n: number) => `${n} pts.`,
-    champion: "Guanya el Tilt",
-    youChampion: "Guanyes el Tilt!",
     standings: "Classificació final",
     paid: "El que ha pagat",
     waiting: "Esperant els resultats…",

@@ -491,8 +491,6 @@ export const en = {
     timeTrial: "Time trial",
     /** Your place in the Tilt, beside it: its points. */
     points: (n: number) => `${n} pts`,
-    champion: "Wins the Tilt",
-    youChampion: "You win the Tilt!",
     standings: "Final standings",
     paid: "What it paid",
     waiting: "Waiting for the results…",

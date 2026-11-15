@@ -8,6 +8,7 @@
 // race straight from there, through the season card. A time trial ends on
 // the same panel, with Retry. Problems (the race server turning the ticket
 // down, going away, another release) get the same panel, with a way out.
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -16,7 +17,7 @@ import { SEASONS } from "@shifty/rider";
 import { type RaceEnd, RaceSession, type Trouble, readPlan } from "../../game/race.ts";
 import { SeasonCard } from "../../game/season-change.ts";
 import { useT } from "../../i18n/index.ts";
-import { ApiError, type PendingRace, playSingle, raceMode, setRequeue, takePendingRace } from "../api.ts";
+import { ApiError, type PendingRace, meQuery, playSingle, raceMode, setRequeue, takePendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { MenuIcon } from "../icons.tsx";
 import { nav, pointing } from "../nav.ts";
@@ -48,6 +49,8 @@ interface Run {
 
 export function RaceScreen() {
   const [run, setRun] = useState<Run>(() => ({ race: takePendingRace(), card: null, key: 0 }));
+  // The player's account stays at hand through the race, for the menus after it.
+  useQuery(meQuery);
   const again = (race: PendingRace, card: SeasonCard) => setRun((r) => ({ race, card, key: r.key + 1 }));
   return <RaceRun key={run.key} race={run.race} card={run.card} onAgain={again} />;
 }

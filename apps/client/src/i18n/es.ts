@@ -501,8 +501,6 @@ export const es: Messages = {
     tilt: "El Tilt",
     timeTrial: "Contrarreloj",
     points: (n: number) => `${n} ptos.`,
-    champion: "Gana el Tilt",
-    youChampion: "¡Ganas el Tilt!",
     standings: "Clasificación final",
     paid: "Lo que ha pagado",
     waiting: "Esperando los resultados…",
