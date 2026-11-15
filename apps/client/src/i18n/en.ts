@@ -335,6 +335,8 @@ export const en = {
       reload: "Reload",
     },
     joining: "Joining the race…",
+    /** Nothing has come from the race server for a moment. */
+    waiting: "Waiting for the race server…",
     controls: "Controls",
     help: {
       jetski: [
@@ -488,7 +490,6 @@ export const en = {
   end: {
     continue: "Continue",
     tilt: "The Tilt",
-    timeTrial: "Time trial",
     /** Your place in the Tilt, beside it: its points. */
     points: (n: number) => `${n} pts`,
     standings: "Final standings",
@@ -535,6 +536,9 @@ export const en = {
     season: "Season",
     yourBest: "Your best",
     record: "Record",
+    /** Ghosts the run just beat, on its results. */
+    previousBest: "Your previous best",
+    previousRecord: "Previous record",
     noTime: "No time yet",
     rank: (n: number, total: number) => `${n} of ${total}`,
     board: "Leaderboard",

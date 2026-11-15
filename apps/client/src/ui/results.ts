@@ -8,7 +8,7 @@
 import "./results.css";
 import { circuit } from "@shifty/rider";
 import { messages } from "../i18n/index.ts";
-import { type Conditions, type Season, circuitName } from "../game/conditions.ts";
+import { type Conditions, type Season, circuitName, clockTime, timeOfDay } from "../game/conditions.ts";
 import { PALETTE, setAccent } from "../game/seasons.ts";
 import { type GrandPrixView, type RaceView, type StandingView, formatTime, ordinal } from "./hud.ts";
 
@@ -32,8 +32,22 @@ export interface RosterName {
 export interface BoardRace extends RaceView {
   course: number;
   season: Season;
+  conditions: Conditions;
   eventIndex: number;
   eventCount: number;
+}
+
+/** A race's circuit, by name. */
+export function circuitTitle(course: number): string {
+  return circuitName(course, circuit(course)?.sport ?? "jetski");
+}
+
+/** "Fall · Snow, then clear · Afternoon 15:10": a race's season, weather (and what it turns to) and time of day. */
+export function conditionsLine(c: Conditions): string {
+  const m = messages();
+  const weather =
+    c.weather === c.turns ? m.weathers[c.weather] : m.intro.turns(m.weathers[c.weather], m.weathers[c.turns]);
+  return [m.seasons[c.season], weather, `${m.timesOfDay[timeOfDay(c)]} ${clockTime(c.time)}`].join(" · ");
 }
 
 export interface BoardInput {
@@ -252,6 +266,7 @@ export class Scoreboard {
       })
       .join("");
     const season = messages().seasons[race.season];
+    const title = escapeHtml(circuitTitle(race.course));
     const hero = Number.isFinite(myTicks)
       ? `<div class="board-mine"><b>${ordinal(place)}</b><span>${formatTime(myTicks, hz)}</span></div>`
       : `<div class="board-mine"><b>${m.dnf}</b></div>`;
@@ -259,7 +274,7 @@ export class Scoreboard {
     this.board.innerHTML =
       `<section class="board-panel board-race board-trial">` +
       `<header class="board-head"><div><span class="board-label">${messages().trial.title}</span>` +
-      `<b class="board-title">${season}</b>${callout}</div>${hero}</header>` +
+      `<b class="board-title circuit">${title}</b><span class="board-sub">${season}</span>${callout}</div>${hero}</header>` +
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span></div>${body}</section>`;
     this.countdown = null;
   }
@@ -310,14 +325,24 @@ export class Scoreboard {
 
   private renderBoard(input: BoardInput, list: StandingView[], tilt: TiltRow[] | null): void {
     const { race, mySlot, riders } = input;
-    const key = JSON.stringify([list, tilt, mySlot, race.eventIndex, input.next, messages().results.title]);
+    const key = JSON.stringify([
+      list,
+      tilt,
+      mySlot,
+      race.eventIndex,
+      race.course,
+      race.conditions,
+      input.next,
+      messages().results.title,
+    ]);
     if (key === this.boardKey) return;
     this.boardKey = key;
     const m = messages().results;
     const hz = race.tickHz;
     const best = bestTime(list);
     const last = race.eventIndex >= race.eventCount - 1;
-    const season = messages().seasons[race.season];
+    const title = escapeHtml(circuitTitle(race.course));
+    const sub = escapeHtml(conditionsLine(race.conditions));
     const won = new Map(tilt?.map((r) => [r.slot, r.won]) ?? []);
     const style = !race.looped || list.some((s) => s.points > 0);
     // Summer: buoys missed, tricks (and style, once tricks score); winter: tricks and style.
@@ -378,7 +403,7 @@ export class Scoreboard {
     const racePanel =
       `<section class="board-panel board-race" style="--n: ${cols.length}">` +
       `<header class="board-head"><div><span class="board-label">${raceLabel}</span>` +
-      `<b class="board-title">${season}</b></div>${hero}</header>` +
+      `<b class="board-title circuit">${title}</b><span class="board-sub">${sub}</span></div>${hero}</header>` +
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +
       cols.map(([label]) => `<span>${label}</span>`).join("") +
       `</div>${rows}` +

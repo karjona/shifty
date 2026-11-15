@@ -379,3 +379,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The heading: the circuit (on two lines if it must), and its conditions under it. */
+.board-title.circuit {
+  font-size: 56px;
+  line-height: 0.92;
+  white-space: normal;
+}
+.board-sub {
+  font-size: var(--fs-label);
+  font-weight: 560;
+  color: var(--ink-2);
+}

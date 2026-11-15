@@ -50,15 +50,16 @@ export function PodiumScreen({
       const podium = new Podium(data);
       stage = podium;
       engine.show(podium);
-      void podium.shown.then(() => {
+      // The champion's name stands on the scene once the card has cleared.
+      void podium.shown.then(async () => {
         if (!live) return;
-        card.hide();
-        setShown(true);
+        await card.hide();
+        if (live) setShown(true);
       });
     });
     return () => {
       live = false;
-      card.hide();
+      void card.hide();
       const s = stage;
       if (s) void Engine.get().then((engine) => engine.hide(s));
     };

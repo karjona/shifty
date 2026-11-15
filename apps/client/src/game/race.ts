@@ -75,6 +75,18 @@ export interface PlannedRace {
   conditions: Conditions;
 }
 
+/** What went wrong when the connection to the race server closed (`reason`: the transport's). */
+function closeTrouble(_reason: string): Trouble {
+  return { kind: "lost" };
+}
+
+/** What went wrong when the race server couldn't be reached at all. */
+function connectTrouble(e: unknown): Trouble {
+  return {
+    kind: e instanceof WebTransportUnavailable && typeof WebTransport === "undefined" ? "unsupported" : "unreachable",
+  };
+}
+
 /** The races a ticket's room runs, in order (see `planOf`; empty if it can't be read). */
 export function readPlan(token: string): PlannedRace[] {
   let data: unknown;
@@ -161,6 +173,8 @@ export interface RaceState {
   plan: PlannedRace[];
   /** What went wrong, if anything. */
   trouble: Trouble | null;
+  /** Nothing has come from the race server for a moment: the race goes on from prediction, the HUD's clock held. */
+  stalled: boolean;
 }
 
 /** `sim::Phase`: the countdown, the race, the results. */
@@ -216,6 +230,10 @@ function ticketSeason(token: string): Season {
 /** With no frame for this long (ms), a timer runs the netcode. */
 const STALLED_MS = 100;
 
+/** With nothing from the race server for this long (ms) a sign says so; for this long, the connection is lost. */
+const SILENT_MS = 2500;
+const SILENT_LOST_MS = 10_000;
+
 /** How long a course waits for its riders' art before it goes on without the late ones. */
 const RIDERS_WAIT_MS = 8000;
 
@@ -258,6 +276,8 @@ export class RaceSession implements Stage {
   private conditions: Conditions = homeConditions("jetski");
   private sport: "jetski" | "snow" = "jetski";
   private closedReason = "";
+  /** When the race server was last heard from (ms). */
+  private heardAt = performance.now();
   private joined = false;
   private last = performance.now();
   private stats: Record<string, number> = {};
@@ -292,6 +312,7 @@ export class RaceSession implements Stage {
     finalResults: false,
     plan: [],
     trouble: null,
+    stalled: false,
   };
   /** The player moved on from the last race's results before they ran out. */
   private moveOn = false;
@@ -301,6 +322,8 @@ export class RaceSession implements Stage {
   /** What the last run set (a new best or record), and the ghosts it raced, for its results. */
   private trialCallout: string | null = null;
   private trialRaced: { label: string; ticks: number }[] = [];
+  /** What the last run beat: 2 the record (and your best), 1 your best, 0 nothing. */
+  private trialBeat = 0;
 
   private opts: RaceOptions;
 
@@ -389,6 +412,7 @@ export class RaceSession implements Stage {
     const record = trial.record === null || ms < trial.record;
     const best = trial.best === null || ms < trial.best;
     this.trialCallout = record ? m.newRecord : best ? m.newBest : null;
+    this.trialBeat = record ? 2 : best ? 1 : 0;
     if (best) trial.best = ms;
     if (record) trial.record = ms;
     // The race server reports the run as it ends; the lobby has it a moment later.
@@ -442,7 +466,7 @@ export class RaceSession implements Stage {
     this.joining(() => messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
-      this.state.trouble = { kind: e instanceof WebTransportUnavailable ? e.kind : "unreachable" };
+      this.state.trouble = connectTrouble(e);
       this.opts.status(e instanceof Error ? e.message : String(e));
       void this.card?.hide();
       this.opts.onJoin?.(false);
@@ -459,7 +483,10 @@ export class RaceSession implements Stage {
     this.transport = transport;
     const client = new WasmClient(this.opts.ticket.token);
     this.client = client;
-    transport.onMessage((bytes) => client.handlePacket(bytes, performance.now()));
+    transport.onMessage((bytes) => {
+      this.heardAt = performance.now();
+      client.handlePacket(bytes, this.heardAt);
+    });
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
@@ -709,9 +736,17 @@ export class RaceSession implements Stage {
       if (!done) this.state.trouble ??= { kind: "rejected", reason };
       this.opts.status(m.rejected(reason === "other" ? String(phase) : m.reasons[reason]));
     } else if (this.closedReason && !done) {
-      this.state.trouble ??= { kind: "lost" };
+      this.state.trouble ??= closeTrouble(this.closedReason);
       this.opts.status(m.lost(this.closedReason));
     } else this.opts.status("");
+    // A silent race server: a sign after a moment, lost after a while (the connection may take long to close).
+    const silent = phase === 1 && !done && this.state.trouble === null ? now - this.heardAt : 0;
+    if (silent > SILENT_LOST_MS) this.state.trouble = closeTrouble("silent");
+    const stalled = silent > SILENT_MS && this.state.trouble === null;
+    if (stalled !== this.state.stalled) {
+      this.state.stalled = stalled;
+      this.joining(stalled ? () => messages().race.waiting : null);
+    }
     if (!this.joined && phase !== 0) {
       this.joined = true;
       this.joining(null);
@@ -786,11 +821,25 @@ export class RaceSession implements Stage {
     if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
     else if (this.trial) {
       this.resultsEvent = -1;
-      // A run's results stand against the ghosts it raced (a new best replaces yours after).
+      // A run's results stand against the ghosts it raced (a new best replaces yours after),
+      // the ones it beat named for what they were.
+      const t = messages().trial;
+      const beat = this.trialBeat;
       this.trialRaced = (this.ghosts?.list ?? [])
         .filter((r) => r.course === race.course)
-        .map((r) => ({ label: ghostLabel(r.pick), ticks: r.finishTicks }));
-      if (race.phase !== RACING) this.trialCallout = null;
+        .map((r) => ({
+          label:
+            r.pick.label === "best" && beat > 0
+              ? t.previousBest
+              : r.pick.label === "record" && beat > 1
+                ? t.previousRecord
+                : ghostLabel(r.pick),
+          ticks: r.finishTicks,
+        }));
+      if (race.phase !== RACING) {
+        this.trialCallout = null;
+        this.trialBeat = 0;
+      }
     }
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
@@ -851,7 +900,8 @@ export class RaceSession implements Stage {
     const audible = this.shown && !this.seasonChange?.active;
     this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    // Its clock held while the race server is silent.
+    if (!this.state.stalled) this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
     this.board.update({
       race,
       mySlot: client.slot(),

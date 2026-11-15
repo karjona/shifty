@@ -58,15 +58,8 @@ class Listeners {
   }
 }
 
-/** Thrown when this browser (`unsupported`) or network (`unreachable`) can't do WebTransport. */
-export class WebTransportUnavailable extends Error {
-  readonly kind: "unsupported" | "unreachable";
-
-  constructor(kind: "unsupported" | "unreachable", message: string) {
-    super(message);
-    this.kind = kind;
-  }
-}
+/** Thrown when this browser or network can't do WebTransport. */
+export class WebTransportUnavailable extends Error {}
 
 /**
  * The spec replaced `datagrams.writable` with `datagrams.createWritable()`.
@@ -81,7 +74,6 @@ function datagramWritable(wt: WebTransport): WritableStream<Uint8Array> {
 export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Transport> {
   if (typeof WebTransport === "undefined") {
     throw new WebTransportUnavailable(
-      "unsupported",
       "This browser doesn't support WebTransport. Please use a recent Chrome, Edge, Firefox or Safari.",
     );
   }
@@ -97,10 +89,7 @@ export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Tra
     await Promise.race([wt.ready, timeout]);
   } catch {
     wt.close();
-    throw new WebTransportUnavailable(
-      "unreachable",
-      "Couldn't reach the race server. Your network may be blocking UDP.",
-    );
+    throw new WebTransportUnavailable("Couldn't reach the race server. Your network may be blocking UDP.");
   }
 
   const listeners = new Listeners();

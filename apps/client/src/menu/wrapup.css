@@ -56,20 +56,15 @@
   min-width: 0;
 }
 .end-what .board-label {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .end-title {
-  font-size: 64px;
-  line-height: 0.9;
+  font-size: 52px;
+  line-height: 0.92;
   font-weight: 900;
   font-stretch: 125%;
   font-style: italic;
   letter-spacing: -0.04em;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .end-title.small {
   font-size: var(--fs-head);
@@ -267,7 +262,7 @@
   padding: 16px 0 12px;
 }
 :root[data-compact] .end-title {
-  font-size: 44px;
+  font-size: 38px;
 }
 :root[data-compact] .end-title.small {
   font-size: 32px;

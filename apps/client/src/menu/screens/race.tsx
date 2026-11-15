@@ -99,13 +99,14 @@ function RaceRun({
   const [error, setError] = useState<string | null>(null);
   const { device } = useDevice();
 
+  // Out of a race the browser's back doesn't come back to it: every way out replaces it.
   const back = () => {
     if (!race) {
-      void navigate({ to: "/play" });
+      void navigate({ to: "/play", replace: true });
       return;
     }
-    if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params });
-    else void navigate({ to: "/play", search: race.back.search });
+    if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params, replace: true });
+    else void navigate({ to: "/play", search: race.back.search, replace: true });
   };
   const planOver = useEffectEvent((data: RaceEnd) => {
     setMenu(false);
@@ -117,7 +118,7 @@ function RaceRun({
     const hud = hudRef.current;
     if (!race || !hud) {
       void card?.hide();
-      void navigate({ to: "/play" });
+      void navigate({ to: "/play", replace: true });
       return undefined;
     }
     if (outdated) {
@@ -227,8 +228,8 @@ function RaceRun({
     }
   };
 
-  const changeMode = () => void navigate({ to: "/play", search: { mode } });
-  const mainMenu = () => void navigate({ to: "/" });
+  const changeMode = () => void navigate({ to: "/play", search: { mode }, replace: true });
+  const mainMenu = () => void navigate({ to: "/", replace: true });
   const toRoom = () => back();
 
   // What leaving costs now: a Tilt under way, or a race you are still in.
@@ -431,7 +432,7 @@ function RaceRun({
           </div>
         </div>
       )}
-      {trouble && <Problem trouble={trouble} back={back} />}
+      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} />}
       {endShown && end && wrapUp({ kind: "race", end })}
       {trialShown && trialPanel && wrapUp({ kind: "trial", trial: trialPanel })}
     </div>
@@ -454,12 +455,12 @@ function Help({ view, inMenu }: { view: View; inMenu: boolean }) {
   );
 }
 
-/** What went wrong, and the way back. */
-function Problem({ trouble, back }: { trouble: Trouble; back: () => void }) {
+/** What went wrong, and the way back (a room's: where its race can be rejoined while it runs). */
+function Problem({ trouble, back, room }: { trouble: Trouble; back: () => void; room: boolean }) {
   const t = useT();
   const { title, body } = useTroubleText(trouble);
   const version = trouble.kind === "rejected" && trouble.reason === "version";
-  const backAction: EndAction = { label: t.common.back, run: back, glyph: "back" };
+  const backAction: EndAction = { label: room ? t.end.backToRoom : t.common.back, run: back, glyph: "back" };
   return (
     <TroublePanel
       title={title}

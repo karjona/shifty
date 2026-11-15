@@ -334,6 +334,7 @@ export const es: Messages = {
       reload: "Recargar",
     },
     joining: "Entrando en la carrera…",
+    waiting: "Esperando al servidor de carreras…",
     controls: "Controles",
     help: {
       jetski: [
@@ -499,7 +500,6 @@ export const es: Messages = {
   end: {
     continue: "Continuar",
     tilt: "El Tilt",
-    timeTrial: "Contrarreloj",
     points: (n: number) => `${n} ptos.`,
     standings: "Clasificación final",
     paid: "Lo que ha pagado",
@@ -546,6 +546,8 @@ export const es: Messages = {
     season: "Estación",
     yourBest: "Tu mejor",
     record: "Récord",
+    previousBest: "Tu mejor anterior",
+    previousRecord: "Récord anterior",
     noTime: "Aún sin tiempo",
     rank: (n: number, total: number) => `${n} de ${total}`,
     board: "Clasificación",

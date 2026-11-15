@@ -9,15 +9,15 @@ import "../wrapup.css";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { audio } from "../../audio/index.ts";
-import { type Conditions, type Season, circuitName, clockTime, timeOfDay } from "../../game/conditions.ts";
+import type { Season } from "../../game/conditions.ts";
 import type { RaceEnd, Trouble } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { formatTime, ordinal } from "../../ui/hud.ts";
+import { circuitTitle, conditionsLine } from "../../ui/results.ts";
 import { type MatchPay, type Mode, fetchMatchPay, meQuery } from "../api.ts";
 import { useAction, useAutoFocus } from "../hooks.ts";
 import { Button, Hints } from "../ui.tsx";
 import type { GlyphAction } from "../glyphs.tsx";
-import { circuit } from "@shifty/rider";
 
 /** How often (ms) the lobby is asked what the race paid, how long before it is late, and for how long after that, less often. */
 const PAY_POLL_MS = 1500;
@@ -55,9 +55,9 @@ type Pay =
   | { state: "none"; note: string }
   | { state: "waiting" }
   | { state: "late" }
-  | { state: "paid"; rows: { label: string; delta: number }[]; before: number; after: number; note: string | null };
+  | { state: "paid"; rows: { label: string; delta: number }[]; before: number; after: number };
 
-/** What the match paid you, from the lobby, as rows; null until the last race's results are in. */
+/** What the match paid you, from the lobby's ledger, as rows: place, style, the Tilt bonus. */
 function payRows(
   pay: MatchPay,
   races: number,
@@ -105,7 +105,7 @@ function usePay(mode: Mode, match: string | null, races: number, place: number):
         setPay(
           rows.length === 0
             ? { state: "none", note: mode === "room" ? t.end.pays.alone : t.end.pays.nothing }
-            : { state: "paid", rows, before: got.credits - total, after: got.credits, note: null },
+            : { state: "paid", rows, before: got.credits - total, after: got.credits },
         );
         return;
       }
@@ -166,14 +166,6 @@ function useCountUp(pay: Pay): { shown: number; credits: number | null } {
   return { shown, credits };
 }
 
-/** "Snow · Afternoon 15:40": a race's weather (and what it turned to) and time of day. */
-function useConditionsLine(c: Conditions): string {
-  const t = useT();
-  const weather =
-    c.weather === c.turns ? t.weathers[c.weather] : t.intro.turns(t.weathers[c.weather], t.weathers[c.turns]);
-  return [weather, `${t.timesOfDay[timeOfDay(c)]} ${clockTime(c.time)}`].join(" · ");
-}
-
 /** A rider's name: a handle's tag (`#1234`) set apart. */
 function Name({ name }: { name: string }) {
   const tagged = /^(.*)(#\d{4})$/u.exec(name);
@@ -190,12 +182,15 @@ function Head({
   kicker,
   title,
   sub,
+  callout,
   hero,
   heroSub,
 }: {
   kicker: string;
   title: string;
   sub?: string;
+  /** What the run set ("New record!"), called out. */
+  callout?: string | null;
   hero: string;
   heroSub?: string;
 }) {
@@ -205,6 +200,7 @@ function Head({
         <span className="board-label">{kicker}</span>
         <b className="end-title">{title}</b>
         {sub && <span className="end-sub">{sub}</span>}
+        {callout && <p className="board-callout">{callout}</p>}
       </div>
       <div className="end-hero">
         <b>{hero}</b>
@@ -217,8 +213,6 @@ function Head({
 /** The race (or the Tilt) as it ended for you. */
 function RaceHead({ end }: { end: RaceEnd }) {
   const t = useT();
-  const line = useConditionsLine(end.conditions);
-  const name = circuitName(end.course, circuit(end.course)?.sport ?? end.sport);
   const podium = end.podium;
   if (podium) {
     const i = podium.riders.findIndex((r) => r.me);
@@ -234,9 +228,9 @@ function RaceHead({ end }: { end: RaceEnd }) {
   }
   return (
     <Head
-      kicker={`${t.results.title} · ${name}`}
-      title={t.seasons[end.conditions.season]}
-      sub={line}
+      kicker={t.results.title}
+      title={circuitTitle(end.course)}
+      sub={conditionsLine(end.conditions)}
       hero={end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : t.results.dnf}
       heroSub={end.finishTicks > 0 ? formatTime(end.finishTicks, end.tickHz) : undefined}
     />
@@ -395,9 +389,10 @@ export function WrapUp({
         {end && <RaceHead end={end} />}
         {trial && (
           <Head
-            kicker={`${t.end.timeTrial} · ${circuitName(trial.course, circuit(trial.course)?.sport ?? "jetski")}`}
-            title={t.seasons[trial.season]}
-            sub={trial.callout ?? undefined}
+            kicker={t.trial.title}
+            title={circuitTitle(trial.course)}
+            sub={t.seasons[trial.season]}
+            callout={trial.callout}
             hero={trial.ticks > 0 ? formatTime(trial.ticks, trial.hz) : t.results.dnf}
           />
         )}
