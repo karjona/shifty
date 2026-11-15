@@ -181,7 +181,8 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       // The select shot looks out from the terrace's sea side, toward the sky, like a character select.
       r.group.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
       const pose = params.get("pose") ?? (shot === "select" ? "crossed" : "idle");
-      if (r.body) r.pose((pose === "crossed" ? crossedPose : pose === "hip" ? hipPose : idlePose)(r.body, time + i * 3.1));
+      if (r.body)
+        r.pose((pose === "crossed" ? crossedPose : pose === "hip" ? hipPose : idlePose)(r.body, time + i * 3.1));
     });
     avatars.forEach((a, i) => {
       const x = (i - (avatars.length - 1) / 2) * 1.6;

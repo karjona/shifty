@@ -14,6 +14,7 @@ import {
   dot,
   float,
   floor,
+  fwidth,
   max,
   min,
   mix,
@@ -61,8 +62,10 @@ const INK_TONE = 0.03;
 const IRIS_TONE = 0.41;
 const GLINT_TONE = 0.95;
 /** How far a face preset's shape can move the shade line. */
-const SHAPE_SHADE = 1.2;
+const SHAPE_SHADE = 1.7;
 
+/** Where painted lines cut (coverage, 0-1). */
+const INK_EDGE = 0.32;
 /** How far the front of the face's normals lean toward straight ahead (see `faceGeometry`). */
 const FACE_FLAT = 1.6;
 /** How far the shade line shifts under the jaw (toward shade). */
@@ -126,7 +129,7 @@ export class CelTintMaterial extends CelMaterial {
     let shapeShade: THREE.Node<"float"> = float(0);
     for (const t of overlays?.features ?? []) {
       const o = texture(t).rgb;
-      const iris = clamp(o.z.mul(2), 0, 1);
+      const iris = crisp(clamp(o.z.mul(2), 0, 1));
       over(iris, vec3(0, 1, 0), vec3(IRIS_TONE));
       // (From a softer level, so the shade line runs in clean shapes; the art stores "no change" as 128.)
       shapeShade = shapeShade.add(
@@ -135,14 +138,14 @@ export class CelTintMaterial extends CelMaterial {
           .g.sub(128 / 255)
           .mul(2),
       );
-      over(o.x, none, vec3(INK_TONE));
-      over(clamp(o.z.mul(2).sub(1), 0, 1), none, vec3(GLINT_TONE));
+      over(crisp(o.x), none, vec3(INK_TONE));
+      over(crisp(clamp(o.z.mul(2).sub(1), 0, 1)), none, vec3(GLINT_TONE));
     }
     // The brows and the beard take the hair's colour (the mask's third channel) where they cover the face.
     if (overlays) {
       const hairMask = vec3(0, 0, 1);
       over(texture(overlays.beard).r, hairMask, vec3(BEARD_TONE));
-      over(texture(overlays.brows).r, hairMask, vec3(BROW_TONE));
+      over(crisp(texture(overlays.brows).r), hairMask, vec3(BROW_TONE));
     }
     const sum = w.x.add(w.y).add(w.z);
     const lum = dot(g, vec3(0.299, 0.587, 0.114));
@@ -172,23 +175,24 @@ export class CelTintMaterial extends CelMaterial {
     // The painter's light nudges the shade line.
     // (From a blurred level of the paint, so the shade line runs in clean shapes.)
     const soft = dot(texture(detail).level(float(kind === "look" ? 5.5 : 4)).rgb, vec3(0.299, 0.587, 0.114));
-    const painted = clamp(soft.sub(0.5).mul(face ? 0.25 : kind === "look" ? 0.45 : 0.5), -0.45, 0.35).sub(
-      shapeShade.mul(SHAPE_SHADE),
-    );
+    // (Skin takes its shade from its shape alone: clean shapes on a face, an arm, a leg.)
+    const painted = clamp(soft.sub(0.5).mul(kind === "look" ? 0 : 0.5), -0.45, 0.35).sub(shapeShade.mul(SHAPE_SHADE));
     this.biasNode = face ? painted.add(attribute<"float">("shadeBias", "float")) : painted;
     if (kind === "kit") this.deepNode = smoothstep(0.3, 0.22, soft);
     if (kind === "hair") {
       // The sheen on anime hair: a broad, lighter band of the hair's own colour.
-      this.specStrength = 0.55;
-      this.specSize = 0.16;
-      this.specColorNode = this.albedo.mul(0.8).add(vec3(0.18, 0.16, 0.14));
+      this.specStrength = 0.22;
+      this.specSize = 0.03;
+      this.specColorNode = this.albedo.mul(1.1).add(vec3(0.1, 0.09, 0.08));
     }
     if (kind === "look") {
       // Skin shades warm, the eyes and hair cool.
       const skin = clamp(w.x.div(max(sum, 1e-4)), 0, 1).mul(clamp(sum, 0, 1));
+      // (Dark skin keeps its shade from sinking to black: the darker the colour, the lighter its shade's multiple.)
+      const depth = smoothstep(0.02, 0.3, dot(this.albedo, vec3(0.299, 0.587, 0.114)));
       this.shadeNode = mix(
         vec3(COOL_SHADE.r, COOL_SHADE.g, COOL_SHADE.b),
-        vec3(WARM_SHADE.r, WARM_SHADE.g, WARM_SHADE.b),
+        vec3(WARM_SHADE.r, WARM_SHADE.g, WARM_SHADE.b).mul(mix(float(1.55), float(1), depth)),
         skin,
       );
     } else if (kind === "hair") {
@@ -205,6 +209,16 @@ export class CelTintMaterial extends CelMaterial {
     this.second.value.setHex(second);
     this.accent.value.setHex(accent);
   }
+}
+
+/**
+ * Painted coverage (0-1, soft at the texture's size) as a line drawn at the
+ * screen's: a hard edge where the paint is about a third there, however
+ * close the camera comes, a little lighter where the paint itself is thin.
+ */
+function crisp(v: THREE.Node<"float">): THREE.Node<"float"> {
+  const w = clamp(fwidth(v).mul(0.9), 0.012, 0.3);
+  return smoothstep(float(INK_EDGE).sub(w), float(INK_EDGE).add(w), v).mul(v.sqrt());
 }
 
 /** One number for the edge between two welded vertices, either way round. */
@@ -293,6 +307,12 @@ function derived(
   return out;
 }
 
+/** A smooth step of `x` from 0 to 1. */
+function smooth(x: number): number {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
+}
+
 const hullGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
 const faceGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
 
@@ -328,10 +348,6 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.Buffe
   const bias = new Float32Array(pos.count);
   const e = new THREE.Vector3();
   const o = new THREE.Vector3();
-  const smooth = (x: number) => {
-    const t = Math.min(1, Math.max(0, x));
-    return t * t * (3 - 2 * t);
-  };
   for (let i = 0; i < pos.count; i++) {
     p.fromBufferAttribute(pos, i);
     o.fromBufferAttribute(nor, i);
@@ -350,8 +366,8 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.Buffe
       .normalize();
     n.set([e.x, e.y, e.z], i * 3);
     // Under the jaw and behind the chin: the neck, in the head's shade.
-    const under = smooth((jaw + span * 0.2 - (p.y + c.y)) / (span * 0.9));
-    const behind = smooth((half.z * 0.72 - p.z) / (half.z * 0.3));
+    const under = smooth((jaw + span * 0.5 - (p.y + c.y)) / (span * 1.5));
+    const behind = smooth((half.z * 0.78 - p.z) / (half.z * 0.45));
     bias[i] = -NECK_SHADE * under * behind;
   }
   out = derived(geo, new THREE.BufferAttribute(n, 3), { shadeBias: new THREE.BufferAttribute(bias, 1) });

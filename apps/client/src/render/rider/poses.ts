@@ -51,7 +51,11 @@ export function idlePose(a: Body, t: number): Pose {
     const ankle = rest(a, side > 0 ? "foot.L" : "foot.R");
     return {
       // The free leg stands out and ahead, its knee easy and its heel light.
-      target: v3(ankle.x + side * (0.015 + 0.055 * free) * k, ankle.y + 0.012 * free * k, ankle.z + (0.075 * free - 0.01) * k),
+      target: v3(
+        ankle.x + side * (0.05 * free - 0.012) * k,
+        ankle.y + 0.012 * free * k,
+        ankle.z + (0.08 * free - 0.01) * k,
+      ),
       bend: v3(side * (0.12 + 0.3 * free), 0, 1),
       toes: v3(side * (0.18 + 0.28 * free), -0.05 * free, 1).normalize(),
       sole: v3(0, -1, -0.05 * free).normalize(),
