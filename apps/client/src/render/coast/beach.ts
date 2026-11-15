@@ -10,7 +10,8 @@ import { llaut } from "./boats.ts";
 import { TILE } from "./facades.ts";
 import { addBench, addLampPost } from "./harbour.ts";
 import type { Life } from "./life.ts";
-import { type Crowd, addPerson } from "./people.ts";
+import type { Grounding } from "./grounding.ts";
+import { type Crowd, type Walkers, addPerson } from "./people.ts";
 import { Local, type Shape, box, pick, place, post, turned } from "./shape.ts";
 
 /** Where the beach is: the point `inland` metres up the sand at `z` along the shore, and how far it runs. */
@@ -28,6 +29,8 @@ const WHITE = new THREE.Color(0xf6f2ea);
 const RED = new THREE.Color(0xd6402e);
 const PLAIN = new THREE.Color(0xffffff);
 const CANOPIES = [0x2a8fb0, 0xf2c14e, 0xd94a3a, 0x3f8a6a, 0xf08a3c, 0x7a5aa8];
+/** The sand's colour under a figure's feet (its shade is small: one colour does). */
+const SAND_SHADE = 0xecdbaf;
 
 /** The beach bar, facing `yaw`: open (its counter served, the terrace laid) or shut up. */
 export function addBeachBar(
@@ -260,8 +263,13 @@ export function addBeach(
   /** The lifeguard's flag: green, yellow or red by the sea's state. */
   flag: number,
   r: () => number,
+  /** Where shade is laid on the sand: the ground's colour and height at a place. */
+  shades: { on: Grounding; colour: (x: number, z: number) => THREE.Color; ground: (x: number, z: number) => number },
+  /** Those who walk along the water. */
+  walkers: Walkers,
 ): void {
   const sea = site.seaward;
+  const shade = { on: shades.on, colour: SAND_SHADE };
   const open = season === "summer" || season === "spring";
   const barAt = site.at(bar.z, bar.inland);
   const B = addBeachBar(shape, barAt.x, barAt.y - 0.2, barAt.z, sea, open, r);
@@ -293,6 +301,7 @@ export function addBeach(
       if (season !== "summer" && r() < 0.5) continue;
       const p = site.at(z + (r() - 0.5) * 1.5, inland + (r() - 0.5) * 1.5);
       addUmbrella(shape, p.x, p.y, p.z, sea, pick(CANOPIES, r), r);
+      shades.on.add(p.x, p.y, p.z, 1.5, 2.2, shades.colour, shades.ground, 0.07);
       if (r() < crowd) {
         const L = new Local(shape, p.x, p.y, p.z, sea);
         const side = r() < 0.5 ? -1 : 1;
@@ -310,12 +319,24 @@ export function addBeach(
   for (let i = 0; i < strollers; i++) {
     const z = site.from + 10 + r() * (site.to - site.from - 16);
     const p = site.at(z, 1.5 + r() * 5);
-    if (i % 3 === 0) wavers.add(shape, p.x, p.y, p.z, sea + (r() - 0.5) * 0.6, r, true);
+    if (i % 3 === 0) wavers.add(shape, p.x, p.y, p.z, sea + (r() - 0.5) * 0.6, r, true, shade);
     else
       addPerson(shape, p.x, p.y, p.z, sea + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) + (r() - 0.5) * 0.5, r, {
         pose: "walk",
         beach: true,
+        shade,
       });
+  }
+  // A few walk the water's edge and back.
+  const beats = Math.round(5 * Math.min(1, crowd * 1.3));
+  for (let i = 0; i < beats; i++) {
+    const beat = 22 + r() * 16;
+    const z = site.from + 14 + r() * (site.to - site.from - 30 - beat);
+    const inland = 3.2 + r() * 1.6;
+    const a = site.at(z, inland);
+    const b = site.at(z + beat, inland);
+    const length = Math.hypot(b.x - a.x, b.z - a.z);
+    walkers.add(a.x, (a.y + b.y) / 2, a.z, (b.x - a.x) / length, (b.z - a.z) / length, length, 0.9 + r() * 0.4, 400 + i * 17, SAND_SHADE, true);
   }
   // Towels on the sand, with sunbathers.
   const towels = Math.round(18 * crowd);
@@ -385,8 +406,8 @@ export function addBeach(
     const bench = site.at(z + 8, 38);
     addBench(shape, bench.x, bench.y, bench.z, sea);
   }
-  const walkers = Math.round(10 * crowd);
-  for (let i = 0; i < walkers; i++) {
+  const passers = Math.round(10 * crowd);
+  for (let i = 0; i < passers; i++) {
     const p = site.at(site.from + 24 + r() * (site.to - site.from - 40), 39 + r() * 3);
     addPerson(shape, p.x, p.y, p.z, sea + (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk" });
   }

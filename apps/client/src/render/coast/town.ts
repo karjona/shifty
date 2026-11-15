@@ -13,7 +13,8 @@ import { capsuleOutline, prism } from "./outline.ts";
 import { SHUTTERS, TILE, type Tile, house, townMaterial } from "./facades.ts";
 import { addBench, addBollard, addLampPost, capsuleEdge } from "./harbour.ts";
 import { COSTA_NEVADA, type Life } from "./life.ts";
-import { type Crowd, addPerson } from "./people.ts";
+import { Grounding, OVERHEAD, type Sunlight } from "./grounding.ts";
+import { type Crowd, Walkers, addPerson } from "./people.ts";
 import { Local, Shape, box, pick, place, post, random } from "./shape.ts";
 import { Planting } from "./trees.ts";
 
@@ -387,10 +388,12 @@ function addPromenade(
   crowd: number,
   wavers: Crowd,
   clear: (x: number, z: number) => boolean,
+  shades: Grounding,
 ): void {
   // What would stand on ground kept clear goes to a shape that is never drawn.
   const spare = new Shape();
   let shape = target;
+  const shade = { on: shades, colour: PAVING };
   const spot = (quay: Quay, along: number, inland: number) => {
     const p = quayPoint(quay, along, inland);
     shape = clear(p.x, p.z) ? spare : target;
@@ -404,20 +407,23 @@ function addPromenade(
     const kind = r();
     if (kind < 0.16) {
       const p = spot(q, a, 1.3);
-      if (shape === target) wavers.add(shape, p.x, QUAY_TOP, p.z, q.yaw + (r() - 0.5) * 0.5, r);
+      if (shape === target) wavers.add(shape, p.x, QUAY_TOP, p.z, q.yaw + (r() - 0.5) * 0.5, r, false, shade);
     } else if (kind < 0.26) {
       const p = spot(q, a, 0.2);
       addPerson(shape, p.x, QUAY_TOP + 0.02, p.z, q.yaw, r, { pose: "fish" });
     } else if (kind < 0.5) {
       // Two in talk.
-      const p = spot(q, a, 4 + r() * 4);
+      const p = spot(q, a, 4.6 + r() * 3.6);
       const turn = r() * 6;
-      addPerson(shape, p.x, QUAY_TOP, p.z, turn, r);
-      addPerson(shape, p.x + Math.sin(turn) * 0.8, QUAY_TOP, p.z + Math.cos(turn) * 0.8, turn + Math.PI, r);
+      const on = shape === target ? shade : undefined;
+      addPerson(shape, p.x, QUAY_TOP, p.z, turn, r, { shade: on });
+      addPerson(shape, p.x + Math.sin(turn) * 0.8, QUAY_TOP, p.z + Math.cos(turn) * 0.8, turn + Math.PI, r, {
+        shade: on,
+      });
     } else {
-      const p = spot(q, a, 3 + r() * 5.5);
+      const p = spot(q, a, 4.6 + r() * 4);
       const way = q.yaw + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) + (r() - 0.5) * 0.3;
-      addPerson(shape, p.x, QUAY_TOP, p.z, way, r, { pose: "walk" });
+      addPerson(shape, p.x, QUAY_TOP, p.z, way, r, { pose: "walk", shade: shape === target ? shade : undefined });
     }
   }
   for (let a = -span; a < q.len + span; a += 8) {
@@ -470,6 +476,7 @@ function addPromenade(
         uv: TILE.white,
         flat: true,
       });
+      if (shape === target) shades.add(p.x, QUAY_TOP, p.z, 1.5, 2.3, PAVING);
       for (const side of [-0.8, 0.8]) {
         const cx = p.x + q.ux * side;
         const cz = p.z + q.uz * side;
@@ -510,6 +517,8 @@ export function buildTown(
   life: Life,
   /** Ground to leave bare of houses, street furniture and people (something else stands there). */
   clear: (x: number, z: number) => boolean = () => false,
+  /** Which way shade falls. */
+  light: Sunlight = OVERHEAD,
 ): Town {
   const group = new THREE.Group();
   const q = quayOf(l);
@@ -605,7 +614,28 @@ export function buildTown(
       }
     }
   });
-  addPromenade(shape, q, r, season, crowd, wavers, clear);
+  const shades = new Grounding(light);
+  addPromenade(shape, q, r, season, crowd, wavers, clear, shades);
+  // A few walk the promenade up and down, between the lamps and the palms.
+  const walkers = new Walkers();
+  const lane = 3.7;
+  const room = reach(q, lane) - 8;
+  const strolling = Math.round(((q.len + room * 2) / 34) * Math.min(1, crowd * 1.4));
+  for (let i = 0; i < strolling; i++) {
+    const beat = 26 + r() * 30;
+    const from = -room + r() * Math.max(1, q.len + room * 2 - beat);
+    const way = r() < 0.5 ? 1 : -1;
+    const pace = 1.05 + r() * 0.5;
+    const seed = Math.floor(r() * 9000);
+    let free = true;
+    for (let a = 0; a <= beat; a += 3) {
+      const p = quayPoint(q, from + a, lane);
+      if (clear(p.x, p.z)) free = false;
+    }
+    if (!free) continue;
+    const start = quayPoint(q, way > 0 ? from : from + beat, lane + (r() - 0.5) * 0.5);
+    walkers.add(start.x, QUAY_TOP, start.z, q.ux * way, q.uz * way, beat, pace, seed, PAVING);
+  }
   // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill.
   const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
   flags.forEach((colours, i) => {
@@ -629,7 +659,9 @@ export function buildTown(
   for (let a = -span + 3; a < q.len + span; a += 12.5 + r() * 3) {
     const p = quayPoint(q, a, 4.6);
     if (clear(p.x, p.z)) continue;
-    palms.add("palm", p.x, QUAY_TOP, p.z, 6.2 + r() * 2.6, 0.9 + r() * 0.2);
+    const tall = 6.2 + r() * 2.6;
+    palms.add("palm", p.x, QUAY_TOP, p.z, tall, 0.9 + r() * 0.2);
+    shades.add(p.x, QUAY_TOP, p.z, 2.1, tall * 0.9, PAVING);
   }
   for (const [da, di] of [
     [-9, -8],
@@ -648,5 +680,9 @@ export function buildTown(
     plants.add(r() < 0.3 ? "cypress" : "pine", p.x, groundAt(back) - 0.5, p.z, 8 + r() * 4, 0.88 + r() * 0.2);
   }
   group.add(palms.build(true), plants.build(true));
+  const shade = shades.build();
+  if (shade) group.add(shade);
+  const strollers = walkers.build();
+  if (strollers) group.add(strollers);
   return { group };
 }
