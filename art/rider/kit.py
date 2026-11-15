@@ -152,14 +152,15 @@ def to_armhole(theta, z):
     return side + a / r * half, zc + b / r * bz
 
 
-# The scoop of the neck at the front: its lowest point, and how far round it reaches (degrees).
-NECK_LOW, NECK_HALF = 1.432, 58
+# The scoop of the neck at the front, cut low enough to show the collarbones: its lowest point, how far round it
+# reaches (degrees), and how square its bottom is.
+NECK_LOW, NECK_HALF, NECK_CURVE = 1.392, 58, 2.4
 
 
 def neckline(theta):
     """The vest's top edge at the front and back (z), by angle from the front."""
     a = abs(_sdeg(theta, 0))
-    front = NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7
+    front = NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** NECK_CURVE
     return min(front, VEST_TOP + 0.01) if a < NECK_HALF else VEST_TOP + 0.01
 
 
@@ -207,6 +208,7 @@ def vest(body):
             elif kinds == {2}:
                 Z[i, j] = min(neckline(th), VEST_TOP)
     radius = {}
+    shoulder, base = body.fig.TORSO[body.fig.SHOULDER], body.fig.TORSO[-1]
 
     def surface(th, z):
         key = (round(th, 3), round(z, 4))
@@ -217,7 +219,7 @@ def vest(body):
             r = math.hypot(hit[0], hit[1] - yc)
             # Above the armholes the straps lie on the trapezius, not out on the shoulder caps.
             side = abs(math.sin(a))
-            cap = 0.2 + (0.105 - 0.2) * smoothstep(1.43, 1.505, z)
+            cap = shoulder[1] + (base[1] - shoulder[1]) * smoothstep(shoulder[0] - 0.022, base[0] - 0.007, z)
             radius[key] = min(r, cap / max(side, 0.35)) if side > 0.35 else r
         return radius[key]
 
@@ -253,7 +255,7 @@ def _edges_dist(pos, z_hem=VEST_BOTTOM):
     r = np.hypot(x, y)
     d = np.abs(z - z_hem)
     a = np.abs((th + 180) % 360 - 180)
-    nl = np.where(a < NECK_HALF, np.minimum(NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7, VEST_TOP),
+    nl = np.where(a < NECK_HALF, np.minimum(NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** NECK_CURVE, VEST_TOP),
                   VEST_TOP)
     d = np.minimum(d, np.abs(z - nl))
     zc, bz, half = ARMHOLE

@@ -29,6 +29,11 @@ export interface Conditions {
   time: number;
 }
 
+/** Whether riders on the water wear cold-water gear: always in winter, and when it snows in fall or spring. */
+export function coldWater(c: Conditions): boolean {
+  return c.season === "winter" || c.weather === "snow" || c.turns === "snow";
+}
+
 /** Costa Nevada's latitude and the Earth's axial tilt, degrees. */
 export const LATITUDE = 37;
 export const AXIAL_TILT = 23.4;

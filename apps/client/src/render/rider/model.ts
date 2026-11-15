@@ -21,6 +21,7 @@ import { inkId } from "../cel/material.ts";
 import {
   CelTintMaterial,
   type FaceOverlays,
+  type FaceState,
   NO_OVERLAY,
   type NeckShade,
   faceGeometry,
@@ -31,6 +32,32 @@ import { whileLoading } from "../../loading.ts";
 import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
+
+/** The body's regions, in the art's order (`REGIONS` in art/rider/figure.py), as bits of a set. */
+const REGIONS = [
+  "torso",
+  "hips",
+  "thighs",
+  "shins",
+  "feet",
+  "upperarms",
+  "forearms",
+  "hands",
+  "head",
+  "flanks",
+] as const;
+const regionBit = (name: (typeof REGIONS)[number]) => 1 << REGIONS.indexOf(name);
+const REGION_COUNT = 14;
+/** Cold-water gear: a wetsuit from the neck to the wrists and ankles, gloves and boots, its forearms and shins
+ * in the life vest's accent colour. */
+const WETSUIT = {
+  regions: ((1 << REGION_COUNT) - 1) & ~regionBit("head"),
+  panels: regionBit("forearms") | regionBit("shins"),
+  neoprene: 0x1e2026,
+};
+
+/** A face at rest: what a pose that says nothing of the face leaves it as. */
+const RESTING: FaceState = { blink: 0 };
 
 /** Standing heights per height preset (m). Both bodies' art is built 1.78 m tall (the male's middle preset). */
 const HEIGHTS = { male: [1.68, 1.73, 1.78, 1.83, 1.88], female: [1.58, 1.63, 1.68, 1.73, 1.78] };
@@ -67,8 +94,9 @@ const SHAPES = ["eyes", "nose", "mouth"] as const;
 
 /** What a look wears over its face: its eyes', nose's and mouth's paint (the first nose and mouth have none), its
  * brows and beard. */
-async function overlaysFor(look: Look): Promise<FaceOverlays> {
-  const [brows, beard, ...features] = await Promise.all([
+async function overlaysFor(look: Look, gaze: FaceOverlays["gaze"]): Promise<FaceOverlays> {
+  const [lids, brows, beard, ...features] = await Promise.all([
+    loadOverlay(look.body, "lids"),
     loadOverlay(look.body, `brows.${look.brows}`),
     look.facialHair > 0 ? loadOverlay(look.body, `beard.${look.facialHair}`) : Promise.resolve(null),
     loadOverlay(look.body, `eyes.${look.eyes}`),
@@ -79,6 +107,8 @@ async function overlaysFor(look: Look): Promise<FaceOverlays> {
     brows: brows ?? NO_OVERLAY,
     beard: beard ?? NO_OVERLAY,
     features: features.filter((f): f is THREE.Texture => f !== null),
+    lids: lids ?? NO_OVERLAY,
+    gaze,
   };
 }
 
@@ -115,6 +145,9 @@ export class RiderFigure {
   body: Body | null = null;
   private meshes: THREE.SkinnedMesh[] = [];
   private materials: Painted[] = [];
+  private face: CelTintMaterial | null = null;
+  /** The colour of the wetsuit's panels, in cold-water gear. */
+  private wetsuit: number | null = null;
   /** What the figure is built as (the look but its paint, what it wears, the sport). */
   private key = "";
   /** The latest look asked for: its paint goes on whatever is built. */
@@ -128,14 +161,17 @@ export class RiderFigure {
   readonly ready: Promise<void>;
   private markReady: () => void = () => {};
 
-  constructor(appearance: Appearance, sport: Sport) {
+  /** `cold`: in cold-water gear (on the water). */
+  constructor(appearance: Appearance, sport: Sport, cold = false) {
     this.ready = new Promise((resolve) => (this.markReady = resolve));
-    this.set(appearance, sport);
+    this.set(appearance, sport, cold);
   }
 
   /** Dresses the figure: rebuilt when its shape or what it wears changed, repainted when only colours or size did. */
-  set(appearance: Appearance, sport: Sport): void {
+  set(appearance: Appearance, sport: Sport, cold = false): void {
     this.look = appearance.look;
+    const vest = sport === "summer" ? appearance.outfits.summer.vest : undefined;
+    this.wetsuit = cold && sport === "summer" ? ((vest ? item(vest)?.colours[2] : undefined) ?? 0x8a8f96) : null;
     const shape: Partial<Look> = { ...appearance.look };
     for (const part of ["skin", "hairColor", "eyeColor", "height", "build"] satisfies PaintPart[]) delete shape[part];
     const key = JSON.stringify([shape, appearance.outfits[sport], sport]);
@@ -149,11 +185,11 @@ export class RiderFigure {
       (async () => {
         const look = { ...appearance.look, body: await artBody(appearance.look) };
         const items = await worn(look, appearance.outfits[sport], sport);
-        const [overlays, ...assets] = await Promise.all([
-          overlaysFor(look),
+        const assets = await Promise.all([
           loadModel(look.body, "body"),
           ...items.map((i) => loadModel(look.body, i.model)),
         ]);
+        const overlays = await overlaysFor(look, assets[0].pieces.find((p) => p.name === "face")?.gaze ?? null);
         if (version !== this.version) return;
         const built = this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
         if (!built) return;
@@ -167,8 +203,10 @@ export class RiderFigure {
 
   /** Poses the rig (kept for when the art arrives, if it hasn't yet). */
   pose(p: Pose): void {
-    if (this.rig) this.rig.apply(p);
-    else this.pending = p;
+    if (this.rig) {
+      this.rig.apply(p);
+      this.face?.setFace(p.face ?? RESTING);
+    } else this.pending = p;
   }
 
   /** Model-space units per metre of the art: poses work in the art's size, the group scales it. */
@@ -192,6 +230,7 @@ export class RiderFigure {
     group.scale.setScalar(heightScale(look.body, look.height));
     const meshes: THREE.SkinnedMesh[] = [];
     const materials: Painted[] = [];
+    let faceMat: CelTintMaterial | null = null;
     const hidden = assets.reduce((h, a, i) => (i === 0 ? h : a.pieces.reduce((g, p) => g | p.hides, h)), 0);
     for (const [i, asset] of assets.entries()) {
       const w = wearing[i];
@@ -217,8 +256,10 @@ export class RiderFigure {
           piece.flat,
           face ? overlays : null,
           isNeckShade(neck) ? neck : null,
+          piece.lines,
         );
         if (regions) mat.hide(hidden);
+        if (face) faceMat = mat;
         const colours = w?.colours ?? null;
         mat.setTints(...tintsOf(look, piece.tints, colours));
         const mesh = new THREE.SkinnedMesh(geometry, mat);
@@ -250,6 +291,7 @@ export class RiderFigure {
       rigFor: look.body,
       meshes,
       materials,
+      face: faceMat,
       dispose: () => {
         for (const m of materials) m.mat.dispose();
       },
@@ -266,9 +308,10 @@ export class RiderFigure {
     this.group.add(b.rig.root, ...b.meshes);
     this.meshes = b.meshes;
     this.materials = b.materials;
+    this.face = b.face;
     this.repaint();
     if (this.pending) {
-      b.rig.apply(this.pending);
+      this.pose(this.pending);
       this.pending = null;
     }
     this.markReady();
@@ -279,7 +322,12 @@ export class RiderFigure {
   private repaint(): void {
     const look = this.look;
     if (!look || !this.rigFor) return;
-    for (const m of this.materials) m.mat.setTints(...tintsOf(look, m.tints, m.colours));
+    const suit = this.wetsuit;
+    for (const m of this.materials) {
+      m.mat.setTints(...tintsOf(look, m.tints, m.colours));
+      if (m.tints === "look")
+        m.mat.setSuit(suit === null ? 0 : WETSUIT.regions, WETSUIT.panels, WETSUIT.neoprene, suit ?? 0);
+    }
     this.group.scale.setScalar(heightScale(this.rigFor, look.height));
   }
 
@@ -288,6 +336,7 @@ export class RiderFigure {
     for (const m of this.materials) m.mat.dispose();
     this.meshes = [];
     this.materials = [];
+    this.face = null;
   }
 
   dispose(): void {
@@ -308,6 +357,7 @@ interface Built {
   rigFor: Look["body"];
   meshes: THREE.SkinnedMesh[];
   materials: Painted[];
+  face: CelTintMaterial | null;
   dispose(): void;
 }
 

@@ -1,6 +1,7 @@
 """Hair styles built from a few shapes: shells over the scalp, sheets that fall from it and drape over the head and
-the shoulders, tied tails and buns. Everything is chunky locks, the way the old consoles built hair, placed by
-casting rays at the body's detailed mesh (a hair.Head), so a style sits on whichever head it is built for.
+the shoulders, tied tails and buns, and sculpted spikes and curls standing out of a shell. Everything is chunky
+locks, the way the old consoles built hair, placed by casting rays at the body's detailed mesh (a hair.Head), so a
+style sits on whichever head it is built for.
 
 Every style is made three ways (`kind`): as it falls freely ("free"), and as it shows under a cap ("cap") or a
 beanie ("beanie"): only what is below the hat's band, pressed flat under it, and whatever comes out from under
@@ -412,6 +413,211 @@ def tie(head, root, out, radius, box):
     return obj
 
 
+# ---------------------------------------------------------------- sculpted locks
+
+
+def bent(start, d0, d1, length, steps, ease=1.0):
+    """A path of `steps` steps from `start`: it leaves along `d0` and has turned to `d1` by its end (sooner with
+    `ease` under 1, later over it)."""
+    p = np.asarray(start, dtype=np.float64)
+    out = [p]
+    for k in range(steps):
+        p = p + slerp(d0, d1, ((k + 0.5) / steps) ** ease) * (length / steps)
+        out.append(p)
+    return out
+
+
+def keep_off(head, path, clear, since=0.25):
+    """A path with its points past `since` of the way along pushed out to `clear` off the head."""
+    out = []
+    for i, p in enumerate(path):
+        if i >= since * (len(path) - 1):
+            loc, nrm, _, dist = head.tree.find_nearest(Vector(p))
+            if loc is not None:
+                loc, nrm = np.array(loc), np.array(nrm)
+                if np.dot(p - loc, nrm) < 0 or dist < clear:
+                    p = loc + nrm * clear
+        out.append(p)
+    return out
+
+
+def tag(obj, part):
+    """Marks every point of an object as `part` (see hair.PART_SHELL), for the painter."""
+    a = obj.data.attributes.new("part", "INT", "POINT")
+    a.data.foreach_set("value", [part] * len(obj.data.vertices))
+    return obj
+
+
+def _mesh_object(name, bm, origin):
+    """A lock's mesh as an object, its faces turned outward (`origin`: a point in the plane of its open root)."""
+    bm.normal_update()
+    o = Vector(origin)
+    if sum(f.normal.dot(f.calc_center_median() - o) * f.calc_area() for f in bm.faces) < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    return blend.link(bpy.data.objects.new(name, me))
+
+
+def lying(head, start, heading, length, steps, lift, rise=0.0):
+    """A path of `steps` steps over the head from the direction `start`: it runs along `heading` (kept flat on
+    the scalp) `lift` off it, and past the middle its end stands out `rise` further."""
+    p, n = head.surface(start)
+    out = [p + n * lift]
+    h = np.asarray(heading, dtype=np.float64)
+    for k in range(steps):
+        t = (k + 1) / steps
+        flat = h - n * np.dot(h, n)
+        p, n = head.surface(p + unit(flat) * (length / steps) - head.centre)
+        out.append(p + n * (lift + rise * smoothstep(0.4, 1.0, t) ** 1.5))
+    return out
+
+
+# A spike's section round it (across, out from the head): a lens, fuller on its outer side, with a hard edge
+# either side.
+SECTION = ((1.0, 0.0), (0.72, 0.7), (0.0, 1.0), (-0.72, 0.7), (-1.0, 0.0), (-0.72, -0.5), (0.0, -0.7), (0.72, -0.5))
+SECTION_HARD = (0, 4)
+
+
+def spike(path, face, width, depth, box, lean=0.0, taper=0.7):
+    """A sculpted spike along `path` (its last point the tip), shaped like a flame: `width` to each side and
+    `depth` out at its fullest, a third of the way along, tapering to the tip and closing behind its root, its
+    ridge turned toward `face` and moved `lean` (-1 to 1) off the middle. UVs across it (u) and along it (v), in
+    `box`."""
+    path = [np.asarray(p, dtype=np.float64) for p in path]
+    n = len(path) - 1
+    sides = len(SECTION)
+    bm = bmesh.new()
+    uvl = bm.loops.layers.uv.new("uv")
+    up = unit(face)
+    rings = []
+    for i in range(n):
+        t = i / n
+        d = unit(path[i + 1] - path[max(i - 1, 0)])
+        up = up - d * np.dot(up, d)
+        up = unit(up) if np.linalg.norm(up) > 1e-6 else unit(np.cross(d, (1, 0, 0)))
+        side = np.cross(d, up)
+        s = (1 - t) ** taper * (0.72 + 0.28 * smoothstep(0.0, 0.33, t))
+        rings.append([bm.verts.new(tuple(path[i] + side * (across + lean * max(out, 0.0)) * width * s
+                                         + up * out * depth * s)) for across, out in SECTION])
+        if i == 0:
+            behind = bm.verts.new(tuple(path[0] - d * width * 0.6 - up * depth * 0.5))
+    tip = bm.verts.new(tuple(path[-1]))
+    v0, v1 = 0.12, (n - 1) / n
+
+    def face_of(verts, uvs):
+        f = bm.faces.new(verts)
+        for lo, q in zip(f.loops, uvs):
+            lo[uvl].uv = q
+
+    def along(i):
+        return v0 + (v1 - v0) * i / (n - 1)
+
+    for i in range(n - 1):
+        for k in range(sides):
+            k2 = (k + 1) % sides
+            face_of([rings[i][k2], rings[i][k], rings[i + 1][k], rings[i + 1][k2]],
+                    [((k + 1) / sides, along(i)), (k / sides, along(i)), (k / sides, along(i + 1)),
+                     ((k + 1) / sides, along(i + 1))])
+    for k in range(sides):
+        k2 = (k + 1) % sides
+        face_of([rings[-1][k2], rings[-1][k], tip], [((k + 1) / sides, v1), (k / sides, v1), ((k + 0.5) / sides, 1.0)])
+        face_of([rings[0][k], rings[0][k2], behind], [(k / sides, v0), ((k + 1) / sides, v0), ((k + 0.5) / sides, 0.0)])
+    for k in SECTION_HARD:
+        for i in range(n - 1):
+            bm.edges.get((rings[i][k], rings[i + 1][k])).smooth = False
+        bm.edges.get((rings[-1][k], tip)).smooth = False
+    obj = tag(_mesh_object("spike", bm, path[0]), hair.PART_LOCK)
+    remap_uv(obj, box)
+    return obj
+
+
+def curl(centre, axis, radius, box, squash=0.8, segs=12, rows=4, under=35.0, turn=0.0, flow=None, stretch=1.0):
+    """A sculpted curl: a round clump at `centre` standing along `axis`, `squash` as tall as it is wide and
+    `stretch` as long along `flow`, cut off `under` degrees below its middle (open there: it sits sunk into the
+    hair under it). UVs spread from its top, at the middle of `box`."""
+    centre = np.asarray(centre, dtype=np.float64)
+    axis = unit(axis)
+    if flow is None:
+        flow = (0, 0, 1) if abs(axis[2]) < 0.9 else (1, 0, 0)
+    e1 = np.asarray(flow, dtype=np.float64)
+    e1 = unit(e1 - axis * np.dot(e1, axis))
+    e2 = np.cross(axis, e1)
+    bm = bmesh.new()
+    uvl = bm.loops.layers.uv.new("uv")
+    span = math.radians(90.0 + under)
+    top = bm.verts.new(tuple(centre + axis * radius * squash))
+    grid, uvs = [], []
+    for i in range(1, rows + 1):
+        th = span * i / rows
+        ring, ring_uv = [], []
+        for k in range(segs):
+            ph = 2 * math.pi * k / segs + turn
+            out = e1 * math.cos(ph) * stretch + e2 * math.sin(ph)
+            at = centre + out * radius * math.sin(th) + axis * radius * squash * math.cos(th)
+            ring.append(bm.verts.new(tuple(at)))
+            ring_uv.append((0.5 + 0.5 * i / rows * math.cos(ph), 0.5 + 0.5 * i / rows * math.sin(ph)))
+        grid.append(ring)
+        uvs.append(ring_uv)
+
+    def face_of(verts, at):
+        f = bm.faces.new(verts)
+        for lo, q in zip(f.loops, at):
+            lo[uvl].uv = q
+
+    for k in range(segs):
+        k2 = (k + 1) % segs
+        face_of([top, grid[0][k], grid[0][k2]], [(0.5, 0.5), uvs[0][k], uvs[0][k2]])
+        for i in range(rows - 1):
+            face_of([grid[i][k], grid[i + 1][k], grid[i + 1][k2], grid[i][k2]],
+                    [uvs[i][k], uvs[i + 1][k], uvs[i + 1][k2], uvs[i][k2]])
+    obj = tag(_mesh_object("curl", bm, centre - axis * radius), hair.PART_CURL)
+    remap_uv(obj, box)
+    return obj
+
+
+def lean_normals(obj, head, amount):
+    """Turns an object's normals toward the head's own roundness, by `amount[part]` (0 none, 1 all the way): the
+    shade then falls over the whole head of hair first, and over each lock second."""
+    me = obj.data
+    blend.shade_smooth(obj)
+    n = len(me.loops)
+    normals = np.empty(n * 3)
+    me.corner_normals.foreach_get("vector", normals)
+    normals = normals.reshape(n, 3)
+    vi = np.empty(n, dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    part = np.empty(len(me.vertices), dtype=np.int32)
+    me.attributes["part"].data.foreach_get("value", part)
+    radial = blend.verts(obj) - head.centre
+    radial /= np.linalg.norm(radial, axis=1, keepdims=True)
+    k = np.array([amount.get(int(p), 0.0) for p in part])[vi][:, None]
+    out = normals * (1 - k) + radial[vi] * k
+    out /= np.linalg.norm(out, axis=1, keepdims=True)
+    me.normals_split_custom_set([tuple(float(c) for c in v) for v in out])
+
+
+def sculpted(head, kind, pieces, lean):
+    """A sculpted style's piece: its shell, locks and curls as one object on the head bone."""
+    obj = join(kind, pieces) if len(pieces) > 1 else pieces[0]
+    obj.name = obj.data.name = kind
+    lean_normals(obj, head, lean)
+    weigh(obj, head, falls=False)
+    return obj
+
+
+def under_band(head, kind, points, margin=1.0):
+    """Whether these points all sit below the hat's band (always, bareheaded)."""
+    if kind == "free":
+        return True
+    for p in points:
+        a, e = az_el(head, p)
+        if e > band(head, kind, a) - margin:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------- styles
 
 
@@ -511,27 +717,6 @@ BUZZ = {
     "fringe": {"centre": 0.0, "full": 40.0, "none": 62.0, "span": (-60.0, 60.0), "locks": 8, "seed": 500,
                "drop": 0.0, "length": (0.0, 0.0), "sharp": (1.2, 2.2), "slope": 0.0},
     "lift": {"base": 0.0032, "fringe": 0.0, "crown": 0.0015, "edge": 0.0006, "edge_fringe": 0.0},
-    "tuck": 60.0,
-}
-
-
-def _curls():
-    """Round curls all over the scalp (a golden-angle spiral), a little bigger toward the crown."""
-    out = []
-    n = 64
-    for k in range(n):
-        t = (k + 0.5) / n
-        out.append((math.degrees(k * 2.39996) % 360 - 180, 4 + 80 * t**0.8, 0.012 + 0.006 * t, 12 + 3 * t,
-                    (0.0, 0.0, 0.0)))
-    return _messy(out, seed=55)
-
-
-# Short curls: round clumps all over, standing out from the scalp.
-CURLY = {
-    "spikes": _curls(), "height": 0.74, "profile": 0.55,
-    "fringe": {"centre": 0.0, "full": 40.0, "none": 60.0, "span": (-60.0, 60.0), "locks": 9, "seed": 600,
-               "drop": 3.0, "length": (1.5, 5.0), "sharp": (0.5, 0.9), "slope": 0.0},
-    "lift": {"base": 0.012, "fringe": 0.004, "crown": 0.008, "edge": 0.002, "edge_fringe": 0.004},
     "tuck": 60.0,
 }
 
@@ -648,13 +833,175 @@ def bun(head, kind):
     return obj
 
 
-def _spiky(head, kind):
-    obj = hair.helmet(head, under_cap=kind == "cap", under_beanie=kind == "beanie")
+def _spike(az, length, width, depth, d0, d1, above=None, el=None, lean=0.0, ease=1.0, low=False, clear=None):
+    """A spike that stands free of the head: where it roots (azimuth; degrees `above` the hairline, or the
+    elevation `el`), its length, half width and depth (m), the way it leaves the head and the way its tip points
+    (x toward the rider's left, y back, z up), how far its ridge leans, how soon it turns, whether it shows under
+    a hat (`low`), and how far it keeps off the head past its root (m; free of it by default)."""
+    return {"az": az, "above": above, "el": el, "length": length, "width": width, "depth": depth, "d0": d0,
+            "d1": d1, "lean": lean, "ease": ease, "low": low, "clear": clear}
+
+
+def _lock(az, length, width, depth, heading, above=None, el=None, lift=0.008, rise=0.0, lean=0.0, low=False):
+    """A lock that lies on the head: rooted like a spike, it runs along `heading` over the scalp, `lift` off it,
+    its tip standing out `rise` further."""
+    return {"az": az, "above": above, "el": el, "length": length, "width": width, "depth": depth,
+            "heading": heading, "lift": lift, "rise": rise, "lean": lean, "low": low}
+
+
+# Spiky: big spikes all over the top of the head, swept up, back and toward the rider's left: a fan of them up
+# from the forehead, more behind it and out of the back of the head; three locks falling across the forehead;
+# low locks over the ears; short at the nape, a few tufts on its edge.
+SPIKY_LOCKS = (
+    _spike(-55, 0.08, 0.034, 0.026, (-0.85, -0.35, 0.4), (-0.5, 0.2, 0.85), above=14),
+    _spike(-22, 0.095, 0.040, 0.030, (-0.3, -0.75, 0.6), (0.1, 0.1, 1.0), above=15),
+    _spike(14, 0.10, 0.040, 0.030, (0.15, -0.75, 0.65), (0.55, 0.15, 0.8), above=15),
+    _spike(48, 0.085, 0.036, 0.026, (0.7, -0.45, 0.55), (0.95, 0.25, 0.3), above=14),
+    _spike(-45, 0.09, 0.040, 0.030, (-0.35, -0.1, 0.95), (-0.1, 0.45, 0.9), el=72),
+    _spike(20, 0.10, 0.042, 0.030, (0.2, -0.15, 1.0), (0.5, 0.45, 0.75), el=74),
+    _spike(150, 0.09, 0.040, 0.030, (0.2, 0.4, 0.9), (0.45, 0.85, 0.4), el=78),
+    _spike(-82, 0.08, 0.036, 0.026, (-0.8, 0.2, 0.6), (-0.6, 0.6, 0.5), el=58),
+    _spike(82, 0.08, 0.036, 0.026, (0.85, 0.2, 0.5), (0.85, 0.6, 0.1), el=56),
+    _spike(180, 0.09, 0.040, 0.028, (0.0, 0.7, 0.7), (0.15, 0.8, 0.55), el=58),
+    _spike(138, 0.085, 0.036, 0.026, (0.6, 0.75, 0.3), (0.7, 0.8, -0.2), el=40),
+    _spike(-138, 0.085, 0.036, 0.026, (-0.55, 0.8, 0.3), (-0.35, 1.0, -0.15), el=42),
+    _lock(124, 0.085, 0.038, 0.020, (0.45, 0.5, -0.75), el=44, lift=0.012, rise=0.034),
+    _lock(162, 0.09, 0.038, 0.020, (0.2, 0.5, -0.85), el=40, lift=0.012, rise=0.034),
+    _lock(-160, 0.085, 0.038, 0.020, (-0.15, 0.5, -0.85), el=42, lift=0.012, rise=0.034),
+    _lock(-122, 0.085, 0.038, 0.020, (-0.45, 0.5, -0.75), el=44, lift=0.012, rise=0.034),
+    _lock(104, 0.06, 0.030, 0.014, (0.3, 0.6, -0.75), el=14, lift=0.007, rise=0.018),
+    _lock(140, 0.065, 0.032, 0.015, (0.3, 0.4, -0.85), el=10, lift=0.007, rise=0.02),
+    _lock(180, 0.07, 0.032, 0.015, (0.05, 0.4, -0.9), el=8, lift=0.007, rise=0.02),
+    _lock(-142, 0.065, 0.032, 0.015, (-0.3, 0.4, -0.85), el=10, lift=0.007, rise=0.02),
+    _lock(-106, 0.06, 0.030, 0.014, (-0.3, 0.6, -0.75), el=14, lift=0.007, rise=0.018),
+    _lock(86, 0.055, 0.022, 0.008, (0.05, 0.75, -0.65), above=24, lift=0.004, rise=0.004),
+    _lock(-86, 0.055, 0.022, 0.008, (-0.05, 0.75, -0.65), above=24, lift=0.004, rise=0.004),
+    _spike(-28, 0.085, 0.032, 0.016, (-0.15, -0.9, 0.35), (0.5, -0.25, -0.85), above=15, clear=0.012),
+    _spike(8, 0.07, 0.028, 0.014, (0.15, -0.9, 0.35), (0.65, -0.2, -0.7), above=15, clear=0.011),
+    _spike(-56, 0.05, 0.022, 0.012, (-0.6, -0.75, 0.2), (-0.25, -0.3, -1.0), above=11, clear=0.009),
+    _lock(150, 0.04, 0.020, 0.008, (0.2, 0.3, -1.0), above=14, lift=0.004, rise=0.006, low=True),
+    _lock(-178, 0.045, 0.020, 0.008, (0.0, 0.3, -1.0), above=14, lift=0.004, rise=0.006, low=True),
+    _lock(-150, 0.04, 0.020, 0.008, (-0.2, 0.3, -1.0), above=14, lift=0.004, rise=0.006, low=True),
+)
+# How far a standing spike's root sits under the scalp.
+ROOT_SINK = 0.012
+
+
+def spiky(head, kind):
+    """Spiky hair: a close shell over the scalp, fuller on top, and SPIKY_LOCKS standing out of it (under a hat, the
+    shell below the band and the short locks that clear it)."""
+
+    def lift(a, t):
+        return 0.001 + (0.006 + 0.011 * smoothstep(0.35, 0.85, t)) * smoothstep(0.0, 0.18, t)
+
+    sc = scalp(head, kind, direction(180, 78), rows=11, cols=48, lift=lift)
+    pieces = [tag(sheet_object("shell", sc, head, hair.SHELL_BOX), hair.PART_SHELL)]
+    for k, sp in enumerate(SPIKY_LOCKS):
+        if kind != "free" and not sp["low"]:
+            continue
+        az = sp["az"]
+        el = sp["el"] if sp["el"] is not None else min(hairline_elev(head, az) + sp["above"], 86.0)
+        p, n = head.surface(direction(az, el))
+        if "heading" in sp:
+            path = lying(head, direction(az, el), sp["heading"], sp["length"], 6, sp["lift"], sp["rise"])
+        else:
+            path = bent(p - n * ROOT_SINK, sp["d0"], sp["d1"], sp["length"], 6, sp["ease"])
+            if sp["clear"] is not None:
+                path = keep_off(head, path, sp["clear"])
+        if not under_band(head, kind, path, margin=2.0):
+            continue
+        # A standing spike is fullest on the outside of its bend, a lying lock away from the head.
+        full = n if "heading" in sp else unit(sp["d0"]) - unit(sp["d1"]) + n * 0.05
+        pieces.append(spike(path, full, sp["width"], sp["depth"], hair.cell(hair.LOCK_GRID, k), lean=sp["lean"]))
+    obj = sculpted(head, kind, pieces, {hair.PART_LOCK: 0.3})
+    obj["half"] = kind != "free"
+    return obj
+
+
+# Curls: rings of them round the head from the crown down (those that fall below the hairline are left out), as
+# (elevation, how many round the head, their radius in metres, how tall they stand for their width).
+CURL_ROWS = ((84, 1, 0.031, 0.95), (62, 5, 0.032, 0.9), (40, 8, 0.031, 0.8), (17, 9, 0.028, 0.66),
+             (-7, 9, 0.026, 0.62), (-27, 9, 0.024, 0.6))
+# The curls along the hairline, behind the temples (azimuth, radius), and the ones over the forehead (azimuth,
+# degrees below the hairline, radius).
+CURL_EDGE = ((64, 0.021), (96, 0.022), (128, 0.024), (160, 0.023), (-168, 0.024), (-134, 0.023), (-100, 0.022),
+             (-66, 0.021))
+CURL_FRINGE = ((-34, 4.0, 0.026), (2, 2.0, 0.022), (34, 3.0, 0.019))
+# Loose curls that hook out of the mop, as spikes that turn most of the way round: over the forehead, by the
+# temples, over the ears, at the nape and on top.
+HOOKS = (
+    _spike(-14, 0.055, 0.014, 0.012, (-0.1, -0.8, -0.6), (0.7, -0.3, 0.6), above=1, clear=0.012, ease=0.8),
+    _spike(20, 0.045, 0.012, 0.010, (0.2, -0.8, -0.6), (-0.6, -0.4, 0.6), above=0, clear=0.011, ease=0.8),
+    _spike(70, 0.045, 0.012, 0.010, (0.3, -0.2, -0.95), (0.3, -0.85, 0.5), above=2, clear=0.011, low=True),
+    _spike(-70, 0.045, 0.012, 0.010, (-0.3, -0.2, -0.95), (-0.3, -0.85, 0.5), above=2, clear=0.011, low=True),
+    _spike(108, 0.045, 0.013, 0.011, (0.5, 0.4, -0.75), (0.45, 0.75, 0.5), above=8, clear=0.012, low=True),
+    _spike(-118, 0.05, 0.013, 0.011, (-0.5, 0.5, -0.7), (-0.7, 0.4, 0.6), above=12, clear=0.012, low=True),
+    _spike(150, 0.05, 0.013, 0.011, (0.3, 0.5, -0.8), (0.4, 0.8, 0.5), above=8, clear=0.012, low=True),
+    _spike(-176, 0.055, 0.014, 0.012, (0.0, 0.5, -0.85), (-0.2, 0.85, 0.5), above=8, clear=0.012, low=True),
+    _spike(-146, 0.05, 0.013, 0.011, (-0.3, 0.5, -0.8), (-0.4, 0.8, 0.5), above=8, clear=0.012, low=True),
+    _spike(35, 0.05, 0.014, 0.012, (0.3, -0.2, 1.0), (0.8, 0.3, -0.5), el=76, ease=1.2),
+)
+
+
+def curls(head, kind):
+    """A mop of big round curls: a close shell over the scalp, CURL_ROWS of curls sunk into it, each hanging over
+    the one below, more along the hairline and over the forehead, and HOOKS breaking out of its outline (under a
+    hat, the shell below the band and the curls and hooks that clear it)."""
+    rng = np.random.default_rng(31)
+
+    def lift(a, t):
+        return 0.001 + (0.004 + 0.005 * smoothstep(0.3, 0.8, t)) * smoothstep(0.0, 0.15, t)
+
+    sc = scalp(head, kind, direction(180, 84), rows=8, cols=32, lift=lift)
+    pieces = [tag(sheet_object("shell", sc, head, hair.SHELL_BOX), hair.PART_SHELL)]
+    spots = []
+    for row, (el, count, radius, squash) in enumerate(CURL_ROWS):
+        for j in range(count):
+            az = (360.0 * (j + 0.5 * (row % 2)) / count + rng.uniform(-6, 6)) % 360.0 - 180.0
+            r = radius * rng.uniform(0.85, 1.15)
+            if el < hairline_elev(head, az) + 9.0:
+                continue
+            low = smoothstep(70.0, 10.0, el)
+            p, n = head.surface(direction(az, el))
+            spots.append((p + n * 0.004, n + DOWN * 0.3 * low, r, squash, 1.0 + 0.2 * low))
+    for az, radius in CURL_EDGE:
+        p, n = head.surface(direction(az, hairline_elev(head, az) + 5.0))
+        spots.append((p + n * 0.003, n + DOWN * 0.35, radius, 0.62, 1.15))
+    for az, drop, radius in CURL_FRINGE:
+        p, n = head.surface(direction(az, hairline_elev(head, az) - drop))
+        spots.append((p + n * 0.008, n + DOWN * 0.45, radius, 0.66, 1.1))
+    fringe = len(spots) - len(CURL_FRINGE)
+    for k, (centre, axis, r, squash, stretch) in enumerate(spots):
+        axis = unit(axis + rng.normal(0, 0.12, 3))
+        turn = rng.uniform(0, 2 * math.pi)
+        if kind != "free":
+            e1 = unit(np.cross(axis, (0.3, 0.5, 0.8)))
+            rim = [centre + (e1 * math.cos(a) + np.cross(axis, e1) * math.sin(a)) * r
+                   for a in np.linspace(0, 2 * math.pi, 8, endpoint=False)]
+            if not under_band(head, kind, rim + [centre + axis * r * squash]):
+                continue
+        pieces.append(curl(centre, axis, r, hair.cell(hair.CURL_GRID, k), squash=squash,
+                           segs=16 if r > 0.03 else 14, rows=4 if r > 0.025 or k >= fringe else 3,
+                           under=60.0 if k >= fringe else 35.0, turn=turn, flow=DOWN, stretch=stretch))
+    for k, sp in enumerate(HOOKS):
+        if kind != "free" and not sp["low"]:
+            continue
+        az = sp["az"]
+        el = sp["el"] if sp["el"] is not None else hairline_elev(head, az) + sp["above"]
+        p, n = head.surface(direction(az, el))
+        path = bent(p - n * 0.002, sp["d0"], sp["d1"], sp["length"], 5, sp["ease"])
+        if sp["clear"] is not None:
+            path = keep_off(head, path, sp["clear"])
+        if not under_band(head, kind, path, margin=2.0):
+            continue
+        pieces.append(spike(path, unit(sp["d0"]) - unit(sp["d1"]) + n * 0.05, sp["width"], sp["depth"],
+                            hair.cell(hair.CURL_GRID, 49 - k), taper=0.6))
+    obj = sculpted(head, kind, pieces, {hair.PART_CURL: 0.3, hair.PART_LOCK: 0.2})
     obj["half"] = kind != "free"
     return obj
 
 
 STYLES = {
-    "male": {0: _spiky, 1: _helmet(SWEPT), 2: _helmet(BUZZ), 3: _helmet(CURLY), 4: surfer},
+    "male": {0: spiky, 1: _helmet(SWEPT), 2: _helmet(BUZZ), 3: curls, 4: surfer},
     "female": {0: _helmet(PIXIE), 1: ponytail, 2: bob, 3: long, 4: bun},
 }
