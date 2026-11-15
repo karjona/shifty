@@ -4,11 +4,18 @@
 // comes from the sim (`courseJson`), so what you see is what you collide
 // with.
 import * as THREE from "three/webgpu";
-import { BobbingBatch, type Bobbing, at, placed } from "./bobbing.ts";
+import type { Season } from "../game/conditions.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
+import { type Lantern, breakwaterCameras, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
+import { OVERHEAD, type Sunlight } from "./coast/grounding.ts";
+import { COSTA_NEVADA, DOWNWIND, Life } from "./coast/life.ts";
+import { boatMaterial, clothMaterial } from "./coast/materials.ts";
+import { Crowd } from "./coast/people.ts";
+import { Shape, box, place, post } from "./coast/shape.ts";
 import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
+import { UNREFLECTED } from "./cel/material.ts";
 import type { RiderView } from "./world.ts";
 
 /** Which water course: the bay's oval, or the cape's loop. */
@@ -59,101 +66,180 @@ export interface LandData {
   kind: LandKind;
 }
 
-const RED = 0xe8402a;
 const BOUNDARY_SPACING = 18;
 
 const std = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
   new THREE.MeshStandardNodeMaterial({ color, roughness: 0.6, ...opts });
 
-function checkerTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 32;
-  const g = c.getContext("2d")!;
-  for (let x = 0; x < 16; x++)
-    for (let y = 0; y < 2; y++) {
-      g.fillStyle = (x + y) % 2 === 0 ? "#111" : "#f4f4f0";
-      g.fillRect(x * 16, y * 16, 16, 16);
-    }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  return t;
-}
+/** The race's colours on what floats on the course: marker orange, white, ink, and the ramps' yellow. */
+const MARK = { orange: 0xf2682a, white: 0xf6f4ee, ink: 0x1c2230, yellow: 0xf7bd2c, steel: 0x9aa1ab, red: 0xd6402e };
 
-/** A ramp wedge: `length` along +Z, rising from 0 to `height`, centred on the footprint. */
-function wedge(length: number, width: number, height: number): THREE.BufferGeometry {
-  const l = length / 2;
-  const w = width / 2;
-  // prettier-ignore
-  const v = [
-    -w, 0, -l,  w, 0, -l,  w, height, l,  -w, height, l, // deck
-    -w, 0, -l,  -w, 0, l,  -w, height, l, // left side
-    w, 0, -l,  w, height, l,  w, 0, l, // right side
-    -w, 0, l,  -w, height, l,  w, height, l,  w, 0, l, // back
-  ];
-  const idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 7, 8, 9, 10, 12, 11, 10, 13, 12];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
-}
-
-/** A llaüt's hull: 5.2 m, pinched at bow and stern, rising toward them, a round bilge. */
-function llautHull(): THREE.BufferGeometry {
-  const hull = new THREE.BoxGeometry(5.2, 1, 1.9, 8, 2, 2);
-  const pos = hull.attributes.position!;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i) / 2.6;
-    const k = Math.abs(x);
-    pos.setZ(i, pos.getZ(i) * (1 - Math.pow(k, 2.6)) * (pos.getY(i) < 0 ? 0.75 : 1));
-    pos.setY(i, pos.getY(i) + k * k * (x > 0 ? 0.55 : 0.3));
-  }
-  hull.computeVertexNormals();
-  return hull;
-}
-
-/** Where a boat lies moored: the middle of its hull at the water line, and its heading. */
-export interface Mooring {
-  x: number;
-  z: number;
-  yaw: number;
+/** A float: a tube lying along z, `length` long, its top `above` the water. */
+function tube(shape: Shape, x: number, z: number, length: number, radius: number, above: number, colour: number): void {
+  const geo = new THREE.CapsuleGeometry(radius, length - radius * 2, 3, 8).rotateX(Math.PI / 2);
+  shape.take(geo, colour, place(x, above - radius, z));
 }
 
 /**
- * Fishing boats (llaüts), one per mooring, riding the swell as a few
- * batches (hulls, rails, cabins, masts). `seed` picks their colours.
+ * One tower of the start gate, its foot at the water: a raft on two
+ * floats, a banded mast `tall` high with a lamp head, and stays down to
+ * the raft's corners.
  */
-export function mooredBoats(spots: readonly Mooring[], seed: number): BobbingBatch[] {
-  const hull = llautHull();
-  const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
-  const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
-  let s = seed;
-  const rnd = () => {
-    s = (s * 16807) % 2147483647;
-    return s / 2147483647;
-  };
-  const bodies: (Bobbing & { color: number })[] = [];
-  const rails: (Bobbing & { color: number })[] = [];
-  const cabins: Bobbing[] = [];
-  const masts: Bobbing[] = [];
-  for (const { x, z, yaw } of spots) {
-    const body = colours[Math.floor(rnd() * colours.length)]!;
-    const rail = stripes[Math.floor(rnd() * stripes.length)]!;
-    bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
-    rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
-    if (rnd() < 0.6) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
-    if (rnd() < 0.5) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
+function gateTower(tall: number): THREE.Mesh {
+  const shape = new Shape();
+  for (const side of [-1, 1]) tube(shape, side * 1.05, 0, 4.4, 0.5, 0.42, MARK.orange);
+  shape.take(box(2.9, 0.16, 3.2), MARK.white, place(0, 0.4, 0));
+  shape.take(box(1.1, 0.5, 1.1), MARK.steel, place(0, 0.56, 0));
+  // The mast, in bands.
+  const bands = 6;
+  const from = 1.06;
+  for (let k = 0; k < bands; k++) {
+    const h = (tall - from) / bands;
+    shape.take(post(0.3, 0.3, h, 8), k % 2 === 0 ? MARK.white : MARK.red, place(0, from + k * h, 0));
   }
-  const batches = [
-    new BobbingBatch(hull, std(0xffffff), bodies),
-    new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
-    new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
-    new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
-  ];
-  for (const b of batches) b.mesh.castShadow = true;
-  return batches;
+  shape.take(post(0.42, 0.42, 0.18, 8), MARK.ink, place(0, tall, 0));
+  shape.take(new THREE.SphereGeometry(0.34, 8, 5).translate(0, 0.42, 0), MARK.yellow, place(0, tall, 0));
+  // Stays: struts from the mast to the raft's corners.
+  for (const sx of [-1, 1])
+    for (const sz of [-1, 1]) {
+      const foot = new THREE.Vector3(sx * 1.25, 0.56, sz * 1.4);
+      const head = new THREE.Vector3(0, 3.6, 0);
+      const mid = foot.clone().add(head).multiplyScalar(0.5);
+      const m = new THREE.Matrix4()
+        .lookAt(foot, head, new THREE.Vector3(0, 1, 0))
+        .setPosition(mid)
+        .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+      shape.take(new THREE.BoxGeometry(0.1, foot.distanceTo(head), 0.1), MARK.steel, m);
+    }
+  const mesh = shape.mesh(boatMaterial(), "cast");
+  mesh.name = "gate-tower";
+  return mesh;
+}
+
+/**
+ * The start gate's span, `width` across (along x, centred), its banner's
+ * foot at y = 0: a truss of two chords and posts, the chequered banner
+ * hung in it, a board in Costa Nevada's colours over its middle and
+ * pennants at its ends. `yaw` is the heading it will be turned to.
+ */
+function gateSpan(width: number, yaw: number): THREE.Group {
+  const g = new THREE.Group();
+  const shape = new Shape();
+  const half = width / 2;
+  const tall = 1.6;
+  for (const y of [-0.12, tall + 0.12]) shape.take(new THREE.BoxGeometry(width, 0.2, 0.2), MARK.steel, place(0, y, 0));
+  const bays = 16;
+  for (let k = 0; k <= bays; k++)
+    shape.take(
+      new THREE.BoxGeometry(0.1, tall + 0.24, 0.24),
+      MARK.steel,
+      place(-half + (k / bays) * width, tall / 2, 0),
+    );
+  // The banner: two rows of squares, seen from both sides.
+  const cell = width / bays;
+  for (let k = 0; k < bays; k++)
+    for (let row = 0; row < 2; row++) {
+      const colour = (k + row) % 2 === 0 ? MARK.ink : MARK.white;
+      const x0 = -half + k * cell;
+      const y0 = row * (tall / 2);
+      for (const z of [0.06, -0.06]) {
+        const a = new THREE.Vector3(x0, y0, z);
+        const b = new THREE.Vector3(x0 + cell, y0, z);
+        const c = new THREE.Vector3(x0 + cell, y0 + tall / 2, z);
+        const d = new THREE.Vector3(x0, y0 + tall / 2, z);
+        if (z > 0) shape.quad(a, b, c, d, colour);
+        else shape.quad(b, a, d, c, colour);
+      }
+    }
+  // The board over the middle, in three stripes.
+  const board = Math.min(7, width * 0.42);
+  COSTA_NEVADA.forEach((colour, k) =>
+    shape.take(new THREE.BoxGeometry(board / 3, 1.0, 0.16), colour, place((k - 1) * (board / 3), tall + 0.76, 0)),
+  );
+  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 1.3, 0));
+  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 0.22, 0));
+  // Pennants flying from both ends.
+  const cloth = new Shape();
+  for (const side of [-1, 1]) {
+    const x = side * (half - 0.2);
+    shape.take(post(0.05, 0.04, 3.6, 5), MARK.steel, place(x, tall, 0));
+    COSTA_NEVADA.forEach((colour, k) => {
+      const geo = new THREE.PlaneGeometry(1.9, 0.4, 5, 1).translate(0.95, -(k + 0.5) * 0.4, 0);
+      cloth.take(geo, colour, place(x, tall + 3.55, 0, DOWNWIND - yaw), { weight: (p) => Math.hypot(p.x - x, p.z) });
+    });
+  }
+  const frame = shape.mesh(boatMaterial(), "cast");
+  frame.name = "gate-span";
+  g.add(frame);
+  const pennants = cloth.mesh(clothMaterial(), "none");
+  pennants.layers.set(UNREFLECTED);
+  pennants.frustumCulled = false;
+  g.add(pennants);
+  return g;
+}
+
+/**
+ * A ramp, `length` along +z rising from the water to `height`, centred on
+ * its footprint: a yellow deck with arrows pointing up it and a white lip,
+ * red and white skirts, and a float along each side.
+ */
+function rampMesh(length: number, width: number, height: number): THREE.Mesh {
+  const shape = new Shape();
+  const l = length / 2;
+  const w = width / 2;
+  const at = (x: number, t: number, lift = 0) => new THREE.Vector3(x * w, t * height + lift, -l + t * length);
+  // The deck: yellow, white along its lip.
+  shape.quad(at(1, 0), at(-1, 0), at(-1, 0.9), at(1, 0.9), MARK.yellow);
+  shape.quad(at(1, 0.9), at(-1, 0.9), at(-1, 1), at(1, 1), MARK.white);
+  // Arrows up the deck.
+  for (const t of [0.16, 0.42, 0.68]) {
+    const lift = 0.02;
+    const arm = 0.16;
+    const tip = at(0, t + arm, lift);
+    for (const side of [-1, 1]) {
+      const outer = at(side * 0.62, t, lift);
+      const inner = at(side * 0.62, t - 0.09, lift);
+      const notch = at(0, t + arm - 0.09, lift);
+      if (side > 0) shape.quad(tip, outer, inner, notch, MARK.ink);
+      else shape.quad(outer, tip, notch, inner, MARK.ink);
+    }
+  }
+  // The skirts in red and white, and the back.
+  const panels = 4;
+  for (const side of [-1, 1])
+    for (let k = 0; k < panels; k++) {
+      const t0 = k / panels;
+      const t1 = (k + 1) / panels;
+      const colour = k % 2 === 0 ? MARK.red : MARK.white;
+      const a = at(side, t0).setY(-0.4);
+      const b = at(side, t1).setY(-0.4);
+      if (side > 0) shape.quad(b, a, at(side, t0), at(side, t1), colour);
+      else shape.quad(a, b, at(side, t1), at(side, t0), colour);
+    }
+  for (let k = 0; k < panels; k++) {
+    const x0 = -1 + (k / panels) * 2;
+    const x1 = -1 + ((k + 1) / panels) * 2;
+    shape.quad(at(x0, 1).setY(-0.4), at(x1, 1).setY(-0.4), at(x1, 1), at(x0, 1), k % 2 === 0 ? MARK.white : MARK.red);
+  }
+  for (const side of [-1, 1]) tube(shape, side * (w + 0.4), 0, length * 0.94, 0.45, 0.4, MARK.orange);
+  const mesh = shape.mesh(boatMaterial());
+  mesh.name = "ramp";
+  return mesh;
+}
+
+/** The start gate: how high the banner's foot hangs over the water (m), and the banner's height. */
+const GATE = { foot: 6.4, banner: 1.6 };
+
+/** Where the start gate's two towers float, and how tall and wide they stand (m), for what they hide. */
+export function gateTowers(d: CourseData): { x: number; z: number; radius: number; top: number }[] {
+  const { x, z, yaw } = d.start;
+  const half = d.laneHalf + 2;
+  return [-1, 1].map((side) => ({
+    x: x - Math.cos(yaw) * half * side,
+    z: z + Math.sin(yaw) * half * side,
+    radius: 1.8,
+    top: GATE.foot + GATE.banner + 1.2,
+  }));
 }
 
 interface Floating {
@@ -166,28 +252,36 @@ interface Floating {
 export class CourseView {
   readonly group = new THREE.Group();
   private floating: Floating[] = [];
-  /** Batches riding the swell: moored boats. */
-  private bobbing: BobbingBatch[] = [];
   private buoys: BuoyMarks;
   private chevrons: ChevronBoards;
   private boundary: THREE.InstancedMesh;
   private boundaryPoints: { x: number; z: number }[] = [];
   private matrix = new THREE.Matrix4();
+  /** The breakwater's lamps. */
+  private lanterns: Lantern[] = [];
+  /** The people on the bay's land who wave. */
+  private crowd = new Crowd();
+  /** The start gate's span and the towers that carry it (`left` at the span's -x end). */
+  private gate: { span: THREE.Object3D; left: THREE.Object3D; right: THREE.Object3D; width: number } | null = null;
 
   readonly data: CourseData;
 
-  constructor(data: CourseData) {
+  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land; `light` is which way its shade falls. */
+  constructor(data: CourseData, season: Season = "summer", crowd = 1, light: Sunlight = OVERHEAD) {
     this.data = data;
     if (data.place === "bay") {
-      this.buildBreakwater();
-      this.group.add(buildLand(this.data.land));
+      const life = new Life();
+      this.buildBreakwater(crowd, light, life);
+      this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life, light));
+      this.group.add(...life.build());
+      const arms = this.crowd.build();
+      if (arms) this.group.add(arms);
     }
     this.buildStartGate();
     this.buoys = new BuoyMarks(this.data);
     this.chevrons = new ChevronBoards(this.data);
     this.buildRamps();
     this.boundary = this.buildBoundary();
-    if (data.place === "bay") this.buildBoats();
     for (const g of [this.buoys.group, this.chevrons.group]) {
       g.userData.noMerge = true;
       this.group.add(g);
@@ -195,181 +289,46 @@ export class CourseView {
     for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
-  private buildBreakwater(): void {
+  private buildBreakwater(crowd: number, light: Sunlight, life: Life): void {
     const d = this.data;
-    const rock = std(0x8a8072, { roughness: 0.95, flatShading: true });
-    const geo = new THREE.CapsuleGeometry(d.breakwaterRadius, d.straightHalf * 2, 6, 14);
-    geo.rotateZ(Math.PI / 2);
-    // Jitter the vertices so it reads as piled rocks, not a pill.
-    const pos = geo.attributes.position!;
-    for (let i = 0; i < pos.count; i++) {
-      const n = Math.sin(i * 12.9898) * 43758.5453;
-      const j = (n - Math.floor(n) - 0.5) * 1.6;
-      pos.setY(i, pos.getY(i) + j);
-      pos.setZ(i, pos.getZ(i) + j * 0.6);
-    }
-    geo.computeVertexNormals();
-    const mound = new THREE.Mesh(geo, rock);
-    mound.scale.set(1, 0.22, 1);
-    mound.position.y = -0.6;
-    mound.castShadow = true;
-    mound.receiveShadow = true;
-    this.group.add(mound);
-    this.group.add(this.armourStones());
-
-    // Lighthouse on the east tip.
-    const lh = new THREE.Group();
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.8, 13, 12), std(0xf4f1ea));
-    tower.position.y = 6.5;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.42, 1.55, 2, 12), std(RED));
-    band.position.y = 8;
-    const lamp = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.1, 1.1, 1.4, 10),
-      std(0xfff2b0, { emissive: 0xffd760, emissiveIntensity: 0.8 }),
+    const breakwater = buildBreakwater(
+      d.straightHalf,
+      d.breakwaterRadius,
+      d.straightHalf + d.breakwaterRadius * 0.45,
+      crowd,
+      this.crowd,
+      breakwaterCameras(d.straightHalf, d.start.x, Math.sign(d.start.z) || -1),
+      light,
+      life,
     );
-    lamp.position.y = 13.7;
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.8, 12), std(RED));
-    cap.position.y = 15.3;
-    for (const m of [tower, band, lamp, cap]) {
-      m.castShadow = true;
-      lh.add(m);
-    }
-    lh.position.set(d.straightHalf + d.breakwaterRadius * 0.45, 1.6, 0);
-    this.group.add(lh);
-  }
-
-  /** Fishing boats (llaüts) moored off the town quay, riding the swell. */
-  private buildBoats(): void {
-    const town = this.data.land.find((l) => l.kind === "town");
-    if (!town) return;
-    const dx = town.bx - town.ax;
-    const dz = town.bz - town.az;
-    const len = Math.hypot(dx, dz);
-    const ux = dx / len;
-    const uz = dz / len;
-    let nx = -uz;
-    let nz = ux;
-    if (nx * -town.ax + nz * -town.az < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
-    const hull = llautHull();
-    const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
-    const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
-    let seed = 11;
-    const rnd = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-    const bodies: (Bobbing & { color: number })[] = [];
-    const rails: (Bobbing & { color: number })[] = [];
-    const cabins: Bobbing[] = [];
-    const masts: Bobbing[] = [];
-    for (let a = 8; a < len - 8; a += 9 + rnd() * 10) {
-      const body = colours[Math.floor(rnd() * colours.length)]!;
-      const rail = stripes[Math.floor(rnd() * stripes.length)]!;
-      const cabin = rnd() < 0.6;
-      const mast = rnd() < 0.5;
-      const d = town.radius + 5 + rnd() * 3;
-      const x = town.ax + ux * a + nx * d;
-      const z = town.az + uz * a + nz * d;
-      const yaw = Math.atan2(-uz, ux) + (rnd() - 0.5) * 0.3;
-      bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
-      rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
-      if (cabin) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
-      if (mast) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
-    }
-    const batches = [
-      new BobbingBatch(hull, std(0xffffff), bodies),
-      new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
-      new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
-      new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
-    ];
-    for (const b of batches) {
-      b.mesh.castShadow = true;
-      this.group.add(b.mesh);
-      this.bobbing.push(b);
-    }
-  }
-
-  /** The mound faced with big squared stones, so it draws as a breakwater. */
-  private armourStones(): THREE.InstancedMesh {
-    const d = this.data;
-    const len = d.straightHalf * 2 + d.breakwaterRadius * 2;
-    const per = Math.floor(len / 2.4);
-    const items: THREE.Matrix4[] = [];
-    const colours: number[] = [];
-    let seed = 7;
-    const rnd = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-    const greys = [0xa49c8e, 0x958d80, 0xb3ab9c, 0x8c8578];
-    for (const side of [-1, 1]) {
-      for (const row of [0, 1]) {
-        for (let i = 0; i < per; i++) {
-          const x = -len / 2 + (i + 0.5 + (rnd() - 0.5) * 0.5) * (len / per);
-          // Round the ends of the capsule.
-          const end = Math.max(0, Math.abs(x) - d.straightHalf) / d.breakwaterRadius;
-          const reach = d.breakwaterRadius * (row === 0 ? 0.95 : 0.6) * Math.sqrt(Math.max(0, 1 - end * end));
-          const s = 1.5 + rnd() * 1.4;
-          const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * Math.PI, rnd() * 0.6));
-          items.push(
-            new THREE.Matrix4().compose(
-              new THREE.Vector3(x, row === 0 ? -0.3 : 0.9, side * reach),
-              q,
-              new THREE.Vector3(s, s * 0.8, s),
-            ),
-          );
-          colours.push(greys[Math.floor(rnd() * greys.length)]!);
-        }
-      }
-    }
-    const mesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      std(0xffffff, { roughness: 0.95, flatShading: true }),
-      items.length,
-    );
-    items.forEach((m, i) => {
-      mesh.setMatrixAt(i, m);
-      mesh.setColorAt(i, new THREE.Color(colours[i]));
-    });
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
+    this.lanterns.push(...breakwater.lanterns);
+    this.group.add(breakwater.group);
   }
 
   private buildStartGate(): void {
     const d = this.data;
     const { x, z, yaw } = d.start;
-    const rx = -Math.cos(yaw);
-    const rz = Math.sin(yaw);
     const half = d.laneHalf + 2;
-    const poleMat = std(0xf4f4f0);
-    for (const side of [-1, 1]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 9, 8), poleMat);
-      const px = x + rx * half * side;
-      const pz = z + rz * half * side;
-      pole.position.set(px, 3.5, pz);
-      pole.castShadow = true;
-      this.group.add(pole);
-      this.floating.push({ obj: pole, x: px, z: pz, lift: 3.5 });
+    const towers: THREE.Mesh[] = [];
+    for (const { x: px, z: pz } of gateTowers(d)) {
+      const tower = gateTower(GATE.foot + GATE.banner);
+      tower.position.set(px, 0, pz);
+      tower.rotation.y = yaw;
+      this.group.add(tower);
+      this.floating.push({ obj: tower, x: px, z: pz, lift: 0 });
+      towers.push(tower);
     }
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(half * 2, 1.6),
-      new THREE.MeshStandardNodeMaterial({ map: checkerTexture(), side: THREE.DoubleSide, roughness: 0.8 }),
-    );
-    banner.position.set(x, 7.2, z);
-    banner.rotation.y = yaw;
-    this.group.add(banner);
+    const span = gateSpan(half * 2, yaw);
+    span.position.set(x, GATE.foot, z);
+    span.rotation.y = yaw;
+    span.userData.noMerge = true;
+    this.group.add(span);
+    this.gate = { span, right: towers[1]!, left: towers[0]!, width: half * 2 };
   }
 
   private buildRamps(): void {
-    const deck = std(0xf2b630, { roughness: 0.7 });
     for (const r of this.data.ramps) {
-      const m = new THREE.Mesh(wedge(r.length, r.width, r.height), deck);
-      m.castShadow = true;
-      m.receiveShadow = true;
+      const m = rampMesh(r.length, r.width, r.height);
       m.position.set(r.x, 0, r.z);
       m.rotation.y = r.yaw;
       this.group.add(m);
@@ -446,13 +405,20 @@ export class CourseView {
   /** Floats everything on the swells, swings the buoys riders hit, and marks the next buoy. */
   update(waves: Float32Array, t: number, dt: number, riders: readonly RiderView[], nextBuoy: number | null): void {
     for (const f of this.floating) f.obj.position.y = waveHeight(waves, f.x, f.z, t) + f.lift;
+    if (this.gate) {
+      // The span rides on its two towers.
+      const { span, left, right, width } = this.gate;
+      span.position.y = (left.position.y + right.position.y) / 2 + GATE.foot;
+      span.rotation.z = Math.atan2(left.position.y - right.position.y, width);
+    }
     this.boundaryPoints.forEach((p, i) => {
       this.matrix.makeTranslation(p.x, waveHeight(waves, p.x, p.z, t), p.z);
       this.boundary.setMatrixAt(i, this.matrix);
     });
     this.boundary.instanceMatrix.needsUpdate = true;
 
-    for (const b of this.bobbing) b.update(waves, t);
+    flashLanterns(this.lanterns, t);
+    this.crowd.update(t, riders);
     this.buoys.update(waves, t, dt, riders, nextBuoy);
     this.chevrons.update(waves, t);
   }

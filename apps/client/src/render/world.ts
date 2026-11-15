@@ -8,7 +8,7 @@ import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
 import { resetLook } from "./cel/look.ts";
 import { CelPost } from "./cel/post.ts";
-import { PIXEL_AT_1M } from "./cel/rider.ts";
+import { PIXEL_AT_1M, SHADOW_LIFT } from "./cel/rider.ts";
 import { NO_WEATHER, type WeatherHere } from "../game/conditions.ts";
 
 export interface RiderView {
@@ -111,10 +111,15 @@ export interface Environment {
   readonly topSpeed: number;
   /** Something in it reflects the world (the sea). */
   readonly reflects?: boolean;
+  /** Resolves once everything it shows is built (its models loaded), if some of it comes in later. */
+  readonly ready?: Promise<void>;
   /** Where its sun shines from, relative to what it lights (see `World.setSunOffset`), if it has its own. */
   readonly sunOffset?: THREE.Vector3;
   /** Colours the sky, the fog and the lights. */
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
+  /** The sun's shadow box covers only a few metres round the camera's subject (a menu's stage), or a race's: with
+   * a close one, scenery far from any stage needn't be drawn into the shadow map. */
+  closeShadows?(on: boolean): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
   ground(x: number, z: number, t: number): number;
   /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
@@ -169,6 +174,10 @@ const REFLECT_FAR = 30;
 const SHADOW_REACH = 45;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
+/** Shadow map texels up to this size (m) draw a rider's own shadows cleanly; over coarser ones riders skip them. */
+const FINE_TEXEL = 0.015;
+/** How far toward the sun riders then look the shadow map up from (m). */
+const RIDER_LIFT = 0.55;
 /** The field of view (degrees) the distances above are for: a narrower one brings riders that much closer. */
 const DETAIL_FOV = 55;
 
@@ -279,6 +288,7 @@ export class World {
     SUN_DIR.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
     // Line widths are in pixels of a 1080p frame, whatever the resolution.
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    SHADOW_LIFT.value = this.riderLift;
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.cel.width.value = 1.6 * (size.y / 1080);
     this.sun.shadow.needsUpdate = true;
@@ -311,10 +321,17 @@ export class World {
     Object.assign(shadow.camera, { left: -half, right: half, top: half, bottom: -half });
     shadow.camera.updateProjectionMatrix();
     const texel = (2 * half) / shadow.mapSize.x;
+    this.riderLift = texel > FINE_TEXEL ? RIDER_LIFT : 0;
+    this.shadowHalf = half;
+    this.env?.closeShadows?.(half < SHADOW_BOX);
     shadow.normalBias = texel * 2;
     // (Depth runs from the camera's near to its far: a texel's worth of it.)
     shadow.bias = -texel / (shadow.camera.far - shadow.camera.near);
   }
+
+  private shadowHalf = SHADOW_BOX;
+  /** How far riders look up the shadow map from (see `SHADOW_LIFT`). */
+  private riderLift = 0;
 
   /** The sun, for stages that light their own shots. */
   get sunLight(): THREE.DirectionalLight {
@@ -340,6 +357,7 @@ export class World {
     this.scene.add(env.group);
     resetLook();
     env.light(this.scene, this.sun, this.hemi);
+    env.closeShadows?.(this.shadowHalf < SHADOW_BOX);
     if (env.sunOffset) this.sunOffset.copy(env.sunOffset);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();

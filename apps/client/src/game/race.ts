@@ -550,6 +550,7 @@ export class RaceSession implements Stage {
     const env = this.env;
     const ghostsIn = this.ghosts?.attach(engine.world.scene, env, this.state.course) ?? Promise.resolve();
     engine.world.addRiders(this.slots);
+    await env.ready;
     await engine.warm(() => engine.world.compile());
     // (The roster may have come in meanwhile.)
     if (this.client !== client) return;

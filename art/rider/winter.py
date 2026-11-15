@@ -341,8 +341,9 @@ def paint_puffer(maps):
 # ---------------------------------------------------------------- snowboard pants
 
 # Down each leg: (distance along the thigh, or along the shin past the knee, how far out from the leg).
-PANTS_THIGH = [(0.15, 0.034), (0.25, 0.04), (0.33, 0.046), (0.4, 0.05)]
-PANTS_SHIN = [(0.04, 0.054), (0.11, 0.056), (0.19, 0.056), (0.26, 0.058), (0.32, 0.062), (0.37, 0.066)]
+# (The cloth stacks over the boots: the last rings swell and pinch in turn.)
+PANTS_THIGH = [(0.15, 0.04), (0.25, 0.05), (0.33, 0.058), (0.4, 0.064)]
+PANTS_SHIN = [(0.04, 0.068), (0.11, 0.072), (0.19, 0.074), (0.26, 0.068), (0.32, 0.086), (0.37, 0.078)]
 PANTS_HEM = 0.37
 KNEE = (0.465, 0.6)
 

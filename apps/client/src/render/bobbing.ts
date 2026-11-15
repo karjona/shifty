@@ -35,9 +35,6 @@ export class BobbingBatch {
   }
 }
 
-/** A translation. */
-export const at = (x: number, y: number, z: number) => new THREE.Matrix4().makeTranslation(x, y, z);
-
 /** The transform `x, z` (at the water line), turned `yaw`, then `local` within it. */
 export function placed(x: number, z: number, yaw: number, local: THREE.Matrix4 = new THREE.Matrix4()): THREE.Matrix4 {
   return new THREE.Matrix4().makeTranslation(x, 0, z).multiply(new THREE.Matrix4().makeRotationY(yaw)).multiply(local);

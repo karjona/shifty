@@ -20,15 +20,18 @@ import {
 } from "three/tsl";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
+import { ClubArt } from "./club.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { LOOK } from "./cel/look.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { Precipitation } from "./cel/precip.ts";
 import { type CircuitLook, ConditionsLook } from "./look.ts";
 import { Gulls } from "./cel/gulls.ts";
+import { BaySide } from "./bayside.ts";
+import { sunlight } from "./coast/grounding.ts";
+import { crowdOf } from "./coast/people.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
-import { buildScenery } from "./scenery.ts";
 import { Spray } from "./spray.ts";
 import { SeaWater, type WakeSource } from "./water.ts";
 import {
@@ -41,7 +44,7 @@ import {
   waterGrid,
   waveHeight,
 } from "./waves.ts";
-import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
+import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
 const WATER_SIZE = 1400;
@@ -104,10 +107,10 @@ export interface WaterScenery {
   readonly group: THREE.Group;
   /** Where the gulls circle. */
   readonly gulls: THREE.Vector3;
-  /** The sea is hidden this far inside the land (m), where swells would show through low shores. */
-  readonly inland: number;
-  /** Per frame: what floats rides the swell. */
-  update(waves: Float32Array, t: number): void;
+  /** The sea is hidden this far inside the land (m), where swells would show through low shores (null: past the bay's plain). */
+  readonly inland: number | null;
+  /** Per frame: what floats rides the swell, and people wave at the riders. */
+  update(waves: Float32Array, t: number, riders: readonly RiderView[]): void;
 }
 
 export class Bay implements Environment {
@@ -141,19 +144,44 @@ export class Bay implements Environment {
   private sun: THREE.DirectionalLight | null = null;
   private hemi: THREE.HemisphereLight | null = null;
   private background = new THREE.Color();
-  private scenery: WaterScenery | null;
+  private scenery: WaterScenery;
+  private farCasters: THREE.Mesh[] | null = null;
+
+  /** With the shadow box close round a menu's stage only the club casts shadows: the town, the boats and the
+   * planting stand outside it. */
+  closeShadows(on: boolean): void {
+    if (on && !this.farCasters) {
+      const far: THREE.Mesh[] = [];
+      const visit = (o: THREE.Object3D) => {
+        if (o === this.club?.group) return;
+        if (o instanceof THREE.Mesh && o.castShadow) far.push(o);
+        o.children.forEach(visit);
+      };
+      visit(this.group);
+      for (const m of far) m.castShadow = false;
+      this.farCasters = far;
+    } else if (!on && this.farCasters) {
+      for (const m of this.farCasters) m.castShadow = true;
+      this.farCasters = null;
+    }
+  }
+
+  /** The country club at the quay's east end (on the bay itself; other places on the water have none). */
+  readonly club: ClubArt | null = null;
+  /** Resolves once the club's art is in. */
+  readonly ready: Promise<void> = Promise.resolve();
 
   constructor(opts: BayOptions) {
     this.conditions = opts.conditions ?? homeConditions("jetski");
     this.look = new ConditionsLook(this.conditions, opts.look ?? BAY_LOOK);
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
-    this.scenery = opts.scenery ?? null;
+    this.scenery = opts.scenery ?? new BaySide(opts.course);
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
-    this.group.add(this.scenery?.group ?? buildScenery());
+    this.group.add(this.scenery.group);
     if (opts.water === "sea") {
-      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS, this.scenery?.inland ?? null);
+      this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS, this.scenery.inland);
       this.group.add(this.sea.mesh);
     } else {
       this.buildWater();
@@ -163,7 +191,12 @@ export class Bay implements Environment {
     this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
     this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
-    this.course = new CourseView(opts.course);
+    this.course = new CourseView(
+      opts.course,
+      this.conditions.season,
+      crowdOf(this.conditions),
+      sunlight(this.look.sun),
+    );
     this.group.add(this.course.group);
     this.sea?.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);
@@ -172,7 +205,12 @@ export class Bay implements Environment {
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
-    this.gulls = new Gulls(this.scenery?.gulls ?? new THREE.Vector3(40, 0, 40));
+    if (opts.course.place === "bay") {
+      this.club = new ClubArt();
+      this.group.add(this.club.group);
+      this.ready = this.club.ready;
+    }
+    this.gulls = new Gulls(this.scenery.gulls);
     this.gulls.group.userData.weather = true;
     this.group.add(this.gulls.group);
   }
@@ -263,7 +301,7 @@ export class Bay implements Environment {
     if (this.gulls) this.gulls.group.visible = this.look.rain < 0.3 && this.look.snow < 0.5;
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
-    this.scenery?.update(this.waveParams, f.t);
+    this.scenery.update(this.waveParams, f.t, f.riders);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {
       const model = f.models.get(r.slot);

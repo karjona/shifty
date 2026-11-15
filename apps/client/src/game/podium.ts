@@ -6,13 +6,12 @@
 // (names, looks, points), so it needs nothing more from the race server.
 import * as THREE from "three/webgpu";
 import { type Appearance, botAppearance } from "@shifty/rider";
-import { Confetti, STEPS, buildPodium } from "../render/podium.ts";
+import { PodiumScene, STEPS } from "../render/podium.ts";
 import { championPose, clapPose, wavePose } from "../render/rider/cheer.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import type { Pose } from "../render/rider/rig.ts";
 import type { Body } from "../render/rider/skeleton.ts";
 import { sharedBay } from "./backdrops.ts";
-import { disposeTree } from "./dispose.ts";
 import type { Engine, Stage } from "./engine.ts";
 import type { RosterName, TiltRow } from "../ui/results.ts";
 import type { Season } from "./season-change.ts";
@@ -72,9 +71,9 @@ const ART_WAIT_MS = 8000;
  * looking up, until all three stand in the shot left of the middle (the standings take the right). It stays in
  * front of the houses behind it. */
 const EYE_FROM = new THREE.Vector3(-0.7, 0.5, 3.1);
-const EYE_TO = new THREE.Vector3(0.6, 1.0, 7.2);
+const EYE_TO = new THREE.Vector3(0.6, 1.25, 7.2);
 const LOOK_FROM = new THREE.Vector3(-0.1, 2.3, 0);
-const LOOK_TO = new THREE.Vector3(1.25, 1.75, 0);
+const LOOK_TO = new THREE.Vector3(0.8, 1.75, 0);
 const FOV_FROM = 40;
 const FOV_TO = 47;
 
@@ -85,9 +84,8 @@ const easeOut = (k: number) => 1 - (1 - k) ** 3;
 export class Podium implements Stage {
   private engine: Engine | null = null;
   private group = new THREE.Group();
-  private podium: THREE.Group;
+  private scene: PodiumScene;
   private figures: RiderFigure[] = [];
-  private confetti: Confetti;
   private t = 0;
   private eye = new THREE.Vector3();
   private look = new THREE.Vector3();
@@ -100,9 +98,8 @@ export class Podium implements Stage {
     this.shown = new Promise((resolve) => (this.markShown = resolve));
     this.season = data.season;
     const colours = SEASONS.map((s) => PALETTE[s].accent);
-    this.podium = buildPodium(colours, PALETTE[data.season].accent);
-    this.confetti = new Confetti([...colours, 0xf6f1e7, 0xf2c14e]);
-    this.group.add(this.podium, this.confetti.mesh);
+    this.scene = new PodiumScene(colours, PALETTE[data.season].accent);
+    this.group.add(this.scene.group);
     data.riders.slice(0, STEPS.length).forEach((r, i) => {
       // On the bay, in their jetski kit.
       const figure = new RiderFigure(r.look, "summer");
@@ -148,7 +145,8 @@ export class Podium implements Stage {
   }
 
   loaded(): Promise<void> {
-    return Promise.all(this.figures.map((f) => f.ready)).then(() => {});
+    const bay = this.engine?.render ? sharedBay(this.engine).ready : Promise.resolve();
+    return Promise.all([bay, this.scene.ready, ...this.figures.map((f) => f.ready)]).then(() => {});
   }
 
   frame(now: number, dt: number): void {
@@ -162,7 +160,7 @@ export class Podium implements Stage {
     this.figures.forEach((f, i) => {
       if (f.body) f.pose(POSES[i]!(f.body, held + i * 1.7));
     });
-    this.confetti.update(t);
+    this.scene.update(t);
     // Once risen, the camera drifts a little from side to side.
     const drift = Math.sin(t * 0.21) * 0.35 * k;
     this.eye.lerpVectors(EYE_FROM, EYE_TO, k);
@@ -180,8 +178,7 @@ export class Podium implements Stage {
     world?.clearEnvironment();
     for (const f of this.figures) f.dispose();
     this.figures = [];
-    this.confetti.dispose();
-    disposeTree(this.podium);
+    this.scene.dispose();
   }
 }
 

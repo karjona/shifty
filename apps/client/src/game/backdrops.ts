@@ -3,32 +3,15 @@
 // where riders gather (mode select, rooms). Each is a stage; one is shown
 // at a time, and they keep what they built for the next time.
 import * as THREE from "three/webgpu";
-import {
-  Fn,
-  abs,
-  clamp,
-  float,
-  fwidth,
-  length,
-  min,
-  mix,
-  mx_noise_float,
-  positionWorld,
-  screenUV,
-  sin,
-  smoothstep,
-  uniform,
-  vec2,
-  vec3,
-} from "three/tsl";
+import { Fn, abs, clamp, float, length, mix, screenUV, sin, smoothstep, uniform, vec2, vec3 } from "three/tsl";
 import type { Appearance, Sport } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Avatar } from "../render/avatar.ts";
 import { Bay } from "../render/bay.ts";
-import { CLUB, HANDRAIL, buildClub } from "../render/club.ts";
-import { SUN_DIR, SUN_STRENGTH, celify, inkId, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
+import { CLUB } from "../render/club.ts";
+import { SUN_DIR, SUN_STRENGTH, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
 import { CelPost } from "../render/cel/post.ts";
-import { PIXEL_AT_1M } from "../render/cel/rider.ts";
+import { PIXEL_AT_1M, SHADOW_LIFT } from "../render/cel/rider.ts";
 import { devParams } from "../dev-params.ts";
 import type { Engine, Stage } from "./engine.ts";
 import { quietly } from "../loading.ts";
@@ -111,6 +94,10 @@ class Flyover implements Stage {
 
   compile(root?: THREE.Object3D): Promise<void> {
     return this.engine?.world.compile(root) ?? Promise.resolve();
+  }
+
+  loaded(): Promise<void> {
+    return this.engine?.render ? bay(this.engine).ready : Promise.resolve();
   }
 
   frame(now: number, dt: number): void {
@@ -305,6 +292,7 @@ class SeasonField implements Stage {
     if (this.avatar) this.avatar.set(appearance, sport);
     else {
       this.avatar = new Avatar(appearance, 0, sport);
+      this.avatar.stance = this.shot === "hero" ? "hip" : "idle";
       this.avatar.showRide(this.withRide);
       this.rider.add(this.avatar.mesh);
     }
@@ -327,6 +315,7 @@ class SeasonField implements Stage {
   setShot(shot: RiderShot, space: (() => ScreenBox | null) | null): void {
     this.shot = shot;
     this.space = space;
+    if (this.avatar) this.avatar.stance = shot === "hero" ? "hip" : "idle";
   }
 
   /** Eases the framing toward the shot's (snaps to it at first). */
@@ -379,6 +368,7 @@ class SeasonField implements Stage {
     SUN_STRENGTH.value = (k.color.r + k.color.g + k.color.b) * k.intensity;
     SUN_DIR.value.copy(KEY_OFFSET).normalize();
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    SHADOW_LIFT.value = 0;
     this.post.render();
   }
 
@@ -388,7 +378,7 @@ class SeasonField implements Stage {
 /** The club's terrace, with the riders gathered at the front of it. */
 class Club implements Stage {
   private engine: Engine | null = null;
-  private group = celifyClub(buildClub());
+  private group = new THREE.Group();
   private avatars: Avatar[] = [];
   private count = 1;
 
@@ -431,7 +421,7 @@ class Club implements Stage {
     }
     this.avatars.forEach((a, i) => {
       const spot = spots[i]!;
-      a.crossed = i === 0;
+      a.stance = i === 0 ? "crossed" : "idle";
       a.mesh.position.set(spot.x, CLUB.floor, spot.z);
       a.mesh.rotation.y = spot.yaw;
       if (i < this.count) this.group.add(a.mesh);
@@ -449,6 +439,7 @@ class Club implements Stage {
   private attach(engine: Engine): void {
     const world = engine.world;
     world.setEnvironment(bay(engine));
+    bay(engine).club?.setDetail(true);
     // A key from the camera's left, so the riders turn half to shade.
     const k = HERO_VIEW.key;
     world.setSunOffset(k.x, k.y, k.z);
@@ -477,6 +468,7 @@ class Club implements Stage {
     await engine.warm(() => world.compile(this.group), false);
     if (engine.current === this) return;
     this.group.removeFromParent();
+    bay(engine).club?.setDetail(false);
     world.setShadowBox();
     // (Unless another stage now draws the world.)
     if (engine.current === host) world.clearEnvironment();
@@ -487,7 +479,8 @@ class Club implements Stage {
   }
 
   loaded(): Promise<void> {
-    return Promise.all(this.avatars.slice(0, this.count).map((a) => a.ready)).then(() => {});
+    const club = this.engine?.render ? bay(this.engine).ready : Promise.resolve();
+    return Promise.all([club, ...this.avatars.slice(0, this.count).map((a) => a.ready)]).then(() => {});
   }
 
   frame(now: number, dt: number): void {
@@ -501,6 +494,7 @@ class Club implements Stage {
 
   stop(): void {
     this.group.removeFromParent();
+    if (this.engine?.render) bay(this.engine).club?.setDetail(false);
     this.engine?.world.setShadowBox();
     this.engine?.world.clearEnvironment();
   }
@@ -508,15 +502,20 @@ class Club implements Stage {
 
 /**
  * The mode select, framed like a character select: the camera low on the
- * terrace looking out to sea, your rider large on the left, turned
- * three-quarters, friends beside and behind.
+ * terrace at the head of the stair, looking out to sea past your rider, who
+ * stands large on the left, turned three-quarters, in the sun; the
+ * lighthouse and the signal mast's flags stand in the open sky between the
+ * rider and the menu's panels (which cover the right of the picture), and
+ * friends gather behind, toward the middle.
  */
 const HERO_VIEW = (() => {
   const at = new THREE.Vector3(CLUB.x + 2.5, CLUB.floor, CLUB.z - 5.2);
   // The camera stands inland of the rider, looking out over the bay (−z), a little from the east.
-  const theta = 0.42;
+  const theta = 0.186;
   const fwd = new THREE.Vector3(-Math.sin(theta), 0, -Math.cos(theta));
   const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
+  // The sun from the camera's left and behind it, over the clubhouse's roof: the riders turn half to shade, and
+  // nothing on the terrace stands between them and it.
   const key = right
     .clone()
     .multiplyScalar(-22)
@@ -525,20 +524,22 @@ const HERO_VIEW = (() => {
   return { at, theta, fwd, right, key, dist: 4.4, fov: 34 };
 })();
 
+/** Where the riders stand: you, then friends behind you toward the middle of the picture, each further back. */
 function heroSpots(): { x: number; z: number; yaw: number }[] {
   const { at, theta, right, fwd } = HERO_VIEW;
   const spot = (side: number, back: number, turn: number) => {
     const p = at.clone().addScaledVector(right, side).addScaledVector(fwd, back);
     return { x: p.x, z: p.z, yaw: theta + turn };
   };
-  return [spot(0, 0, 0.45), spot(-1.1, 1.3, 0.2), spot(1.2, 1.5, -0.3), spot(-2.2, 2.6, 0.1)];
+  return [spot(0, 0, 0.45), spot(0.9, 1.2, 0.1), spot(1.95, 2.2, -0.25), spot(0.5, 2.7, 0.3)];
 }
 
 /**
- * The hero view; `close` (0-1) closes in on the rider (the pro shop). The
- * camera holds still, as a character select's does: the riders move, and
- * the terrace's long straight edges stay put (a drifting camera makes their
- * pixel steps crawl along them).
+ * The hero view; `close` (0-1) closes in on the rider (the pro shop),
+ * turning a little so the mast's flags go behind the shop's panel instead
+ * of under its edge. The camera holds still, as a character select's does:
+ * the riders move, and the terrace's long straight edges stay put (a
+ * drifting camera makes their pixel steps crawl along them).
  */
 function heroView(close = 0): { eye: THREE.Vector3; look: THREE.Vector3; fov: number } {
   const { at, fwd, right, dist, fov } = HERO_VIEW;
@@ -549,32 +550,9 @@ function heroView(close = 0): { eye: THREE.Vector3; look: THREE.Vector3; fov: nu
   // Looking past the rider's left shoulder puts them left of centre.
   const look = at
     .clone()
-    .addScaledVector(right, 1.55 - close * 0.55)
+    .addScaledVector(right, 1.35 - close * 0.86)
     .add(new THREE.Vector3(0, 1.12 + close * 0.2, 0));
   return { eye, look, fov };
-}
-
-function celifyClub(g: THREE.Group): THREE.Group {
-  celify(g, (m) => {
-    // The handrail sits on its posts a few centimetres proud of them: too little for the ink pass to always see
-    // from depth as the camera sways, so it is inked as a thing of its own and the line under it holds.
-    if (m.name === HANDRAIL) return { id: inkId(HANDRAIL) };
-    // The terrace's paving: square slabs with grout, each a touch different.
-    if (m.color.getHex() !== 0xe9dcc2) return {};
-    const colorNode = Fn(() => {
-      const q = positionWorld.xz.div(0.75);
-      const cell = q.floor();
-      const f = q.fract();
-      const edge = min(min(f.x, f.y), min(f.x.oneMinus(), f.y.oneMinus()));
-      const aa = fwidth(edge);
-      const grout = smoothstep(float(0.02).add(aa), float(0.02).sub(aa), edge);
-      const v = mx_noise_float(vec3(cell.mul(3.7), 0.5)).mul(0.05);
-      const slab = vec3(0.8, 0.72, 0.58).mul(float(1).add(v));
-      return mix(slab, vec3(0.62, 0.55, 0.45), grout);
-    })();
-    return { colorNode, crease: 0 };
-  });
-  return g;
 }
 
 let flyover: Flyover | null = null;

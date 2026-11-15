@@ -8,6 +8,15 @@ import type { World } from "../render/world.ts";
 
 const isObject = (v: unknown): v is object => typeof v === "object" && v !== null;
 
+/** How many of a geometry's positions aren't finite numbers. */
+function broken(g: THREE.BufferGeometry): number {
+  const p = g.attributes.position;
+  if (!p) return 0;
+  let bad = 0;
+  for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i) + p.getY(i) + p.getZ(i))) bad++;
+  return bad;
+}
+
 export function installBench(world: World, pause: (on: boolean) => void): void {
   const renderer = world.renderer;
   const device: unknown = Reflect.get(renderer.backend, "device");
@@ -160,6 +169,36 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     });
     return rows;
   };
+  /** Every visible mesh: its triangles, name, instances, whether it casts shadows (S) and is mirrored (R), and how many of its positions are broken (NaN). */
+  const meshes = () => {
+    const rows: string[] = [];
+    world.scene.traverseVisible((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const g = o.geometry;
+      const n = g.index ? g.index.count : (g.attributes.position?.count ?? 0);
+      const count = o instanceof THREE.InstancedMesh ? o.count : 1;
+      const material: THREE.Material | THREE.Material[] = o.material;
+      const name = o.name || (Array.isArray(material) ? "" : material.name) || o.type;
+      rows.push(
+        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}${broken(g) > 0 ? ` NaN:${broken(g)}` : ""}`,
+      );
+    });
+    return rows;
+  };
+  /** Meshes with broken positions (they have no bounds, so they are never culled): how many, and where each hangs
+   * in the scene. */
+  const brokenMeshes = () => {
+    const rows: string[] = [];
+    world.scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const bad = broken(o.geometry);
+      if (bad === 0) return;
+      const path: string[] = [];
+      for (let at: THREE.Object3D | null = o; at; at = at.parent) path.push(at.name || at.type);
+      rows.push(`${bad} ${path.join(" < ")}`);
+    });
+    return rows;
+  };
   Object.assign(window, {
     __shiftyBench: {
       bench,
@@ -169,6 +208,8 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       scale: () => world.renderScale,
       scene,
       census,
+      meshes,
+      broken: brokenMeshes,
       /** Moves the sun to `(x, y, z)` from the point it shines on (held frames). */
       sun: (x: number, y: number, z: number) => {
         const sun = world.sunLight;

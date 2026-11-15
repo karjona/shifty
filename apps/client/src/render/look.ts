@@ -45,6 +45,8 @@ interface Sky {
   shadow: number;
   cirrus: number;
   streaks: number;
+  puffs: number;
+  veil: number;
   overcast: number;
   deck: RGB;
   deckShade: RGB;
@@ -156,6 +158,9 @@ interface WeatherLook {
   shadow: number;
   cirrus: number;
   streaks: number;
+  /** Bands of soft flat cloud at mid height, and veils of rain under the deck (0-1 each). */
+  puffs: number;
+  veil: number;
   overcast: number;
   deck: [number, number];
   cloud: number;
@@ -184,6 +189,8 @@ const BASE: WeatherLook = {
   shadow: 1,
   cirrus: 1,
   streaks: 0,
+  puffs: 0,
+  veil: 0,
   overcast: 0,
   deck: [0xd8dde4, 0x9aa4b4],
   cloud: 0xffffff,
@@ -214,6 +221,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.05, 1.05, 1.04),
     shadow: 0.55,
     cirrus: 0.4,
+    puffs: 0.8,
     overcast: 0.4,
     deck: [0xe4e8ee, 0xa4adbc],
     cloud: 0xeef1f5,
@@ -231,6 +239,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     weight: 0.4,
     cirrus: 1,
     streaks: 1,
+    puffs: 0,
     cover: 0.42,
     tower: 0.6,
     whitecaps: 0.8,
@@ -247,6 +256,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.1, 1.1, 1.08),
     shadow: 0.3,
     cirrus: 0,
+    puffs: 0,
     cover: 0,
     haze: 1,
     sea: [0x3c6a86, 0x4f7f98, 0x7c9cb0, 0x6aa0a6],
@@ -264,6 +274,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(0.98, 1.0, 1.04),
     shadow: 0.1,
     cirrus: 0,
+    puffs: 0,
+    veil: 0.7,
     overcast: 0.9,
     deck: [0x8c97a5, 0x5d6878],
     cloud: 0xb6bec8,
@@ -287,9 +299,11 @@ const WEATHER: Record<Weather, WeatherLook> = {
     sky: [0x262f3c, 0x3c4654, 0x6c7682, 0x8a8a88],
     weight: 0.95,
     lit: rgb(0.7, 0.73, 0.78),
-    shade: rgb(0.92, 0.95, 1.02),
+    shade: rgb(0.8, 0.8, 0.74),
     shadow: 0,
     cirrus: 0,
+    puffs: 0,
+    veil: 1,
     overcast: 1,
     deck: [0x5a6472, 0x343c4a],
     cloud: 0x8a929c,
@@ -316,6 +330,8 @@ const WEATHER: Record<Weather, WeatherLook> = {
     shade: rgb(1.1, 1.1, 1.08),
     shadow: 0.35,
     cirrus: 0,
+    puffs: 0,
+    veil: 0.35,
     overcast: 0.95,
     deck: [0xd4d9e0, 0xa8b0bd],
     cloud: 0xdde2e8,
@@ -445,6 +461,8 @@ function skyOf(weather: Weather, season: Season, el: number, morning: boolean): 
     shadow: w.shadow,
     cirrus: w.cirrus,
     streaks: w.streaks,
+    puffs: w.puffs,
+    veil: w.veil,
     overcast: w.overcast,
     deck: tone(w.deck[0]),
     deckShade: tone(w.deck[1]),
@@ -479,6 +497,21 @@ function blend(out: Sky, a: Sky, b: Sky, t: number): void {
   }
 }
 
+/** The way to the sun (a unit vector) over a circuit in its conditions: never lower than the light comes in. */
+export function sunOver(conditions: Conditions, circuit: CircuitLook): THREE.Vector3 {
+  const sun = sunAt(conditions.season, conditions.time);
+  // Azimuth from noon's direction (south), kept to the circuit's swing.
+  const off = (sun.azimuth - Math.PI) * circuit.swing;
+  const [sx, sz] = circuit.south;
+  const len = Math.hypot(sx, sz) || 1;
+  const south = new THREE.Vector2(sx / len, sz / len);
+  // East is a quarter turn from south toward the morning sun: north × up.
+  const east = new THREE.Vector2(south.y, -south.x);
+  const dir = south.clone().multiplyScalar(Math.cos(off)).addScaledVector(east, -Math.sin(off));
+  const lift = Math.max(SUN_LOWEST, sun.elevation);
+  return new THREE.Vector3(dir.x * Math.cos(lift), Math.sin(lift), dir.y * Math.cos(lift));
+}
+
 /** The look of a race's conditions on a circuit. */
 export class ConditionsLook {
   readonly conditions: Conditions;
@@ -511,18 +544,10 @@ export class ConditionsLook {
     this.from = skyOf(conditions.weather, season, el, morning);
     this.to = skyOf(conditions.turns, season, el, morning);
     this.now = skyOf(conditions.weather, season, el, morning);
-    // Azimuth from noon's direction (south), kept to the circuit's swing.
-    const off = (sun.azimuth - Math.PI) * circuit.swing;
+    this.sun = sunOver(conditions, circuit).multiplyScalar(SUN_DISTANCE);
     const [sx, sz] = circuit.south;
     const len = Math.hypot(sx, sz) || 1;
     const south = new THREE.Vector2(sx / len, sz / len);
-    // East is a quarter turn from south toward the morning sun: north × up.
-    const east = new THREE.Vector2(south.y, -south.x);
-    const dir = south.clone().multiplyScalar(Math.cos(off)).addScaledVector(east, -Math.sin(off));
-    const lift = Math.max(SUN_LOWEST, sun.elevation);
-    this.sun = new THREE.Vector3(dir.x * Math.cos(lift), Math.sin(lift), dir.y * Math.cos(lift)).multiplyScalar(
-      SUN_DISTANCE,
-    );
     // The wind blows across the circuit from the sun's side, a little off it.
     this.wind = new THREE.Vector2(-south.y, south.x).add(south.clone().multiplyScalar(-0.4)).normalize();
     this.setSeason();
@@ -580,6 +605,8 @@ export class ConditionsLook {
     LOOK.shadow.value = s.shadow;
     LOOK.cirrus.value = s.cirrus;
     LOOK.streaks.value = s.streaks;
+    LOOK.puffs.value = s.puffs;
+    LOOK.veil.value = s.veil;
     LOOK.overcast.value = s.overcast;
     LOOK.deck.value.copy(s.deck);
     LOOK.deckShade.value.copy(s.deckShade);

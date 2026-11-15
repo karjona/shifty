@@ -7,6 +7,8 @@ import { BONE, BONES, type Body, type BoneName, boneParent } from "./skeleton.ts
 /** An arm reaching for a point (wrist), elbow toward `bend`; the hand turned so the fingers and palm point along `fingers` and `palm`. */
 export interface Reach {
   target: THREE.Vector3;
+  /** `target` is measured from the shoulder as the spine's pose leaves it (else from the model's origin). */
+  fromShoulder?: boolean;
   bend: THREE.Vector3;
   fingers?: THREE.Vector3;
   palm?: THREE.Vector3;
@@ -34,6 +36,12 @@ export interface Pose {
   arms: [Reach, Reach];
   legs: [Step, Step];
 }
+
+/** How much larger than the art's the head and the hands are drawn. */
+const HEAD_SIZE = 1.12;
+const HAND_SIZE = 1.1;
+/** How wide the shoulders are drawn, against the art's (the arms hang from a little further in). */
+const SHOULDERS = 0.93;
 
 const v = () => new THREE.Vector3();
 const q = () => new THREE.Quaternion();
@@ -106,6 +114,10 @@ export class Rig {
         b.position.copy(this.rest[i]!).sub(this.rest[BONE[parent]]!);
       } else b.position.copy(this.rest[i]!);
     });
+    // Drawn a little larger than life, as cel characters are: the head and the hands read from afar.
+    this.bones[BONE.head]!.scale.setScalar(HEAD_SIZE);
+    for (const arm of [BONE["upperarm.L"], BONE["upperarm.R"]]) this.bones[arm]!.position.x *= SHOULDERS;
+    for (const hand of [BONE["hand.L"], BONE["hand.R"]]) this.bones[hand]!.scale.setScalar(HAND_SIZE);
     this.root = this.bones[0]!;
     this.root.updateMatrixWorld(true);
     this.skeleton = new THREE.Skeleton(this.bones);
@@ -186,6 +198,7 @@ export class Rig {
         reach.target,
         reach.bend,
         new THREE.Vector3(0, 0, -1),
+        reach.fromShoulder === true,
       );
       const hand = BONE[`hand.${L}`];
       if (reach.fingers && reach.palm) {
@@ -227,10 +240,12 @@ export class Rig {
     target: THREE.Vector3,
     bend: THREE.Vector3,
     restBend: THREE.Vector3,
+    relative = false,
   ): void {
     // Where the chain starts, with the parent posed.
     this.setLocal(u, q());
     const root = this.modelP[u]!.clone();
+    if (relative) target = target.clone().add(root);
     const mid = solve(root, target, a, b, bend, v());
     const end = target.clone().sub(root);
     if (end.length() > a + b) end.setLength(a + b - 1e-4);

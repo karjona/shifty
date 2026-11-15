@@ -4,7 +4,8 @@
 // helicopter high and wide, and a drone. They all follow your rider.
 import * as THREE from "three/webgpu";
 import { chevronSpots } from "../render/chevrons.ts";
-import type { CourseData } from "../render/course.ts";
+import { breakwaterCameras } from "../render/coast/harbour.ts";
+import { type CourseData, gateTowers } from "../render/course.ts";
 import type { Environment } from "../render/world.ts";
 import { type Rig, type Watch, clear, drone, onRider } from "./broadcast-rig.ts";
 
@@ -17,17 +18,29 @@ const HELI_OUT = 72;
 const HELI_UP = 24;
 /** The least the helicopter flies over what it passes over (m). */
 const HELI_CLEAR = 16;
-/** The camera boats' eye over the water (m): high enough to see over the chevron boards. */
-const BOAT_EYE = 5.5;
+/** The camera boats' eye over the water (m): over the boat's own camera, and high enough to see over the chevron boards. */
+const BOAT_EYE = 5.9;
 /** Standing camera's eye over what it stands on (m). */
 const EYE = 1.7;
-/** Breakwater crest, quay top, the island's grass and pines, a rock, the lighthouse (m) (see render/course.ts, render/land.ts). */
-const BREAKWATER_TOP = 2.5;
+/**
+ * The breakwater's deck and what stands on it (people, lamps, the parapet), its half width, and the armour's
+ * foot; quay top, the island's rim and pines, a rock, the lighthouse's gallery (m) (see render/coast/harbour.ts,
+ * render/land.ts).
+ */
+const DECK = { top: 2.6, half: 4.4, crowd: 6.5, parapet: 1.44, stand: 1 };
 const QUAY_TOP = 2.2;
-const ISLAND_TOP = 5;
-const PINES_TOP = 10;
+const ISLAND_RIM = 6.6;
+const PINES_TOP = 12;
 const ROCK_TOP = 3;
-const LIGHTHOUSE = { radius: 1.9, top: 16 };
+const LIGHTHOUSE = { radius: 3.2, gallery: 13.6, top: 17.5 };
+/** The lighthouse's camera hangs out from the gallery on a boom: this far past the rail and over the gallery (m). */
+const BOOM = { out: 1.4, up: 2.6 };
+/** A camera's sight line clears a ramp's lip by this much (m). */
+const RAMP_CLEAR = 1.2;
+/** The drone keeps off whatever stands this far over its rider (m). */
+const DRONE_CLEAR = 4;
+/** A camera's sight line keeps this far from a buoy (m). */
+const BUOY_CLEAR = 1.3;
 /** A chevron board's half width and top (see render/chevrons.ts). */
 const BOARD = { half: 2.2, top: 2.4 };
 
@@ -39,15 +52,20 @@ function solid(course: CourseData): (x: number, z: number) => number {
   const bw = course.breakwaterRadius;
   const light = lighthouse(course);
   const boards = chevronSpots(course);
+  const gate = gateTowers(course);
   return (x, z) => {
     let h = 0;
-    const dx = Math.max(0, Math.abs(x) - sh);
-    if (Math.hypot(dx, z) < bw * 0.85) h = BREAKWATER_TOP;
+    // The breakwater: its deck with all that stands on it (cameras stand at its edges), armour sloping to the water.
+    const out = Math.hypot(Math.max(0, Math.abs(x) - sh), z);
+    if (out < DECK.half - 0.6) h = DECK.crowd;
+    else if (out < bw * 0.95) h = DECK.top * (1 - (out - DECK.half) / (bw - DECK.half)) + 0.9;
     if (Math.hypot(x - light.x, z - light.z) < LIGHTHOUSE.radius) h = LIGHTHOUSE.top;
     for (const b of boards) if (Math.hypot(x - b.x, z - b.z) < BOARD.half) h = Math.max(h, BOARD.top);
-    for (const r of course.ramps) if (Math.hypot(x - r.x, z - r.z) < r.length / 2) h = Math.max(h, r.height);
+    for (const g of gate) if (Math.hypot(x - g.x, z - g.z) < g.radius) h = Math.max(h, g.top);
+    for (const r of course.ramps)
+      if (Math.hypot(x - r.x, z - r.z) < r.length / 2 + 1) h = Math.max(h, r.height + RAMP_CLEAR);
     for (const b of course.buoys)
-      if (Math.hypot(x - b.x, z - b.z) < course.buoyRadius) h = Math.max(h, course.buoyHeight);
+      if (Math.hypot(x - b.x, z - b.z) < course.buoyRadius + BUOY_CLEAR) h = Math.max(h, course.buoyHeight);
     for (const l of course.land) {
       const ax = l.bx - l.ax;
       const az = l.bz - l.az;
@@ -56,7 +74,7 @@ function solid(course: CourseData): (x: number, z: number) => number {
       const d = Math.hypot(x - (l.ax + ax * k), z - (l.az + az * k));
       if (d >= l.radius) continue;
       const top =
-        l.kind === "island" ? (d < l.radius * 0.5 ? PINES_TOP : ISLAND_TOP) : l.kind === "rock" ? ROCK_TOP : QUAY_TOP;
+        l.kind === "island" ? (d < l.radius * 0.6 ? PINES_TOP : ISLAND_RIM) : l.kind === "rock" ? ROCK_TOP : QUAY_TOP;
       h = Math.max(h, top);
     }
     return h;
@@ -164,30 +182,26 @@ export function helicopter(solidAt: (x: number, z: number) => number): Rig {
 
 export function bayRigs(course: CourseData, env: Environment): Rig[] {
   const sh = course.straightHalf;
-  const bw = course.breakwaterRadius;
   const solidAt = solid(course);
-  // On the breakwater's flank, facing a straight.
-  const flank = (x: number, side: number) => {
-    const z = side * bw * 0.55;
-    return v(x, 0.22 * Math.sqrt(bw * bw - z * z) - 0.6 + EYE, z);
-  };
   const startSide = Math.sign(course.start.z) || -1;
+  const [byStart, middle] = breakwaterCameras(sh, course.start.x, startSide);
+  const light = lighthouse(course);
   const rigs: Rig[] = [
-    spot("breakwater-start", flank(course.start.x + 20, startSide), solidAt, env),
-    spot("breakwater", flank(sh * 0.2, -startSide), solidAt, env),
-    // Up by the lighthouse gallery on the breakwater's tip, over the turn.
-    spot("lighthouse", v(lighthouse(course).x + 4, 14, 0), solidAt, env),
+    spot("breakwater-start", v(byStart!.x, byStart!.y, byStart!.z), solidAt, env),
+    spot("breakwater", v(middle!.x, middle!.y, middle!.z), solidAt, env),
+    // Out from the lighthouse's gallery on the breakwater's tip, over the turn.
+    spot("lighthouse", v(light.x + LIGHTHOUSE.radius + BOOM.out, LIGHTHOUSE.gallery + BOOM.up, 0), solidAt, env),
     // On a camera boat's platform, out past the chevron boards round each turn.
     spot("boat-east", v(sh + course.outerLimit + 16, BOAT_EYE, 6), solidAt, env, true),
     spot("boat-west", v(-(sh + course.outerLimit + 16), BOAT_EYE, -6), solidAt, env, true),
     helicopter(solidAt),
-    drone("drone", (x, z, t) => env.ground(x, z, t)),
+    drone("drone", (x, z, t) => Math.max(env.ground(x, z, t), solidAt(x, z)), DRONE_CLEAR),
   ];
   const island = course.land.find((l) => l.kind === "island");
   if (island) {
     // On the island's shore facing the course.
     const toward = Math.sign(-island.az) || 1;
-    rigs.push(spot("island", v(island.ax, ISLAND_TOP + EYE, island.az + toward * island.radius * 0.9), solidAt, env));
+    rigs.push(spot("island", v(island.ax, ISLAND_RIM + EYE, island.az + toward * (island.radius + 0.4)), solidAt, env));
   }
   const town = course.land.find((l) => l.kind === "town");
   if (town) {

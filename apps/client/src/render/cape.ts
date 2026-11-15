@@ -1,62 +1,56 @@
 // The cape: a rocky headland in a bay of the Costa Nevada coast, joined to
-// the mainland by a natural arch. The land is one terrain drawn from the
-// sim's capsules (`courseJson`), so the shore you see is the shore you hit:
-// cliffs round the headland and the mainland, a sandy beach in the east
-// cove, and the harbour town on the west. On it: the arch, the sea stacks,
-// the harbour mole and its light, the beacon rock in the harbour mouth,
-// moored boats, the old watchtower on the point, the beach bar, umbrellas
-// and the lifeguard tower, pines on the clifftops, and the snowy sierra
-// behind.
+// the mainland by a natural arch. The land is drawn from the sim's capsules
+// (`courseJson`), so the shore you see is the shore you hit: limestone
+// cliffs swept along the headland's and the mainland's shores (planes,
+// fissures, ledges, a notch at the water; see coast/rock.ts) under a
+// rolling top of dry grass, a sandy beach in the east cove, and the harbour
+// town on the west. On it: the arch, the sea stacks, the harbour mole and
+// its light, the beacon rock in the harbour mouth, moored boats, the old
+// watchtower on the point, the beach bar, umbrellas and the lifeguard
+// tower, stone pines on the clifftops, and the snowy sierra behind.
 //
-// The look follows the race's season through uniforms (`COAST_LOOK`): the
-// grass and the pines' colour, and snow settling on upward faces above the
-// conditions' snow line (cel/look.ts). Rock, sand and grass share one material, so a season's change
-// is a few numbers, never a new shader.
+// Everything is out in the weather (cel/look.ts): the grass and the trees
+// in the season's colours, snow on what faces up above the snow line.
 import * as THREE from "three/webgpu";
-import {
-  Fn,
-  attribute,
-  color,
-  float,
-  fract,
-  fwidth,
-  mix,
-  normalWorld,
-  positionWorld,
-  smoothstep,
-  uniform,
-} from "three/tsl";
-import type { Season } from "../game/conditions.ts";
+import { Fn, attribute, clamp, float, max, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
-import { LOOK } from "./cel/look.ts";
-import type { CircuitLook } from "./look.ts";
-import type { BobbingBatch } from "./bobbing.ts";
+import { cut0 } from "./cel/look.ts";
+import { CelMaterial, UNREFLECTED, inkId } from "./cel/material.ts";
+import { noise4 } from "./cel/noise.ts";
+import { type CircuitLook, sunOver } from "./look.ts";
 import { noise3 } from "./cel/terrain.ts";
-import { type CourseData, type LandData, type Mooring, mooredBoats } from "./course.ts";
-import { Boxes, buildLand, capsuleOutline, landDistance, prism, rng, unitBox } from "./land.ts";
-import { hash, peak } from "./scenery.ts";
-
-/**
- * The coast's look by season, as shader values: the grass on the land and
- * the pines' needles, and where snow lies (on faces turned up, above the
- * snow line, as much as `snowCover`).
- */
-export const COAST_LOOK = {
-  grass: uniform(new THREE.Color(0xa6a457)),
-  pines: uniform(new THREE.Color(0x3d6a35)),
-  /** Height (m) above which snow settles (the conditions', see look.ts). */
-  snowLine: LOOK.snowLine,
-  /** 0 (none) to 1 (every upward face above the line). */
-  snowCover: LOOK.snowCover,
-};
-
-/** Season looks: summer dry and golden, fall browning, winter green under the snow, spring fresh. */
-const SEASON_LOOK: Record<Season, { grass: number; pines: number }> = {
-  summer: { grass: 0xb0a65a, pines: 0x3d6a35 },
-  fall: { grass: 0x9c8a4c, pines: 0x3a6034 },
-  winter: { grass: 0x7d8a5a, pines: 0x2f5530 },
-  spring: { grass: 0x7fae4a, pines: 0x40703a },
-};
+import { type BeachSite, addBeach } from "./coast/beach.ts";
+import { type Berth, Fleet, Roamer, ferry, yacht } from "./coast/boats.ts";
+import { townMaterial } from "./coast/facades.ts";
+import { Grounding, sunlight } from "./coast/grounding.ts";
+import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
+import { WATCHTOWER_STAFF, addWatchtower } from "./coast/landmarks.ts";
+import { COSTA_NEVADA, Life } from "./coast/life.ts";
+import { boatMaterial } from "./coast/materials.ts";
+import { Crowd, Walkers, crowdOf } from "./coast/people.ts";
+import {
+  CLIFF,
+  DRY_GRASS,
+  GRASSY,
+  LIMESTONE,
+  LIMESTONE_TOP,
+  SCRUB,
+  type ShorePoint,
+  addStack,
+  boulderGeometry,
+  rockMaterial,
+  stonePaint,
+  sweepCliff,
+} from "./coast/rock.ts";
+import { Shape, random, turned } from "./coast/shape.ts";
+import { cutShore, traceShore } from "./coast/shoreline.ts";
+import { buildTown } from "./coast/town.ts";
+import { Planting } from "./coast/trees.ts";
+import type { CourseData, LandData } from "./course.ts";
+import { landDistance, rng } from "./land.ts";
+import type { RiderView } from "./world.ts";
+import { COAST_SIERRA, farMaterial, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
 
 /** The cape under the sky: the bay's sun, snow down to the beach in winter and only on the sierra otherwise. */
 const CAPE_LOOK: CircuitLook = {
@@ -67,25 +61,24 @@ const CAPE_LOOK: CircuitLook = {
   snowLine: { summer: 290, fall: 175, winter: 2.5, spring: 200 },
 };
 
-/** Sets the coast's look for a season. */
-export function setCoastSeason(season: Season): void {
-  const s = SEASON_LOOK[season];
-  COAST_LOOK.grass.value.setHex(s.grass);
-  COAST_LOOK.pines.value.setHex(s.pines);
-}
-
-const SNOW = 0xf4f7fb;
-const ROCK = new THREE.Color(0xbba88c);
-const DARK_ROCK = new THREE.Color(0x8f7f6c);
 const SAND = new THREE.Color(0xecdbaf);
 const PROMENADE = new THREE.Color(0xd9cbb0);
+const SEA_BED = new THREE.Color(0x8f7f6c);
 /** The town's quay top (see land.ts) and the mole's. */
 const QUAY_TOP = 2.2;
 export const MOLE_TOP = 2.6;
-/** Cliff tops: the headland rises toward its point; the mainland's cliffs. */
+/** Cliff tops: the headland rises toward its point; the mainland's cliffs; the rock the arch springs from. */
 const HEADLAND_TOP = 22;
 const POINT_TOP = 32;
 const COAST_CLIFF = 18;
+const ARCH_RIM = 29;
+/** The arch's opening: where its underside springs from the legs, and its crown (m over the water). */
+const ARCH_SPRING = 10;
+const ARCH_CROWN = 22;
+/** The top of the arch's span (m), for what it hides. */
+export const ARCH_TOP = ARCH_RIM + 6;
+/** A cliff's top is drawn by the cliff this far in from the shore (m); the ground's own mesh starts there. */
+const CLIFF_TOP = 6;
 
 /** Distance to the nearest of `caps` (negative inside). */
 function nearest(caps: LandData[], x: number, z: number): number {
@@ -103,6 +96,8 @@ interface Ground {
   kind: "sea" | "headland" | "coast" | "beach" | "town";
   /** How far inland (m). */
   inland: number;
+  /** How far in from a cliffed shore (m; negative out at sea). */
+  cliff: number;
 }
 
 /**
@@ -116,10 +111,13 @@ export class CoastGround {
   private coast: LandData[];
   private beach: LandData[];
   private town: LandData[];
-  private out: Ground = { h: 0, color: new THREE.Color(), lush: 0, kind: "sea", inland: 0 };
+  private arch: LandData[];
+  private out: Ground = { h: 0, color: new THREE.Color(), lush: 0, kind: "sea", inland: 0, cliff: 0 };
 
   constructor(land: LandData[]) {
-    this.head = land.filter((l) => l.kind === "headland");
+    this.arch = land.filter((l) => l.kind === "arch");
+    // (The arch's legs are headland to the ground: rock up to where the span springs.)
+    this.head = land.filter((l) => l.kind === "headland" || l.kind === "arch");
     this.coast = land.filter((l) => l.kind === "coast");
     this.beach = land.filter((l) => l.kind === "beach");
     this.town = land.filter((l) => l.kind === "town");
@@ -128,6 +126,16 @@ export class CoastGround {
   /** The ground's height at `(x, z)` (the sea bed under water). */
   height(x: number, z: number): number {
     return this.sample(x, z).h;
+  }
+
+  /** Distance to the nearest cliffed shore (negative inside the land). */
+  cliffs(x: number, z: number): number {
+    return Math.min(nearest(this.head, x, z), nearest(this.coast, x, z));
+  }
+
+  /** Distance to the town's quay and to the beach's sand (negative inside). */
+  quay(x: number, z: number): number {
+    return nearest(this.town, x, z);
   }
 
   /** The ground at `(x, z)` (the returned object is reused). */
@@ -140,37 +148,40 @@ export class CoastGround {
     const dBeach = nearest(this.beach, x, z);
     const dTown = nearest(this.town, x, z);
     const d = Math.min(dHead, dCoast, dBeach, dTown);
+    // The rock stands tall where the arch springs from it.
+    const byArch = smooth(1 - Math.max(0, nearest(this.arch, x, z)) / 22);
     // Under water: the sea bed shelving away.
     let h = -2 - Math.min(4, Math.max(0, d) * 0.4);
     let kind: Ground["kind"] = "sea";
     let lush = 0;
-    g.color.copy(DARK_ROCK);
+    g.color.copy(SEA_BED);
     if (dHead < 0) {
       const inland = -dHead;
       // A cliff (its height wandering along the shore), then the top rising
       // in a rounded hump toward the point.
       const top = HEADLAND_TOP + (POINT_TOP - HEADLAND_TOP) * smooth((z + 20) / 130);
-      const edge = top * (0.45 + 0.25 * (n * 0.5 + 0.5));
-      const cliff = Math.pow(smooth(inland / 6), 0.7);
-      const crown = smooth((inland - 4) / 34);
-      const hh = -2 + (edge + 2) * cliff + (top - edge) * crown + n2 * 1.4 * cliff;
+      const edge = Math.max(top * (0.45 + 0.25 * (n * 0.5 + 0.5)), ARCH_RIM * byArch);
+      const cliff = Math.pow(smooth(inland / 4), 0.7);
+      const crown = smooth((inland - 5) / 34);
+      const hh = -2 + (edge + 2) * cliff + Math.max(0, top - edge) * crown + n2 * 1.4 * cliff * (1 - byArch);
       if (hh > h) {
         h = hh;
         kind = "headland";
         lush = 1;
-        g.color.copy(ROCK);
+        g.color.copy(DRY_GRASS);
       }
     }
     if (dCoast < 0) {
       const inland = -dCoast;
-      const cliff = Math.pow(smooth(inland / 7), 0.7);
+      const cliff = Math.pow(smooth(inland / 4), 0.7);
       const hills = Math.max(0, inland - 18) * 0.3 * (0.75 + 0.35 * n) + n2 * 1.5;
-      const hh = -2 + (COAST_CLIFF * (0.6 + 0.4 * (n * 0.5 + 0.5)) + 2) * cliff + Math.min(hills, 170);
+      const edge = Math.max(COAST_CLIFF * (0.6 + 0.4 * (n * 0.5 + 0.5)), ARCH_RIM * byArch);
+      const hh = -2 + (edge + 2) * cliff + Math.min(hills, 170);
       if (hh > h) {
         h = hh;
         kind = "coast";
         lush = 1;
-        g.color.copy(ROCK);
+        g.color.copy(DRY_GRASS);
       }
     }
     if (dBeach < 0) {
@@ -183,7 +194,7 @@ export class CoastGround {
         h = hh;
         kind = "beach";
         lush = smooth((inland - 46) / 6);
-        g.color.copy(inland < 36 ? SAND : inland < 46 ? PROMENADE : ROCK);
+        g.color.copy(inland < 36 ? SAND : inland < 46 ? PROMENADE : DRY_GRASS);
       }
     }
     if (dTown < 10) {
@@ -200,6 +211,7 @@ export class CoastGround {
     g.kind = kind;
     g.lush = lush;
     g.inland = -d;
+    g.cliff = kind === "headland" || kind === "coast" ? -Math.min(dHead, dCoast) : -1e3;
     return g;
   }
 }
@@ -209,40 +221,53 @@ const smooth = (t: number) => {
   return x * x * (3 - 2 * x);
 };
 
-/** Paints a geometry for the coast's material: one colour, and how much grass it can hold. */
-function paint(geo: THREE.BufferGeometry, rgb: THREE.Color, lush: number): THREE.BufferGeometry {
-  const n = geo.attributes.position!.count;
-  const colors = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) rgb.toArray(colors, i * 3);
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  geo.setAttribute("lush", new THREE.BufferAttribute(new Float32Array(n).fill(lush), 1));
-  geo.deleteAttribute("uv");
-  return geo;
-}
+const groundCels = new Map<boolean, CelMaterial>();
 
 /**
- * The coast's one material: the colour it is painted, grass where it is
- * level enough and can hold it, layers in the rock, and snow on faces
- * turned up above the snow line.
+ * The ground's material: each vertex's colour, the grass broken into
+ * darker scrub and patches of bare earth, the sand wet and dark by the
+ * water. Out in the weather as grass. `shade`: the same ground as the
+ * shade lying on it (see coast/grounding.ts).
  */
-function coastMaterial(): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1 });
-  m.userData.colorNode = Fn(() => {
-    const base = attribute("color", "vec3");
-    const lush = attribute("lush", "float");
-    const up = normalWorld.y;
-    const w = fwidth(up).max(1e-3);
-    // Limestone in layers, darker every few metres on the faces.
-    const band = fract(positionWorld.y.mul(0.32).add(positionWorld.x.mul(0.013)));
-    const bw = fwidth(band).max(1e-3);
-    const layered = mix(base, base.mul(0.84), smoothstep(bw, float(0), band.sub(0.12).abs()).mul(up.oneMinus()));
-    const grassy = smoothstep(float(0.8).sub(w), float(0.8).add(w), up).mul(lush);
-    const c = mix(layered, COAST_LOOK.grass, grassy);
-    const above = smoothstep(COAST_LOOK.snowLine, COAST_LOOK.snowLine.add(4), positionWorld.y);
-    const snowy = smoothstep(float(0.72).sub(w), float(0.72).add(w), up).mul(above).mul(COAST_LOOK.snowCover);
-    return mix(c, color(SNOW), smoothstep(0.45, 0.55, snowy));
-  })();
-  return m;
+function groundMaterial(shade = false): CelMaterial {
+  const made = groundCels.get(shade);
+  if (made) return made;
+  const colour = Fn(() => {
+    const c = attribute<"vec3">("color", "vec3");
+    const p = positionWorld;
+    const wide = noise4(p.xz.mul(0.027));
+    const fine = noise4(p.xz.mul(0.12));
+    const green = clamp(c.g.sub(max(c.r, c.b)).mul(9), 0, 1);
+    const scrub = cut0(wide.x.mul(0.7).add(fine.y.mul(0.45)).sub(0.08));
+    const bare = cut0(fine.z.mul(0.6).add(wide.w.mul(0.5)).sub(0.42));
+    const grown = mix(c, c.mul(vec3(0.74, 0.88, 0.66)), scrub.mul(green));
+    const ground = mix(grown, vec3(LIMESTONE_TOP.r, LIMESTONE_TOP.g, LIMESTONE_TOP.b), bare.mul(green).mul(0.85));
+    const wet = smoothstep(0.75, 0.3, p.y.add(fine.x.mul(0.2)));
+    return ground.mul(mix(vec3(1), vec3(0.74, 0.78, 0.8), wet));
+  });
+  const cel = new CelMaterial({
+    colorNode: colour(),
+    outdoor: GRASSY,
+    shade: new THREE.Color(0.6, 0.62, 0.82),
+    richness: 1.2,
+    crease: shade ? 0 : 0.5,
+    silhouette: shade ? 0 : 1,
+    darkness: shade ? 0 : 0.7,
+    cast: shade ? float(0) : undefined,
+    id: inkId("ground"),
+  });
+  cel.name = shade ? "ground-shade" : "ground";
+  groundCels.set(shade, cel);
+  return cel;
+}
+
+/** The colour the ground's mesh carries at `(x, z)` (its shader works the rest out). */
+function groundColour(ground: CoastGround, x: number, z: number, out: THREE.Color): THREE.Color {
+  const g = ground.sample(x, z);
+  out.copy(g.color);
+  // Scrub darkens the grass in drifts.
+  if (g.lush > 0.5 && noise3(x * 0.021, 1.5, z * 0.021, 4) > 0.25) out.lerp(SCRUB, 0.6);
+  return out;
 }
 
 /** The ground near the course in detail, and far round the bay in coarse steps. */
@@ -252,19 +277,22 @@ const FAR = { x0: -1100, x1: 1100, z0: -1100, z1: 650, step: 16 };
 /**
  * A height field mesh over a rectangle, sampled every `step`, leaving out
  * cells deep under water and those `skip` says another mesh draws.
- * `lower` sinks it (m) where another mesh lies over it.
+ * `lower` sinks it (m) where another mesh lies over it; with `cliffs`,
+ * the strip along a cliffed shore is left to the cliff's own mesh.
  */
 function groundMesh(
   ground: CoastGround,
   r: { x0: number; x1: number; z0: number; z1: number; step: number },
   skip: (x: number, z: number) => boolean,
   lower: (x: number, z: number) => number,
+  cliffs: boolean,
 ): THREE.BufferGeometry {
   const nx = Math.round((r.x1 - r.x0) / r.step) + 1;
   const nz = Math.round((r.z1 - r.z0) / r.step) + 1;
   const pos = new Float32Array(nx * nz * 3);
   const col = new Float32Array(nx * nz * 3);
-  const lush = new Float32Array(nx * nz);
+  const edge = new Uint8Array(nx * nz);
+  const c = new THREE.Color();
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
       const x = r.x0 + i * r.step;
@@ -274,8 +302,11 @@ function groundMesh(
       pos[k * 3] = x;
       pos[k * 3 + 1] = g.h - lower(x, z);
       pos[k * 3 + 2] = z;
-      g.color.toArray(col, k * 3);
-      lush[k] = g.lush;
+      c.copy(g.color);
+      // Scrub darkens the grass in drifts.
+      if (g.lush > 0.5 && noise3(x * 0.021, 1.5, z * 0.021, 4) > 0.25) c.lerp(SCRUB, 0.6);
+      c.toArray(col, k * 3);
+      edge[k] = cliffs && g.cliff > -100 && g.cliff < CLIFF_TOP ? 1 : 0;
     }
   }
   const index: number[] = [];
@@ -286,488 +317,286 @@ function groundMesh(
       if (skip(r.x0 + (i + 0.5) * r.step, r.z0 + (j + 0.5) * r.step)) continue;
       const a = j * nx + i;
       const b = a + 1;
-      const c = a + nx;
-      const d = c + 1;
-      index.push(a, c, b, b, c, d);
+      const cc = a + nx;
+      const d = cc + 1;
+      if (edge[a]! + edge[b]! + edge[cc]! + edge[d]! > 0) continue;
+      index.push(a, cc, b, b, cc, d);
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  geo.setAttribute("lush", new THREE.BufferAttribute(lush, 1));
   geo.setIndex(index);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
 }
 
-/** Nudges every vertex by smooth noise, so a shape reads as weathered rock. */
-function weather(geo: THREE.BufferGeometry, amount: number, scale: number, seed: number): THREE.BufferGeometry {
-  const p = geo.attributes.position!;
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i);
-    const y = p.getY(i);
-    const z = p.getZ(i);
-    p.setXYZ(
-      i,
-      x + noise3(x * scale, y * scale, z * scale, seed) * amount,
-      y + noise3(x * scale, y * scale, z * scale, seed + 1) * amount * 0.5,
-      z + noise3(x * scale, y * scale, z * scale, seed + 2) * amount,
-    );
+/** The longest plane a cliff can have at a shore point (m): short round a tight end, long on a straight shore. */
+function planeAt(land: readonly LandData[], x: number, z: number): number {
+  let best = 1e6;
+  let radius = 60;
+  for (const l of land) {
+    const d = Math.abs(landDistance(l, x, z));
+    if (d < best) {
+      best = d;
+      radius = l.radius;
+    }
   }
-  geo.computeVertexNormals();
-  return geo;
+  return Math.sqrt(8 * radius * 0.55);
 }
 
 /**
- * The arch: a bridge of rock over the passage through the headland's
- * neck, standing on its two legs (the sim's arch capsules).
+ * The cliffs: every cliffed shore near the course traced from the land
+ * and swept into rock, with boulders fallen at their feet.
  */
-function arch(legs: LandData[]): THREE.BufferGeometry | null {
+function addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[]): void {
+  const cliffed = land.filter((l) => l.kind === "headland" || l.kind === "coast" || l.kind === "arch");
+  const chains = traceShore((x, z) => ground.cliffs(x, z), { ...NEAR, cell: 2 });
+  const kit = [boulderGeometry(13), boulderGeometry(29), boulderGeometry(41)];
+  const r = random(5);
+  chains.forEach((chain, k) => {
+    // The town stands in front of the cliffs behind it: none there.
+    for (const run of cutShore(chain.points, chain.closed, (p) => ground.quay(p.x, p.z) > 4)) {
+      const shore: ShorePoint[] = run.points.map((p) => {
+        const top = ground.sample(p.x - p.nx * 5, p.z - p.nz * 5);
+        return { x: p.x, z: p.z, nx: p.nx, nz: p.nz, height: top.h, inland: null, lush: top.lush };
+      });
+      const tight = Math.min(...run.points.filter((_, i) => i % 6 === 0).map((p) => planeAt(cliffed, p.x, p.z)));
+      sweepCliff(shape, shore, run.closed, 100 + k * 13, {
+        ...CLIFF,
+        face: [Math.min(5, tight * 0.6), Math.min(11, tight)],
+        out: [-0.6, 0.9],
+        flange: CLIFF_TOP + 3,
+        ground: (x, z) => ground.height(x, z) - 0.3,
+        hollows: 0.24,
+        inside: (x, z) => -ground.cliffs(x, z),
+      });
+      // Boulders at the foot, where the shore meets the water.
+      for (let i = 0; i < run.points.length; i += 3) {
+        const p = run.points[i]!;
+        if (r() > 0.3 || ground.sample(p.x + p.nx * 3, p.z + p.nz * 3).kind !== "sea") continue;
+        const count = 1 + Math.floor(r() * 2.5);
+        for (let n = 0; n < count; n++) {
+          const size = 1.3 + r() * 1.3;
+          const out = -0.6 + r() * 0.8;
+          const slide = (r() - 0.5) * 4;
+          shape.add(
+            kit[Math.floor(r() * kit.length)]!,
+            stonePaint(LIMESTONE, LIMESTONE_TOP, r),
+            turned(
+              p.x + p.nx * out - p.nz * slide,
+              0.1 + r() * 0.3,
+              p.z + p.nz * out + p.nx * slide,
+              r(),
+              r() * 6,
+              r(),
+              size,
+            ),
+            { flat: true },
+          );
+        }
+      }
+    }
+  });
+  for (const g of kit) g.dispose();
+}
+
+/**
+ * The arch's span: a bridge of rock from one leg to the other over the
+ * passage, thinnest at its crown, drawn in planes from station to station
+ * across it.
+ */
+function addArch(shape: Shape, legs: LandData[]): void {
   const sorted = legs.toSorted((p, q) => p.az - q.az);
   const a = sorted[0];
   const b = sorted[sorted.length - 1];
-  if (!a || !b || a === b) return null;
+  if (!a || !b || a === b) return;
   const cx = (a.ax + a.bx + b.ax + b.bx) / 4;
-  // The opening: between the legs' inner faces, up to its crown.
+  // The opening: between the legs' inner faces.
   const open0 = a.az + a.radius;
   const open1 = b.az - b.radius;
-  const outer0 = a.az - a.radius - 10;
-  const outer1 = b.az + b.radius + 10;
-  const crown = 16;
-  const spring = 9;
-  const top = 26;
-  // In the shape's plane: u = -z (it is turned to stand along x), v = y.
-  const shape = new THREE.Shape();
-  shape.moveTo(-outer0, -6);
-  shape.lineTo(-outer0, top - 6);
-  shape.quadraticCurveTo(-outer0, top, -outer0 - 10, top);
-  shape.lineTo(-outer1 + 10, top + 1);
-  shape.quadraticCurveTo(-outer1, top, -outer1, top - 6);
-  shape.lineTo(-outer1, -6);
-  shape.closePath();
-  const hole = new THREE.Path();
-  hole.moveTo(-open0, -5);
-  hole.lineTo(-open0, spring);
-  hole.absellipse((-open0 - open1) / 2, spring, (open1 - open0) / 2, crown - spring, 0, Math.PI, false);
-  hole.lineTo(-open1, -5);
-  hole.closePath();
-  shape.holes.push(hole);
-  const depth = Math.max(Math.abs(a.bx - a.ax), Math.abs(b.bx - b.ax)) + a.radius * 2 + 2;
-  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 14, steps: 6 });
-  geo.rotateY(Math.PI / 2);
-  geo.translate(cx - depth / 2, 0, 0);
-  weather(geo, 1.6, 0.09, 31);
-  return paint(geo, ROCK, 0.8);
-}
-
-/** A sea stack: a pillar of layered rock, narrowing a little to a scrubby top. */
-function stack(l: LandData, seed: number): THREE.BufferGeometry {
-  const h = 14 + hash(seed) * 13;
-  const rows = 12;
-  const geo = new THREE.CylinderGeometry(l.radius * 0.78, l.radius * 1.08, h + 6, 12, rows);
-  geo.translate(0, h / 2 - 3, 0);
-  const p = geo.attributes.position!;
-  const lean = (hash(seed + 3) - 0.5) * 0.14;
-  const ledge = 2.6 + hash(seed + 5) * 1.6;
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i);
-    // Lumps, ledges where harder layers stand out, and a waist the sea has cut.
-    const lumps = noise3(p.getX(i) * 0.35, y * 0.18, p.getZ(i) * 0.35, seed) * 0.26;
-    const layer = (y / ledge) % 1 < 0.35 ? 0.07 : 0;
-    const waist = -0.14 * Math.exp(-(((y - 1.5) / 2.5) ** 2));
-    const k = 1 + lumps + layer + waist;
-    p.setXYZ(
-      i,
-      p.getX(i) * k + y * lean,
-      y + (y > h - 0.5 ? noise3(p.getX(i) * 0.6, 0, p.getZ(i) * 0.6, seed) * 1.6 : 0),
-      p.getZ(i) * k,
+  const mid = (open0 + open1) / 2;
+  const half = (open1 - open0) / 2;
+  const reach = Math.max(Math.abs(a.bx - a.ax), Math.abs(b.bx - b.ax)) / 2 + a.radius;
+  const r = random(31);
+  const rings: THREE.Vector3[][] = [];
+  const from = open0 - 7;
+  const to = open1 + 7;
+  const steps = 15;
+  for (let i = 0; i <= steps; i++) {
+    const z = from + ((to - from) * i) / steps;
+    const t = Math.abs(z - mid) / half;
+    // The vault: ribs of harder rock hang a little lower across it.
+    const rib = i % 3 === 1 ? 0.9 : 0;
+    const under =
+      t < 1 ? ARCH_CROWN - (ARCH_CROWN - ARCH_SPRING) * Math.pow(t, 2.2) - rib * (1 - t) : ARCH_SPRING - (t - 1) * 16;
+    const top = ARCH_RIM + 2.6 + 2.4 * Math.cos(Math.min(1.5, t) * 1.05) + (r() - 0.5) * 1.6;
+    const wide = Math.min(reach - 0.6, reach * (0.7 + 0.22 * t * t));
+    const left = wide * (0.92 + r() * 0.16);
+    const right = wide * (0.92 + r() * 0.16);
+    const lip = 0.4 + r() * 1.3;
+    const belly = (r() - 0.5) * 1.1;
+    const brow = 3.2 + r() * 1.6;
+    // Round the span, seen from the south: the vault (higher along its middle), east flank, top, west flank.
+    rings.push(
+      [
+        [-left * 0.55, under + belly],
+        [(r() - 0.5) * left * 0.2, under + 1.1 + r() * 0.7],
+        [right * 0.55, under - belly],
+        [right, under + brow],
+        [right + lip, top - 4.4 - r()],
+        [right * 0.68, top],
+        [-left * 0.68, top + (r() - 0.5)],
+        [-left - lip, top - 4.4 - r()],
+        [-left, under + brow],
+      ].map(([x, y]) => new THREE.Vector3(cx + x!, y, z)),
     );
   }
-  geo.translate(l.ax, 0, l.az);
-  const flat = geo.toNonIndexed();
-  geo.dispose();
-  flat.computeVertexNormals();
-  return paint(flat, ROCK, 0.9);
-}
-
-const std = (hex: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
-  new THREE.MeshStandardNodeMaterial({ color: hex, roughness: 0.85, ...opts });
-
-/** A mesh of `geo` at `(x, y, z)`, casting and taking shadows. */
-function put(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, yaw = 0): THREE.Mesh {
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.position.set(x, y, z);
-  mesh.rotation.y = yaw;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** The old watchtower (torre de guaita): a round sandstone tower with a crenellated top and its door high up. */
-function watchtower(x: number, y: number, z: number, yaw: number): THREE.Group {
-  const g = new THREE.Group();
-  const stone = std(0xcdb48a);
-  g.add(put(new THREE.CylinderGeometry(3.1, 3.7, 12, 14, 3), stone, 0, 5, 0));
-  g.add(put(new THREE.CylinderGeometry(3.45, 3.3, 1.2, 14), stone, 0, 11.6, 0));
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    g.add(put(new THREE.BoxGeometry(1.1, 1, 0.7), stone, Math.cos(a) * 3.1, 12.7, Math.sin(a) * 3.1, -a));
-  }
-  // The door, 6 m up, and the corbels of its long-gone gallery.
-  g.add(put(new THREE.BoxGeometry(0.4, 1.9, 1.1), std(0x4a3a2c), 3.25, 6.6, 0));
-  for (const dz of [-0.7, 0.7]) g.add(put(new THREE.BoxGeometry(0.8, 0.35, 0.3), stone, 3.5, 5.4, dz));
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** The mole: a paved breakwater with its stones on the sea side and a green light on its head. */
-function mole(l: LandData, ground: CoastGround): THREE.Group {
-  const g = new THREE.Group();
-  const body = new THREE.Mesh(prism(capsuleOutline(l, 12), -5, MOLE_TOP), [std(0xd9cbb0), std(0xb4a58c)]);
-  body.receiveShadow = true;
-  body.castShadow = true;
-  g.add(body);
-  // Armour stones along the side facing the open sea (away from the harbour's town).
-  const dx = l.bx - l.ax;
-  const dz = l.bz - l.az;
-  const len = Math.hypot(dx, dz);
-  const ux = dx / len;
-  const uz = dz / len;
-  const r = rng(77);
-  const stones = new Boxes();
-  for (let a = -2; a < len + 4; a += 2.2) {
-    for (const side of [1, -1]) {
-      const reach = side === 1 ? l.radius + 0.8 : l.radius + 0.2;
-      const s = side === 1 ? 2.2 + r() * 1.2 : 1.2 + r() * 0.6;
-      // South (+z) is the sea side.
-      const x = l.ax + ux * a - uz * reach * side;
-      const z = l.az + uz * a + ux * reach * side;
-      if (ground.height(x, z) > 0) continue;
-      stones.add(
-        x,
-        -0.6 + r() * 0.8 * (side === 1 ? 1 : 0.3),
-        z,
-        s,
-        s * 0.8,
-        s,
-        [0xa49c8e, 0x958d80, 0xb3ab9c][Math.floor(r() * 3)]!,
-        r() * 3,
-      );
+  const c = new THREE.Color();
+  const count = rings[0]!.length;
+  for (let i = 0; i < steps; i++) {
+    const p = rings[i]!;
+    const q = rings[i + 1]!;
+    for (let k = 0; k < count; k++) {
+      const tone = LIMESTONE[Math.floor(r() * LIMESTONE.length)] ?? LIMESTONE[0]!;
+      const k1 = (k + 1) % count;
+      const paint = (_p: THREE.Vector3, n: THREE.Vector3) => c.copy(n.y > 0.72 ? DRY_GRASS : tone);
+      shape.tri(p[k]!, p[k1]!, q[k]!, paint);
+      shape.tri(q[k]!, p[k1]!, q[k1]!, paint);
     }
   }
-  g.add(stones.build(new THREE.BoxGeometry(1, 1, 1), std(0xffffff, { flatShading: true })));
-  // Bollards along the harbour side.
-  const bollards = new Boxes();
-  for (let a = 4; a < len; a += 7)
-    bollards.add(
-      l.ax + ux * a + uz * (l.radius - 0.6),
-      MOLE_TOP,
-      l.az + uz * a - ux * (l.radius - 0.6),
-      0.35,
-      0.6,
-      0.35,
-      0x3a3f46,
-    );
-  g.add(bollards.build(unitBox(), std(0xffffff)));
-  // The harbour light on the head: green, as the course's marks on your left.
-  const hx = l.bx + ux * (l.radius - 2);
-  const hz = l.bz + uz * (l.radius - 2);
-  g.add(put(new THREE.CylinderGeometry(0.9, 1.1, 5.5, 10), std(0xf4f1ea), hx, MOLE_TOP + 2.75, hz));
-  g.add(put(new THREE.CylinderGeometry(0.95, 0.95, 1.2, 10), std(0x2f9a4a), hx, MOLE_TOP + 4.2, hz));
-  g.add(
-    put(
-      new THREE.CylinderGeometry(0.55, 0.55, 0.9, 10),
-      std(0xd8ffe0, { emissive: 0x6cff8a, emissiveIntensity: 0.6 }),
-      hx,
-      MOLE_TOP + 6,
-      hz,
-    ),
-  );
-  g.add(put(new THREE.ConeGeometry(0.8, 0.8, 10), std(0x2f9a4a), hx, MOLE_TOP + 6.85, hz));
-  return g;
 }
 
-/** The beacon on the rock across the harbour mouth: red, as the course's marks on your right. */
-function beacon(l: LandData, coast: THREE.Material): THREE.Group {
+/** Stone pines in groves on the clifftops and the hills, scrub and agaves along the cliffs' edges. */
+function plants(ground: CoastGround, shades: GroundShade): THREE.Group {
   const g = new THREE.Group();
-  const rock = weather(new THREE.IcosahedronGeometry(l.radius * 1.05, 2), 0.9, 0.35, 5);
-  rock.scale(1, 0.7, 1);
-  g.add(put(paint(rock, ROCK, 0.3), coast, l.ax, 0.2, l.az));
-  g.add(put(new THREE.CylinderGeometry(0.25, 0.3, 7, 8), std(0xd6402e), l.ax, 6, l.az));
-  g.add(put(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 10), std(0xd6402e), l.ax, 8.2, l.az));
-  g.add(
-    put(
-      new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8),
-      std(0xffe0d8, { emissive: 0xff6a4a, emissiveIntensity: 0.6 }),
-      l.ax,
-      9.4,
-      l.az,
-    ),
-  );
-  return g;
-}
-
-/** The beach bar: a timber hut on a deck, a reed roof, its counter and stools; shut up out of season. */
-function chiringuito(x: number, y: number, z: number, yaw: number, open: boolean): THREE.Group {
-  const g = new THREE.Group();
-  const wood = std(0xa77a4f);
-  const pale = std(0xf2ead8);
-  g.add(put(new THREE.BoxGeometry(13, 0.4, 9), std(0xb88a5c), 0, 0.2, 0));
-  g.add(put(new THREE.BoxGeometry(7, 3, 4.5), pale, 0, 1.9, -1.6));
-  // The front: a counter when open, shutters down when not.
-  g.add(put(new THREE.BoxGeometry(7.2, 1.1, 0.8), wood, 0, 0.95, 1));
-  if (!open) g.add(put(new THREE.BoxGeometry(6.8, 1.7, 0.15), std(0x4f86a8), 0, 2.4, 0.6));
-  for (const px of [-3.4, 3.4]) g.add(put(new THREE.BoxGeometry(0.3, 3.2, 0.3), wood, px, 1.9, 1.3));
-  const roof = new THREE.ConeGeometry(6.4, 2.2, 4, 1);
-  roof.rotateY(Math.PI / 4);
-  roof.scale(1.25, 1, 0.95);
-  g.add(put(roof, std(0xcfae6d, { flatShading: true }), 0, 4.4, -0.6));
-  // A painted board over the counter: the sea, a sun.
-  g.add(put(new THREE.BoxGeometry(4.2, 0.9, 0.12), std(0x2a8fb0), 0, 3.6, 1.45));
-  g.add(put(new THREE.CircleGeometry(0.32, 12), std(0xf2c14e), 1.3, 3.65, 1.52));
-  if (open) {
-    const stools = new Boxes();
-    for (let i = -2; i <= 2; i++) stools.add(i * 1.4, 0.4, 2.1, 0.45, 0.8, 0.45, 0x7a5a3c);
-    g.add(stools.build(unitBox(), std(0xffffff)));
-    // Tables with parasols on the deck.
-    for (const [tx, tz] of [
-      [-5, 2.8],
-      [5, 2.8],
-    ] as const) {
-      g.add(put(new THREE.CylinderGeometry(0.6, 0.6, 0.08, 10), pale, tx, 1.15, tz));
-      g.add(put(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6), wood, tx, 1.7, tz));
-      g.add(put(new THREE.ConeGeometry(1.6, 0.6, 8), std(0xf6f2ea), tx, 3.1, tz));
-    }
-  }
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** The lifeguard tower: a white hut on stilts with a red band, a ramp, and its flag. */
-function lifeguardTower(x: number, y: number, z: number, yaw: number, flag: number): THREE.Group {
-  const g = new THREE.Group();
-  const wood = std(0xe9e4d8);
-  for (const [lx, lz] of [
-    [-1, -1],
-    [1, -1],
-    [-1, 1],
-    [1, 1],
-  ] as const)
-    g.add(put(new THREE.BoxGeometry(0.22, 3.2, 0.22), wood, lx * 1.1, 1.6, lz * 1.1));
-  g.add(put(new THREE.BoxGeometry(2.9, 0.2, 2.9), wood, 0, 3.2, 0));
-  g.add(put(new THREE.BoxGeometry(2.4, 2, 2.4), wood, 0, 4.3, -0.1));
-  g.add(put(new THREE.BoxGeometry(2.45, 0.4, 2.45), std(0xd6402e), 0, 4.6, -0.1));
-  const roof = new THREE.ConeGeometry(2.1, 0.9, 4);
-  roof.rotateY(Math.PI / 4);
-  g.add(put(roof, std(0x8a9aa8), 0, 5.75, -0.1));
-  const ramp = new THREE.BoxGeometry(1, 0.12, 5);
-  ramp.rotateX(-0.62);
-  g.add(put(ramp, wood, 0, 1.6, 3.4));
-  g.add(put(new THREE.CylinderGeometry(0.05, 0.05, 4, 6), wood, 1.3, 7, 1.3));
-  g.add(put(new THREE.BoxGeometry(0.05, 0.8, 1.2), std(flag, { side: THREE.DoubleSide }), 1.3, 8.5, 0.7));
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** Sun umbrellas and loungers in rows down the beach, between `from` and `to` along it. */
-function umbrellas(ground: CoastGround, beach: LandData, count: number): THREE.Group {
-  const g = new THREE.Group();
-  const r = rng(91);
-  const poles = new Boxes();
-  const canopies = new Boxes();
-  const loungers = new Boxes();
-  const colours = [0x2a8fb0, 0xf2c14e, 0xd94a3a, 0xf6f2ea, 0x3f8a4a, 0xf08a3c];
-  let placedCount = 0;
-  for (let i = 0; i < 400 && placedCount < count; i++) {
-    const z = beach.az - 70 + r() * (beach.bz - beach.az + 120);
-    // Along the shore, 10 to 30 m up the sand.
-    const inlandWanted = 10 + r() * 20;
-    let x = beach.ax - beach.radius;
-    for (let k = 0; k < 40; k++) {
-      const s = ground.sample(x, z);
-      if (s.kind === "beach" && s.inland >= inlandWanted) break;
-      x += 1.5;
-    }
-    const s = ground.sample(x, z);
-    if (s.kind !== "beach" || s.inland > 34) continue;
-    const c = colours[Math.floor(r() * colours.length)]!;
-    poles.add(x, s.h, z, 0.08, 2.4, 0.08, 0xf2f0ea);
-    canopies.add(x, s.h + 2.1, z, 2.6, 0.55, 2.6, c, r() * Math.PI);
-    for (const side of [-1, 1]) loungers.add(x + 0.6, s.h, z + side * 1.1, 1.9, 0.35, 0.65, r() < 0.5 ? 0xf6f2ea : c);
-    placedCount++;
-  }
-  const cone = new THREE.ConeGeometry(0.5, 1, 8, 1);
-  cone.translate(0, 0.5, 0);
-  g.add(
-    poles.build(unitBox(), std(0xffffff)),
-    canopies.build(cone, std(0xffffff, { side: THREE.DoubleSide })),
-    loungers.build(unitBox(), std(0xffffff)),
-  );
-  return g;
-}
-
-/** Points every `step` m round a capsule's edge (world x, z as x, y). */
-function perimeter(l: LandData, step: number): THREE.Vector2[] {
-  const dx = l.bx - l.ax;
-  const dz = l.bz - l.az;
-  const len = Math.hypot(dx, dz);
-  const ux = len > 1e-3 ? dx / len : 1;
-  const uz = len > 1e-3 ? dz / len : 0;
-  const out: THREE.Vector2[] = [];
-  for (const side of [-1, 1])
-    for (let a = 0; a <= len; a += step)
-      out.push(new THREE.Vector2(l.ax + ux * a - uz * side * l.radius, l.az + uz * a + ux * side * l.radius));
-  const arc = Math.max(1, Math.round((Math.PI * l.radius) / step));
-  for (const [cx, cz, from] of [
-    [l.bx, l.bz, Math.atan2(uz, ux) - Math.PI / 2],
-    [l.ax, l.az, Math.atan2(uz, ux) + Math.PI / 2],
-  ] as const)
-    for (let i = 0; i <= arc; i++) {
-      const a = from + (i / arc) * Math.PI;
-      out.push(new THREE.Vector2(cx + Math.cos(a) * l.radius, cz + Math.sin(a) * l.radius));
-    }
-  return out;
-}
-
-/**
- * Boulders fallen from the cliffs, heaped along the water line round the
- * headland and the rocky mainland near the course (not on the beach or by
- * the town): one instanced batch in the coast's material.
- */
-function shoreBoulders(ground: CoastGround, land: LandData[], coast: THREE.Material): THREE.InstancedMesh {
-  const geo = paint(weather(new THREE.IcosahedronGeometry(1, 1), 0.25, 1.3, 13), DARK_ROCK, 0.25);
-  const items: THREE.Matrix4[] = [];
-  const q = new THREE.Quaternion();
-  const e = new THREE.Euler();
-  let k = 0;
-  for (const l of land) {
-    if (l.kind !== "headland" && l.kind !== "coast") continue;
-    for (const p of perimeter(l, 2.6)) {
-      k++;
-      if (p.x < NEAR.x0 || p.x > NEAR.x1 || p.y < NEAR.z0 || p.y > NEAR.z1) continue;
-      const g = ground.sample(p.x, p.y);
-      if (g.kind !== "headland" && g.kind !== "coast") continue;
-      if (Math.abs(g.inland) > 1.5 || hash(k * 1.7) < 0.25) continue;
-      for (let n = 0; n < 2; n++) {
-        const size = 1.2 + hash(k * 3.1 + n) * 2.6;
-        const x = p.x + (hash(k * 5.3 + n) - 0.5) * 4;
-        const z = p.y + (hash(k * 7.9 + n) - 0.5) * 4;
-        q.setFromEuler(e.set(hash(k + n) * 3, hash(k * 2 + n) * 6, hash(k * 3 + n) * 3));
-        items.push(
-          new THREE.Matrix4().compose(
-            new THREE.Vector3(x, -0.4 + size * 0.2, z),
-            q,
-            new THREE.Vector3(size, size * 0.7, size),
-          ),
-        );
-      }
-    }
-  }
-  const mesh = new THREE.InstancedMesh(geo, coast, items.length);
-  items.forEach((m, i) => mesh.setMatrixAt(i, m));
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.computeBoundingSphere();
-  return mesh;
-}
-
-/** Pines on the clifftops and the hills, cypresses by the town: instanced, coloured by the season (`COAST_LOOK`). */
-function pines(ground: CoastGround): THREE.Group {
-  const g = new THREE.Group();
-  const crown = new THREE.IcosahedronGeometry(1, 1);
-  crown.scale(1, 0.42, 1);
-  const needles = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 1 });
-  needles.userData.colorNode = Fn(() => {
-    const up = normalWorld.y;
-    const snowy = smoothstep(0.35, 0.6, up)
-      .mul(COAST_LOOK.snowCover)
-      .mul(smoothstep(COAST_LOOK.snowLine, COAST_LOOK.snowLine.add(4), positionWorld.y));
-    return mix(COAST_LOOK.pines, color(SNOW), smoothstep(0.4, 0.5, snowy));
-  })();
-  const items: { x: number; y: number; z: number; s: number; h: number; tint: number }[] = [];
-  const tryAt = (x: number, z: number, chance: number, seed: number) => {
+  const near = new Planting();
+  const far = new Planting();
+  const tryAt = (to: Planting, kind: "pine" | "pineFar", x: number, z: number, chance: number, seed: number) => {
     // In groves, with clearings between them.
     const grove = smooth((noise3(x * 0.012, 4.5, z * 0.012, 3) + 0.15) * 2.2);
     if (hash(seed) > chance * grove) return;
-    const { lush, kind, inland, h: y } = ground.sample(x, z);
-    if (lush < 0.9 || kind === "town" || inland < 6 || y < 4) return;
+    const { lush, kind: land, inland, h: y } = ground.sample(x, z);
+    if (lush < 0.9 || land === "town" || inland < 9 || y < 4) return;
     // Not on a steep face.
     const slope =
       Math.abs(ground.height(x + 2, z) - ground.height(x - 2, z)) +
       Math.abs(ground.height(x, z + 2) - ground.height(x, z - 2));
     if (slope > 3.2) return;
-    const size = 3.2 + hash(seed + 1) * 2.6;
-    items.push({ x, y, z, s: size, h: 4 + hash(seed + 2) * 5, tint: 0.82 + hash(seed + 3) * 0.3 });
+    const tall = 7 + hash(seed + 2) * 4.5;
+    to.add(kind, x, y - 0.3, z, tall, 0.86 + hash(seed + 3) * 0.26);
+    if (to === near) shades.on.add(x, y, z, tall * 0.42, tall * 0.8, shades.colour, shades.ground, 0.14);
   };
   let k = 0;
-  for (let z = NEAR.z0; z < NEAR.z1; z += 7) {
-    for (let x = NEAR.x0; x < NEAR.x1; x += 7) {
+  for (let z = NEAR.z0; z < NEAR.z1; z += 10) {
+    for (let x = NEAR.x0; x < NEAR.x1; x += 10) {
       k++;
-      tryAt(x + (hash(k * 1.3) - 0.5) * 6, z + (hash(k * 2.7) - 0.5) * 6, 0.5, k * 3.1);
+      tryAt(near, "pine", x + (hash(k * 1.3) - 0.5) * 9, z + (hash(k * 2.7) - 0.5) * 9, 0.42, k * 3.1);
     }
   }
-  for (let z = FAR.z0 + 300; z < 320; z += 20) {
-    for (let x = -800; x < 800; x += 20) {
+  for (let z = FAR.z0 + 300; z < 320; z += 22) {
+    for (let x = -800; x < 800; x += 22) {
       k++;
       if (x > NEAR.x0 && x < NEAR.x1 && z > NEAR.z0 && z < NEAR.z1) continue;
-      tryAt(x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.2, k * 3.1);
+      tryAt(far, "pineFar", x + (hash(k * 1.3) - 0.5) * 16, z + (hash(k * 2.7) - 0.5) * 16, 0.22, k * 3.1);
     }
   }
-  const crowns = new THREE.InstancedMesh(crown, needles, items.length);
-  const trunks = new THREE.InstancedMesh(unitBox(), std(0x6b4a30), items.length);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const c = new THREE.Color();
-  items.forEach((it, i) => {
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), it.tint * 10);
-    m.compose(new THREE.Vector3(it.x, it.y + it.h, it.z), q, new THREE.Vector3(it.s, it.s, it.s * 0.9));
-    crowns.setMatrixAt(i, m);
-    crowns.setColorAt(i, c.setScalar(it.tint));
-    m.compose(new THREE.Vector3(it.x, it.y - 0.5, it.z), q, new THREE.Vector3(0.45, it.h + 0.4, 0.45));
-    trunks.setMatrixAt(i, m);
-  });
-  for (const mesh of [crowns, trunks]) {
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.computeBoundingSphere();
-    g.add(mesh);
+  // Low growth where the grass meets the rock.
+  for (let z = NEAR.z0; z < NEAR.z1; z += 6) {
+    for (let x = NEAR.x0; x < NEAR.x1; x += 6) {
+      k++;
+      if (hash(k * 0.77) > 0.3) continue;
+      const px = x + (hash(k * 1.9) - 0.5) * 5;
+      const pz = z + (hash(k * 3.3) - 0.5) * 5;
+      const s = ground.sample(px, pz);
+      if (s.lush < 0.9 || s.cliff < CLIFF_TOP + 1 || s.cliff > 30 || s.h < 3) continue;
+      near.add(
+        hash(k * 5.1) < 0.25 ? "agave" : "bush",
+        px,
+        s.h - 0.1,
+        pz,
+        1.1 + hash(k * 2.3) * 1.3,
+        0.9 + hash(k) * 0.2,
+      );
+    }
   }
+  g.add(near.build(), far.build());
   return g;
 }
 
-/** The sierra behind the coast: two ranges, snow-capped, the far one taller and hazier. */
-function sierra(): THREE.Group {
-  const g = new THREE.Group();
-  for (let i = 0; i < 16; i++) {
-    const far = i % 2 === 1;
-    const h = (far ? 340 : 200) + hash(i + 140) * (far ? 180 : 110);
-    const p = peak(h * (1.1 + hash(i + 17) * 0.5), h, i + 61, far ? 0.45 : 0.58, far ? 0.45 : 0.28);
-    p.position.x = -2100 + i * 280 + hash(i + 41) * 140;
-    p.position.z = -(far ? 2500 : 1700) - hash(i + 53) * 260;
-    g.add(p);
-  }
-  return g;
+/** Shade laid on the cape's ground: where it goes, and the ground's colour and height at a place. */
+interface GroundShade {
+  on: Grounding;
+  colour: (x: number, z: number) => THREE.Color;
+  ground: (x: number, z: number) => number;
 }
 
-/** Fishing boats moored in the harbour, along the town's quay and in the lee of the mole. */
-function harbourMoorings(town: LandData, breakwater: LandData): Mooring[] {
-  const r = rng(23);
-  const spots: Mooring[] = [];
-  // The quay's face toward the harbour (+x), from the harbour's head to the mole.
-  const face = town.ax + town.radius + 3.2;
-  for (let z = -112; z < breakwater.az - breakwater.radius - 6; z += 7 + r() * 4) {
-    if (r() < 0.2) continue;
-    spots.push({ x: face + r() * 0.8, z, yaw: -Math.PI / 2 + (r() - 0.5) * 0.15 });
-  }
-  // Inside the mole.
-  for (let x = breakwater.ax + 6; x < breakwater.bx - 6; x += 8 + r() * 3)
-    spots.push({ x, z: breakwater.az - breakwater.radius - 3, yaw: (r() - 0.5) * 0.15 });
+/** The centre line at `s`, `offset` m to its right. */
+function along(course: CourseData, s: number, offset: number): { x: number; z: number; yaw: number } {
+  const step = course.path.length > 1 ? course.path[1]!.s : 2;
+  const p = course.path[Math.round(s / step) % course.path.length] ?? course.path[0]!;
+  return { x: p.x - Math.cos(p.yaw) * offset, z: p.z + Math.sin(p.yaw) * offset, yaw: p.yaw };
+}
+
+/**
+ * Where the television's camera boats lie: outside the limit, halfway
+ * round the widest right-hander (the point) and round the bend off the
+ * stacks.
+ */
+export function cameraBoats(course: CourseData): { name: string; x: number; z: number; yaw: number }[] {
+  const out = course.outerLimit + 16;
+  const spots: { name: string; x: number; z: number; yaw: number }[] = [];
+  const boat = (name: string, s: number) => {
+    const p = along(course, s, -out);
+    if (course.land.some((l) => landDistance(l, p.x, p.z) < 6)) return;
+    spots.push({ name, ...p });
+  };
+  const rights = course.path.filter((p) => p.curve > 1e-4);
+  const widest = Math.min(...rights.map((p) => p.curve));
+  const sweep = rights.filter((p) => Math.abs(p.curve - widest) < 1e-5);
+  const middle = sweep[Math.floor(sweep.length / 2)];
+  if (middle) boat("boat-point", middle.s);
+  boat("boat-stacks", course.length * 0.73);
   return spots;
 }
+
+/** The cape's boats: moored in the harbour along the town's quay and in the lee of the mole, and the television's. */
+function berths(course: CourseData, town: LandData | undefined, mole: LandData | undefined): Berth[] {
+  const r = rng(23);
+  const spots: Berth[] = [];
+  const seed = () => Math.floor(r() * 1000);
+  if (town && mole) {
+    // Stern to the quay's face toward the harbour (+x), from the harbour's head to the mole.
+    const face = town.ax + town.radius;
+    for (let z = -112; z < mole.az - mole.radius - 6; z += 4.2 + r() * 3.4) {
+      if (r() < 0.15) continue;
+      const big = r() < 0.16;
+      spots.push({
+        x: face + (big ? 7.4 : 3.6) + r() * 0.5,
+        z: z + (big ? 3 : 0),
+        yaw: Math.PI / 2 + (r() - 0.5) * 0.12,
+        kind: big ? "trawler" : r() < 0.2 ? "inflatable" : "llaut",
+        seed: seed(),
+      });
+      if (big) z += 6;
+    }
+    // Alongside, inside the mole.
+    for (let x = mole.ax + 6; x < mole.bx - 6; x += 8 + r() * 3)
+      spots.push({
+        x,
+        z: mole.az - mole.radius - 1.9,
+        yaw: Math.PI / 2 + (r() < 0.5 ? Math.PI : 0),
+        kind: "llaut",
+        seed: seed(),
+      });
+  }
+  for (const b of cameraBoats(course)) spots.push({ x: b.x, z: b.z, yaw: b.yaw, kind: "camera", seed: 1 });
+  return spots;
+}
+
+/** The fish market on the harbour's quay: by the mole's root, where the boats come in. */
+const FISH_MARKET_AT = { kind: "fish", along: 152 } as const;
 
 /** Where the beach bar and the lifeguard tower stand: along the beach (z) and how far up the sand (m). */
 const BAR = { z: -30, inland: 38 };
@@ -803,13 +632,16 @@ export class CapeScenery implements WaterScenery {
   readonly gulls = new THREE.Vector3(-20, 0, 40);
   readonly inland = 2.5;
   readonly ground: CoastGround;
-  private boats: BobbingBatch[] = [];
+  private fleet: Fleet;
+  private roamers: Roamer[];
+  private lanterns: Lantern[] = [];
+  private crowd = new Crowd();
 
-  constructor(course: CourseData, season: Season) {
-    setCoastSeason(season);
+  constructor(course: CourseData, conditions: Conditions) {
+    const season = conditions.season;
     const land = course.land;
     const ground = (this.ground = new CoastGround(land));
-    const coast = coastMaterial();
+    const soil = groundMaterial();
     const inNear = (x: number, z: number, margin: number) =>
       x > NEAR.x0 + margin && x < NEAR.x1 - margin && z > NEAR.z0 + margin && z < NEAR.z1 - margin;
     const near = new THREE.Mesh(
@@ -818,8 +650,9 @@ export class CapeScenery implements WaterScenery {
         NEAR,
         () => false,
         () => 0,
+        true,
       ),
-      coast,
+      soil,
     );
     const far = new THREE.Mesh(
       groundMesh(
@@ -830,66 +663,158 @@ export class CapeScenery implements WaterScenery {
           const out = Math.max(NEAR.x0 - x, x - NEAR.x1, NEAR.z0 - z, z - NEAR.z1);
           return 1.2 * smooth(1 - out / 40);
         },
+        false,
       ),
-      coast,
+      soil,
     );
     for (const m of [near, far]) {
       m.receiveShadow = true;
-      m.castShadow = true;
       m.userData.noMerge = true;
       this.group.add(m);
     }
 
-    // Rock that stands on its own: the arch, the stacks, the beacon rock.
-    const rocks: THREE.BufferGeometry[] = [];
-    const span = arch(land.filter((l) => l.kind === "arch"));
-    if (span) rocks.push(span);
-    land.filter((l) => l.kind === "stack").forEach((l, i) => rocks.push(stack(l, 300 + i * 17)));
-    for (const geo of rocks) {
-      const m = new THREE.Mesh(geo, coast);
-      m.castShadow = true;
-      m.receiveShadow = true;
-      this.group.add(m);
+    // The rock: cliffs, the arch over its legs, the stacks.
+    const rock = new Shape();
+    addCliffs(rock, ground, land);
+    addArch(
+      rock,
+      land.filter((l) => l.kind === "arch"),
+    );
+    land
+      .filter((l) => l.kind === "stack")
+      .forEach((l, i) => addStack(rock, l.ax, l.az, l.radius, 14 + hash(300 + i * 17) * 13, 300 + i * 17));
+    this.group.add(rock.mesh(rockMaterial()));
+    for (const l of land.filter((k) => k.kind === "rock")) {
+      const beacon = buildBeaconRock(l);
+      this.lanterns.push(...beacon.lanterns);
+      this.group.add(beacon.group);
     }
-    for (const rock of land.filter((l) => l.kind === "rock")) this.group.add(beacon(rock, coast));
 
-    // The harbour: the town on its quay (as the bay's), the mole, the boats.
+    // What people built, in the town's material: the watchtower and the beach's own; the town on its quay.
+    const works = new Shape();
+    const r = random(91);
+    const crowd = crowdOf(conditions);
     const town = land.find((l) => l.kind === "town");
     const harbourMole = land.find((l) => l.kind === "mole");
-    if (town) this.group.add(buildLand([town]));
-    if (harbourMole) this.group.add(mole(harbourMole, ground));
-    if (town && harbourMole) {
-      for (const b of mooredBoats(harbourMoorings(town, harbourMole), 29)) {
-        this.boats.push(b);
-        this.group.add(b.mesh);
-      }
+    const life = new Life();
+    const light = sunlight(sunOver(conditions, CAPE_LOOK));
+    // Shade on the ground and the sand, in the ground's own colours, lying on its mesh.
+    const tint = new THREE.Color();
+    const step = NEAR.step;
+    const node = (i: number, j: number) => ground.height(NEAR.x0 + i * step, NEAR.z0 + j * step);
+    const shades: GroundShade = {
+      on: new Grounding(light),
+      colour: (x, z) => groundColour(ground, x, z, tint),
+      ground: (x, z) => {
+        const fx = (x - NEAR.x0) / step;
+        const fz = (z - NEAR.z0) / step;
+        const i = Math.floor(fx);
+        const j = Math.floor(fz);
+        const u = fx - i;
+        const w = fz - j;
+        // (As the mesh's two triangles lie in each cell.)
+        if (u + w <= 1) {
+          const a = node(i, j);
+          return a + (node(i + 1, j) - a) * u + (node(i, j + 1) - a) * w;
+        }
+        const d = node(i + 1, j + 1);
+        return d + (node(i, j + 1) - d) * (1 - u) + (node(i + 1, j) - d) * (1 - w);
+      },
+    };
+    const walkers = new Walkers();
+    if (town)
+      this.group.add(buildTown(town, 1000, season, crowd, this.crowd, life, undefined, light, FISH_MARKET_AT).group);
+    if (harbourMole) {
+      // The open sea is to the south (+z) of the mole.
+      const dx = harbourMole.bx - harbourMole.ax;
+      const mole = buildMole(harbourMole, MOLE_TOP, dx >= 0 ? 1 : -1, crowd, this.crowd);
+      this.lanterns.push(...mole.lanterns);
+      this.group.add(mole.group);
     }
+    this.fleet = new Fleet(berths(course, town, harbourMole));
+    this.group.add(this.fleet.mesh);
+    // Sails out past the point.
+    const sails: [number, number][] = [
+      [-700, 420],
+      [-100, 560],
+      [620, 470],
+      [420, 700],
+      [-380, 720],
+    ];
+    this.roamers = [0.08, 0.37, 0.7].map(
+      (offset, i) => new Roamer(yacht(4 + i * 5, true), boatMaterial(), sails, 2.6, offset),
+    );
+    // The ferry, far out past the point.
+    const liner = new Roamer(
+      ferry(),
+      farMaterial(),
+      [
+        [-2600, 1500],
+        [0, 1800],
+        [2600, 1500],
+        [2900, 2300],
+        [0, 2600],
+        [-2900, 2300],
+      ],
+      6,
+      0.55,
+    );
+    this.roamers.push(liner);
+    // (Too far off to show in the water.)
+    for (const boat of this.roamers) boat.mesh.layers.set(UNREFLECTED);
+    for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);
-    if (tower) this.group.add(watchtower(tower.x, tower.y - 0.5, tower.z, 0.4));
-
-    // The beach: the bar, the lifeguard tower, umbrellas in season.
-    const beach = land.find((l) => l.kind === "beach");
-    if (beach) {
-      const bar = onBeach(ground, beach, BAR.z, BAR.inland);
-      // Facing the sea (west, -x).
-      this.group.add(chiringuito(bar.x, bar.y, bar.z, -Math.PI / 2, season === "summer" || season === "spring"));
-      const lifeguard = onBeach(ground, beach, LIFEGUARD.z, LIFEGUARD.inland);
-      this.group.add(
-        lifeguardTower(lifeguard.x, lifeguard.y, lifeguard.z, -Math.PI / 2, season === "summer" ? 0x2fb34a : 0xf2c14e),
-      );
-      const count = season === "summer" ? 70 : season === "winter" ? 0 : 18;
-      if (count > 0) this.group.add(umbrellas(ground, beach, count));
+    if (tower) {
+      addWatchtower(works, tower.x, tower.y - 0.5, tower.z, 0.4);
+      life.flag(tower.x, tower.y - 0.5 + WATCHTOWER_STAFF, tower.z, 3, 1.9, COSTA_NEVADA);
     }
 
-    this.group.add(pines(ground), shoreBoulders(ground, land, coast));
-    const sierraGroup = sierra();
-    sierraGroup.userData.noMerge = true;
-    this.group.add(sierraGroup);
+    // The beach: the bar, the lifeguard's tower, umbrellas and people in season.
+    const beach = land.find((l) => l.kind === "beach");
+    if (beach) {
+      const site: BeachSite = {
+        at: (z, inland) => onBeach(ground, beach, z, inland),
+        from: beach.az - 70,
+        to: beach.bz + 50,
+        // The sea is to the west (-x).
+        seaward: -Math.PI / 2,
+      };
+      // The lifeguard's flag: red in a storm or a hard wind, yellow out of season, green on a summer's day.
+      const rough = [conditions.weather, conditions.turns].some((w) => w === "storm" || w === "windy");
+      const flag = rough ? 0xd6402e : season === "summer" ? 0x2fb34a : 0xf2c14e;
+      addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, life, flag, r, shades, walkers);
+      const palms = new Planting({ shadows: true, reflected: true });
+      for (let z = site.from + 30; z < site.to - 20; z += 15 + r() * 6) {
+        const p = site.at(z, 41);
+        const tall = 6 + r() * 2.5;
+        palms.add("palm", p.x, p.y, p.z, tall, 0.9 + r() * 0.2);
+        shades.on.add(p.x, p.y, p.z, 2.4, tall * 0.9, shades.colour, shades.ground, 0.1);
+      }
+      this.group.add(palms.build(true));
+    }
+    // (Up the beach and on the headland: too far from the water to throw shadows on it or show in it.)
+    const built = works.mesh(townMaterial(), "receive");
+    built.layers.set(UNREFLECTED);
+    this.group.add(built);
+    const arms = this.crowd.build();
+    if (arms) this.group.add(arms);
+    this.group.add(...life.build());
+
+    this.group.add(plants(ground, shades));
+    const shade = shades.on.build(groundMaterial(true));
+    if (shade) this.group.add(shade);
+    const strollers = walkers.build();
+    if (strollers) this.group.add(strollers);
+    // The distance: foothills and the sierra behind the coast (north, -z), headlands and islets out to sea.
+    this.group.add(foothills(-1, 1000, 950, 3800, 300, 5), sierra(-1, COAST_SIERRA, 5400, 7), seaHorizon(-1, 9));
   }
 
-  update(waves: Float32Array, t: number): void {
-    for (const b of this.boats) b.update(waves, t);
+  update(waves: Float32Array, t: number, riders: readonly RiderView[]): void {
+    this.crowd.update(t, riders);
+    this.fleet.update(waves, t);
+    for (const boat of this.roamers) boat.update(waves, t);
+    flashLanterns(this.lanterns, t);
   }
 }
 
@@ -899,7 +824,7 @@ export class Cape extends Bay {
   readonly land: CoastGround;
 
   constructor(opts: BayOptions) {
-    const scenery = new CapeScenery(opts.course, opts.conditions?.season ?? "summer");
+    const scenery = new CapeScenery(opts.course, opts.conditions ?? homeConditions("jetski"));
     super({ ...opts, scenery, look: CAPE_LOOK });
     this.land = scenery.ground;
   }

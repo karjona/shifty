@@ -3,8 +3,10 @@
 //  (`event`, `season`, `weather`, `turns` and `time` as the quick race takes
 //  them; `turn` how far the weather has turned, 0-1; `view` one of the
 //  circuit's set views: a rider from behind along the course, then a wide
-//  one; or `eye=x,y,z&look=x,y,z`). `window.__shotReady` turns true once
-//  it is drawn.
+//  one; or `eye=x,y,z&look=x,y,z`; or `fly=0-1`, the intro's fly-over that
+//  far through; or, on a run, `tv=<camera>&rider=<m down the run>`, one of
+//  the television cameras on a rider there, moving at `speed` m/s).
+//  `window.__shotReady` turns true once it is drawn.
 import * as THREE from "three/webgpu";
 import { NOON, SEASONS, WEATHERS, botAppearance } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
@@ -13,7 +15,10 @@ import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { parseCourse } from "../wasm-json.ts";
+import type { Aim, Watch } from "./broadcast-rig.ts";
+import { snowRigs } from "./broadcast-snow.ts";
 import { type Conditions, conditionsBytes } from "./conditions.ts";
+import { Flyover } from "./flyover.ts";
 import type { Engine } from "./engine.ts";
 import { quickPlan } from "./quick.ts";
 import { booted } from "../loading.ts";
@@ -109,8 +114,41 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
       ? { eye: point("eye"), look: point("look"), rider: null }
       : views[Math.min(views.length - 1, Number(params.get("view") ?? 0))]!;
   const turn = Number(params.get("turn") ?? 0);
+  // The intro's fly-over, held at one moment of it.
+  const fly = params.has("fly") ? new Flyover(data, env).intro(Number(params.get("fly")) * 7, 7) : null;
+  // A television camera on a rider somewhere down the run.
+  const tv = data.sport === "snow" ? params.get("tv") : null;
+  const aim: Aim = { eye: new THREE.Vector3(), look: new THREE.Vector3(), frame: 4, fov: null, follow: 6, roll: 0 };
+  let televised: ((t: number) => void) | null = null;
+  if (tv !== null && data.sport === "snow") {
+    const run = data.run;
+    const along = Number(params.get("rider") ?? run.finishS + 25);
+    const p = run.path[Math.max(0, Math.min(run.path.length - 1, Math.round((along - run.path[0]!.s) / 4)))]!;
+    view.rider = { x: p.x, z: p.z, yaw: p.yaw };
+    const rig = snowRigs(run, env, (points) => scenery.heightsAt(points), course).find((r) => r.name === tv);
+    const speed = Number(params.get("speed") ?? 0);
+    let begun = false;
+    televised = (t) => {
+      const r = riderAt(view.rider!, env.ground(p.x, p.z, t), speed);
+      const watch: Watch = {
+        riders: [r],
+        me: r,
+        t,
+        simT: t,
+        dt: 1 / 60,
+        still: () => (speed > 0 ? 0 : 3),
+        results: false,
+      };
+      if (!rig) return;
+      if (!begun) rig.begin?.(watch, r);
+      begun = true;
+      aim.fov = null;
+      rig.aim(watch, r, aim);
+    };
+  }
   world.setAppearance(0, botAppearance(3, 0));
   const [model] = world.addRiders([0]);
+  await env.ready;
   await engine.warm(() => world.compile());
   if (model) await Promise.race([model.ready, new Promise((resolve) => setTimeout(resolve, 8000))]);
   booted();
@@ -120,37 +158,42 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
     const t = 30 + (now - t0) / 1000;
     if (model) {
       model.mesh.visible = view.rider !== null;
-      if (view.rider) {
-        const r = view.rider;
-        const y = env.ground(r.x, r.z, t);
-        const v = Math.sin(r.yaw) * 14;
-        const w = Math.cos(r.yaw) * 14;
-        const rider: RiderView = {
-          slot: 0,
-          x: r.x,
-          y,
-          z: r.z,
-          yaw: r.yaw,
-          pitch: 0,
-          roll: 0,
-          speed: 14,
-          grounded: true,
-          isMe: true,
-          isBot: false,
-          bailing: false,
-          vx: v,
-          vy: 0,
-          vz: w,
-          charge: 0,
-          grab: 0,
-          lean: 0,
-          steer: 0.2,
-          wobble: 0,
-        };
-        model.update(rider, 1 / 60);
-      }
+      if (view.rider) model.update(riderAt(view.rider, env.ground(view.rider.x, view.rider.z, t), 14), 1 / 60);
     }
-    world.renderFrom(view.eye, view.look, t, 1 / 60, data.sport === "snow" ? 55 : 55, turn);
+    if (televised) {
+      televised(t);
+      // A long lens frames `frame` m of the world at the rider.
+      const reach = aim.eye.distanceTo(aim.look);
+      const fov = aim.fov ?? (2 * Math.atan(aim.frame / 2 / Math.max(1, reach)) * 180) / Math.PI;
+      world.renderFrom(aim.eye, aim.look, t, 1 / 60, fov, turn);
+    } else if (fly) world.renderFrom(fly.eye, fly.look, t, 1 / 60, fly.fov, turn);
+    else world.renderFrom(view.eye, view.look, t, 1 / 60, 55, turn);
     if (++frames === 30) Reflect.set(window, "__shotReady", true);
   });
+}
+
+/** A rider standing in for the look tests: on the snow or the water at a place, heading its way at `speed` m/s. */
+function riderAt(at: { x: number; z: number; yaw: number }, y: number, speed: number): RiderView {
+  return {
+    slot: 0,
+    x: at.x,
+    y,
+    z: at.z,
+    yaw: at.yaw,
+    pitch: 0,
+    roll: 0,
+    speed,
+    grounded: true,
+    isMe: true,
+    isBot: false,
+    bailing: false,
+    vx: Math.sin(at.yaw) * speed,
+    vy: 0,
+    vz: Math.cos(at.yaw) * speed,
+    charge: 0,
+    grab: 0,
+    lean: 0,
+    steer: speed > 0 ? 0.2 : 0,
+    wobble: 0,
+  };
 }

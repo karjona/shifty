@@ -2,7 +2,7 @@
 // URL options: shot (select, hero, lineup, face, back), sport (summer, winter), seed (random
 // looks; 0 = the default rider), body (male, female: everyone's, in its starter kit), skin, hair,
 // hairColor, eyes, eyeColor, brows, nose, mouth, facialHair, height, wear (item ids to put on),
-// bare (slots to empty), pose (idle, crossed), t (freeze the idle at a time), cx/cy/dist (camera),
+// bare (slots to empty), pose (idle, hip, crossed), t (freeze the idle at a time), cx/cy/dist (camera),
 // orbit, ride (on the sport's ride: steer -1 to 1, bail, lean -1 to 1, grab 1-5, air; on a jetski, stunt 1-5
 // and how far into it, reach 0-1), stand (with their ride beside them, as in the menus). Keys: F next shot,
 // R new looks, arrows orbit.
@@ -19,11 +19,11 @@ import {
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { Avatar } from "../render/avatar.ts";
-import { CLUB, buildClub } from "../render/club.ts";
+import { CLUB } from "../render/club.ts";
 import { BoarderModel } from "../render/boarder.ts";
 import { JetskiModel } from "../render/rider.ts";
 import { RiderFigure } from "../render/rider/model.ts";
-import { crossedPose, idlePose } from "../render/rider/poses.ts";
+import { crossedPose, hipPose, idlePose } from "../render/rider/poses.ts";
 import { parseCourse } from "../wasm-json.ts";
 import type { RiderModel, RiderView } from "../render/world.ts";
 import { Engine } from "./engine.ts";
@@ -32,7 +32,7 @@ type Shot = "select" | "hero" | "lineup" | "face" | "back";
 const SHOTS: readonly Shot[] = ["select", "hero", "lineup", "face", "back"];
 const isShot = (s: string | null): s is Shot => SHOTS.some((x) => x === s);
 
-function appearanceFor(seed: number, i: number, params: URLSearchParams): Appearance {
+export function appearanceFor(seed: number, i: number, params: URLSearchParams): Appearance {
   const a = seed === 0 && i === 0 ? defaultAppearance() : botAppearance(seed, i);
   const body = params.get("body");
   if (body === "male" || body === "female") {
@@ -75,18 +75,18 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   const scenery = new Scenery(0, 1, 7);
   const course = parseCourse(scenery.courseJson());
   if (course.sport !== "jetski") throw new Error("the club is in the bay");
-  world.setEnvironment(
-    new Bay({
-      water: engine.view.water,
-      topSpeed: scenery.topSpeed(),
-      waves: scenery.waveParams(),
-      course: course.bay,
-    }),
-  );
+  const env = new Bay({
+    water: engine.view.water,
+    topSpeed: scenery.topSpeed(),
+    waves: scenery.waveParams(),
+    course: course.bay,
+  });
+  world.setEnvironment(env);
+  env.club?.setDetail(true);
   scenery.free();
-  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(18, 45, 40);
-  else world.setSunOffset(-25, 55, -30);
-  world.scene.add(buildClub());
+  // The sun from the camera's left, in front of the riders.
+  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(-18, 45, 40);
+  else world.setSunOffset(25, 55, -30);
 
   const shotParam = params.get("shot");
   let shot: Shot = isShot(shotParam) ? shotParam : "select";
@@ -138,7 +138,7 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       avatars = Array.from({ length: count }, (_, i) => {
         const a = new Avatar(appearanceFor(seed, i, params), i, sport);
         a.showRide(true);
-        a.crossed = shot === "select";
+        a.stance = shot === "select" ? "crossed" : "idle";
         world.scene.add(a.mesh);
         return a;
       });
@@ -162,7 +162,7 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   });
 
   let t = 0;
-  const base = new THREE.Vector3(CLUB.x + 3, CLUB.floor, CLUB.z - 4);
+  const base = new THREE.Vector3(CLUB.x + 1.3, CLUB.floor, CLUB.z - 4);
   // Facing the bay (−z), toward the camera.
   const facing = Math.PI;
   const framing: Record<Shot, { cy: number; dist: number; fov: number }> = {
@@ -181,7 +181,8 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       // The select shot looks out from the terrace's sea side, toward the sky, like a character select.
       r.group.rotation.y = shot === "select" ? 0.25 : facing + (shot === "back" ? Math.PI : 0);
       const pose = params.get("pose") ?? (shot === "select" ? "crossed" : "idle");
-      if (r.body) r.pose((pose === "crossed" ? crossedPose : idlePose)(r.body, time + i * 3.1));
+      if (r.body)
+        r.pose((pose === "crossed" ? crossedPose : pose === "hip" ? hipPose : idlePose)(r.body, time + i * 3.1));
     });
     avatars.forEach((a, i) => {
       const x = (i - (avatars.length - 1) / 2) * 1.6;

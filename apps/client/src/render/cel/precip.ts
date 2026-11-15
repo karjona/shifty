@@ -15,6 +15,7 @@ import {
   max,
   mix,
   normalize,
+  positionWorld,
   sin,
   smoothstep,
   uniform,
@@ -133,7 +134,11 @@ class Fall {
     if (flakes) {
       // A round flake, cut out.
       m.maskNode = vec2(c.x, c.y.mul(2)).length().lessThan(1);
-      m.colorNode = vec3(look.colour.r, look.colour.g, look.colour.b).mul(mix(vec3(1), LOOK.lit, 0.5));
+      // (Flakes close to the lens catch the light: they stay white in a dim one.)
+      const close = smoothstep(9, 2.5, positionWorld.distance(cameraPosition));
+      m.colorNode = vec3(look.colour.r, look.colour.g, look.colour.b).mul(
+        mix(mix(vec3(1), LOOK.lit, 0.5), vec3(1.04), close),
+      );
     } else {
       // A streak, its ends tapered.
       m.maskNode = c.y

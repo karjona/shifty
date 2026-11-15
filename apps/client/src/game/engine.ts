@@ -291,8 +291,12 @@ export class Engine {
       return;
     }
     const scale = this.auto.frame(gap, now);
-    if (scale !== null) this.world.setRenderScale(scale, false);
+    if (scale !== null) this.rescale = scale;
   }
+
+  /** A new render scale to take up before the next frame is drawn: resizing clears the canvas, so a resize after
+   * the frame's draw would show an empty frame. */
+  private rescale: number | null = null;
 
   private frame(now: number): void {
     const gap = now - this.last;
@@ -302,6 +306,10 @@ export class Engine {
     if (this.holding > 0) {
       this.smoothSince = null;
       return;
+    }
+    if (this.rescale !== null) {
+      this.world.setRenderScale(this.rescale, false);
+      this.rescale = null;
     }
     if (this.warming > 0) this.drawBetweenCompiles(now, dt);
     else this.draw(now, dt);
