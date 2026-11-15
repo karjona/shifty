@@ -117,6 +117,9 @@ export interface Environment {
   readonly sunOffset?: THREE.Vector3;
   /** Colours the sky, the fog and the lights. */
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void;
+  /** The sun's shadow box covers only a few metres round the camera's subject (a menu's stage), or a race's: with
+   * a close one, scenery far from any stage needn't be drawn into the shadow map. */
+  closeShadows?(on: boolean): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
   ground(x: number, z: number, t: number): number;
   /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
@@ -319,11 +322,14 @@ export class World {
     shadow.camera.updateProjectionMatrix();
     const texel = (2 * half) / shadow.mapSize.x;
     this.riderLift = texel > FINE_TEXEL ? RIDER_LIFT : 0;
+    this.shadowHalf = half;
+    this.env?.closeShadows?.(half < SHADOW_BOX);
     shadow.normalBias = texel * 2;
     // (Depth runs from the camera's near to its far: a texel's worth of it.)
     shadow.bias = -texel / (shadow.camera.far - shadow.camera.near);
   }
 
+  private shadowHalf = SHADOW_BOX;
   /** How far riders look up the shadow map from (see `SHADOW_LIFT`). */
   private riderLift = 0;
 
@@ -351,6 +357,7 @@ export class World {
     this.scene.add(env.group);
     resetLook();
     env.light(this.scene, this.sun, this.hemi);
+    env.closeShadows?.(this.shadowHalf < SHADOW_BOX);
     if (env.sunOffset) this.sunOffset.copy(env.sunOffset);
     this.camera.fov = env.camera.fov;
     this.camera.updateProjectionMatrix();

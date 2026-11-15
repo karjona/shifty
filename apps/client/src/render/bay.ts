@@ -145,6 +145,27 @@ export class Bay implements Environment {
   private hemi: THREE.HemisphereLight | null = null;
   private background = new THREE.Color();
   private scenery: WaterScenery;
+  private farCasters: THREE.Mesh[] | null = null;
+
+  /** With the shadow box close round a menu's stage only the club casts shadows: the town, the boats and the
+   * planting stand outside it. */
+  closeShadows(on: boolean): void {
+    if (on && !this.farCasters) {
+      const far: THREE.Mesh[] = [];
+      const visit = (o: THREE.Object3D) => {
+        if (o === this.club?.group) return;
+        if (o instanceof THREE.Mesh && o.castShadow) far.push(o);
+        o.children.forEach(visit);
+      };
+      visit(this.group);
+      for (const m of far) m.castShadow = false;
+      this.farCasters = far;
+    } else if (!on && this.farCasters) {
+      for (const m of this.farCasters) m.castShadow = true;
+      this.farCasters = null;
+    }
+  }
+
   /** The country club at the quay's east end (on the bay itself; other places on the water have none). */
   readonly club: ClubArt | null = null;
   /** Resolves once the club's art is in. */
