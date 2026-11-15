@@ -24,6 +24,7 @@ function StatRow({
   canAdd: boolean;
   onStep: (d: number) => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const step = useEffectEvent((d: number) => {
     if (d < 0 ? value > 0 : canAdd && value < STAT_MAX) onStep(d);
@@ -54,7 +55,7 @@ function StatRow({
         <span className="muted small">{about}</span>
       </span>
       <span className="stat-value">
-        <button type="button" tabIndex={-1} aria-label="less" onClick={() => step(-1)}>
+        <button type="button" tabIndex={-1} aria-label={t.setup.less} onClick={() => step(-1)}>
           ◀
         </button>
         <span className="pips" aria-hidden="true">
@@ -62,7 +63,7 @@ function StatRow({
             <i key={i} className={i < value ? "on" : ""} />
           ))}
         </span>
-        <button type="button" tabIndex={-1} aria-label="more" onClick={() => step(1)}>
+        <button type="button" tabIndex={-1} aria-label={t.setup.more} onClick={() => step(1)}>
           ▶
         </button>
       </span>
@@ -108,6 +109,9 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       actions={
         <>
+          <Button kind="ghost" glyph="back" onClick={onClose}>
+            {t.common.cancel}
+          </Button>
           <Button onClick={() => setSetups((cur) => ({ ...cur, [sport]: balanced() }))}>{t.setup.balanced}</Button>
           <Button kind="primary" glyph="confirm" disabled={busy || !complete} onClick={() => void save()}>
             {t.setup.save}

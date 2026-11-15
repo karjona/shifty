@@ -10,9 +10,10 @@ import {
   createRoute,
   createRouter,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router";
 import { useT } from "../i18n/index.ts";
-import { ApiError, inviteQuery, meQuery, redeemInvite } from "./api.ts";
+import { ApiError, inviteQuery, meQuery, onSessionEnded, redeemInvite } from "./api.ts";
 import { useAction, useAutoFocus } from "./hooks.ts";
 import { Button, Panel, Wordmark } from "./ui.tsx";
 import { InfoPage } from "./screens/info.tsx";
@@ -41,9 +42,35 @@ const rootRoute = createRootRouteWithContext<Ctx>()({
     </>
   ),
   errorComponent: RouteError,
+  notFoundComponent: NotFound,
 });
 
 const retry = () => window.location.reload();
+
+/** An address that isn't a screen: say so, and offer the way home. */
+function NotFound() {
+  const t = useT();
+  const navigate = useNavigate();
+  useEffect(() => booted(), []);
+  useAutoFocus();
+  const home = () => void navigate({ to: "/" });
+  useAction("back", home);
+  return (
+    <div className="screen login">
+      <header className="screen-top">
+        <Wordmark />
+      </header>
+      <main className="login-main">
+        <Panel className="login-card" title={t.errors.notFoundTitle}>
+          <p>{t.errors.notFound}</p>
+          <Button kind="primary" className="wide" glyph="back" onClick={home} autoFocus>
+            {t.menu.home}
+          </Button>
+        </Panel>
+      </main>
+    </div>
+  );
+}
 
 /**
  * A screen that failed to load (the lobby out of reach, most often): shown
@@ -210,6 +237,24 @@ const routeTree = rootRoute.addChildren([
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPendingMinMs: 0 });
+
+/** The session ended under the menus (it expired, or you logged out elsewhere): back to the login, saying so. */
+function sessionEnded(): void {
+  if (!queryClient.getQueryData(meQuery.queryKey)) return;
+  queryClient.setQueryData(meQuery.queryKey, null);
+  void router.navigate({ to: "/login", search: { error: "session" } });
+}
+onSessionEnded(sessionEnded);
+// A fresh look at the account (the tab coming back) that finds nobody signed in.
+let signedInBefore = false;
+queryClient.getQueryCache().subscribe((e) => {
+  if (e.type !== "updated" || e.query.queryKey[0] !== meQuery.queryKey[0] || e.action.type !== "success") return;
+  const now = e.query.state.data != null;
+  if (!now && signedInBefore && e.action.manual !== true) {
+    void router.navigate({ to: "/login", search: { error: "session" } });
+  }
+  signedInBefore = now;
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

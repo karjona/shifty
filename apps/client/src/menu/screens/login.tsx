@@ -31,7 +31,8 @@ export function Login() {
   const inviteOnly = invite.data?.required === true;
   const invited = invite.data?.redeemed === true;
   const [chosen, setChosen] = useState<Step | null>(null);
-  const firstStep: Step = !inviteOnly || search.error === "invite_required" ? "login" : invited ? "signup" : "invite";
+  const returning = search.error === "invite_required" || search.error === "session";
+  const firstStep: Step = !inviteOnly || returning ? "login" : invited ? "signup" : "invite";
   const step = chosen ?? firstStep;
   const [inviteCode, setInviteCode] = useState("");
   const [email, setEmail] = useState("");
@@ -47,6 +48,8 @@ export function Login() {
         return t.login.badInvite;
       case "too_many":
         return t.login.tooMany;
+      case "session":
+        return t.login.sessionEnded;
       default:
         return t.login.githubFailed;
     }

@@ -1,22 +1,24 @@
 // A private room at the club: the code to share, who's in, the host's
 // settings, ready-up, and the start. The room lives in the lobby; this
 // screen is a WebSocket to it.
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
 import { type PlanRequest, TILT, parsePlan } from "@shifty/rider";
-import { lobbySocket, meQuery, setPendingRace } from "../api.ts";
+import { lobbySocket, meQuery, roomExists, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
-import { PlanPickers, usePlanSummary } from "../plan.tsx";
+import { PlanPickers, PlanRows } from "../plan.tsx";
 import { Button, Handle, Hints, Panel, Picker } from "../ui.tsx";
 import { useLoading } from "../busy.tsx";
 import { TopBar } from "./common.tsx";
 
 const route = getRouteApi("/room/$code");
+/** How many times a dropped room socket comes back before giving up. */
+const RECONNECTS = 4;
 
 type RoomMessage =
   | { t: "state"; room: RoomState }
@@ -76,11 +78,13 @@ export function RoomScreen() {
   const navigate = useNavigate();
   const { code } = route.useParams();
   const me = useSuspenseQuery(meQuery).data?.user.id ?? null;
+  const queryClient = useQueryClient();
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
-  useLoading(room === null, t.room.connecting);
+  useLoading(room === null || reconnecting, reconnecting ? t.room.reconnecting : t.room.connecting);
 
   const leave = () => {
     leaving.current = true;
@@ -113,20 +117,63 @@ export function RoomScreen() {
       toast(msg, "error");
     }
   });
-  const onClose = useEffectEvent((closeCode: number) => {
+  const giveUp = useEffectEvent((closeCode: number, gone: boolean) => {
     if (leaving.current) return;
-    toast(closeCode === 4001 ? t.room.full : t.room.gone, "error");
+    leaving.current = true;
+    const why =
+      closeCode === 4001 ? t.room.full : closeCode === 4000 ? t.room.elsewhere : gone ? t.room.gone : t.room.lost;
+    toast(why, "error");
     void navigate({ to: "/play", search: { mode: "room" } });
   });
+  const checkSession = useEffectEvent(() => void queryClient.refetchQueries({ queryKey: meQuery.queryKey }));
+  // A dropped socket comes back a few times, waiting longer each time, while the room still exists.
   useEffect(() => {
     leaving.current = false;
-    const socket = lobbySocket(`/api/rooms/${encodeURIComponent(code)}/ws`);
-    ws.current = socket;
-    socket.addEventListener("message", (e) => onMessage(socket, e.data));
-    socket.addEventListener("close", (e) => onClose(e.code));
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const connect = () => {
+      const socket = lobbySocket(`/api/rooms/${encodeURIComponent(code)}/ws`);
+      ws.current = socket;
+      socket.addEventListener("message", (e) => {
+        tries = 0;
+        setReconnecting(false);
+        onMessage(socket, e.data);
+      });
+      socket.addEventListener("close", (e) => {
+        if (leaving.current || ws.current !== socket) return;
+        if (e.code === 4000 || e.code === 4001 || tries >= RECONNECTS) {
+          giveUp(e.code, false);
+          return;
+        }
+        setReconnecting(true);
+        checkSession();
+        timer = setTimeout(
+          () =>
+            void roomExists(code).then(
+              (exists) => {
+                if (leaving.current) return;
+                if (exists) {
+                  tries++;
+                  connect();
+                } else {
+                  giveUp(e.code, true);
+                }
+              },
+              () => {
+                if (leaving.current) return;
+                tries++;
+                connect();
+              },
+            ),
+          500 * 2 ** tries,
+        );
+      });
+    };
+    connect();
     return () => {
       leaving.current = true;
-      socket.close();
+      clearTimeout(timer);
+      ws.current?.close();
     };
   }, [code]);
 
@@ -181,11 +228,10 @@ export function RoomScreen() {
                     />
                   </>
                 ) : (
-                  <p className="muted">
-                    <PlanSummary plan={room.plan} /> · {t.room.bots}: {room.bots}
-                    <br />
-                    {t.room.waiting}
-                  </p>
+                  <>
+                    <PlanRows plan={room.plan} bots={room.bots} />
+                    <p className="muted">{t.room.waiting}</p>
+                  </>
                 )}
                 {me && room.racing.includes(me) && (
                   <Button onClick={() => send({ t: "rejoin" })}>{t.room.rejoin}</Button>
@@ -194,9 +240,6 @@ export function RoomScreen() {
             )}
           </Panel>
           <footer className="actions">
-            <Button kind="ghost" glyph="back" onClick={leave}>
-              {t.room.leave}
-            </Button>
             {host ? (
               <Button kind="primary" glyph="play" className="play-button big" onClick={start} autoFocus>
                 {t.room.start}
@@ -210,7 +253,7 @@ export function RoomScreen() {
                 disabled={!room}
                 autoFocus
               >
-                {mine?.ready ? t.room.notReady : t.room.imReady}
+                {mine?.ready ? t.room.notYet : t.room.imReady}
               </Button>
             )}
           </footer>
@@ -219,14 +262,10 @@ export function RoomScreen() {
       <Hints
         items={[
           ["confirm", t.common.select],
-          ["play", host ? t.room.start : t.room.ready],
+          ["play", host ? t.room.start : mine?.ready ? t.room.notYet : t.room.imReady],
           ["back", t.room.leave],
         ]}
       />
     </div>
   );
-}
-
-function PlanSummary({ plan }: { plan: PlanRequest }) {
-  return usePlanSummary(plan);
 }

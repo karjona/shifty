@@ -37,12 +37,21 @@ export interface TrialChoice {
   race: TrialRace | null;
 }
 
-export function TrialPanel({ label, onChange }: { label: string; onChange: (c: TrialChoice) => void }) {
+export function TrialPanel({
+  label,
+  initial,
+  onChange,
+}: {
+  label: string;
+  /** The circuit and season picked last time. */
+  initial: { course: number; season: Season };
+  onChange: (c: TrialChoice) => void;
+}) {
   const t = useT();
   const locale = useLocale();
   const edges = useScrollEdges();
-  const [course, setCourse] = useState(0);
-  const [season, setSeason] = useState<Season>("summer");
+  const [course, setCourse] = useState(initial.course);
+  const [season, setSeason] = useState<Season>(initial.season);
   const circuit = CIRCUITS.find((c) => c.id === course) ?? CIRCUITS[0];
   const seasons = circuit ? SPORT_SEASONS[circuit.sport] : SEASONS;
   const shownSeason = seasons.includes(season) ? season : seasons[0]!;

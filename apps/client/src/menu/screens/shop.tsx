@@ -117,7 +117,8 @@ export function ShopScreen() {
                     onFocus={() => setTrying(it.id)}
                     onMouseEnter={() => setTrying(it.id)}
                     onClick={() => {
-                      if (!owned) setBuying(it);
+                      if (owned) toast(t.shop.wearIt);
+                      else setBuying(it);
                     }}
                   >
                     <i className="swatch" style={{ background: hexColour(it.colours[0]) }} />
@@ -137,7 +138,7 @@ export function ShopScreen() {
       </main>
       {buying && (
         <Modal
-          title={t.shop.title}
+          title={itemLabel(t, buying.id)}
           onClose={() => setBuying(null)}
           actions={
             <>

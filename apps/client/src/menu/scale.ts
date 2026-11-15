@@ -1,6 +1,6 @@
 // The menus and the race HUD are laid out on a 1920×1080 canvas; this scales
 // them to fit the window (CSS `zoom`, from --ui-zoom). A window narrower
-// than 16:9 gets a canvas down to 1760 wide (taller than 1080) before it
+// than 16:9 gets a canvas down to 1800 wide (taller than 1080) before it
 // scales down further, so type stays readable in a small window. A short window (a
 // phone on its side) gets a compact canvas instead, about 640 tall and as
 // wide as the window allows, so type and rows stay big enough to read and
@@ -8,7 +8,7 @@
 let zoom = 1;
 
 /** The narrowest canvas a window gets (the layouts hold down to this width). */
-const MIN_WIDTH = 1760;
+const MIN_WIDTH = 1800;
 /** Below this many CSS pixels tall, the window gets the compact canvas. */
 const COMPACT_BELOW = 600;
 /** The compact canvas's height. */

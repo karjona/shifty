@@ -267,6 +267,9 @@ a {
 }
 .btn.wide {
   width: 100%;
+  white-space: normal;
+  text-align: center;
+  padding-block: 10px;
 }
 .btn-primary {
   --glyph-ink: var(--ink);
@@ -391,7 +394,7 @@ a {
   height: 36px;
   padding: 0 9px;
   box-shadow: inset 0 0 0 2px currentColor;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 800;
   font-stretch: 100%;
   letter-spacing: 0.02em;
@@ -400,7 +403,7 @@ a {
 .btn .glyph-key {
   height: 32px;
   min-width: 32px;
-  font-size: 16px;
+  font-size: 17px;
 }
 
 /* --- tabs: their shoulder buttons at the ends; the current one is underlined --- */
@@ -416,7 +419,7 @@ a {
   box-shadow: var(--lift);
 }
 .tabbar > .glyph {
-  margin: 0 8px;
+  margin: 0 6px;
 }
 .tab {
   position: relative;
@@ -425,7 +428,7 @@ a {
   justify-content: center;
   gap: 10px;
   height: 64px;
-  padding: 0 20px;
+  padding: 0 18px;
   border: 0;
   background: transparent;
   color: rgb(29 27 23 / 0.56);
@@ -441,8 +444,8 @@ a {
 .tab.on::after {
   content: "";
   position: absolute;
-  left: 20px;
-  right: 20px;
+  left: 18px;
+  right: 18px;
   bottom: 0;
   height: 6px;
   background: currentColor;
@@ -542,7 +545,7 @@ a {
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 18px;
+  font-size: 22px;
   width: 40px;
   height: 44px;
   padding: 0;
@@ -1226,7 +1229,6 @@ a {
   overflow: hidden;
   flex: none;
   margin-top: auto;
-  max-width: 600px;
   padding-bottom: 0.06em;
   font-size: var(--fs-title);
   line-height: 0.98;
@@ -1237,7 +1239,6 @@ a {
 /* A long title takes three smaller lines. */
 .hero-block b.long {
   -webkit-line-clamp: 3;
-  max-width: none;
   font-size: 52px;
   line-height: 1;
 }
@@ -1356,8 +1357,48 @@ a {
 .settings {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-content: start;
+  align-items: start;
   gap: var(--gap);
+}
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+/* The menus' buttons, drawn like the hints: an action per row, the controller's and the keyboard's. */
+.controls {
+  width: 100%;
+  border-collapse: collapse;
+}
+.controls th,
+.controls td {
+  height: 52px;
+  padding: 0 16px 0 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: middle;
+}
+.controls thead th,
+.controls thead td {
+  height: 32px;
+  border-bottom: 2px solid var(--ink);
+}
+.controls tbody th {
+  font-weight: 600;
+}
+.controls tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.controls th:last-child,
+.controls td:last-child {
+  padding-right: 0;
+}
+.controls .glyph {
+  gap: 6px;
+}
+.controls .muted {
+  font-size: var(--fs-label);
 }
 
 /* --- mode select and rooms --- */
@@ -1521,10 +1562,10 @@ a {
   color: var(--ink-3);
 }
 .races li b {
-  font-size: var(--fs-nav);
-  line-height: 1.15;
+  font-size: var(--fs-body);
+  line-height: 1.2;
   font-weight: 760;
-  font-stretch: 112%;
+  font-stretch: 100%;
 }
 .races li .muted {
   font-size: var(--fs-label);
@@ -1535,10 +1576,12 @@ a {
   gap: var(--gap);
 }
 .actions .btn {
+  flex: none;
   min-height: 72px;
   min-width: 216px;
   padding: 0 24px;
   font-size: var(--fs-body);
+  font-stretch: 100%;
   box-shadow:
     inset 0 0 0 2px var(--ink),
     var(--lift);
@@ -1546,6 +1589,8 @@ a {
 .actions .btn-primary {
   flex: 1;
   min-width: 0;
+  white-space: normal;
+  text-align: center;
   box-shadow: var(--lift);
 }
 .actions .btn:focus {
@@ -1583,7 +1628,7 @@ a {
   gap: 24px;
 }
 .room-code {
-  font-size: 96px;
+  font-size: 80px;
   line-height: 1;
   font-weight: 820;
   font-stretch: 75%;
@@ -1623,6 +1668,29 @@ a {
 }
 .room .mode-panel .panel-title {
   display: none;
+}
+/* The plan, as a guest sees it: the host's choices, a row each. */
+.plan-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+.plan-rows > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--rule);
+}
+.plan-rows dt {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.plan-rows dd {
+  margin: 0;
+  font-weight: 650;
+  text-align: right;
 }
 /* The host's pickers and a full room can outgrow the panel: it scrolls. */
 .room .mode-panel {
@@ -1817,8 +1885,10 @@ a {
   display: flex;
   align-items: center;
   gap: 16px;
+  max-width: 1040px;
   min-height: 64px;
-  padding: 0 28px;
+  padding: 14px 28px;
+  line-height: 1.3;
   background: var(--ink);
   color: var(--paper);
   font-size: var(--fs-body);
@@ -1828,6 +1898,7 @@ a {
 }
 .toast::before {
   content: "";
+  flex: none;
   width: 6px;
   height: 28px;
   background: var(--accent);
@@ -2090,7 +2161,6 @@ a {
   gap: 12px;
 }
 .wardrobe > .row .btn {
-  min-height: 56px;
   padding: 0 20px;
 }
 .wardrobe > .row .btn-primary {
@@ -2215,21 +2285,21 @@ a {
 .mode-side > *,
 .creator-side > *,
 .shop-panel,
-.settings > * {
+.settings-col > * {
   animation: enter-right 460ms var(--ease) both;
 }
 .home-right > :nth-child(2),
 .mode-side > :nth-child(2),
 .creator-side > :nth-child(2),
-.settings > :nth-child(2) {
+.settings > :nth-child(2) > * {
   animation-delay: 70ms;
 }
 .home-right > :nth-child(3),
 .mode-side > :nth-child(3),
-.settings > :nth-child(3) {
+.settings > :nth-child(3) > * {
   animation-delay: 140ms;
 }
-.settings > :nth-child(4) {
+.settings-col > :nth-child(2) {
   animation-delay: 210ms;
 }
 .title-panel,

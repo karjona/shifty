@@ -102,7 +102,11 @@ export function RiderScreen() {
 
   return (
     <div className="screen rider-screen">
-      <TopBar title={t.rider.title} kicker={t.menu.collection} sub={t.rider.body} />
+      <TopBar
+        title={first ? t.rider.firstTitle : t.rider.title}
+        kicker={first ? t.rider.firstKicker : t.menu.collection}
+        sub={t.rider.body}
+      />
       <main className="menu-body creator">
         <div className="rider-space" aria-hidden="true" ref={space} />
         <div className="creator-side">

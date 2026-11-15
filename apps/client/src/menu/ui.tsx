@@ -149,6 +149,7 @@ export function Picker<T extends string | number>({
   /** Stepping past the last option comes round to the first (false: it stops at either end). */
   wrap?: boolean;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const i = Math.max(
     0,
@@ -191,7 +192,7 @@ export function Picker<T extends string | number>({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="previous"
+          aria-label={t.common.previous}
           onClick={(e) => {
             e.stopPropagation();
             step(-1);
@@ -206,7 +207,7 @@ export function Picker<T extends string | number>({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="next"
+          aria-label={t.common.next}
           onClick={(e) => {
             e.stopPropagation();
             step(1);
