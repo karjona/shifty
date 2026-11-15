@@ -155,6 +155,16 @@ def arch(sc):
     sc.add(kit.wall(outline(0.07), 0.1, LACQUER).at(0, 0, ARCH_Z + 0.07))
     for i, c in enumerate(P.SEASONS):
         sc.add(box(2 * half / 4, 0.07, 0.02, c).at(-half + half / 4 + i * half / 2, y0 + 0.03, ARCH_Z + 0.105))
+    # Garlands of leaves and flowers swagged under the header.
+    rng = np.random.default_rng(2)
+    for k in range(4):
+        x0, x1 = -half + 0.25 + k * (2 * half - 0.5) / 4, -half + 0.25 + (k + 1) * (2 * half - 0.5) / 4
+        line = kit.catenary((x0, y0 - 0.02, ARCH_Z + 0.06), (x1, y0 - 0.02, ARCH_Z + 0.06), 0.34, 8)
+        sc.add(tube(line, 0.075, 5, P.LEAF, "foliage", caps=False).sway(0.04))
+        for q in line[1:-1:2]:
+            c = FLOWERS[int(rng.integers(len(FLOWERS)))]
+            sc.add(blob(0.085, int(rng.integers(99)), c, "foliage", 0.2, 0.8, 0).at(q[0], q[1] - 0.01, q[2] + 0.06).sway(0.05))
+        sc.add(blob(0.13, k, P.LEAF_DARK, "foliage", 0.3, 0.9, 0).at(x0, y0 - 0.04, ARCH_Z + 0.07).sway(0.03))
     z = ARCH_Z + 0.118
     sign(sc, T(0, 5.02, z), "THE TILT", 3.3, 0.6)
     sign(sc, T(2.75, 4.86, z), "23.4° SHIFTY", 1.6, 0.2, "brand")
@@ -282,8 +292,10 @@ def build():
     podium(sc)
     arch(sc)
     crowd(sc)
-    # Flowers in an urn by the base.
+    # Flowers: an urn by the base, and a bunch at each front corner of it.
     sc.add(P.urn(False) + flowers(21, 0.3, 14, 0.7), T(3.05, 0, 0.75))
+    for side in (-1, 1):
+        sc.add(flowers(40 + side, 0.17, 9, 0.0), T(side * 2.48, BASE, 0.86))
     sc.define("lamp", lamp_post())
     sc.place("lamp", T(-5.75, 0, EDGE + 0.4))
     sc.place("lamp", T(5.75, 0, EDGE + 0.4))
