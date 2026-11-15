@@ -640,8 +640,7 @@ export class Built {
       const out = back ? 0.03 : -0.03;
       sign.position.set(g.x + Math.sin(g.yaw) * out, top - 0.4 - wide / 16, g.z + Math.cos(g.yaw) * out);
       sign.rotation.y = g.yaw + (back ? 0 : Math.PI);
-      sign.castShadow = back === 0;
-      sign.userData.noMerge = true;
+      sign.castShadow = true;
       this.group.add(sign);
     }
   }

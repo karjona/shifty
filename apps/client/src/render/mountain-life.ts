@@ -7,11 +7,13 @@ import {
   Fn,
   attribute,
   cameraPosition,
+  cos,
   cross,
   float,
   fract,
   max,
   normalize,
+  positionGeometry,
   sin,
   smoothstep,
   uniform,
@@ -119,9 +121,6 @@ function spindrift(amount: THREE.Node<"float">): THREE.Mesh {
 }
 
 interface Chough {
-  group: THREE.Group;
-  left: THREE.Mesh;
-  right: THREE.Mesh;
   centre: THREE.Vector3;
   radius: number;
   speed: number;
@@ -129,65 +128,87 @@ interface Chough {
   bob: number;
 }
 
-/** One wing of a chough: broad, with fingers at its tip. */
-function wing(side: number): THREE.BufferGeometry {
-  const s = side;
-  const pts = [
-    [0, 0, 0.14],
-    [0, 0, -0.16],
-    [s * 0.45, 0.05, 0.12],
-    [s * 0.5, 0.05, -0.2],
-    [s * 0.95, 0, 0.02],
-    [s * 0.9, 0, -0.26],
-    [s * 1.08, -0.02, -0.12],
-  ];
-  const tris = [
-    [0, 2, 1],
-    [1, 2, 3],
-    [2, 4, 3],
-    [3, 4, 5],
-    [4, 6, 5],
-  ];
+/**
+ * A chough: a body, a tail and two broad wings with fingers at their tips.
+ * `wing` is how far along a wing a vertex is (0 on the body), signed by its side.
+ */
+function choughGeometry(): THREE.BufferGeometry {
+  const pos: number[] = [];
+  const wing: number[] = [];
+  const tri = (pts: number[][], along: number[]) => {
+    for (const p of pts) pos.push(...p);
+    wing.push(...along);
+  };
+  // The body: a slim diamond, nose to tail, and the tail's fan.
+  tri(
+    [
+      [0, 0.05, 0.28],
+      [0.07, 0, 0],
+      [-0.07, 0, 0],
+    ],
+    [0, 0, 0],
+  );
+  tri(
+    [
+      [0.07, 0, 0],
+      [0, 0.03, -0.24],
+      [-0.07, 0, 0],
+    ],
+    [0, 0, 0],
+  );
+  tri(
+    [
+      [0, 0.02, -0.2],
+      [0.12, 0, -0.48],
+      [-0.12, 0, -0.48],
+    ],
+    [0, 0, 0],
+  );
+  for (const s of [-1, 1]) {
+    const pts = [
+      [0, 0, 0.14],
+      [0, 0, -0.16],
+      [s * 0.45, 0, 0.12],
+      [s * 0.5, 0, -0.2],
+      [s * 0.95, 0, 0.02],
+      [s * 0.9, 0, -0.26],
+      [s * 1.08, 0, -0.12],
+    ];
+    for (const [i, j, k] of [
+      [0, 2, 1],
+      [1, 2, 3],
+      [2, 4, 3],
+      [3, 4, 5],
+      [4, 6, 5],
+    ] as const) {
+      tri([pts[i]!, pts[j]!, pts[k]!], [pts[i]![0]!, pts[j]![0]!, pts[k]![0]!]);
+    }
+  }
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pts.flat(), 3));
-  g.setIndex(tris.flatMap((t) => (side > 0 ? t : [t[0]!, t[2]!, t[1]!])));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("wing", new THREE.Float32BufferAttribute(wing, 1));
   g.computeVertexNormals();
   return g;
 }
 
-/** Choughs: black birds in small flocks, circling and gliding on the mountain's air. */
+/**
+ * Choughs: black birds in small flocks, circling and gliding on the
+ * mountain's air. One batch: each bird's place, heading, bank and wing beat
+ * ride on its instance, and the shader poses it.
+ */
 class Choughs {
-  readonly group = new THREE.Group();
+  readonly mesh: THREE.InstancedMesh;
   private birds: Chough[] = [];
+  /** Per bird: x, y, z, heading; and bank, wing beat (rad). */
+  private place: THREE.InstancedBufferAttribute;
+  private pose: THREE.InstancedBufferAttribute;
 
   constructor(flocks: THREE.Vector3[]) {
-    const black = new CelMaterial({
-      color: 0x24242c,
-      side: THREE.DoubleSide,
-      shade: new THREE.Color(0.6, 0.6, 0.9),
-      id: inkId("chough"),
-      crease: 0,
-    });
-    const body = new THREE.ConeGeometry(0.09, 0.5, 5);
-    body.rotateX(Math.PI / 2);
-    const tail = new THREE.BufferGeometry();
-    tail.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, -0.2, 0.12, 0, -0.48, -0.12, 0, -0.48], 3));
-    tail.computeVertexNormals();
     const r = rng(313);
     flocks.forEach((centre, f) => {
       const count = 4 + Math.floor(r() * 4);
       for (let i = 0; i < count; i++) {
-        const g = new THREE.Group();
-        const left = new THREE.Mesh(wing(-1), black);
-        const right = new THREE.Mesh(wing(1), black);
-        g.add(new THREE.Mesh(body, black), new THREE.Mesh(tail, black), left, right);
-        for (const m of g.children) m.layers.set(UNREFLECTED);
-        g.scale.setScalar(1.5);
-        this.group.add(g);
         this.birds.push({
-          group: g,
-          left,
-          right,
           centre: centre.clone().add(new THREE.Vector3((r() - 0.5) * 30, r() * 14, (r() - 0.5) * 30)),
           radius: 14 + r() * 26,
           speed: (0.16 + r() * 0.12) * (f % 2 === 0 ? 1 : -1),
@@ -196,28 +217,71 @@ class Choughs {
         });
       }
     });
-    this.group.userData.noMerge = true;
+    const n = this.birds.length;
+    this.place = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+    this.pose = new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2);
+    this.place.setUsage(THREE.DynamicDrawUsage);
+    this.pose.setUsage(THREE.DynamicDrawUsage);
+    const geometry = choughGeometry();
+    geometry.setAttribute("place", this.place);
+    geometry.setAttribute("pose", this.pose);
+    const black = new CelMaterial({
+      color: 0x24242c,
+      side: THREE.DoubleSide,
+      shade: new THREE.Color(0.6, 0.6, 0.9),
+      id: inkId("chough"),
+      crease: 0,
+    });
+    black.positionNode = Fn(() => {
+      const p = positionGeometry;
+      const place = attribute<"vec4">("place", "vec4");
+      const pose = attribute<"vec2">("pose", "vec2");
+      // The wings beat about the body's length; then the bird banks, turns to its heading and takes its place.
+      const reach = attribute("wing", "float");
+      const flapped = vec3(reach.mul(cos(pose.y)), p.y.add(reach.abs().mul(sin(pose.y))), p.z);
+      const banked = vec3(
+        flapped.x.mul(cos(pose.x)).sub(flapped.y.mul(sin(pose.x))),
+        flapped.x.mul(sin(pose.x)).add(flapped.y.mul(cos(pose.x))),
+        flapped.z,
+      );
+      const turned = vec3(
+        banked.x.mul(cos(place.w)).add(banked.z.mul(sin(place.w))),
+        banked.y,
+        banked.z.mul(cos(place.w)).sub(banked.x.mul(sin(place.w))),
+      );
+      return turned.mul(SIZE).add(place.xyz);
+    })();
+    this.mesh = new THREE.InstancedMesh(geometry, black, n);
+    this.mesh.frustumCulled = false;
+    this.mesh.layers.set(UNREFLECTED);
+    this.mesh.userData.noMerge = true;
   }
 
   update(t: number): void {
-    for (const b of this.birds) {
+    const place = this.place.array;
+    const pose = this.pose.array;
+    this.birds.forEach((b, i) => {
       const a = b.phase + t * b.speed;
       // An oval, drifting up and down the air.
-      const x = b.centre.x + Math.cos(a) * b.radius;
-      const z = b.centre.z + Math.sin(a) * b.radius * 0.7;
-      const y = b.centre.y + Math.sin(t * 0.31 + b.bob) * 5 + Math.sin(a * 2) * 1.5;
-      b.group.position.set(x, y, z);
+      place[i * 4] = b.centre.x + Math.cos(a) * b.radius;
+      place[i * 4 + 1] = b.centre.y + Math.sin(t * 0.31 + b.bob) * 5 + Math.sin(a * 2) * 1.5;
+      place[i * 4 + 2] = b.centre.z + Math.sin(a) * b.radius * 0.7;
       const dir = Math.sign(b.speed);
-      b.group.rotation.set(0, -a - (dir * Math.PI) / 2 + Math.PI, dir * 0.4, "YXZ");
+      // Along the oval, banked into it.
+      place[i * 4 + 3] = -a - (dir * Math.PI) / 2 + Math.PI;
+      pose[i * 2] = dir * 0.4;
       // A few beats, then a long glide (held on twos).
       const tt = Math.floor(t * 12) / 12;
       const flapping = Math.sin(tt * 0.6 + b.bob) > 0.55;
-      const beat = flapping ? Math.sin(tt * 13 + b.bob) * 0.6 : 0.12;
-      b.left.rotation.z = -beat;
-      b.right.rotation.z = beat;
-    }
+      pose[i * 2 + 1] = flapping ? Math.sin(tt * 13 + b.bob) * 0.6 : 0.12;
+    });
+    this.place.needsUpdate = true;
+    this.pose.needsUpdate = true;
   }
 }
+
+/** A chough's size against its model's (about 2 m across the wings). */
+const SIZE = 1.5;
 
 /** The mountain's life (see the file's header). */
 export class MountainLife {
@@ -255,7 +319,7 @@ export class MountainLife {
     this.chimneys = chimneys;
     this.drift = spindrift(this.blowing);
     this.choughs = new Choughs(flocks);
-    this.group.add(this.drift, this.puffs.sprite, this.smoke.sprite, this.choughs.group);
+    this.group.add(this.drift, this.puffs.sprite, this.smoke.sprite, this.choughs.mesh);
     this.group.userData.noMerge = true;
   }
 
