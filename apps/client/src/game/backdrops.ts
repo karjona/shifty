@@ -543,7 +543,7 @@ function heroView(close = 0): { eye: THREE.Vector3; look: THREE.Vector3; fov: nu
   // Looking past the rider's left shoulder puts them left of centre.
   const look = at
     .clone()
-    .addScaledVector(right, 1.35 - close * 0.73)
+    .addScaledVector(right, 1.35 - close * 0.86)
     .add(new THREE.Vector3(0, 1.12 + close * 0.2, 0));
   return { eye, look, fov };
 }
