@@ -4,6 +4,7 @@
 // Each kind is a few shapes drawn many times (instanced); they sway with
 // the wind and take the season's greens (see materials.ts).
 import * as THREE from "three/webgpu";
+import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { UNREFLECTED } from "../cel/material.ts";
 import { foliageMaterial, frondMaterial } from "./materials.ts";
 import { type Paint, Shape, place, random } from "./shape.ts";
@@ -130,7 +131,7 @@ export function pineGeometry(seed: number, height: number, spread: number, lobes
     weight: weigh,
   });
   const base = trunk[4]!;
-  const ball = lobe(lobes > 4 ? 7 : 6, -0.3);
+  const ball = lobe(lobes > 4 ? 6 : 5, -0.3);
   const under = height - fork;
   // The clumps: two or three round the fork, at their own heights, the crown longer one way than the other.
   const clumps = lobes > 4 ? 3 : 2;
@@ -349,14 +350,14 @@ function variants(): Record<Plant, Variant[]> {
   if (kit) return kit;
   const foliage = foliageMaterial();
   const frond = frondMaterial();
-  kit = {
+  const drawn: Record<Plant, Variant[]> = {
     pine: [
-      { geometry: pineGeometry(11, 9, 7.5, 7), material: foliage, size: 9, shadows: true },
+      { geometry: pineGeometry(11, 9, 7.5, 6), material: foliage, size: 9, shadows: true },
       { geometry: pineGeometry(23, 9, 8.5, 6), material: foliage, size: 9, shadows: true },
-      { geometry: pineGeometry(37, 9, 6.5, 6), material: foliage, size: 9, shadows: true },
+      { geometry: pineGeometry(37, 9, 6.5, 5), material: foliage, size: 9, shadows: true },
     ],
     pineFar: [
-      { geometry: pineGeometry(41, 9, 8, 4), material: foliage, size: 9, shadows: false },
+      { geometry: pineGeometry(41, 9, 8, 3), material: foliage, size: 9, shadows: false },
       { geometry: pineGeometry(53, 9, 7, 3), material: foliage, size: 9, shadows: false },
     ],
     palm: [
@@ -373,6 +374,9 @@ function variants(): Record<Plant, Variant[]> {
       { geometry: bushGeometry(6), material: foliage, size: 1, shadows: false },
     ],
   };
+  // (Vertices shared between a shape's triangles are drawn once.)
+  for (const list of Object.values(drawn)) for (const v of list) v.geometry = mergeVertices(v.geometry);
+  kit = drawn;
   return kit;
 }
 
@@ -396,7 +400,7 @@ export class Planting {
   private o: Required<PlantingOptions>;
 
   constructor(o: PlantingOptions = {}) {
-    this.o = { shadows: o.shadows ?? false, reflected: o.reflected ?? false, cell: o.cell ?? 1e6 };
+    this.o = { shadows: o.shadows ?? false, reflected: o.reflected ?? false, cell: o.cell ?? Infinity };
   }
 
   /** A plant of `kind` at `(x, y, z)`, `size` tall (m; across for agaves and bushes), `tint` (about 1) its shade of green. */
@@ -427,15 +431,10 @@ export class Planting {
       for (const { variant, list } of this.items.values()) {
         let shape = shapes.get(variant.material);
         if (!shape) shapes.set(variant.material, (shape = new Shape()));
-        const weights = variant.geometry.attributes.sway!;
         for (const it of list) {
-          const tint = it.tint;
           const from = shape.triangles * 3;
           shape.add(variant.geometry, null, it.m);
-          shape.retouch(from, (i, colour) => {
-            colour.multiplyScalar(tint);
-            return weights.getX(i);
-          });
+          shape.tint(from, it.tint);
         }
       }
       for (const [material, shape] of shapes) {

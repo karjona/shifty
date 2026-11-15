@@ -465,7 +465,7 @@ function plants(ground: CoastGround): THREE.Group {
   for (let z = NEAR.z0; z < NEAR.z1; z += 10) {
     for (let x = NEAR.x0; x < NEAR.x1; x += 10) {
       k++;
-      tryAt(near, "pine", x + (hash(k * 1.3) - 0.5) * 9, z + (hash(k * 2.7) - 0.5) * 9, 0.5, k * 3.1);
+      tryAt(near, "pine", x + (hash(k * 1.3) - 0.5) * 9, z + (hash(k * 2.7) - 0.5) * 9, 0.42, k * 3.1);
     }
   }
   for (let z = FAR.z0 + 300; z < 320; z += 22) {
@@ -698,9 +698,9 @@ export class CapeScenery implements WaterScenery {
       6,
       0.55,
     );
-    liner.mesh.castShadow = false;
-    liner.mesh.layers.set(UNREFLECTED);
     this.roamers.push(liner);
+    // (Too far off to show in the water.)
+    for (const boat of this.roamers) boat.mesh.layers.set(UNREFLECTED);
     for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);

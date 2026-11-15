@@ -12,7 +12,7 @@ export interface AddOptions {
   flat?: boolean;
   /** Where the geometry's texture coordinates land: a rectangle (u0, v0, u1, v1) of the material's texture. */
   uv?: readonly [number, number, number, number];
-  /** The weight carried by every vertex (how far the wind moves it), or one worked out per vertex. */
+  /** The weight carried by every vertex (how far the wind moves it), or one worked out per vertex (the geometry's own `sway` if left out). */
   weight?: number | ((p: THREE.Vector3) => number);
   /** Texture coordinates worked out from where each vertex lands (in place of `uv`). */
   at?: (p: THREE.Vector3) => readonly [number, number];
@@ -79,6 +79,8 @@ export class Shape {
     const normal = geo.attributes.normal;
     const uv = geo.attributes.uv;
     const own = paint === null ? geo.attributes.color : undefined;
+    // (A shape built here carries its weights: they come along unless new ones are given.)
+    const carried = geo.attributes.sway;
     const index = geo.index;
     const count = index ? index.count : position.count;
     const rect = o.uv ?? WHITE_UV;
@@ -109,7 +111,7 @@ export class Shape {
         const placed = o.at?.(p);
         const u = placed ? placed[0] : uv ? rect[0] + uv.getX(at[k]!) * (rect[2] - rect[0]) : rect[0];
         const v = placed ? placed[1] : uv ? rect[1] + uv.getY(at[k]!) * (rect[3] - rect[1]) : rect[1];
-        const w = typeof o.weight === "function" ? o.weight(p) : (o.weight ?? 0);
+        const w = typeof o.weight === "function" ? o.weight(p) : (o.weight ?? carried?.getX(at[k]!) ?? 0);
         const c = own ? this.c.fromBufferAttribute(own, at[k]!) : this.colour(paint ?? 0xffffff, p, n);
         this.push(p, n, c, u, v, w);
       }
@@ -117,17 +119,9 @@ export class Shape {
     return this;
   }
 
-  /**
-   * Goes over the vertices added since vertex `from`, in order: `touch` gets
-   * each one's place in that run and its colour (to change), and returns
-   * its weight.
-   */
-  retouch(from: number, touch: (i: number, colour: THREE.Color) => number): void {
-    for (let v = from; v < this.wts.length; v++) {
-      this.c.fromArray(this.col, v * 3);
-      this.wts[v] = touch(v - from, this.c);
-      this.c.toArray(this.col, v * 3);
-    }
+  /** Tints the colours of the vertices added since vertex `from` by `k`. */
+  tint(from: number, k: number): void {
+    for (let i = from * 3; i < this.col.length; i++) this.col[i] = this.col[i]! * k;
   }
 
   /** Adds `geo` and frees it. */

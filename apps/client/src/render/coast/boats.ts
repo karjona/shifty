@@ -497,7 +497,7 @@ export class Roamer {
     this.speed = speed;
     this.offset = offset;
     this.mesh = new THREE.Mesh(geometry, material);
-    this.mesh.castShadow = true;
+    this.mesh.name = "boat";
     this.mesh.userData.noMerge = true;
     this.mesh.rotation.order = "YXZ";
   }

@@ -78,10 +78,9 @@ function island(l: LandData, seed: number): THREE.Group {
   return g;
 }
 
-/** A rock in the sea: a crag with a couple of boulders against it. */
-function boulder(l: LandData, seed: number): THREE.Mesh {
+/** A rock in the sea, into `stone`: a crag with a couple of boulders against it. */
+function boulder(stone: Shape, l: LandData, seed: number): void {
   const r = rng(seed);
-  const stone = new Shape();
   stone.take(
     cragGeometry(l.radius, 2.3 + r() * 0.8, seed),
     stonePaint(LIMESTONE, LIMESTONE_TOP, r),
@@ -102,7 +101,6 @@ function boulder(l: LandData, seed: number): THREE.Mesh {
     );
   }
   kit.dispose();
-  return stone.mesh(rockMaterial());
 }
 
 /**
@@ -114,11 +112,14 @@ const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24
 /** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
 export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd, life: Life): THREE.Group {
   const g = new THREE.Group();
+  // (The rocks out in the bay are one mesh.)
+  const rocks = new Shape();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
     if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept).group);
     else if (l.kind === "island") g.add(island(l, seed));
-    else g.add(boulder(l, seed));
+    else boulder(rocks, l, seed);
   });
+  if (rocks.triangles > 0) g.add(rocks.mesh(rockMaterial()));
   return g;
 }

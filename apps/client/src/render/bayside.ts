@@ -117,9 +117,9 @@ export class BaySide implements WaterScenery {
       6,
       0.2,
     );
-    liner.mesh.castShadow = false;
-    liner.mesh.layers.set(UNREFLECTED);
     this.roamers.push(liner);
+    // (All but the trawler are too far off to show in the water.)
+    for (const boat of this.roamers.slice(1)) boat.mesh.layers.set(UNREFLECTED);
     for (const boat of this.roamers) this.group.add(boat.mesh);
   }
 
