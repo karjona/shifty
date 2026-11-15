@@ -49,7 +49,7 @@ export class Gulls {
   readonly group = new THREE.Group();
   private gulls: Gull[] = [];
 
-  constructor(centre: THREE.Vector3, count = 9) {
+  constructor(centre: THREE.Vector3, count = 12) {
     const white = new CelMaterial({
       color: 0xffffff,
       shade: new THREE.Color(0.62, 0.66, 0.86),
@@ -87,13 +87,16 @@ export class Gulls {
   update(t: number): void {
     for (const g of this.gulls) {
       const a = g.phase + t * g.speed;
-      const x = g.centre.x + Math.cos(a) * g.radius;
-      const z = g.centre.z + Math.sin(a) * g.radius;
-      const y = g.centre.y + Math.sin(t * 0.4 + g.bob) * 2;
+      // A circle that breathes in and out and drifts: no two rounds alike.
+      const reach = g.radius * (1 + 0.35 * Math.sin(a * 0.37 + g.bob));
+      const x = g.centre.x + Math.cos(a) * reach + Math.sin(t * 0.05 + g.bob) * 14;
+      const z = g.centre.z + Math.sin(a) * reach * 0.8 + Math.cos(t * 0.04 + g.bob) * 12;
+      // Soaring up on the turn into the wind, sliding down the other side.
+      const y = g.centre.y + Math.sin(a + g.bob) * 5 + Math.sin(t * 0.4 + g.bob) * 1.5;
       g.group.position.set(x, y, z);
       // Facing along the circle, banked into it.
       const dir = Math.sign(g.speed);
-      g.group.rotation.set(0, -a - (dir * Math.PI) / 2 + Math.PI, dir * 0.35, "YXZ");
+      g.group.rotation.set(Math.cos(a + g.bob) * 0.12, -a - (dir * Math.PI) / 2 + Math.PI, dir * 0.4, "YXZ");
       // Bursts of flapping, then a glide (held on twos).
       const tt = Math.floor(t * 12) / 12;
       const flapping = Math.sin(tt * 0.7 + g.bob) > 0.3;

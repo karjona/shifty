@@ -8,6 +8,7 @@ import type { Season } from "../game/conditions.ts";
 import type { LandData } from "./course.ts";
 import { townMaterial } from "./coast/facades.ts";
 import { addHermitage } from "./coast/landmarks.ts";
+import type { Life } from "./coast/life.ts";
 import type { Crowd } from "./coast/people.ts";
 import {
   CLIFF,
@@ -135,12 +136,12 @@ function boulder(l: LandData, seed: number): THREE.Mesh {
   return stone.mesh(rockMaterial());
 }
 
-/** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`. */
-export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd): THREE.Group {
+/** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
+export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd, life: Life): THREE.Group {
   const g = new THREE.Group();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers).group);
+    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else g.add(boulder(l, seed));
   });

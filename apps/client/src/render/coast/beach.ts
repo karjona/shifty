@@ -9,6 +9,7 @@ import type { Season } from "../../game/conditions.ts";
 import { llaut } from "./boats.ts";
 import { TILE } from "./facades.ts";
 import { addBench, addLampPost } from "./harbour.ts";
+import type { Life } from "./life.ts";
 import { type Crowd, addPerson } from "./people.ts";
 import { Local, type Shape, box, pick, place, post, turned } from "./shape.ts";
 
@@ -255,6 +256,9 @@ export function addBeach(
   season: Season,
   crowd: number,
   wavers: Crowd,
+  life: Life,
+  /** The lifeguard's flag: green, yellow or red by the sea's state. */
+  flag: number,
   r: () => number,
 ): void {
   const sea = site.seaward;
@@ -263,6 +267,13 @@ export function addBeach(
   const B = addBeachBar(shape, barAt.x, barAt.y - 0.2, barAt.z, sea, open, r);
   const towerAt = site.at(lifeguard.z, lifeguard.inland);
   const T = addLifeguardTower(shape, towerAt.x, towerAt.y, towerAt.z, sea);
+  const staff = T.p(LIFEGUARD_FLAG.x, LIFEGUARD_FLAG.y, LIFEGUARD_FLAG.z);
+  life.flag(staff.x, staff.y, staff.z, 1.5, 1, [flag]);
+  if (open) {
+    // The grill behind the bar.
+    const grill = B.p(2.6, 5.3, -2.6);
+    life.smoke(grill.x, grill.y, grill.z);
+  }
   if (open && crowd > 0.3) {
     const seat = T.p(0, 3.26, 1.6);
     addPerson(shape, seat.x, seat.y + 0.45, seat.z, sea, r, { pose: "sit", beach: true });
@@ -276,7 +287,8 @@ export function addBeach(
     }
   }
   // Umbrellas in rows, fewer out of season; people under them.
-  const rows = season === "summer" ? [11, 17, 23, 29] : season === "winter" ? [] : [14, 24];
+  // (Nobody puts an umbrella up in the rain.)
+  const rows = crowd < 0.25 ? [] : season === "summer" ? [11, 17, 23, 29] : season === "winter" ? [] : [14, 24];
   const court = { from: 52, to: 70 };
   for (const inland of rows) {
     for (let z = site.from + 14; z < site.to - 8; z += 6.5 + r() * 2.5) {

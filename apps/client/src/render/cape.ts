@@ -24,7 +24,8 @@ import { type BeachSite, addBeach } from "./coast/beach.ts";
 import { type Berth, Fleet, Roamer, yacht } from "./coast/boats.ts";
 import { townMaterial } from "./coast/facades.ts";
 import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
-import { addWatchtower } from "./coast/landmarks.ts";
+import { WATCHTOWER_STAFF, addWatchtower } from "./coast/landmarks.ts";
+import { COSTA_NEVADA, Life } from "./coast/life.ts";
 import { boatMaterial } from "./coast/materials.ts";
 import { Crowd, crowdOf } from "./coast/people.ts";
 import {
@@ -660,7 +661,8 @@ export class CapeScenery implements WaterScenery {
     const crowd = crowdOf(conditions);
     const town = land.find((l) => l.kind === "town");
     const harbourMole = land.find((l) => l.kind === "mole");
-    if (town) this.group.add(buildTown(town, 1000, season, crowd, this.crowd).group);
+    const life = new Life();
+    if (town) this.group.add(buildTown(town, 1000, season, crowd, this.crowd, life).group);
     if (harbourMole) {
       // The open sea is to the south (+z) of the mole.
       const dx = harbourMole.bx - harbourMole.ax;
@@ -684,7 +686,10 @@ export class CapeScenery implements WaterScenery {
     for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);
-    if (tower) addWatchtower(works, tower.x, tower.y - 0.5, tower.z, 0.4);
+    if (tower) {
+      addWatchtower(works, tower.x, tower.y - 0.5, tower.z, 0.4);
+      life.flag(tower.x, tower.y - 0.5 + WATCHTOWER_STAFF, tower.z, 3, 1.9, COSTA_NEVADA);
+    }
 
     // The beach: the bar, the lifeguard's tower, umbrellas and people in season.
     const beach = land.find((l) => l.kind === "beach");
@@ -696,7 +701,10 @@ export class CapeScenery implements WaterScenery {
         // The sea is to the west (-x).
         seaward: -Math.PI / 2,
       };
-      addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, r);
+      // The lifeguard's flag: red in a storm or a hard wind, yellow out of season, green on a summer's day.
+      const rough = [conditions.weather, conditions.turns].some((w) => w === "storm" || w === "windy");
+      const flag = rough ? 0xd6402e : season === "summer" ? 0x2fb34a : 0xf2c14e;
+      addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, life, flag, r);
       const palms = new Planting({ shadows: true, reflected: true });
       for (let z = site.from + 30; z < site.to - 20; z += 15 + r() * 6) {
         const p = site.at(z, 41);
@@ -707,6 +715,7 @@ export class CapeScenery implements WaterScenery {
     this.group.add(works.mesh(townMaterial()));
     const arms = this.crowd.build();
     if (arms) this.group.add(arms);
+    this.group.add(...life.build());
 
     this.group.add(plants(ground));
     // The distance: foothills and the sierra behind the coast (north, -z), headlands and islets out to sea.

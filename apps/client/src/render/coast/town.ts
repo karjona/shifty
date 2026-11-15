@@ -12,6 +12,7 @@ import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { SHUTTERS, TILE, type Tile, house, townMaterial } from "./facades.ts";
 import { addBench, addBollard, addLampPost, capsuleEdge } from "./harbour.ts";
+import { COSTA_NEVADA, type Life } from "./life.ts";
 import { type Crowd, addPerson } from "./people.ts";
 import { Local, Shape, box, pick, place, post, random } from "./shape.ts";
 import { Planting } from "./trees.ts";
@@ -484,7 +485,7 @@ export interface Town {
 }
 
 /** The town on the quay `l`, as it is in `season`, with as many people out as `crowd` (0-1) says. */
-export function buildTown(l: LandData, seed: number, season: Season, crowd: number, wavers: Crowd): Town {
+export function buildTown(l: LandData, seed: number, season: Season, crowd: number, wavers: Crowd, life: Life): Town {
   const group = new THREE.Group();
   const q = quayOf(l);
   const r = random(seed);
@@ -580,6 +581,18 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
     }
   });
   addPromenade(shape, q, r, season, crowd, wavers);
+  // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill, smoking.
+  const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
+  flags.forEach((colours, i) => {
+    const p = at(q, q.len * 0.5 + (i - 1) * 3.2, 8.6);
+    shape.take(post(0.07, 0.05, 8, 5), IRON, place(p.x, QUAY_TOP, p.z), { uv: TILE.white });
+    life.flag(p.x, QUAY_TOP + 7.9, p.z, 2.4, 1.5, colours);
+  });
+  const stack = at(q, q.len * 0.72, 61);
+  uphill.take(post(0.75, 0.5, 13, 6), new THREE.Color(0xb86a4a), place(stack.x, groundAt(61), stack.z), {
+    uv: TILE.white,
+  });
+  life.smoke(stack.x, groundAt(61) + 13.4, stack.z);
   group.add(shape.mesh(townMaterial()));
   const upper = uphill.mesh(townMaterial(), "receive");
   upper.layers.set(UNREFLECTED);

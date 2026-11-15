@@ -8,6 +8,7 @@ import type { Season } from "../game/conditions.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
 import { type Lantern, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
+import { Life } from "./coast/life.ts";
 import { Crowd } from "./coast/people.ts";
 import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
@@ -128,7 +129,9 @@ export class CourseView {
     this.data = data;
     if (data.place === "bay") {
       this.buildBreakwater(crowd);
-      this.group.add(buildLand(this.data.land, season, crowd, this.crowd));
+      const life = new Life();
+      this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life));
+      this.group.add(...life.build());
       const arms = this.crowd.build();
       if (arms) this.group.add(arms);
     }
