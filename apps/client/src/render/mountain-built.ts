@@ -29,7 +29,7 @@ import {
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, UNREFLECTED, inkId, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { MOUNTAIN, fadingInk, gustAt, scenerySnow, snowLoad, snowShade, windNow } from "./mountain-look.ts";
+import { MOUNTAIN, fadingInk, gustAt, scenerySnow, shadeKept, snowLoad, snowShade, windNow } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import type { GateData, RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
@@ -171,7 +171,7 @@ export function builtMaterial(): CelMaterial {
   });
   fadingInk(m, 1, 0.6, inkId("built"), 0.85);
   // (Snow on a roof shades as the snow round it does.)
-  m.shadeNode = mix(vec3(0.6, 0.6, 0.86), snowShade(), masks.y);
+  m.shadeNode = mix(vec3(0.6, 0.6, 0.86).mul(shadeKept()), snowShade(), masks.y);
   m.positionNode = Fn(() => {
     const p = positionLocal;
     return p.sub(

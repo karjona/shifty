@@ -417,6 +417,10 @@ function snowMaterial(ribbon: boolean): CelMaterial {
     }
     // Rain greys the snow.
     c = c.mul(float(1).sub(LOOK.wet.mul(0.1)));
+    // Under a closed sky the groomed run stays a touch lighter than the snow round it (cooler and darker).
+    const dull = LOOK.overcast.max(float(1).sub(LOOK.shadow)).mul(0.5);
+    const beside = ribbon ? float(1).sub(smoothstep(0.2, 0.9, attribute("run", "float"))) : float(1);
+    c = c.mul(mix(vec3(1), vec3(0.8, 0.84, 0.92), beside.mul(dull)));
     // Where it's off: the season's grass, in drifts of two tones.
     const ground = mix(LOOK.ground, LOOK.ground2, smoothstep(0.35, 0.65, drift.add(blotch.mul(0.3)).sub(0.15)));
     c = mix(ground, c, cover);

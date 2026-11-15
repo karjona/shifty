@@ -29,7 +29,7 @@ import { LOOK } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { Models } from "./env/models.ts";
-import { fadingInk, scenerySnow, snowLoad, snowShade } from "./mountain-look.ts";
+import { fadingInk, scenerySnow, shadeKept, snowLoad, snowShade } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
@@ -100,7 +100,7 @@ export function rockMaterial(): CelMaterial {
   });
   fadingInk(m, 1, 0.8, inkId("rock"), 0.9);
   // (A cap shades as the snow round it does.)
-  m.shadeNode = mix(vec3(...ROCK_SHADE), snowShade(), masks.y);
+  m.shadeNode = mix(vec3(...ROCK_SHADE).mul(shadeKept()), snowShade(), masks.y);
   // Without snow a cap sinks into its rock.
   m.positionNode = Fn(() => {
     const p = positionLocal;

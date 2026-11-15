@@ -21,7 +21,7 @@ import {
 import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { scenerySnow, fadingInk, gustAt, snowLoad, windNow } from "./mountain-look.ts";
+import { fadingInk, gustAt, scenerySnow, shadeKept, snowLoad, windNow } from "./mountain-look.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
 
@@ -351,6 +351,7 @@ function treeMaterial(): CelMaterial {
     id: inkId("forest"),
   });
   fadingInk(m, 0.7, 0, inkId("forest"), 0.75);
+  m.shadeNode = vec3(0.56, 0.6, 0.86).mul(shadeKept());
   // The wind: the whole tree leans with the gusts, and its boughs bob.
   m.positionNode = Fn(() => {
     const p = positionLocal;
