@@ -56,7 +56,8 @@ import { type Models, loadModels } from "./env/models.ts";
 import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
 import { farLandscape } from "./mountain-far.ts";
-import { MOUNTAIN } from "./mountain-look.ts";
+import { MountainLife } from "./mountain-life.ts";
+import { MOUNTAIN, gustAt, windNow } from "./mountain-look.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -378,6 +379,22 @@ function snowMaterial(ribbon: boolean): CelMaterial {
         sc.assign(mix(sc, sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z));
       });
       c = mix(sc, mix(sc, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
+      // Snow blown along the run in a wind: pale streaks snaking downwind.
+      const blown = c.toVar();
+      If(LOOK.wind.length().greaterThan(2.5), () => {
+        const { speed, dir } = windNow();
+        const along = p.xz.dot(dir).sub(LOOK.time.mul(speed).mul(0.8));
+        const across = p.xz.dot(vec2(dir.y.negate(), dir.x));
+        const snake = noise4(
+          vec2(along.mul(0.035), across.mul(0.4).add(noise4(vec2(along.mul(0.02), across.mul(0.05))).x)),
+        );
+        const streak = smoothstep(0.25, 0.6, snake.x.add(snake.y.mul(0.4)))
+          .mul(clamp(speed.sub(2.5).div(9), 0, 1))
+          .mul(gustAt(p.xz).mul(0.7).add(0.3))
+          .mul(snow.x.mul(3).clamp(0, 1));
+        blown.assign(mix(blown, vec3(0.97, 0.98, 1.0), streak.mul(0.55)));
+      });
+      c = blown;
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
@@ -413,7 +430,9 @@ function snowMaterial(ribbon: boolean): CelMaterial {
     // The shade the forest throws across the run.
     cast: ribbon ? float(1).sub(cut0(attribute("tree", "float").sub(0.5))) : undefined,
   });
-  mat.shadeNode = mix(vec3(...SNOW_SHADE), vec3(...ROCK_SHADE), rock);
+  // (Under a closed sky the shade loses its blue: there is no sun to be out of.)
+  const shade = mix(vec3(0.8, 0.84, 0.96), vec3(...SNOW_SHADE), LOOK.shadow.mul(0.65).add(0.35));
+  mat.shadeNode = mix(shade, vec3(...ROCK_SHADE), rock);
   return mat;
 }
 
@@ -500,6 +519,7 @@ export class Mountain implements Environment {
   private trees: Tree[] = [];
   private buildings: Building[] = [];
   private built: Built | null = null;
+  private life: MountainLife | null = null;
   /** What stands on the mountain (built once its models are in). */
   private props = new THREE.Group();
   /** Resolves once the scenery is built and in the scene. */
@@ -567,6 +587,14 @@ export class Mountain implements Environment {
     this.props.add(this.built.group);
     celify(this.props);
     mergeStatic(this.props, { cell: 400 });
+    // Choughs over the summit, over the middle of the run and over the finish.
+    const over = (k: number, up: number, aside: number) => {
+      const p = run.path[Math.floor(k * (run.path.length - 1))]!;
+      return new THREE.Vector3(p.x + aside, p.y + up, p.z);
+    };
+    const flocks = [over(0.02, 40, -30), over(0.33, 55, 70), over(0.62, 50, -60), over(0.95, 60, 20)];
+    this.life = new MountainLife(this.trees, this.built.chimneys, flocks);
+    this.props.add(this.life.group);
     const { x0, z0, nx, nz } = this.grid;
     this.props.add(
       farLandscape({
@@ -1009,6 +1037,8 @@ export class Mountain implements Environment {
     this.precipitation.update(this.look.rain, this.look.snow);
     MOUNTAIN.snowing.value = this.look.snow;
     this.built?.update(f.t);
+    const snowy = Math.min(1, Math.max(0, (f.eye.y - LOOK.snowLine.value + 30) / 40)) * LOOK.snowCover.value;
+    this.life?.update(f.eye, f.t, f.dt, snowy, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);
     this.trails.update(f.riders, f.t);
     this.powder.update(ground, f.dt);
