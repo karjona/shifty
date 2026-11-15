@@ -124,6 +124,13 @@ export class Shape {
     for (let i = from * 3; i < this.col.length; i++) this.col[i] = this.col[i]! * k;
   }
 
+  /** Sets the weight of the last `count` vertices added, each from where it is. */
+  reweigh(count: number, weight: (p: THREE.Vector3) => number): void {
+    const n = this.wts.length;
+    for (let i = Math.max(0, n - count); i < n; i++)
+      this.wts[i] = weight(this.p.set(this.pos[i * 3]!, this.pos[i * 3 + 1]!, this.pos[i * 3 + 2]!));
+  }
+
   /** Adds `geo` and frees it. */
   take(geo: THREE.BufferGeometry, paint: Paint | null, m: THREE.Matrix4 = IDENTITY, o: AddOptions = {}): this {
     this.add(geo, paint, m, o);

@@ -12,6 +12,7 @@ import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { SHUTTERS, TILE, type Tile, house, townMaterial } from "./facades.ts";
 import { addBench, addBollard, addLampPost, capsuleEdge } from "./harbour.ts";
+import { FISH_MARKET, MARKET_HALL, addFishMarket, addGull, addMarketHall } from "./landmarks.ts";
 import { COSTA_NEVADA, type Life } from "./life.ts";
 import { Grounding, OVERHEAD, type Sunlight } from "./grounding.ts";
 import { type Crowd, Walkers, addPerson } from "./people.ts";
@@ -48,6 +49,20 @@ const COPING = new THREE.Color(0xe6dcc6);
 const WHITE = new THREE.Color(0xffffff);
 const TRIM = new THREE.Color(0xe9e2d2);
 const IRON = 0x3a3f46;
+/** An awning's skirt, in two colours; and what hangs on the washing lines. */
+const VALANCES = [
+  [0xf6f2ea, 0xd94a3a],
+  [0xf6f2ea, 0x2f6fb0],
+  [0xf6f2ea, 0x3f8a6a],
+  [0xf2c14e, 0xf6f2ea],
+];
+const WASHING = [0xf6f2ea, 0xd94a3a, 0x3a6ea5, 0xf2c14e, 0xf6f2ea, 0xe87a9a];
+
+/** A landmark on the waterfront: which, and how far along the quay its middle stands (m). */
+export interface Landmark {
+  kind: "market" | "fish";
+  along: number;
+}
 
 /** The town's frame: along the quay, and in from the water. */
 interface Quay {
@@ -110,6 +125,7 @@ function addHouse(
   r: () => number,
   waterfront: boolean,
   season: Season,
+  life: Life,
 ): void {
   const L = new Local(shape, x, y, z, yaw);
   const wall = new THREE.Color(pick(WALLS, r));
@@ -149,6 +165,8 @@ function addHouse(
       dark,
       stripes,
     );
+    // Its skirt, in the wind.
+    life.valance(L.p(x0 + 0.3, 2.3, zf + 1.7), L.p(x1 - 0.3, 2.3, zf + 1.7), 0.3, pick(VALANCES, r));
   }
   // The floors above: windows, some shut, with a balcony across the middle of one floor.
   const balconyFloor = storeys > 1 && r() < 0.75 ? 1 + Math.floor(r() * (storeys - 1)) : -1;
@@ -240,9 +258,8 @@ function addHouse(
     );
     if (season !== "winter" && r() < 0.7) {
       for (const px of [x0 + 3.6, x1 - 0.8]) L.box(px, top, zf - 1.2, 0.08, 2.1, 0.08, IRON);
-      const colours = [0xf6f2ea, 0xd94a3a, 0x3a6ea5, 0xf2c14e, 0xf6f2ea];
-      for (let cx = x0 + 4.1; cx < x1 - 1.4; cx += 0.9)
-        L.front(cx, cx + 0.7, top + 1.1 + r() * 0.3, top + 2.0, zf - 1.2, new THREE.Color(pick(colours, r)));
+      if (x1 - 0.8 - (x0 + 3.6) > 1.6)
+        life.washing(L.p(x0 + 3.6, top + 2.0, zf - 1.2), L.p(x1 - 0.8, top + 2.0, zf - 1.2), WASHING, r);
     }
   } else {
     // Tiles: the ridge along the street, eaves over the front and the back; some hipped at the ends.
@@ -519,6 +536,8 @@ export function buildTown(
   clear: (x: number, z: number) => boolean = () => false,
   /** Which way shade falls. */
   light: Sunlight = OVERHEAD,
+  /** The landmark on its waterfront, if it has one. */
+  landmark: Landmark | null = null,
 ): Town {
   const group = new THREE.Group();
   const q = quayOf(l);
@@ -577,6 +596,29 @@ export function buildTown(
   const church = quayPoint(q, churchAlong, churchInland);
   addChurch(uphill, church.x, groundAt(churchInland - 10), church.z, q.yaw);
 
+  // The landmark's lot on the waterfront, kept free of houses, trees and street furniture.
+  const plot = landmark ? (landmark.kind === "market" ? MARKET_HALL : FISH_MARKET) : null;
+  const lot = landmark && plot ? { from: landmark.along - plot.width / 2 - 0.8, to: landmark.along + plot.width / 2 + 0.8 } : null;
+  const front = ROWS[0]!.inland - ROWS[0]!.depth / 2;
+  const free = (x: number, z: number) => {
+    if (clear(x, z)) return true;
+    if (!lot) return false;
+    const along = (x - l.ax) * q.ux + (z - l.az) * q.uz;
+    const inland = l.radius - ((x - l.ax) * q.nx + (z - l.az) * q.nz);
+    return along > lot.from && along < lot.to && inland > 4.2 && inland < front + 1;
+  };
+  if (landmark && plot) {
+    const p = quayPoint(q, landmark.along, front + plot.depth / 2 - (landmark.kind === "market" ? 1.2 : 0));
+    if (landmark.kind === "market") addMarketHall(shape, p.x, QUAY_TOP, p.z, q.yaw, life, r);
+    else {
+      addFishMarket(shape, p.x, QUAY_TOP, p.z, q.yaw, front, r);
+      // Gulls on its ridge, waiting for the boats.
+      for (const dx of [-9.5, -6, 1.5, 4]) {
+        const g = quayPoint(q, landmark.along + dx, front + plot.depth / 2);
+        addGull(shape, g.x, QUAY_TOP + 6.55, g.z, q.yaw + (dx * 1.7));
+      }
+    }
+  }
   // The houses, row by row, with streets between them.
   ROWS.forEach((row, k) => {
     if (row.inland + row.depth / 2 > l.radius * 2 - 6) return;
@@ -585,7 +627,15 @@ export function buildTown(
     let a = -span;
     let untilStreet = 28 + r() * 20;
     while (a < q.len + span - 5) {
-      const w = Math.min(5.6 + r() * 4.2, q.len + span - a);
+      let w = Math.min(5.6 + r() * 4.2, q.len + span - a);
+      if (k === 0 && lot && a < lot.to && a + w > lot.from) {
+        // Up to the landmark's lot, then on past it.
+        if (lot.from - a < 4.4) {
+          a = lot.to;
+          continue;
+        }
+        w = lot.from - a;
+      }
       // Leave the church its place, and the square in front of it.
       const mid = a + w / 2;
       const byChurch = Math.abs(mid - churchAlong - 2.5) < 13 && row.inland > churchInland - 26;
@@ -604,6 +654,7 @@ export function buildTown(
           r,
           k === 0,
           season,
+          life,
         );
       }
       a += w + (r() < 0.3 ? 0.4 : 0);
@@ -615,7 +666,7 @@ export function buildTown(
     }
   });
   const shades = new Grounding(light);
-  addPromenade(shape, q, r, season, crowd, wavers, clear, shades);
+  addPromenade(shape, q, r, season, crowd, wavers, free, shades);
   // A few walk the promenade up and down, between the lamps and the palms.
   const walkers = new Walkers();
   const lane = 3.7;
@@ -639,7 +690,7 @@ export function buildTown(
   // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill.
   const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
   flags.forEach((colours, i) => {
-    const p = quayPoint(q, q.len * 0.5 + (i - 1) * 3.2, 8.6);
+    const p = quayPoint(q, q.len * 0.5 + (i - 1) * 3.2, 3.4);
     shape.take(post(0.07, 0.05, 8, 5), IRON, place(p.x, QUAY_TOP, p.z), { uv: TILE.white });
     life.flag(p.x, QUAY_TOP + 7.9, p.z, 2.4, 1.5, colours);
   });
@@ -658,7 +709,7 @@ export function buildTown(
   const span = reach(q, 5) - 6;
   for (let a = -span + 3; a < q.len + span; a += 12.5 + r() * 3) {
     const p = quayPoint(q, a, 4.6);
-    if (clear(p.x, p.z)) continue;
+    if (free(p.x, p.z)) continue;
     const tall = 6.2 + r() * 2.6;
     palms.add("palm", p.x, QUAY_TOP, p.z, tall, 0.9 + r() * 0.2);
     shades.add(p.x, QUAY_TOP, p.z, 2.1, tall * 0.9, PAVING);

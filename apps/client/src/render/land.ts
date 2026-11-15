@@ -110,6 +110,9 @@ function boulder(stone: Shape, l: LandData, seed: number): void {
  */
 const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24.6, z - 68) < 10;
 
+/** The market hall on the bay's waterfront: east of the podium's square, by the flags. */
+const MARKET = { kind: "market", along: 128 } as const;
+
 /** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
 export function buildLand(
   land: LandData[],
@@ -125,7 +128,7 @@ export function buildLand(
   const rocks = new Shape();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept, light).group);
+    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept, light, MARKET).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else boulder(rocks, l, seed);
   });

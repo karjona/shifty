@@ -596,6 +596,9 @@ function berths(course: CourseData, town: LandData | undefined, mole: LandData |
   return spots;
 }
 
+/** The fish market on the harbour's quay: by the mole's root, where the boats come in. */
+const FISH_MARKET_AT = { kind: "fish", along: 152 } as const;
+
 /** Where the beach bar and the lifeguard tower stand: along the beach (z) and how far up the sand (m). */
 const BAR = { z: -30, inland: 38 };
 export const LIFEGUARD = { z: 25, inland: 16, top: 5.5 };
@@ -721,7 +724,8 @@ export class CapeScenery implements WaterScenery {
       },
     };
     const walkers = new Walkers();
-    if (town) this.group.add(buildTown(town, 1000, season, crowd, this.crowd, life, undefined, light).group);
+    if (town)
+      this.group.add(buildTown(town, 1000, season, crowd, this.crowd, life, undefined, light, FISH_MARKET_AT).group);
     if (harbourMole) {
       // The open sea is to the south (+z) of the mole.
       const dx = harbourMole.bx - harbourMole.ax;

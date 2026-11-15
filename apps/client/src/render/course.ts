@@ -255,8 +255,8 @@ export class CourseView {
   constructor(data: CourseData, season: Season = "summer", crowd = 1, light: Sunlight = OVERHEAD) {
     this.data = data;
     if (data.place === "bay") {
-      this.buildBreakwater(crowd, light);
       const life = new Life();
+      this.buildBreakwater(crowd, light, life);
       this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life, light));
       this.group.add(...life.build());
       const arms = this.crowd.build();
@@ -274,7 +274,7 @@ export class CourseView {
     for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
-  private buildBreakwater(crowd: number, light: Sunlight): void {
+  private buildBreakwater(crowd: number, light: Sunlight, life: Life): void {
     const d = this.data;
     const breakwater = buildBreakwater(
       d.straightHalf,
@@ -284,6 +284,7 @@ export class CourseView {
       this.crowd,
       breakwaterCameras(d.straightHalf, d.start.x, Math.sign(d.start.z) || -1),
       light,
+      life,
     );
     this.lanterns.push(...breakwater.lanterns);
     this.group.add(breakwater.group);

@@ -7,6 +7,8 @@ import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { Glow, propMaterial } from "./materials.ts";
 import { Grounding, OVERHEAD, type Sunlight } from "./grounding.ts";
+import { addGull } from "./landmarks.ts";
+import { COSTA_NEVADA, type Life } from "./life.ts";
 import { type Crowd, Walkers, addPerson } from "./people.ts";
 import {
   ARMOUR,
@@ -384,6 +386,8 @@ export function buildBreakwater(
   cameras: readonly { x: number; y: number; z: number }[] = [],
   /** Which way shade falls. */
   light: Sunlight = OVERHEAD,
+  /** What flies its flag. */
+  life: Life | null = null,
 ): Breakwater {
   const group = new THREE.Group();
   const l: Capsule = { ax: -straightHalf, az: 0, bx: straightHalf, bz: 0 };
@@ -404,7 +408,18 @@ export function buildBreakwater(
   const wallZ = -(half - 0.35);
   works.take(box(straightHalf * 2 - 4, 1.3, 0.6), WALL, place(0, top, wallZ));
   works.take(box(straightHalf * 2 - 3.6, 0.14, 0.8), 0xe0d8c6, place(0, top + 1.3, wallZ));
-  for (let x = -straightHalf + 12; x < straightHalf - 8; x += 37.5) addLampPost(works, x, top, wallZ + 0.9);
+  let lamp = 0;
+  for (let x = -straightHalf + 12; x < straightHalf - 8; x += 37.5) {
+    addLampPost(works, x, top, wallZ + 0.9);
+    // Gulls keep to some of the lamps, and to the wall.
+    if (lamp % 3 !== 1) addGull(works, x, top + 5.5, wallZ + 0.9, lamp * 2.1);
+    if (lamp % 2 === 0) addGull(works, x + 9 + lamp, top + DECK.parapet, wallZ, 2.6 + lamp);
+    lamp++;
+  }
+  // A flag on a staff at the lighthouse's gallery.
+  const gallery = top + 0.3 + 1.2 + 9.4;
+  works.take(post(0.05, 0.035, 4.2, 5), IRON, place(lighthouseX, gallery, -2.3));
+  life?.flag(lighthouseX, gallery + 4.15, -2.3, 2.2, 1.4, COSTA_NEVADA);
   for (let x = -straightHalf + 4; x < straightHalf; x += 14) addBollard(works, x, top, half - 0.5);
   for (let x = -straightHalf + 30; x < straightHalf - 20; x += 55) addBench(works, x, top, wallZ + 1.1, 0);
   // Anglers on the deck's edge over the stones, walkers, and people who wave from the wall.
@@ -503,7 +518,10 @@ export function buildMole(l: LandData, top: number, sea: 1 | -1, crowd: number, 
   addCamera(works, camera.x, camera.y, camera.z, Math.atan2(sx, sz), top + DECK.parapet);
   for (let a = 4; a < len; a += 7)
     addBollard(works, l.ax + ux * a - sx * (l.radius - 0.7), top, l.az + uz * a - sz * (l.radius - 0.7));
-  for (let a = 8; a < len - 4; a += 16) addLampPost(works, l.ax + ux * a + sx * 1.3, top, l.az + uz * a + sz * 1.3);
+  for (let a = 8; a < len - 4; a += 16) {
+    addLampPost(works, l.ax + ux * a + sx * 1.3, top, l.az + uz * a + sz * 1.3);
+    if (a % 32 < 16) addGull(works, l.ax + ux * a + sx * 1.3, top + 5.5, l.az + uz * a + sz * 1.3, a);
+  }
   const lanterns = [
     addHarbourLight(works, l.bx + ux * (l.radius - 2.2), top, l.bz + uz * (l.radius - 2.2), "green", 0),
   ];
