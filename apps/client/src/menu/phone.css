@@ -33,8 +33,7 @@
   --col-r: 640px;
 }
 
-:root[data-compact] #root:not(:has(.podium-screen)),
-:root[data-compact] #loading {
+:root[data-compact] #root:not(:has(.podium-screen)) {
   zoom: var(--menu-zoom);
 }
 
@@ -43,6 +42,7 @@
 :root[data-compact] .screen {
   gap: var(--gap);
   padding: var(--margin-y) var(--edge-r) 0 var(--edge-l);
+  overflow: visible;
 }
 :root[data-compact] .home,
 :root[data-compact] .mode-body,
@@ -75,18 +75,25 @@
   gap: 12px;
 }
 :root[data-compact] .picker-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
   font-size: var(--fs-nav);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
 }
 :root[data-compact] .picker-value {
-  flex: none;
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: flex-end;
   margin-right: -14px;
 }
 :root[data-compact] .picker-value b {
   min-width: 0;
+  white-space: normal;
+  text-align: right;
+  line-height: 1.1;
 }
 
 /* --- the header: one line --- */
@@ -398,10 +405,10 @@
 
 /* The mode select: the four modes, the picked one's panel, and Play. */
 :root[data-compact] .mode-body {
-  --col-r: 1000px;
+  --col-r: 1040px;
 }
 :root[data-compact] .mode-select .mode-side {
-  grid-template-columns: 300px minmax(0, 1fr) var(--rail);
+  grid-template-columns: 330px minmax(0, 1fr) var(--rail);
 }
 :root[data-compact] .mode-tabs {
   justify-content: flex-start;
@@ -409,7 +416,7 @@
 }
 :root[data-compact] .mode-tabs .tab {
   height: var(--row);
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.05;
   white-space: normal;
   text-align: left;
@@ -421,7 +428,7 @@
 }
 :root[data-compact] .mode-tabs .tab > span:first-child::before {
   flex: none;
-  width: 38px;
+  width: 34px;
 }
 :root[data-compact] .mode-tabs .tab.on::after {
   left: auto;
@@ -768,6 +775,16 @@
     display: grid;
     grid-template-columns: auto auto;
     gap: 0;
+    font-size: 19px;
+  }
+  :root[data-compact] .footer a {
+    padding: 0 10px;
+  }
+  :root[data-compact] .login-main {
+    width: 700px;
+  }
+  :root[data-compact] body:has(.footer) #loading {
+    bottom: calc(var(--edge-b) + 2 * var(--tap) + 8px);
   }
 }
 
@@ -786,15 +803,7 @@
   font-size: 22px;
   line-height: 1.25;
 }
-:root[data-compact] #loading {
-  left: var(--edge-l);
-  right: auto;
-  bottom: var(--edge-b);
-  height: 40px;
-  font-size: 17px;
-}
 /* Signed out the footer has that corner: the sign stands over it. */
-:root[data-compact] #root:has(.footer) ~ #loading,
 :root[data-compact] body:has(.footer) #loading {
   bottom: calc(var(--edge-b) + var(--tap) + 8px);
 }
@@ -884,11 +893,9 @@
 :root[data-compact][data-typing] #root .typing-host .field-label {
   grid-row: 1;
   grid-column: 1;
-  max-width: 260px;
+  max-width: 290px;
   margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.15;
 }
 :root[data-compact][data-typing] #root .typing-host input {
   grid-row: 1;

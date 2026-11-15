@@ -95,6 +95,17 @@
   animation: axis-rock 0.7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
 }
 
+/* On a phone (scale.ts: data-compact) the sign stands in the bottom left on
+   the menus' canvas, clear of the safe areas and of the panels' buttons. */
+:root[data-compact] #loading {
+  zoom: var(--menu-zoom, 0.6);
+  left: max(var(--safe-left, 0px), 28px);
+  right: auto;
+  bottom: max(var(--safe-bottom, 0px), 14px);
+  height: 40px;
+  font-size: 17px;
+}
+
 /* Something loading: the axis rocks from 23.4° one way to 23.4° the other. */
 @keyframes axis-rock {
   from {
@@ -161,5 +172,65 @@
   }
   100% {
     transform: none;
+  }
+}
+
+/* Safari on an iPhone (device.ts: installSafariBars) hides its bars once the
+   page scrolls: the page runs a swipe past the screen, and every layer of the
+   game stays fixed in place. */
+html[data-swipe] {
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+html[data-swipe] body {
+  height: auto;
+  min-height: calc(100lvh + 160px);
+  overflow: visible;
+}
+html[data-swipe] #app {
+  position: fixed;
+  inset: 0;
+}
+
+/* While Safari's bars are up, the boot screen says to swipe them away. */
+#boot .boot-swipe {
+  display: none;
+}
+html[data-bars] #boot .boot-swipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+#boot .boot-swipe svg {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--accent, #2b3fd0);
+  stroke-width: 3;
+  stroke-linecap: square;
+  animation: swipe-up 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+@keyframes swipe-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px);
   }
 }

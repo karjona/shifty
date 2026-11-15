@@ -28,6 +28,47 @@ export function standalone(): boolean {
   );
 }
 
+// --- Safari's bars on an iPhone ---
+
+/**
+ * Safari on an iPhone, not the game opened from the Home Screen: held
+ * sideways, its address and tab bars take up to a third of the screen until
+ * the page is scrolled, and then they go.
+ */
+export function phoneSafari(): boolean {
+  return apple() && !standalone() && Math.min(screen.width, screen.height) < 600;
+}
+
+/**
+ * On an iPhone's Safari the page runs a swipe past the screen, every layer
+ * of the game fixed in place (boot.css), so a swipe up anywhere gives the
+ * game the whole screen and a swipe down brings Safari's bars back.
+ * `data-bars` on the root says the bars are up, held sideways (the boot
+ * screen then says to swipe).
+ */
+export function installSafariBars(): void {
+  if (!phoneSafari()) return;
+  const root = document.documentElement;
+  root.dataset.swipe = "";
+  const tall = document.createElement("div");
+  tall.setAttribute("aria-hidden", "true");
+  tall.style.cssText = "position:fixed;left:0;top:0;width:0;height:100lvh;visibility:hidden;pointer-events:none";
+  root.append(tall);
+  const check = () => {
+    const up = innerWidth > innerHeight && innerHeight < tall.getBoundingClientRect().height - 4;
+    if (up === root.hasAttribute("data-bars")) return;
+    root.toggleAttribute("data-bars", up);
+    changed();
+  };
+  check();
+  addEventListener("resize", check);
+}
+
+/** Safari's bars are up on an iPhone held sideways (a swipe up hides them). */
+export function safariBarsUp(): boolean {
+  return document.documentElement.hasAttribute("data-bars");
+}
+
 // --- settings ---
 
 /** Jetski gas on a touch screen: always on (a button brakes), or held on a button. */
