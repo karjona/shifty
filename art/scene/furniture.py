@@ -249,48 +249,38 @@ def board_rack(boards):
     return parts
 
 
-def jetski(colours=(0x1E9BB0, 0xF7F1E5, 0xE8A72C)):
-    """A sit-down jetski, its bow toward +x, resting with its keel on y = 0."""
-    main, second, accent = colours
-    half = 1.6
+def vest(main, second, trim):
+    """A life vest on a hanger, hanging from the origin: padded panels, a zip, a belt."""
+    parts = [tube([(-0.2, -0.06, 0), (0, 0.0, 0), (0.2, -0.06, 0)], 0.012, 4, P.IRON)]
+    body = [(-0.22, -0.08), (-0.1, -0.05), (-0.06, -0.14), (0.06, -0.14), (0.1, -0.05), (0.22, -0.08), (0.25, -0.3), (0.2, -0.34), (0.21, -0.62), (-0.21, -0.62), (-0.2, -0.34), (-0.25, -0.3)]
+    parts.append(kit.wall(body, 0.09, main, back=True).at(0, 0, 0.045))
+    for y in (-0.3, -0.4, -0.5):
+        parts.append(box(0.36, 0.012, 0.012, kit.shade(main, 0.75)).at(0, y, 0.05))
+    parts.append(box(0.025, 0.46, 0.012, trim).at(0, -0.6, 0.052))
+    parts.append(box(0.44, 0.045, 0.1, second).at(0, -0.47, 0.0))
+    for x in (-0.19, 0.19):
+        parts.append(box(0.07, 0.2, 0.1, second).at(x, -0.3, 0.0))
+    return parts
 
-    def side(sign):
-        def point(u, v):
-            x = -half + 2 * half * u
-            fore = max(0.0, x / half) ** 2.0
-            aft = max(0.0, -x / half) ** 4
-            beam = 0.58 * (1 - fore * 0.92) * (1 - 0.12 * aft)
-            keel = 0.22 * fore
-            deck = 0.62 + 0.1 * fore - 0.04 * aft
-            # v: 0 the keel, 0.45 the chine, 0.75 the bumper, 1 the middle of the deck.
-            if v < 0.45:
-                k = v / 0.45
-                return (x, keel + 0.2 * k, sign * beam * 0.85 * k)
-            if v < 0.75:
-                k = (v - 0.45) / 0.3
-                return (x, keel + 0.2 + (deck - 0.2 - keel) * k * 0.82, sign * beam * (0.85 + 0.15 * math.sin(k * math.pi / 2)))
-            k = (v - 0.75) / 0.25
-            return (x, deck - (deck - keel - 0.2) * 0.18 * (1 - k) + 0.07 * k, sign * beam * (1 - k) ** 0.8)
 
-        m = grid(12, 8, point, main, "solid", True)
-        v = np.repeat(np.arange(9) / 8, 13)
-        m.C[v < 0.47] = kit.srgb(second)
-        m.C[(v > 0.6) & (v < 0.78)] = kit.srgb(0x23252B)
-        return m if sign > 0 else m.flipped()
-
-    parts = [side(1), side(-1)]
-    # The stern's flat.
-    parts.append(quad((-half, 0.0, -0.5), (-half, 0.0, 0.5), (-half, 0.62, 0.5), (-half, 0.62, -0.5), second).clean())
-    # Seat, hood, bars.
-    seat = lathe([(0.0, -0.75), (0.17, -0.7), (0.2, 0.0), (0.17, 0.55), (0.0, 0.62)], 8, 0x2B2D33)
-    parts.append(seat.xf(T(-0.45, 0.66, 0) @ RZ(-math.pi / 2) @ S(1, 1, 1.05)))
-    hood = blob(0.4, 5, main, "solid", 0.1, 0.55).xf(T(0.55, 0.72, 0) @ S(1.5, 1, 0.95))
-    hood.C[hood.P[:, 0] > 0.9] = kit.srgb(accent)
-    parts.append(hood)
-    parts.append(rod((0.42, 0.85, 0), (0.3, 1.08, 0), 0.04, 5, 0x2B2D33))
-    parts.append(rod((0.3, 1.08, -0.34), (0.3, 1.08, 0.34), 0.022, 5, 0x2B2D33))
-    for z in (-0.3, 0.3):
-        parts.append(rod((0.3, 1.08, z - 0.06 * np.sign(z)), (0.3, 1.08, z + 0.07 * np.sign(z)), 0.03, 5, accent))
+def poster(w=0.78, h=0.56):
+    """A poster in a frame, on the wall (its back on z = 0, its middle at the origin): a jetski leaping off a
+    swell under a big sun, in flat colours."""
+    z = 0.012
+    parts = [box(w + 0.08, h + 0.08, 0.02, P.NAVY).at(0, -h / 2 - 0.04, 0.0), box(w, h, 0.004, 0x3F9BE0).at(0, -h / 2, z)]
+    sun = kit.disc(0.16, 14, 0xFFD45C).xf(kit.T(0.17, 0.08, z + 0.004) @ RX(math.pi / 2))
+    parts.append(sun)
+    sea = [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, -0.1), (0.2, -0.06), (0.0, -0.13), (-0.18, -0.05), (-w / 2, -0.12)]
+    parts.append(kit.wall(sea, 0.004, 0x1668B8, back=False).at(0, 0, z + 0.008))
+    foam = [(-0.3, -0.12), (-0.08, -0.02), (0.04, -0.1), (-0.02, -0.16), (-0.26, -0.17)]
+    parts.append(kit.wall(foam, 0.004, 0xF7F4EC, back=False).at(0, 0, z + 0.012))
+    # The jetski, nose up: hull, seat and rider as three shapes.
+    lean = RZ(0.42)
+    hull = [(-0.2, -0.03), (0.12, -0.04), (0.24, 0.03), (0.1, 0.05), (-0.02, 0.07), (-0.19, 0.04)]
+    parts.append(kit.wall(hull, 0.004, 0xE8A72C, back=False).xf(kit.T(-0.02, 0.0, z + 0.016) @ lean))
+    parts.append(kit.wall([(-0.19, -0.03), (0.12, -0.04), (0.16, -0.015), (-0.2, -0.005)], 0.004, 0x23252B, back=False).xf(kit.T(-0.02, 0.0, z + 0.02) @ lean))
+    rider = [(-0.1, 0.05), (-0.03, 0.06), (0.03, 0.15), (0.09, 0.12), (0.1, 0.15), (0.02, 0.2), (-0.01, 0.26), (-0.07, 0.25), (-0.08, 0.17), (-0.12, 0.1)]
+    parts.append(kit.wall(rider, 0.004, 0xD4262F, back=False).xf(kit.T(-0.02, 0.0, z + 0.02) @ lean))
     return parts
 
 

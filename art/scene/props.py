@@ -71,7 +71,8 @@ PLINTH = [(0.13, 0.0), (0.13, 0.09), (0.1, 0.12), (-0.1, 0.12), (-0.13, 0.09), (
 
 
 def balustrade(scene, a, b, y=0.0):
-    """A stone balustrade from `a` to `b` (x, z): plinth, balusters (the scene's `baluster`) and rail."""
+    """A stone balustrade from `a` to `b` (x, z): plinth, balusters (the scene's `baluster`) and rail. From afar
+    a plain parapet stands in for the balusters."""
     a3, b3 = np.array([a[0], y, a[1]]), np.array([b[0], y, b[1]])
     scene.add(extrude(RAIL, [a3, b3], STONE_LIGHT))
     scene.add(extrude(PLINTH, [a3, b3], STONE_DARK))
@@ -79,7 +80,9 @@ def balustrade(scene, a, b, y=0.0):
     n = max(1, round(length / 0.25))
     for i in range(n):
         p = a3 + (b3 - a3) * (i + 0.5) / n
-        scene.place("baluster", T(p[0], y + 0.12, p[2]))
+        scene.place("baluster", T(p[0], y + 0.12, p[2]), 1)
+    panel = [(0.05, 0.12), (0.05, 0.74), (-0.05, 0.74), (-0.05, 0.12), (0.05, 0.12)]
+    scene.add(extrude(panel, [a3, b3], STONE_DARK), None, 2)
 
 
 def pier(top="ball"):
@@ -115,6 +118,32 @@ def lantern():
         for sz in (-1, 1):
             parts.append(rod((sx * 0.085, 0.285, sz * 0.085), (sx * 0.135, 0.605, sz * 0.135), 0.013, 4, IRON))
     return parts
+
+
+def lamp_post(height=3.3):
+    """A cast-iron lamp post for a promenade: a fluted foot, a slim post, a lantern on top."""
+    foot = [(0.17, 0.0), (0.17, 0.1), (0.17, 0.1), (0.11, 0.16), (0.09, 0.6), (0.09, 0.6), (0.11, 0.63), (0.11, 0.68), (0.11, 0.68), (0.055, 0.74), (0.045, height - 0.25), (0.08, height - 0.2), (0.08, height - 0.2), (0.12, height - 0.16)]
+    parts = [lathe(foot, 8, IRON)]
+    parts.append(rod((-0.3, height - 0.55, 0), (0.3, height - 0.55, 0), 0.02, 4, IRON))
+    return parts + kit.xf(lantern(), T(0, height - 0.19, 0) @ S(1.25))
+
+
+def bench(length=1.8):
+    """A promenade bench of painted slats on iron ends, facing +z."""
+    parts = []
+    for i in range(4):
+        parts.append(box(length, 0.03, 0.09, WOOD).at(0, 0.44, -0.16 + 0.11 * i))
+    for i in range(3):
+        parts.append(box(length, 0.09, 0.03, WOOD).at(0, 0.56 + 0.12 * i, -0.24 - 0.025 * i))
+    for x in (-length / 2 + 0.12, length / 2 - 0.12):
+        parts.append(box(0.05, 0.44, 0.45, IRON).at(x, 0, 0.0))
+        parts.append(box(0.05, 0.5, 0.05, IRON).at(x, 0.42, -0.26))
+    return parts
+
+
+def bollard():
+    """A mooring bollard of cast iron."""
+    return [lathe([(0.16, 0.0), (0.16, 0.06), (0.11, 0.1), (0.1, 0.34), (0.17, 0.4), (0.17, 0.46), (0.0, 0.5)], 8, IRON)]
 
 
 def urn(plant=True):
@@ -280,9 +309,9 @@ def pennant(length, height, colour):
     return [grid(6, 1, point, colour, "cloth").sway(lambda P: np.clip(P[:, 0] / length, 0, 1) ** 1.2)]
 
 
-def mast(height=8.0, flags=SEASONS):
-    """A signal mast: a white pole with a yard, the four seasons' flags hoisted one under another, and the club's
-    pennant at the masthead."""
+def mast(height=8.0, flags=SEASONS, scale=1.0):
+    """A signal mast: a white pole with a yard, the four seasons' flags hoisted one under another (`scale` times
+    their usual size), and the club's pennant at the masthead."""
     parts = [
         tube([(0, 0, 0), (0, height * 0.5, 0), (0, height, 0)], [0.1, 0.085, 0.05], 8, WHITE),
         lathe([(0.2, 0.0), (0.2, 0.08), (0.2, 0.08), (0.13, 0.12), (0.12, 0.5), (0.12, 0.5), (0.1, 0.52)], 8, STONE_DARK),
@@ -294,12 +323,11 @@ def mast(height=8.0, flags=SEASONS):
     # Stays from the yard's ends to the masthead.
     for side in (-1, 1):
         parts.append(rod((0, height * 0.8, side * 1.25), (0, height - 0.1, 0), 0.012, 3, IRON))
-    y = height - 0.5
-    parts += kit.xf(pennant(1.3, 0.34, NAVY), T(0.05, height - 0.38, 0))
-    y -= 0.2
+    parts += kit.xf(pennant(1.3 * scale, 0.34 * scale, NAVY), T(0.05, height - 0.1 - 0.34 * scale, 0))
+    y = height - 0.25 - 0.45 * scale
     for c in flags:
-        y -= 0.72
-        parts += kit.xf(flag(1.02, 0.62, c), T(0.06, y, 0))
+        y -= 0.72 * scale
+        parts += kit.xf(flag(1.02 * scale, 0.62 * scale, c), T(0.06, y, 0))
     # The halyard the flags are hoisted on.
     parts.append(rod((0.06, y - 0.2, 0), (0.06, height - 0.6, 0), 0.01, 3, STONE_DEEP))
     return parts
@@ -390,35 +418,31 @@ def sailboat(length=6.0, mast_height=7.6, colour=WHITE, stripe=NAVY, sail=0xF3EA
     return parts
 
 
-def far_sail(height=9.0, colour=0xFFFFFF, hull_colour=0xF2F0EA):
-    """A boat under sail, to see from far away: a hull, a mainsail and a jib. It sails toward +x."""
-    return [
-        slab([(-3.2, -0.9), (2.4, -0.9), (4.2, 0.0), (2.4, 0.9), (-3.2, 0.9)], 0, 1.1, hull_colour),
-        tri((0.2, 1.2, 0), (0.2, height, 0), (-3.4, 1.4, 0.3), colour, "cloth"),
-        tri((0.5, 1.2, 0), (3.9, 1.2, 0), (0.5, height * 0.86, 0), colour, "cloth"),
-        rod((0.3, 1.0, 0), (0.3, height + 0.3, 0), 0.07, 4, 0x6B4528),
-    ]
-
-
 def clump(sc, colour, variant=0, detail=2, sway=0.08):
     """A clump of leaves or flowers of unit radius, as a prop of the scene (defined on first use): its name. A
-    rounded mass with leaves standing out of it all round, so its outline is ragged. Trees and climbers are placed
-    clumps."""
+    rounded mass, paler on top and deeper underneath, with leaves standing out of it all round so its outline is
+    ragged. Trees and climbers are placed clumps."""
     name = f"clump.{colour:06x}.{variant}.{detail}"
     if name not in sc.defs:
         rng = np.random.default_rng(100 + variant)
-        parts = [blob(1.0, 11 + variant * 7, colour, "foliage", 0.32, 1.0, detail).sway(sway)]
-        light = kit.shade(colour, 1.18)
-        for k in range(10 + 6 * detail):
+        mass = blob(1.0, 11 + variant * 7, colour, "foliage", 0.16, 1.0, detail).sway(sway)
+        # Light from above: the crown's top is a tone up, its underside a tone down.
+        up = np.clip(mass.P[:, 1], -1, 1)
+        mass.C = (mass.C * (0.86 + 0.22 * np.clip(up + 0.25, 0, 1))[:, None]).astype(np.float32)
+        parts = [mass]
+        light = kit.shade(colour, 1.2)
+        deep = kit.shade(colour, 0.8)
+        for k in range(14 + 9 * detail):
             d = rng.normal(size=3)
-            d[1] = d[1] * 0.8 + 0.25
+            d[1] = d[1] * 0.8 + 0.2
             d /= np.linalg.norm(d)
             side = np.cross(d, rng.normal(size=3))
             side /= np.linalg.norm(side)
             lift = np.cross(side, d)
-            tip = d * rng.uniform(1.22, 1.42) + lift * rng.uniform(-0.2, 0.3)
-            w = rng.uniform(0.14, 0.22)
-            leaf = tri(d * 0.86 - side * w, d * 0.86 + side * w, tip, light if k % 3 == 0 else colour, "foliage")
+            tip = d * rng.uniform(1.16, 1.34) + lift * rng.uniform(-0.18, 0.26)
+            w = rng.uniform(0.09, 0.15)
+            c = light if d[1] > 0.45 else (deep if d[1] < -0.2 else colour)
+            leaf = tri(d * 0.9 - side * w, d * 0.9 + side * w, tip, c, "foliage")
             parts.append(leaf.sway(sway * 1.6))
         sc.define(name, parts)
     return name

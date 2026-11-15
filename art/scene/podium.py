@@ -23,7 +23,8 @@ BASE = 0.1
 # The quay's edge, and the line the arch stands on.
 EDGE = -2.0
 ARCH_Z = -1.62
-PYLON_X = 4.0
+# The gate stands close over the champion: the names on screen take the picture's top corners.
+PYLON_X = 1.74
 # Where the breeze blows (x, z).
 WIND = (0.9, -0.44)
 
@@ -103,17 +104,17 @@ def podium(sc):
         sc.add(ribbon(path, 0.035, (1, 0, 0), c, "cloth").sway(lambda q, top=h, d=drop: 0.25 * np.clip((top - q[:, 1]) / max(d, 0.01), 0, 1)))
 
 
-def pylon(sign_text=None):
-    """One of the arch's pylons: a tapering white tower banded in the seasons' colours, on a stone foot."""
-    h = 5.0
-    w = lambda y: 0.62 - 0.2 * y / h  # noqa: E731
+def pylon():
+    """One of the gate's pylons: a slim tapering white tower banded in the seasons' colours, on a stone foot."""
+    h = 5.35
+    w = lambda y: 0.44 - 0.14 * y / h  # noqa: E731
     parts = [
-        box(0.92, 0.2, 0.92, P.STONE_DARK),
-        taper(0.8, 0.8, 0.66, 0.66, 0.1, P.STONE).at(0, 0.2, 0),
+        box(0.7, 0.2, 0.7, P.STONE_DARK),
+        taper(0.6, 0.6, 0.48, 0.48, 0.1, P.STONE).at(0, 0.2, 0),
         taper(w(0), w(0), w(h), w(h), h, LACQUER).at(0, 0.3, 0),
-        box(w(h) + 0.14, 0.08, w(h) + 0.14, LACQUER).at(0, h + 0.3, 0),
-        taper(w(h) + 0.14, w(h) + 0.14, 0.12, 0.12, 0.2, CARPET).at(0, h + 0.38, 0),
-        ball(0.09, 8, 5, GOLD).at(0, h + 0.64, 0),
+        box(w(h) + 0.12, 0.08, w(h) + 0.12, LACQUER).at(0, h + 0.3, 0),
+        taper(w(h) + 0.12, w(h) + 0.12, 0.1, 0.1, 0.2, CARPET).at(0, h + 0.38, 0),
+        ball(0.08, 8, 5, GOLD).at(0, h + 0.62, 0),
     ]
     for k, c in enumerate(P.SEASONS):
         y = 0.62 + k * 0.2
@@ -129,26 +130,28 @@ def banner(colour, length=2.15, width=0.62):
 
 
 def arch(sc):
+    """The gate behind the champion: two pylons with a header board between them, garlands under it, and a
+    banner of each season hanging outside the pylons, behind the second and third."""
     sc.define("pylon", pylon())
     for side in (-1, 1):
         x = side * PYLON_X
         sc.place("pylon", T(x, 0, ARCH_Z))
         # "COSTA NEVADA" up the pylon's face.
-        sign(sc, T(x, 2.9, ARCH_Z + 0.275) @ RZ(math.pi / 2), "COSTA NEVADA", 2.2, 0.13, "caps", CARPET)
-        # An arm each side, a season's banner hanging from each.
+        sign(sc, T(x, 4.05, ARCH_Z + 0.185) @ RZ(math.pi / 2), "COSTA NEVADA", 1.5, 0.09, "caps", CARPET)
+        # An arm out from the gate, two seasons' banners hanging from it.
         colours = P.SEASONS[:2] if side < 0 else P.SEASONS[2:]
-        for k, way in enumerate((-1, 1)):
-            y = 4.25
-            sc.add(rod((x, y, ARCH_Z), (x + way * 1.08, y, ARCH_Z), 0.03, 6, GOLD))
-            sc.add(ball(0.05, 6, 4, GOLD).at(x + way * 1.1, y, ARCH_Z))
-            inner = x + way * 0.36 if way > 0 else x + way * 0.36 - 0.62
-            sc.add(banner(colours[k]), T(inner, y - 0.05, ARCH_Z))
+        y = 3.4
+        sc.add(rod((x, y, ARCH_Z), (x + side * 1.82, y, ARCH_Z), 0.03, 6, GOLD))
+        sc.add(ball(0.05, 6, 4, GOLD).at(x + side * 1.84, y, ARCH_Z))
+        for k in range(2):
+            inner = x + 0.3 + k * 0.76 if side > 0 else x - 0.3 - k * 0.76 - 0.62
+            sc.add(banner(colours[k if side > 0 else 1 - k], 1.85), T(inner, y - 0.05, ARCH_Z))
     # The header: a board arched along its top, with a pale edge behind it.
-    half = PYLON_X - 0.2
-    y0, y1, crown = 4.42, 5.02, 0.42
+    half = PYLON_X - 0.12
+    y0, y1, crown = 4.5, 5.2, 0.3
 
     def outline(grow):
-        top = [(half * math.cos(a), y1 + grow + crown * math.sin(a)) for a in np.linspace(0, math.pi, 17)]
+        top = [(half * math.cos(a), y1 + grow + crown * math.sin(a)) for a in np.linspace(0, math.pi, 13)]
         return [(-half - grow, y0 - grow), (half + grow, y0 - grow)] + [(x * (half + grow) / half, y) for x, y in top]
 
     sc.add(kit.wall(outline(0.0), 0.12, CARPET).at(0, 0, ARCH_Z + 0.1))
@@ -157,18 +160,17 @@ def arch(sc):
         sc.add(box(2 * half / 4, 0.07, 0.02, c).at(-half + half / 4 + i * half / 2, y0 + 0.03, ARCH_Z + 0.105))
     # Garlands of leaves and flowers swagged under the header.
     rng = np.random.default_rng(2)
-    for k in range(4):
-        x0, x1 = -half + 0.25 + k * (2 * half - 0.5) / 4, -half + 0.25 + (k + 1) * (2 * half - 0.5) / 4
-        line = kit.catenary((x0, y0 - 0.02, ARCH_Z + 0.06), (x1, y0 - 0.02, ARCH_Z + 0.06), 0.34, 8)
+    for k in range(2):
+        x0, x1 = -half + 0.2 + k * (half - 0.2), -half + 0.2 + (k + 1) * (half - 0.2)
+        line = kit.catenary((x0, y0 - 0.02, ARCH_Z + 0.06), (x1, y0 - 0.02, ARCH_Z + 0.06), 0.3, 8)
         sc.add(tube(line, 0.075, 5, P.LEAF, "foliage", caps=False).sway(0.04))
         for q in line[1:-1:2]:
             c = FLOWERS[int(rng.integers(len(FLOWERS)))]
             sc.add(blob(0.085, int(rng.integers(99)), c, "foliage", 0.2, 0.8, 0).at(q[0], q[1] - 0.01, q[2] + 0.06).sway(0.05))
         sc.add(blob(0.13, k, P.LEAF_DARK, "foliage", 0.3, 0.9, 0).at(x0, y0 - 0.04, ARCH_Z + 0.07).sway(0.03))
     z = ARCH_Z + 0.118
-    sign(sc, T(0, 5.02, z), "THE TILT", 3.3, 0.6)
-    sign(sc, T(2.75, 4.86, z), "23.4° SHIFTY", 1.6, 0.2, "brand")
-    sign(sc, T(0, 4.56, z), "TRAMUNTANA   ·   GARBÍ   ·   LLEVANT   ·   XALOC   ·   PONENT", 6.6, 0.12, "caps")
+    sign(sc, T(0, 5.1, z), "THE TILT", 2.7, 0.52)
+    sign(sc, T(0, 4.7, z), "23.4° SHIFTY", 1.3, 0.17, "brand")
 
 
 def barrier(colour, second=PAPER):
@@ -297,7 +299,7 @@ def build():
     for side in (-1, 1):
         sc.add(flowers(40 + side, 0.17, 9, 0.0), T(side * 2.48, BASE, 0.86))
     sc.define("lamp", lamp_post())
-    sc.place("lamp", T(-5.75, 0, EDGE + 0.4))
+    sc.place("lamp", T(-6.6, 0, EDGE + 0.4))
     sc.place("lamp", T(5.75, 0, EDGE + 0.4))
     sc.add(P.palm(sc, 5.9, 0.6, 5), T(7.2, 0, -1.0) @ RY(0.8))
     return sc

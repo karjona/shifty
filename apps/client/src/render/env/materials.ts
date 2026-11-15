@@ -42,9 +42,16 @@ const FOLIAGE_SWAY: Sway = { along: 0.3, across: 0.1, lift: 0.16 };
 const CLOTH_SWAY: Sway = { along: 0.05, across: 0.16, lift: 0.05 };
 
 export class EnvLook {
+  /** Out in the weather (the season's greens, snow, wet: see cel/look.ts), or always as it is on a summer's day. */
+  private weather: boolean;
+
+  constructor(weather = true) {
+    this.weather = weather;
+  }
+
   /** Where the breeze blows (x, z; the art's flags fly that way). */
   readonly breeze = uniform(new THREE.Vector2(1, 0));
-  /** A medallion set into the paving: its middle (world x, z) and radius (m; 0 = none). */
+  /** A medallion set into the paving: its middle (world x, z) and radius (m; 0 = none). Only out in the weather. */
   readonly medallion = uniform(new THREE.Vector3(0, 0, 0));
   private materials = new Map<string, THREE.Material>();
 
@@ -85,7 +92,7 @@ export class EnvLook {
       const c = new CelMaterial({
         vertexColors: true,
         side: THREE.DoubleSide,
-        outdoor: FOLIAGE.evergreen,
+        outdoor: this.weather ? FOLIAGE.evergreen : undefined,
         crease: 0.35,
       });
       c.positionNode = this.swayed(FOLIAGE_SWAY);
@@ -98,13 +105,13 @@ export class EnvLook {
       m = new CelMaterial({ colorNode: glass(), spec: 0.5, specSize: 0.06, crease: 0, id: inkId("env.glass") });
     } else if (cls === "paving") {
       m = new CelMaterial({
-        colorNode: paving(this.medallion),
+        colorNode: paving(this.weather ? this.medallion : null),
         crease: 0,
-        outdoor: FOLIAGE.none,
+        outdoor: this.weather ? FOLIAGE.none : undefined,
         shade: PAVING_SHADE,
       });
     } else {
-      m = new CelMaterial({ vertexColors: true, outdoor: FOLIAGE.none });
+      m = new CelMaterial({ vertexColors: true, outdoor: this.weather ? FOLIAGE.none : undefined });
     }
     this.materials.set(cls, m);
     return m;
@@ -122,7 +129,8 @@ export class EnvLook {
       if (skip.includes(cls)) continue;
       const mesh = new THREE.Mesh(geometry, this.material(cls));
       mesh.name = `env.${cls}`;
-      mesh.castShadow = true;
+      // (A floor casts no shadow that shows, nor does a pane set in its wall.)
+      mesh.castShadow = cls !== "paving" && cls !== "glass";
       mesh.receiveShadow = true;
       mesh.layers.set(UNREFLECTED);
       out.push(mesh);
@@ -166,11 +174,11 @@ const TILT = (23.4 * Math.PI) / 180;
 
 /**
  * Paving: limestone slabs with grout, a small glazed or terracotta tile set
- * in at every corner, and a round medallion of glazed tile where `medallion`
- * says (its middle and radius): a glazed ring round a pale field with the
+ * in at every corner, and (unless it is null) a round medallion of glazed
+ * tile where `medallion` says (its middle and radius): a glazed ring round a pale field with the
  * game's tilted slash across it.
  */
-function paving(medallion: THREE.Node<"vec3">): THREE.Node<"vec3"> {
+function paving(medallion: THREE.Node<"vec3"> | null): THREE.Node<"vec3"> {
   return Fn(() => {
     const q = positionWorld.xz.div(0.66);
     const cell = q.floor();
@@ -190,6 +198,7 @@ function paving(medallion: THREE.Node<"vec3">): THREE.Node<"vec3"> {
     const groutLine = grout.mul(float(1).sub(smoothstep(float(0.86).sub(ca), float(0.86).add(ca), corner)));
     const pattern = mix(mix(slab, tile, inset), tone(0xb7a27e), groutLine);
     const paved = mix(pattern, tone(0xdfcba6), smoothstep(0.5, 1.4, span));
+    if (!medallion) return paved;
     // The medallion: bands by distance from its middle, the slash a leaning bar.
     const d = positionWorld.xz.sub(medallion.xy).div(max(medallion.z, float(1e-3)));
     const r = d.length();

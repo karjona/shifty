@@ -20,6 +20,7 @@ import {
 } from "three/tsl";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
+import { ClubArt } from "./club.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import { LOOK } from "./cel/look.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
@@ -143,6 +144,10 @@ export class Bay implements Environment {
   private hemi: THREE.HemisphereLight | null = null;
   private background = new THREE.Color();
   private scenery: WaterScenery;
+  /** The country club at the quay's east end (on the bay itself; other places on the water have none). */
+  readonly club: ClubArt | null = null;
+  /** Resolves once the club's art is in. */
+  readonly ready: Promise<void> = Promise.resolve();
 
   constructor(opts: BayOptions) {
     this.conditions = opts.conditions ?? homeConditions("jetski");
@@ -173,6 +178,11 @@ export class Bay implements Environment {
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
+    if (opts.course.place === "bay") {
+      this.club = new ClubArt();
+      this.group.add(this.club.group);
+      this.ready = this.club.ready;
+    }
     this.gulls = new Gulls(this.scenery.gulls);
     this.gulls.group.userData.weather = true;
     this.group.add(this.gulls.group);

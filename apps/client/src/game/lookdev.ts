@@ -19,7 +19,7 @@ import {
 import { Scenery } from "../wasm/sim.js";
 import { Bay } from "../render/bay.ts";
 import { Avatar } from "../render/avatar.ts";
-import { CLUB, buildClub } from "../render/club.ts";
+import { CLUB } from "../render/club.ts";
 import { BoarderModel } from "../render/boarder.ts";
 import { JetskiModel } from "../render/rider.ts";
 import { RiderFigure } from "../render/rider/model.ts";
@@ -75,19 +75,18 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   const scenery = new Scenery(0, 1, 7);
   const course = parseCourse(scenery.courseJson());
   if (course.sport !== "jetski") throw new Error("the club is in the bay");
-  world.setEnvironment(
-    new Bay({
-      water: engine.view.water,
-      topSpeed: scenery.topSpeed(),
-      waves: scenery.waveParams(),
-      course: course.bay,
-    }),
-  );
+  const env = new Bay({
+    water: engine.view.water,
+    topSpeed: scenery.topSpeed(),
+    waves: scenery.waveParams(),
+    course: course.bay,
+  });
+  world.setEnvironment(env);
+  env.club?.setDetail(true);
   scenery.free();
   // The sun from the camera's left, in front of the riders.
   if ((params.get("shot") ?? "select") === "select") world.setSunOffset(-18, 45, 40);
   else world.setSunOffset(25, 55, -30);
-  world.scene.add(buildClub());
 
   const shotParam = params.get("shot");
   let shot: Shot = isShot(shotParam) ? shotParam : "select";

@@ -8,7 +8,7 @@ import type { Appearance, Sport } from "@shifty/rider";
 import { Scenery } from "../wasm/sim.js";
 import { Avatar } from "../render/avatar.ts";
 import { Bay } from "../render/bay.ts";
-import { CLUB, buildClub, clubReady } from "../render/club.ts";
+import { CLUB } from "../render/club.ts";
 import { SUN_DIR, SUN_STRENGTH, inkNode, inkOnlyInPass } from "../render/cel/material.ts";
 import { CelPost } from "../render/cel/post.ts";
 import { PIXEL_AT_1M, SHADOW_LIFT } from "../render/cel/rider.ts";
@@ -94,6 +94,10 @@ class Flyover implements Stage {
 
   compile(root?: THREE.Object3D): Promise<void> {
     return this.engine?.world.compile(root) ?? Promise.resolve();
+  }
+
+  loaded(): Promise<void> {
+    return this.engine?.render ? bay(this.engine).ready : Promise.resolve();
   }
 
   frame(now: number, dt: number): void {
@@ -374,7 +378,7 @@ class SeasonField implements Stage {
 /** The club's terrace, with the riders gathered at the front of it. */
 class Club implements Stage {
   private engine: Engine | null = null;
-  private group = buildClub();
+  private group = new THREE.Group();
   private avatars: Avatar[] = [];
   private count = 1;
 
@@ -435,6 +439,7 @@ class Club implements Stage {
   private attach(engine: Engine): void {
     const world = engine.world;
     world.setEnvironment(bay(engine));
+    bay(engine).club?.setDetail(true);
     // A key from the camera's left, so the riders turn half to shade.
     const k = HERO_VIEW.key;
     world.setSunOffset(k.x, k.y, k.z);
@@ -463,6 +468,7 @@ class Club implements Stage {
     await engine.warm(() => world.compile(this.group), false);
     if (engine.current === this) return;
     this.group.removeFromParent();
+    bay(engine).club?.setDetail(false);
     world.setShadowBox();
     // (Unless another stage now draws the world.)
     if (engine.current === host) world.clearEnvironment();
@@ -473,9 +479,8 @@ class Club implements Stage {
   }
 
   loaded(): Promise<void> {
-    return Promise.all([clubReady(this.group), ...this.avatars.slice(0, this.count).map((a) => a.ready)]).then(
-      () => {},
-    );
+    const club = this.engine?.render ? bay(this.engine).ready : Promise.resolve();
+    return Promise.all([club, ...this.avatars.slice(0, this.count).map((a) => a.ready)]).then(() => {});
   }
 
   frame(now: number, dt: number): void {
@@ -489,6 +494,7 @@ class Club implements Stage {
 
   stop(): void {
     this.group.removeFromParent();
+    if (this.engine?.render) bay(this.engine).club?.setDetail(false);
     this.engine?.world.setShadowBox();
     this.engine?.world.clearEnvironment();
   }
@@ -505,7 +511,7 @@ class Club implements Stage {
 const HERO_VIEW = (() => {
   const at = new THREE.Vector3(CLUB.x + 2.5, CLUB.floor, CLUB.z - 5.2);
   // The camera stands inland of the rider, looking out over the bay (−z), a little from the east.
-  const theta = 0.33;
+  const theta = 0.186;
   const fwd = new THREE.Vector3(-Math.sin(theta), 0, -Math.cos(theta));
   const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
   // The sun from the camera's left and behind it, over the clubhouse's roof: the riders turn half to shade, and
