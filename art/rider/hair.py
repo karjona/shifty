@@ -366,10 +366,10 @@ def helmet(head, under_cap=False, cols=80, rows=None, under_beanie=False, cut=SP
 
 
 def paint_hair(maps):
-    """Hair colour (mask B): dark at the roots and in the valleys between spikes, lighter up each spike, strands
-    running up them, a sheen over the top."""
+    """Hair colour (mask B): flat, as cel hair is drawn, a little darker at the roots and in the valleys between
+    locks, with a few clean dark lines where locks part (the game draws them as ink) and a lighter band over the
+    top."""
     inside = maps["inside"]
-    pos = maps["pos"]
     ao = np.clip(maps["ao"], 0, 1)
     L = maps["light"]
     ref = np.percentile(L[inside], 85) if inside.any() else 1.0
@@ -377,21 +377,18 @@ def paint_hair(maps):
     h, w = ao.shape
     v = np.linspace(1, 0, h)[:, None] * np.ones((1, w))
     u = np.linspace(0, 1, w)[None, :] * np.ones((h, 1))
-    strands = fbm(np.stack([u * 260, v * 3, np.zeros_like(u)], axis=-1), 1.0, octaves=3, seed=5)
-    # Dark partings between locks of strands: the ridges of a second noise, thin.
-    part = 1 - np.abs(fbm(np.stack([u * 130, v * 1.6, np.ones_like(u)], axis=-1), 1.0, octaves=2, seed=11) - 0.5) * 2
-    partings = smoothstep(0.82, 0.96, part)
+    # Partings between locks: the ridges of a noise that runs along the hair, thin and few.
+    part = 1 - np.abs(fbm(np.stack([u * 46, v * 1.1, np.ones_like(u)], axis=-1), 1.0, octaves=2, seed=11) - 0.5) * 2
+    partings = smoothstep(0.93, 0.985, part)
     curv = np.clip((maps["curv"] - 0.5) * 6, -1, 1)
-    g = 0.27 + 0.15 * np.clip(s, 0, 1.3) + 0.2 * (strands - 0.5)
-    g = g * (1 - 0.45 * partings)
-    # Valleys (concave) darker, spike ridges (convex) lighter.
-    g = g * (1 + 0.35 * np.maximum(curv, 0) - 0.45 * np.maximum(-curv, 0))
-    g = g * (0.45 + 0.55 * ao)
+    g = 0.36 + 0.1 * np.clip(s, 0, 1.3)
+    # Valleys (concave) darker, ridges (convex) a touch lighter.
+    g = g * (1 + 0.15 * np.maximum(curv, 0) - 0.4 * np.maximum(-curv, 0))
+    g = g * (0.55 + 0.45 * ao)
     up = np.clip(maps["nrm"][..., 2], 0, 1)
-    sheen = smoothstep(0.4, 0.85, up) * (0.4 + 0.6 * strands) * ao * (1 - partings)
-    g = g + 0.18 * sheen
+    g = g + 0.07 * smoothstep(0.45, 0.8, up) * ao
+    g = g * (1 - 0.7 * partings)
     detail = np.repeat(g[..., None], 3, axis=2)
     mask = np.zeros_like(detail)
     mask[..., 2] = 1
     return np.clip(detail, 0, 1), mask
-
