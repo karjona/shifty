@@ -13,6 +13,7 @@ import { EnvLook } from "./env/materials.ts";
 import { type EnvModel, loadEnv } from "./env/model.ts";
 import { signs } from "./env/signs.ts";
 import { warmUp } from "./warm.ts";
+import { waitNow } from "../loading.ts";
 
 /** The podium's blocks, in the order of the places they stand for (1st, 2nd, 3rd): across (m, + = the riders' left),
  * and height (m). The riders face +z. (The art's blocks are these: art/scene/podium.py.) */
@@ -73,10 +74,11 @@ export class PodiumScene {
     this.confetti = new Confetti([...colours, 0xf6f1e7, 0xf2c14e]);
     this.streamers = new Streamers([...colours, 0xf2c14e]);
     this.group.add(this.confetti.mesh, this.streamers.mesh);
-    this.ready = loadEnv("podium")
+    const wait = waitNow();
+    this.ready = loadEnv("podium", wait)
       .then(async (model) => {
         const art = await this.assemble(model, accent);
-        await warmUp(art);
+        await warmUp(art, wait);
         if (this.gone) return;
         this.group.add(art);
       })

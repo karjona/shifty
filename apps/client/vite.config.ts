@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { devJoinTicket, repoRoot } from "../../scripts/dev-lobby.ts";
@@ -132,6 +135,121 @@ const rustNotices = (): Plugin => ({
   },
 });
 
+/** The folders of public/ that hold the game's art. */
+const ART_DIRS = ["riders", "rides", "env"];
+const ART_ID = "virtual:art";
+
+/**
+ * `virtual:art`: every file of the art in public/ (by path, e.g.
+ * `riders/male/body.glb`) with its size in bytes and, in builds, a hash of
+ * its content. Loaders know what exists and how big it is before asking,
+ * and ask for a file by its hash, so a browser keeps it until it changes
+ * (see public/_headers).
+ */
+const art = (): Plugin => {
+  let root = "";
+  let hashed = false;
+  const list = () => {
+    const files: Record<string, [number, string]> = {};
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const file = join(dir, name);
+        const st = statSync(file);
+        if (st.isDirectory()) walk(file);
+        else if (!name.startsWith(".")) {
+          const hash = hashed ? createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 10) : "";
+          files[relative(root, file).split(sep).join("/")] = [st.size, hash];
+        }
+      }
+    };
+    for (const dir of ART_DIRS) walk(join(root, dir));
+    return files;
+  };
+  return {
+    name: "shifty-art",
+    configResolved(config) {
+      root = config.publicDir;
+      hashed = config.command === "build";
+    },
+    resolveId: (id) => (id === ART_ID ? `\0${ART_ID}` : null),
+    load: (id) => (id === `\0${ART_ID}` ? `export default ${JSON.stringify(list())};` : null),
+    configureServer(server) {
+      // Art built while the dev server runs: the list follows, and the page reloads.
+      const changed = (file: string) => {
+        const rel = relative(root, file);
+        if (rel.startsWith("..") || !ART_DIRS.includes(rel.split(sep)[0] ?? "")) return;
+        const mod = server.moduleGraph.getModuleById(`\0${ART_ID}`);
+        if (mod) server.moduleGraph.invalidateModule(mod);
+        server.ws.send({ type: "full-reload" });
+      };
+      server.watcher.on("add", changed);
+      server.watcher.on("unlink", changed);
+    },
+  };
+};
+
+/**
+ * The boot's download plan, put in the page: the game's code (the chunk
+ * behind main.tsx's `import("./start.tsx")`, its imports and styles) and
+ * the WASM sim, each with its size, so the boot screen can count them in
+ * as they come (main.tsx). Builds only: the dev server serves modules one
+ * by one.
+ */
+const bootPlan = (): Plugin => ({
+  name: "shifty-boot-plan",
+  apply: "build",
+  transformIndexHtml: {
+    order: "post",
+    handler(_html, ctx) {
+      const bundle = ctx.bundle;
+      if (!bundle) return [];
+      const chunks = Object.values(bundle).filter((f) => f.type === "chunk");
+      const start = chunks.find((c) => c.facadeModuleId?.endsWith("/src/start.tsx"));
+      const entry = chunks.find((c) => c.isEntry);
+      if (!start) return [];
+      const files = new Set<string>();
+      const add = (name: string) => {
+        if (files.has(name) || name === entry?.fileName) return;
+        files.add(name);
+        const chunk = bundle[name];
+        if (chunk?.type !== "chunk") return;
+        for (const css of chunk.viteMetadata?.importedCss ?? []) files.add(css);
+        for (const i of chunk.imports) add(i);
+      };
+      add(start.fileName);
+      for (const f of Object.values(bundle))
+        if (f.type === "asset" && f.fileName.endsWith(".wasm")) files.add(f.fileName);
+      const sizeOf = (name: string) => {
+        const f = bundle[name];
+        if (!f) return 0;
+        return f.type === "chunk"
+          ? Buffer.byteLength(f.code)
+          : typeof f.source === "string"
+            ? Buffer.byteLength(f.source)
+            : f.source.byteLength;
+      };
+      const plan = [...files].map((f) => [`/${f}`, sizeOf(f)]);
+      // The fonts the boot screen's wordmark is set in come first: no flash of another face.
+      const fonts = Object.values(bundle)
+        .filter((f) => f.type === "asset" && /archivo-latin-wdth-(normal|italic)-.*\.woff2$/u.test(f.fileName))
+        .map((f) => ({
+          tag: "link",
+          attrs: { rel: "preload", as: "font", type: "font/woff2", crossorigin: "", href: `/${f.fileName}` },
+          injectTo: "head" as const,
+        }));
+      return [
+        ...fonts,
+        {
+          tag: "script",
+          attrs: { type: "application/json", id: "boot-plan" },
+          children: JSON.stringify(plan),
+          injectTo: "head",
+        },
+      ];
+    },
+  },
+});
+
 const LOBBY_ORIGIN = process.env.LOBBY_ORIGIN;
 
 type ProxyReq = { setHeader: (k: string, v: string) => void };
@@ -145,7 +263,7 @@ function asOrigin(origin: string) {
 }
 
 export default defineConfig({
-  plugins: [react(), devLobby(), noDevCode(), rustNotices()],
+  plugins: [react(), art(), bootPlan(), devLobby(), noDevCode(), rustNotices()],
   server: {
     port: 5173,
     strictPort: true,

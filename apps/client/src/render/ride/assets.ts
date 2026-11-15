@@ -3,7 +3,8 @@
 // (no materials), plus a detail and a mask texture, made by
 // art/ride/build.py into public/rides/.
 import * as THREE from "three/webgpu";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import type { Wait } from "../../loading.ts";
+import { artMatching, followArt, loadGltf } from "../art.ts";
 import { loadTexture } from "../rider/assets.ts";
 
 /** The bones a ride's mesh is skinned to, in this order. */
@@ -19,18 +20,14 @@ export interface RideAsset {
   bars: THREE.Vector3 | null;
 }
 
-const BASE = `${import.meta.env.BASE_URL}rides`;
-const gltf = new GLTFLoader();
+const BASE = "rides";
 const cache = new Map<string, Promise<RideAsset>>();
-let manifest: Promise<ReadonlySet<string>> | null = null;
+let built: ReadonlySet<string> | null = null;
 
 /** The ride models the art has built. */
-export function builtRides(): Promise<ReadonlySet<string>> {
-  manifest ??= fetch(`${BASE}/manifest.json`)
-    .then((r) => r.json())
-    .then((v: unknown) => new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []))
-    .catch(() => new Set<string>());
-  return manifest;
+export function builtRides(): ReadonlySet<string> {
+  built ??= new Set(artMatching(/^rides\/[^/]+\.glb$/u).map((p) => p.slice(BASE.length + 1, -4)));
+  return built;
 }
 
 /** A bone's place in RIDE_BONES (the root's if it isn't one). */
@@ -52,15 +49,17 @@ function remapJoints(mesh: THREE.SkinnedMesh): THREE.BufferGeometry {
   return geo;
 }
 
-/** A ride model of the art (e.g. `summer.ride.runabout`), loaded once. */
-export function loadRide(model: string): Promise<RideAsset> {
+/** A ride model of the art (e.g. `summer.ride.runabout`), loaded once; `wait` counts its download. */
+export function loadRide(model: string, wait: Wait | null): Promise<RideAsset> {
   let p = cache.get(model);
-  if (!p) {
+  // (Still on its way: counted in this wait too.)
+  if (p) followArt([`${BASE}/${model}.glb`, `${BASE}/${model}.detail.png`, `${BASE}/${model}.mask.png`], wait);
+  else {
     p = (async () => {
       const [file, detail, mask] = await Promise.all([
-        gltf.loadAsync(`${BASE}/${model}.glb`),
-        loadTexture(`${BASE}/${model}.detail.png`),
-        loadTexture(`${BASE}/${model}.mask.png`),
+        loadGltf(`${BASE}/${model}.glb`, wait),
+        loadTexture(`${BASE}/${model}.detail.png`, wait),
+        loadTexture(`${BASE}/${model}.mask.png`, wait),
       ]);
       file.scene.updateMatrixWorld(true);
       let mesh: THREE.SkinnedMesh | null = null;
@@ -77,6 +76,8 @@ export function loadRide(model: string): Promise<RideAsset> {
         bars: bone ? bone.getWorldPosition(new THREE.Vector3()) : null,
       };
     })();
+    // A ride that failed can be asked for again.
+    p.catch(() => cache.delete(model));
     cache.set(model, p);
   }
   return p;

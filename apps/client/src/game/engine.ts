@@ -3,11 +3,12 @@
 // reloads between them, so going from a menu into a race is instant.
 import type * as THREE from "three/webgpu";
 import init, { type InitOutput } from "../wasm/sim.js";
+import simUrl from "../wasm/sim_bg.wasm?url";
 import { setWarmer } from "../render/warm.ts";
 import { AutoResolution } from "./resolution.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
-import { booted, whileLoading } from "../loading.ts";
+import { type Wait, begin, bootLoad, booted, download, waitNow } from "../loading.ts";
 
 /** Something on screen, drawn every frame. */
 export interface Stage {
@@ -123,15 +124,20 @@ export class Engine {
   /** The engine, created on first use. */
   static get(): Promise<Engine> {
     Engine.booting ??= (async () => {
-      const wasm = await init().catch((e: unknown) => {
+      const wait = waitNow();
+      const wasm = await init({ module_or_path: download(simUrl, wait, "code") }).catch((e: unknown) => {
         booted();
         throw e;
       });
       const world = new World(document.querySelector<HTMLElement>("#app")!);
-      await world.init().catch((e: unknown) => {
-        booted();
-        throw e;
-      });
+      const starting = begin("scene", wait);
+      await world
+        .init()
+        .catch((e: unknown) => {
+          booted();
+          throw e;
+        })
+        .finally(() => starting.end());
       const engine = new Engine(wasm, world);
       if (import.meta.env.DEV && devParams.has("bench")) {
         const { installBench } = await import("./bench.ts");
@@ -139,7 +145,9 @@ export class Engine {
           engine.paused = paused;
         });
       }
-      setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root), false) : Promise.resolve()));
+      setWarmer((root, counted) =>
+        engine.render ? engine.warm(() => engine.compile(root), false, counted) : Promise.resolve(),
+      );
       if (!engine.render) booted();
       await world.renderer.setAnimationLoop((now: number) => engine.frame(now));
       return engine;
@@ -162,20 +170,24 @@ export class Engine {
 
   /**
    * Gets a stage that has just gone on ready: its shaders compiled (nothing
-   * is drawn meanwhile), what it shows in, and drawing smoothly. The loading
-   * sign is up until it shows; the boot screen comes off after.
+   * is drawn meanwhile), what it shows in, and drawing smoothly. The wait of
+   * the moment (the boot screen, or the loading sign once it takes long
+   * enough to notice) is up until it shows; the boot screen comes off after.
    */
   private async prepare(stage: Stage): Promise<void> {
     const late = new Promise<void>((resolve) => setTimeout(resolve, LOAD_MAX_MS));
-    const arriving = whileLoading(
-      (async () => {
-        if (this.render && stage.compile) await this.warm(() => stage.compile!());
-        await Promise.race([stage.loaded?.(), late]);
-      })(),
-    );
+    const wait = waitNow();
+    const arriving = (async () => {
+      if (this.render && stage.compile) await this.warm(() => stage.compile!(), true, wait);
+      await Promise.race([stage.loaded?.(), late]);
+    })();
     this.arriving = arriving.catch(() => {});
+    if (wait) void wait.during(arriving).catch(() => {});
     await arriving;
+    // Under the boot screen, drawing smoothly is part of the wait; elsewhere the screen is up and drawing.
+    const settling = wait === bootLoad() ? begin("settle", wait) : null;
     await this.settled();
+    settling?.end();
     booted();
   }
 
@@ -208,13 +220,17 @@ export class Engine {
    * time; the page (menus, timers, the netcode) carries on. With `hold`
    * (what is in the scene is new), nothing is drawn until it is done: the
    * canvas holds its last frame. Without (what compiles isn't in the scene
-   * yet), frames go on being drawn in between.
+   * yet), frames go on being drawn in between. `wait`: the wait it counts
+   * in (the one of the moment by default; null for none).
    */
-  warm(compile: () => Promise<void>, hold = true): Promise<void> {
+  warm(compile: () => Promise<void>, hold = true, wait: Wait | null = waitNow()): Promise<void> {
     this.warming++;
     if (hold) this.holding++;
     const run = this.warmed
-      .then(compile)
+      .then(() => {
+        const compiling = begin("shaders", wait && !wait.closed ? wait : null);
+        return compile().finally(() => compiling.end());
+      })
       .catch((e: unknown) => console.error(e))
       .finally(() => {
         this.warming--;

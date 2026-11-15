@@ -7,6 +7,16 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
+    /** What the boot screen, a season card or the loading sign says loads now. */
+    loadingSteps: {
+      code: "Downloading the game",
+      connect: "Connecting to the race server",
+      join: "Joining the race",
+      art: "Downloading riders and scenery",
+      scene: "Setting the scene",
+      shaders: "Getting the graphics ready",
+      settle: "Almost there",
+    },
     soundLocked: "Click, tap or press any key for sound",
     rotate: "Turn your screen sideways to play",
     retry: "Try again",

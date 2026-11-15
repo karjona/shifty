@@ -10,12 +10,15 @@ import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
 import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
-import { holdLoading } from "../loading.ts";
+import { type Work, begin, holdLoading, tracked, waitNow } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
 import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
+import { loadModels } from "../render/env/models.ts";
+import { prefetchLook } from "../render/rider/model.ts";
+import { prefetchRide } from "../render/ride/ride.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
@@ -39,7 +42,7 @@ import { disposeTree } from "./dispose.ts";
 import { Ghosts, ghostLabel, readGhost } from "./ghosts.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
-import { SeasonCard, SeasonChange } from "./season-change.ts";
+import { COURSE_STEPS, SeasonCard, SeasonChange } from "./season-change.ts";
 import { TouchControls } from "../touch/controls.ts";
 import { canTouch, keepAwake, touchScreen } from "../touch/device.ts";
 
@@ -204,6 +207,8 @@ export class RaceSession implements Stage {
   private covered = true;
   /** The race whose results came up last: the grid after them waits for the next course. */
   private resultsEvent = -1;
+  /** The race whose results fetched the other sport's art ahead. */
+  private fetchedAhead = -1;
   private intro: RaceIntro | null = null;
   /** The cameras once your race is over. */
   private tv: Broadcast | null = null;
@@ -244,13 +249,22 @@ export class RaceSession implements Stage {
     this.board = new Scoreboard(opts.hud);
   }
 
-  /** Takes down the loading sign put up by `joining`. */
+  /** Takes down the loading sign put up by `joining`, or ends the step it counts on the card. */
   private joinSign: (() => void) | null = null;
 
-  /** Puts the loading sign up saying how joining goes (null: joined, or turned away). */
-  private joining(label: (() => string) | null): void {
+  /** Says how joining goes (null: joined, or turned away): on the card's bar, or else on the loading sign. */
+  private joining(step: "connect" | "join" | null): void {
     this.joinSign?.();
-    this.joinSign = label ? holdLoading(label) : null;
+    this.joinSign = null;
+    if (!step) return;
+    const wait = this.card?.loading;
+    if (wait) {
+      const work: Work = wait.begin(step);
+      this.joinSign = () => work.end();
+    } else {
+      const m = messages().race;
+      this.joinSign = holdLoading(step === "connect" ? () => m.connecting : () => m.joining);
+    }
   }
 
   /** Paused (a menu is open over the race): the rider gets no input. */
@@ -327,12 +341,12 @@ export class RaceSession implements Stage {
     }
     if (this.opts.render ?? engine.render) {
       this.card = new SeasonCard(ticketSeason(this.opts.ticket.token), false);
-      this.card.loading = true;
+      this.card.load("course", ["connect", "join", ...COURSE_STEPS]);
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
       this.tv = new Broadcast();
     }
-    this.joining(() => messages().race.connecting);
+    this.joining("connect");
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
       this.opts.status(e instanceof Error ? e.message : String(e));
@@ -355,7 +369,7 @@ export class RaceSession implements Stage {
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.joining(() => messages().race.joining);
+    this.joining("join");
     if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -513,6 +527,9 @@ export class RaceSession implements Stage {
     this.shown = false;
     const old = this.env;
     const conditions = this.conditions;
+    // (The card's wait, or the sign's.)
+    const wait = waitNow();
+    const building = begin("scene", wait);
     if (course.sport === "snow") {
       this.env = new Mountain(
         course.run,
@@ -550,8 +567,9 @@ export class RaceSession implements Stage {
     const env = this.env;
     const ghostsIn = this.ghosts?.attach(engine.world.scene, env, this.state.course) ?? Promise.resolve();
     engine.world.addRiders(this.slots);
-    await env.ready;
-    await engine.warm(() => engine.world.compile());
+    building.end();
+    await tracked("scene", env.ready ?? Promise.resolve(), wait);
+    await engine.warm(() => engine.world.compile(), true, wait);
     // (The roster may have come in meanwhile.)
     if (this.client !== client) return;
     this.readRoster(engine, client);
@@ -561,8 +579,22 @@ export class RaceSession implements Stage {
     if (this.env !== env || this.stopped) return;
     this.ready = true;
     // It draws behind the card until it runs smoothly.
-    await engine.settled();
+    await tracked("settle", engine.settled(), wait);
     if (this.env === env && !this.stopped) this.shown = true;
+  }
+
+  /**
+   * Fetches what the plan's other sport needs in the background while a
+   * race's results are up (a Tilt rides both): the next course's season
+   * card then waits on building and shaders, not on downloads.
+   */
+  private fetchAhead(): void {
+    const sport = this.sport === "snow" ? "summer" : "winter";
+    if (sport === "winter") void loadModels("snow", null);
+    for (const look of this.looks.values()) {
+      prefetchLook(look, sport);
+      prefetchRide(sport, look.outfits[sport].ride);
+    }
   }
 
   /** The HUD is off while a season card is up, and while the start has the screen. */
@@ -666,8 +698,13 @@ export class RaceSession implements Stage {
     // The course on screen is this race's, and nothing covers it: the
     // server can start the race as far as this screen goes. (After a
     // race's results, the grid waits for the plan's next course.)
-    if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
-    else if (this.trial) {
+    if (race.phase === RESULTS) {
+      this.resultsEvent = race.eventIndex;
+      if (render && race.eventIndex < race.eventCount - 1 && this.fetchedAhead !== race.eventIndex) {
+        this.fetchedAhead = race.eventIndex;
+        this.fetchAhead();
+      }
+    } else if (this.trial) {
       this.resultsEvent = -1;
       // A run's results stand against the ghosts it raced (a new best replaces yours after).
       this.trialRaced = (this.ghosts?.list ?? [])

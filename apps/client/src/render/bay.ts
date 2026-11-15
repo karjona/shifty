@@ -172,6 +172,8 @@ export class Bay implements Environment {
   readonly ready: Promise<void> = Promise.resolve();
 
   constructor(opts: BayOptions) {
+    // The club's art comes down while the rest is built.
+    const club = opts.course.place === "bay" ? new ClubArt() : null;
     this.conditions = opts.conditions ?? homeConditions("jetski");
     this.look = new ConditionsLook(this.conditions, opts.look ?? BAY_LOOK);
     this.topSpeed = opts.topSpeed;
@@ -205,10 +207,10 @@ export class Bay implements Environment {
     if (this.water) this.water.userData.noMerge = true;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
     this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
-    if (opts.course.place === "bay") {
-      this.club = new ClubArt();
-      this.group.add(this.club.group);
-      this.ready = this.club.ready;
+    if (club) {
+      this.club = club;
+      this.group.add(club.group);
+      this.ready = club.ready;
     }
     this.gulls = new Gulls(this.scenery.gulls);
     this.gulls.group.userData.weather = true;

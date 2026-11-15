@@ -60,6 +60,7 @@ import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
+import { waitNow } from "../loading.ts";
 import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan, liftEnds } from "./mountain-built.ts";
 import { farLandscape, landscape } from "./mountain-far.ts";
@@ -569,6 +570,8 @@ export class Mountain implements Environment {
 
   /** `conditions`: the race's (a clear winter noon if left out); `course`: which run (`sim::CourseId`), for its scenery. */
   constructor(run: RunData, terrain: Terrain, conditions?: Conditions, course = 1) {
+    // The scenery's models come down while the mountain is built.
+    const models = loadModels("snow", waitNow());
     this.conditions = conditions ?? homeConditions("snow");
     this.run = run;
     this.terrain = terrain;
@@ -607,7 +610,7 @@ export class Mountain implements Environment {
     this.trails.group.userData.noMerge = true;
     this.group.add(this.trails.group, this.powder.sprite, this.mist.sprite, this.precipitation.group);
     this.group.add(skyDome(), this.cumulus.mesh);
-    this.ready = loadModels("snow").then((models) => this.buildScenery(models));
+    this.ready = models.then((m) => this.buildScenery(m));
   }
 
   /** What stands on the mountain, once its models are in. */

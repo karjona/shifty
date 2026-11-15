@@ -5,16 +5,27 @@ import { createRoot } from "react-dom/client";
 import { installSound } from "./audio/ui.ts";
 import { App } from "./menu/app.tsx";
 import { devParams } from "./dev-params.ts";
-import { booted } from "./loading.ts";
+import { booted, setWords } from "./loading.ts";
 import { messages, onLocale } from "./i18n/index.ts";
 import { installScreen } from "./touch/device.ts";
+import { Engine } from "./game/engine.ts";
 
 installSound();
 installScreen();
+setWords(
+  () => messages().common.loadingSteps,
+  () => messages().common.loading,
+);
 onLocale(() => {
   const rotate = document.querySelector("#rotate span");
   if (rotate) rotate.textContent = messages().common.rotate;
+  setWords(
+    () => messages().common.loadingSteps,
+    () => messages().common.loading,
+  );
 });
+// Every screen draws over the engine: it starts at once, while the first screen finds out what to show.
+void Engine.get().catch(() => {});
 
 // The quick race, the look checks, the podium and the sound board only exist on the dev server: builds
 // drop these branches and the modules with them (and vite.config.ts fails a

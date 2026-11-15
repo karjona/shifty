@@ -1,0 +1,14 @@
+# How long browsers keep what the Worker serves (Workers static assets read
+# this file; it is not served). Built code, styles, fonts and the WASM sim
+# carry a hash of their content in their names, and the game asks for its
+# art by a hash of its content (`?v=`, see render/art.ts): a new version is
+# a new URL, so a browser keeps these for good. Everything else (the page
+# itself, the icons) is checked with the server each time.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/riders/*
+  Cache-Control: public, max-age=31536000, immutable
+/rides/*
+  Cache-Control: public, max-age=31536000, immutable
+/env/*
+  Cache-Control: public, max-age=31536000, immutable

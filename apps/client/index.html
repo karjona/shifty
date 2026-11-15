@@ -18,11 +18,20 @@
   </head>
   <body>
     <div id="boot">
-      <div class="boot-mark" aria-hidden="true">
-        <span class="deg">23.4°</span><span class="axis"></span><span class="name">SHIFTY</span>
+      <div class="boot-stack">
+        <div class="boot-mark" aria-hidden="true">
+          <span class="deg">23.4°</span><span class="axis"></span><span class="name">SHIFTY</span>
+        </div>
+        <div class="load" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="load-bar"><i class="load-fill"></i></div>
+          <div class="load-line"><span class="load-what"></span><span class="load-pct"></span></div>
+        </div>
       </div>
     </div>
-    <div id="loading" class="on" role="status"><span></span></div>
+    <div id="loading" role="status">
+      <span class="load-what"></span>
+      <div class="load-bar off"><i class="load-fill"></i></div>
+    </div>
     <div id="rotate" role="alert">
       <svg viewBox="0 0 120 120" aria-hidden="true">
         <path class="arc" d="M24 46a40 40 0 0 1 38-30" />

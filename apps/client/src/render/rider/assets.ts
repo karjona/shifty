@@ -1,10 +1,11 @@
 // Rider art, loaded once and shared: each model is a .glb of skinned
 // pieces (no materials) plus a detail and a mask texture per piece (for the
 // body's skin, its drawn anatomy instead), made by art/rider/build.py into
-// public/riders/<body>/.
+// public/riders/<body>/. A model's textures come down with it, not after it.
 import * as THREE from "three/webgpu";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { Body as BodyKind } from "@shifty/rider";
+import type { Wait } from "../../loading.ts";
+import { artMatching, followArt, hasArt, loadBitmap, loadGltf } from "../art.ts";
 import { BONE, BONES, boneOf } from "./skeleton.ts";
 
 /** How a piece's surface takes the light. */
@@ -43,27 +44,19 @@ export interface ModelAsset {
   rest: THREE.Vector3[];
 }
 
-const BASE = `${import.meta.env.BASE_URL}riders`;
-const gltf = new GLTFLoader();
-/** Decoded off the main thread, as they are: the maps hold raw factors, not colours. */
-const images = new THREE.ImageBitmapLoader().setOptions({ premultiplyAlpha: "none", colorSpaceConversion: "none" });
+const BASE = "riders";
 const cache = new Map<string, Promise<ModelAsset>>();
-let manifest: Promise<Record<string, string[]>> | null = null;
+const built = new Map<BodyKind, ReadonlySet<string>>();
 
 /** The models the art has built for a body. */
-export async function builtModels(body: BodyKind): Promise<ReadonlySet<string>> {
-  manifest ??= fetch(`${BASE}/manifest.json`)
-    .then((r) => r.json())
-    .then((v: unknown) => {
-      const out: Record<string, string[]> = {};
-      if (typeof v === "object" && v !== null) {
-        for (const [k, list] of Object.entries(v)) {
-          if (Array.isArray(list)) out[k] = list.filter((x): x is string => typeof x === "string");
-        }
-      }
-      return out;
-    });
-  return new Set((await manifest)[body] ?? []);
+export function builtModels(body: BodyKind): ReadonlySet<string> {
+  let set = built.get(body);
+  if (!set) {
+    const prefix = `${BASE}/${body}/`;
+    set = new Set(artMatching(/\.glb$/u).flatMap((p) => (p.startsWith(prefix) ? [p.slice(prefix.length, -4)] : [])));
+    built.set(body, set);
+  }
+  return set;
 }
 
 function finishOf(v: unknown): Finish {
@@ -97,15 +90,18 @@ const BLANK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 BLANK.needsUpdate = true;
 
 /** A face overlay of the art (e.g. `brows.2`, `beard.1`): how much of each texel of the face it covers. */
-export function loadOverlay(body: BodyKind, name: string): Promise<THREE.Texture | null> {
-  return loadTexture(`${BASE}/${body}/body.face.${name}.png`).catch(() => null);
+export function loadOverlay(body: BodyKind, name: string, wait: Wait | null): Promise<THREE.Texture | null> {
+  const path = `${BASE}/${body}/body.face.${name}.png`;
+  return hasArt(path) ? loadTexture(path, wait).catch(() => null) : Promise.resolve(null);
 }
 
-/** A texture of the art (a map of raw factors, not colours), loaded once. */
-export function loadTexture(url: string): Promise<THREE.Texture> {
-  let t = textures.get(url);
-  if (!t) {
-    t = images.loadAsync(url).then((bitmap) => {
+/** A texture of the art (a path under public/; a map of raw factors, not colours), loaded once. */
+export function loadTexture(path: string, wait: Wait | null): Promise<THREE.Texture> {
+  let t = textures.get(path);
+  // (Still on its way: counted in this wait too.)
+  if (t) followArt([path], wait);
+  else {
+    t = loadBitmap(path, wait).then((bitmap) => {
       const tex = new THREE.Texture(bitmap);
       // The art's UVs follow glTF (origin top left).
       tex.flipY = false;
@@ -114,9 +110,16 @@ export function loadTexture(url: string): Promise<THREE.Texture> {
       tex.needsUpdate = true;
       return tex;
     });
-    textures.set(url, t);
+    // A texture that failed can be asked for again.
+    t.catch(() => textures.delete(path));
+    textures.set(path, t);
   }
   return t;
+}
+
+/** A texture of the art if it has it (null if not). */
+function maybeTexture(path: string, wait: Wait | null): Promise<THREE.Texture | null> {
+  return hasArt(path) ? loadTexture(path, wait).catch(() => null) : Promise.resolve(null);
 }
 
 /** Rewrites a skinned mesh's joint indices from its glTF skin's order to BONES order. */
@@ -136,13 +139,25 @@ function remapJoints(mesh: THREE.SkinnedMesh): THREE.BufferGeometry {
   return geo;
 }
 
-/** A model of the art (e.g. `body`, `summer.vest.foam`) for a body, loaded once. */
-export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
+/** The textures of a model's pieces (`<model>.<piece>.<map>.png`): the model's file names its pieces, but they
+ * need not wait for it. */
+function pieceTextures(key: string): string[] {
+  const prefix = `${BASE}/${key}.`;
+  return artMatching(/\.(?:detail|mask|flat|lines)\.png$/u).filter(
+    (p) => p.startsWith(prefix) && /^[^.]+\.[a-z]+\.png$/u.test(p.slice(prefix.length)),
+  );
+}
+
+/** A model of the art (e.g. `body`, `summer.vest.foam`) for a body, loaded once; `wait` counts its download. */
+export function loadModel(body: BodyKind, model: string, wait: Wait | null): Promise<ModelAsset> {
   const key = `${body}/${model}`;
   let p = cache.get(key);
-  if (!p) {
+  // (Still on its way: counted in this wait too.)
+  if (p) followArt([`${BASE}/${key}.glb`, ...pieceTextures(key)], wait);
+  else {
+    for (const path of pieceTextures(key)) void loadTexture(path, wait).catch(() => null);
     p = (async () => {
-      const file = await gltf.loadAsync(`${BASE}/${key}.glb`);
+      const file = await loadGltf(`${BASE}/${key}.glb`, wait);
       file.scene.updateMatrixWorld(true);
       const meshes: THREE.SkinnedMesh[] = [];
       file.scene.traverse((o) => {
@@ -160,10 +175,10 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
           const name = m.name.replace(/_\d+$/, "");
           const skin = model === "body" && name === "skin";
           const [detail, mask, flat, lines] = await Promise.all([
-            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.detail.png`),
-            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.mask.png`),
-            name === "face" ? loadTexture(`${BASE}/${key}.${name}.flat.png`).catch(() => null) : Promise.resolve(null),
-            skin ? loadTexture(`${BASE}/${key}.${name}.lines.png`) : Promise.resolve(null),
+            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.detail.png`, wait),
+            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.mask.png`, wait),
+            name === "face" ? maybeTexture(`${BASE}/${key}.${name}.flat.png`, wait) : Promise.resolve(null),
+            skin ? loadTexture(`${BASE}/${key}.${name}.lines.png`, wait) : Promise.resolve(null),
           ]);
           const finish: unknown = Reflect.get(m.userData, "finish");
           const tints: unknown = Reflect.get(m.userData, "tints");
@@ -185,6 +200,8 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
       );
       return { pieces, rest };
     })();
+    // A model that failed can be asked for again.
+    p.catch(() => cache.delete(key));
     cache.set(key, p);
   }
   return p;

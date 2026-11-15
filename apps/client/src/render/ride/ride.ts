@@ -8,7 +8,7 @@ import { texture, vec3 } from "three/tsl";
 import { type Colourway, type Sport, defaultOutfits, item } from "@shifty/rider";
 import { inkId } from "../cel/material.ts";
 import { CelTintMaterial, outlineOf } from "../cel/rider.ts";
-import { whileLoading } from "../../loading.ts";
+import { waitNow } from "../../loading.ts";
 import { warmUp } from "../warm.ts";
 import { type RideAsset, builtRides, loadRide } from "./assets.ts";
 
@@ -18,12 +18,18 @@ const RIM = 0.15;
 const SPEC_SIZE = 0.018;
 
 /** The model that draws an item: its own, or the sport's starter ride until its art is built. */
-async function modelOf(sport: Sport, id: string | undefined): Promise<string | null> {
-  const built = await builtRides();
+function modelOf(sport: Sport, id: string | undefined): string | null {
+  const built = builtRides();
   const own = id ? item(id)?.model : undefined;
   if (own && built.has(own)) return own;
   const starter = item(defaultOutfits("male")[sport].ride ?? "")?.model;
   return starter && built.has(starter) ? starter : null;
+}
+
+/** Fetches an item's ride ahead, in the background: a ride put on later comes at once. */
+export function prefetchRide(sport: Sport, id: string | undefined): void {
+  const model = modelOf(sport, id);
+  if (model) void loadRide(model, null).catch(() => null);
 }
 
 export class Ride {
@@ -50,36 +56,36 @@ export class Ride {
     this.colours = colours;
     this.mat?.setTints(...colours);
     const version = ++this.version;
-    void whileLoading(
-      (async () => {
-        const model = await modelOf(sport, id);
-        if (version !== this.version || model === this.model) {
-          if (version === this.version) this.markReady();
-          return;
-        }
-        if (!model) {
-          this.markReady();
-          return;
-        }
-        const asset = await loadRide(model);
-        if (version !== this.version) return;
-        const built = this.build(model, asset);
-        await warmUp(built.root);
-        if (version !== this.version) {
-          built.mat.dispose();
-          return;
-        }
-        this.clear();
-        this.model = model;
-        this.mat = built.mat;
-        this.mat.setTints(...this.colours);
-        this.bars = built.bars;
-        this.meshes = built.root.children.slice();
-        this.group.add(...this.meshes);
-        this.steer(this.turn);
+    const wait = waitNow();
+    const putting = (async () => {
+      const model = modelOf(sport, id);
+      if (version !== this.version || model === this.model) {
+        if (version === this.version) this.markReady();
+        return;
+      }
+      if (!model) {
         this.markReady();
-      })().catch(() => this.markReady()),
-    );
+        return;
+      }
+      const asset = await loadRide(model, wait);
+      if (version !== this.version) return;
+      const built = this.build(model, asset);
+      await warmUp(built.root, wait);
+      if (version !== this.version) {
+        built.mat.dispose();
+        return;
+      }
+      this.clear();
+      this.model = model;
+      this.mat = built.mat;
+      this.mat.setTints(...this.colours);
+      this.bars = built.bars;
+      this.meshes = built.root.children.slice();
+      this.group.add(...this.meshes);
+      this.steer(this.turn);
+      this.markReady();
+    })().catch(() => this.markReady());
+    void (wait ? wait.during(putting) : putting);
   }
 
   /** Turns the bars about their upright (rad, + to the left). */
