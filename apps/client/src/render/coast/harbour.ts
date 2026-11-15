@@ -338,7 +338,8 @@ export function buildBreakwater(
   const stone = new Shape();
   addCore(stone, l, half, radius, top);
   addArmour(stone, l, half, radius, top, 7);
-  group.add(stone.mesh(rockMaterial()));
+  // (A thousand stones: their lit and shaded planes give them form without a pass through the shadow map.)
+  group.add(stone.mesh(rockMaterial(), "receive"));
 
   const works = new Shape();
   const deck: LandData = { ...l, radius: half, kind: "mole" };
