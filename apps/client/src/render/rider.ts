@@ -73,13 +73,13 @@ export class JetskiModel implements RiderModel {
   private stunt = new StuntHold();
   private lastVel: THREE.Vector3 | null = null;
 
-  /** Without an appearance, a rider made up for the seat. */
-  constructor(slot: number, appearance: Appearance | null) {
+  /** Without an appearance, a rider made up for the seat. `cold`: in cold-water gear. */
+  constructor(slot: number, appearance: Appearance | null, cold = false) {
     const look = appearance ?? botAppearance(1, slot);
     this.ski = new Ride("summer", look.outfits.summer.ride, rideColours(look, slot));
     this.mesh.add(this.ski.group);
 
-    this.figure = new RiderFigure(look, "summer");
+    this.figure = new RiderFigure(look, "summer", cold);
     this.figure.group.position.copy(DECK);
     this.body.add(this.figure.group);
     this.mesh.add(this.body);

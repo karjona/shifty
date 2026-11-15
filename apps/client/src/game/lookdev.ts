@@ -130,7 +130,7 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
       riders = [];
       skis = Array.from({ length: count }, (_, i) => {
         const a = appearanceFor(seed, i, params);
-        return sport === "winter" ? new BoarderModel(i, a) : new JetskiModel(i, a);
+        return sport === "winter" ? new BoarderModel(i, a) : new JetskiModel(i, a, params.has("cold"));
       });
       for (const j of skis) world.scene.add(j.mesh);
     } else if (standing) {
@@ -143,7 +143,10 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
         return a;
       });
     } else {
-      riders = Array.from({ length: count }, (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport));
+      riders = Array.from(
+        { length: count },
+        (_, i) => new RiderFigure(appearanceFor(seed, i, params), sport, params.has("cold")),
+      );
       for (const r of riders) world.scene.add(r.group);
     }
     label.textContent = `${shot} · ${sport} · seed ${seed} · keys: F shot, R new looks, ←→ orbit`;

@@ -33,6 +33,29 @@ import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
 
+/** The body's regions, in the art's order (`REGIONS` in art/rider/figure.py), as bits of a set. */
+const REGIONS = [
+  "torso",
+  "hips",
+  "thighs",
+  "shins",
+  "feet",
+  "upperarms",
+  "forearms",
+  "hands",
+  "head",
+  "flanks",
+] as const;
+const regionBit = (name: (typeof REGIONS)[number]) => 1 << REGIONS.indexOf(name);
+const REGION_COUNT = 14;
+/** Cold-water gear: a wetsuit from the neck to the wrists and ankles, gloves and boots, its forearms and shins
+ * in the life vest's accent colour. */
+const WETSUIT = {
+  regions: ((1 << REGION_COUNT) - 1) & ~regionBit("head"),
+  panels: regionBit("forearms") | regionBit("shins"),
+  neoprene: 0x1e2026,
+};
+
 /** A face at rest: what a pose that says nothing of the face leaves it as. */
 const RESTING: FaceState = { blink: 0 };
 
@@ -122,6 +145,8 @@ export class RiderFigure {
   private meshes: THREE.SkinnedMesh[] = [];
   private materials: Painted[] = [];
   private face: CelTintMaterial | null = null;
+  /** The colour of the wetsuit's panels, in cold-water gear. */
+  private wetsuit: number | null = null;
   /** What the figure is built as (the look but its paint, what it wears, the sport). */
   private key = "";
   /** The latest look asked for: its paint goes on whatever is built. */
@@ -135,14 +160,17 @@ export class RiderFigure {
   readonly ready: Promise<void>;
   private markReady: () => void = () => {};
 
-  constructor(appearance: Appearance, sport: Sport) {
+  /** `cold`: in cold-water gear (on the water). */
+  constructor(appearance: Appearance, sport: Sport, cold = false) {
     this.ready = new Promise((resolve) => (this.markReady = resolve));
-    this.set(appearance, sport);
+    this.set(appearance, sport, cold);
   }
 
   /** Dresses the figure: rebuilt when its shape or what it wears changed, repainted when only colours or size did. */
-  set(appearance: Appearance, sport: Sport): void {
+  set(appearance: Appearance, sport: Sport, cold = false): void {
     this.look = appearance.look;
+    const vest = sport === "summer" ? appearance.outfits.summer.vest : undefined;
+    this.wetsuit = cold && sport === "summer" ? ((vest ? item(vest)?.colours[2] : undefined) ?? 0x8a8f96) : null;
     const shape: Partial<Look> = { ...appearance.look };
     for (const part of ["skin", "hairColor", "eyeColor", "height", "build"] satisfies PaintPart[]) delete shape[part];
     const key = JSON.stringify([shape, appearance.outfits[sport], sport]);
@@ -293,7 +321,12 @@ export class RiderFigure {
   private repaint(): void {
     const look = this.look;
     if (!look || !this.rigFor) return;
-    for (const m of this.materials) m.mat.setTints(...tintsOf(look, m.tints, m.colours));
+    const suit = this.wetsuit;
+    for (const m of this.materials) {
+      m.mat.setTints(...tintsOf(look, m.tints, m.colours));
+      if (m.tints === "look")
+        m.mat.setSuit(suit === null ? 0 : WETSUIT.regions, WETSUIT.panels, WETSUIT.neoprene, suit ?? 0);
+    }
     this.group.scale.setScalar(heightScale(this.rigFor, look.height));
   }
 

@@ -18,7 +18,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
-import { type Conditions, homeConditions } from "../game/conditions.ts";
+import { type Conditions, coldWater, homeConditions } from "../game/conditions.ts";
 import { mergeStatic } from "./merge.ts";
 import { ClubArt } from "./club.ts";
 import { celify, inkNode, inkOnlyInPass } from "./cel/material.ts";
@@ -238,7 +238,7 @@ export class Bay implements Environment {
   }
 
   makeRider(slot: number, appearance: Appearance | null): RiderModel {
-    return new JetskiModel(slot, appearance);
+    return new JetskiModel(slot, appearance, coldWater(this.conditions));
   }
 
   private buildWater(): void {

@@ -129,6 +129,11 @@ export class CelTintMaterial extends CelMaterial {
   private accent = uniform(new THREE.Color());
   private hidden = uniform(0);
   private blink = uniform(0);
+  /** A wetsuit over the skin: the body regions it covers, those of them in its panels' colour, and its colours. */
+  private suit = uniform(0);
+  private suitPanels = uniform(0);
+  private suitMain = uniform(new THREE.Color());
+  private suitPanel = uniform(new THREE.Color());
   /** The flat colour, also used by the outline. */
   readonly albedo: THREE.Node<"vec3">;
   readonly regionMask: THREE.Node<"bool"> | null = null;
@@ -165,20 +170,25 @@ export class CelTintMaterial extends CelMaterial {
       crease: 0.7,
     });
     this.receivedShadowPositionNode = positionWorld.add(SUN_DIR.mul(SHADOW_LIFT));
+    const region = floor(attribute<"float">("_region", "float").add(0.5));
+    /** 1 where the fragment's body region is one of `bits`' (a set of regions, one bit each). */
+    const among = (bits: THREE.Node<"float">) => mod(floor(bits.div(pow(2, region))), 2).greaterThan(0.5);
     if (regions) {
-      const region = floor(attribute<"float">("_region", "float").add(0.5));
-      this.regionMask = mod(floor(this.hidden.div(pow(2, region))), 2).lessThan(0.5);
+      this.regionMask = among(this.hidden).not();
       this.maskNode = this.regionMask;
     }
     const [t0, t1, t2] = [this.main, this.second, this.accent];
     if (lines) {
       const drawn = texture(lines);
-      const skin = t0.rgb;
-      this.albedo = mix(skin, skin.mul(vec3(LINE_TONE.r, LINE_TONE.g, LINE_TONE.b)), penLine(drawn.r));
+      // A wetsuit is the skin in another colour: neoprene, cut in panels along the body's regions.
+      const suited = regions ? among(this.suit).select(1, 0) : float(0);
+      const panel = regions ? among(this.suitPanels).select(1, 0) : float(0);
+      const base = mix(t0.rgb, mix(this.suitMain.rgb, this.suitPanel.rgb, panel), suited);
+      this.albedo = mix(base, base.mul(vec3(LINE_TONE.r, LINE_TONE.g, LINE_TONE.b)), penLine(drawn.r));
       this.colorNode = this.albedo;
       // (The art stores "no change" as 128.)
       this.biasNode = drawn.g.sub(128 / 255).mul(-2 * ANATOMY_SHADE);
-      this.shadeNode = warmShade(skin);
+      this.shadeNode = mix(warmShade(base), vec3(COOL_SHADE.r, COOL_SHADE.g, COOL_SHADE.b), suited);
       return;
     }
     const g = texture(detail).rgb;
@@ -280,6 +290,14 @@ export class CelTintMaterial extends CelMaterial {
   /** Sets what the face is doing (a face's material only). */
   setFace(face: FaceState): void {
     this.blink.value = face.blink;
+  }
+
+  /** Puts a wetsuit over body `regions` (a set, one bit each; 0 for none), `panels` of them in `panel`'s colour. */
+  setSuit(regions: number, panels: number, main: number, panel: number): void {
+    this.suit.value = regions;
+    this.suitPanels.value = panels;
+    this.suitMain.value.setHex(main);
+    this.suitPanel.value.setHex(panel);
   }
 
   hide(regions: number): void {
