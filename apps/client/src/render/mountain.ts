@@ -2,12 +2,16 @@
 // heights (a ribbon of vertices along the run, fine where the riding is, and
 // a coarse grid for the mountain around it), so the slope you see is the
 // slope you ride. The snow shows its shape: a low sun, shade baked into
-// hollows, blue dye lines on lips and knuckles, and old board tracks
-// streaking down the run. Around it: pines crowding the run's edges, red
-// netting fences, checkpoint flags, the start and finish arches, the
-// chairlift, rocks, a lodge, peaks in the haze, falling snow, powder thrown
-// up by the boards, and the tracks they carve; and what each run has of its
-// own (runs.ts: outcrops, a lift station, a lake, a creek, logs).
+// hollows, the forest's shade thrown across it, blue dye lines on lips and
+// knuckles, old board tracks streaking down the run, and bare rock in its
+// beds where the mountain is steep. Around it, built once the scenery's
+// models are in (`ready`): the forest (mountain-forest.ts), rocks and rock
+// walls (mountain-rocks.ts), the village, the lift, gantries, gates, flags
+// and the crowd (mountain-built.ts), blown snow, smoke and birds
+// (mountain-life.ts), the land beyond down to the sea (mountain-far.ts),
+// red netting, falling snow, powder thrown up by the boards and the tracks
+// they carve; and what each run has of its own (runs.ts: a lake, a creek,
+// logs).
 //
 // All of it in the race's conditions (see look.ts): deep powder in winter;
 // in fall a thin white run through brown slopes, rocks poking through; in
@@ -21,6 +25,7 @@ import {
   abs,
   attribute,
   cameraPosition,
+  cameraViewMatrix,
   clamp,
   float,
   floor,
@@ -31,6 +36,7 @@ import {
   mix,
   mx_noise_float,
   normalWorld,
+  positionLocal,
   positionWorld,
   sin,
   smoothstep,
@@ -40,19 +46,25 @@ import {
   vertexStage,
 } from "three/tsl";
 import { noise4 } from "./cel/noise.ts";
-import { FOLIAGE, LOOK, SNOW, cut0 } from "./cel/look.ts";
+import { LOOK, cut0 } from "./cel/look.ts";
 import { Precipitation } from "./cel/precip.ts";
 import { ConditionsLook } from "./look.ts";
 import { CarveTrails } from "./trails.ts";
 import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
-import { peakRange } from "./scenery.ts";
-import { celify } from "./cel/material.ts";
+import { CelMaterial, celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
-import { creek, lake, lipProps, liftStation, outcrops, runAt, runPoint } from "./mountain-props.ts";
+import { creek, lake, lipProps, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
+import { type Models, loadModels } from "./env/models.ts";
+import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
+import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
+import { farLandscape } from "./mountain-far.ts";
+import { MountainLife } from "./mountain-life.ts";
+import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
+import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
 export interface RunPoint {
@@ -183,10 +195,16 @@ const GRID_SINK = 0.3;
 /** Coarse vertices this close to the run hide under the ribbon. */
 const GRID_HIDE = RIBBON_HALF - GRID_STEP;
 const ROWS_PER_CHUNK = 96;
-/** Pines are batched in square cells this wide (m). */
-const FOREST_CELL = 96;
-/** Pine cells further than this from the camera (m) are lost in the fog. */
-const FOREST_FAR = 520;
+/** The fog's range as the conditions' look works it out (m), and how far a clear day sees on the mountain. */
+const FOG_NEAR = 45;
+const FOG_FAR = 330;
+const CLEAR_NEAR = 80;
+const CLEAR_FAR = 4000;
+/** The forest is cut back this far either side of the chairlift's line (m), from this far past its end towers. */
+const LIFT_SWATHE = 8;
+const LIFT_REACH = 270;
+/** Trees are drawn out to this far (m), fog allowing. */
+const FOREST_FAR = 1300;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
 const DYE_BREAK = 0.16;
 /** How far back up the approach from the crest the dye reaches (m). */
@@ -198,6 +216,11 @@ const PITCH_SPAN = 9;
 const SNOW_EVERYWHERE = -1000;
 /** The groomed snow reaches this far past the riding width (m). */
 const RUN_EDGE = 4;
+
+/** Snow shades to a cool violet-blue, as drawn. */
+const SNOW_SHADE = [0.6, 0.67, 1.0] as const;
+/** Faces off the run steeper than this (the normal's height) are bare rock. */
+const ROCK_FROM = 0.72;
 
 /** Deterministic noise in [0, 1). */
 function rng(seed: number): () => number {
@@ -212,13 +235,6 @@ function rng(seed: number): () => number {
 
 const flat = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
   new THREE.MeshStandardNodeMaterial({ color, roughness: 0.85, flatShading: true, ...opts });
-
-/** Dark shingles, snowed on as deep as the snow lies. */
-function roofMaterial(): THREE.MeshStandardNodeMaterial {
-  const m = flat(0x4e4440);
-  m.userData.outdoor = FOLIAGE.none;
-  return m;
-}
 
 /** Offsets across the ribbon: fine on the run, coarser up the walls and beyond. */
 function ribbonOffsets(): Float32Array {
@@ -260,8 +276,13 @@ const pick = (v: THREE.Node<"vec3">, k: number) => (k === 0 ? v.x : k === 1 ? v.
  * knuckles (`dye`).
  * Fine detail fades out where it would be smaller than a pixel.
  */
-function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
-  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
+function snowMaterial(ribbon: boolean): CelMaterial {
+  // Steep faces off the run are bare rock.
+  const steep = float(ROCK_FROM)
+    .sub(normalWorld.y)
+    .add(noise4(positionWorld.xz.mul(0.023)).z.mul(0.1))
+    .add(noise4(positionWorld.xz.mul(0.19)).w.mul(0.025));
+  const rock = ribbon ? cut0(steep).mul(float(1).sub(smoothstep(0.3, 0.6, attribute("run", "float")))) : cut0(steep);
   // How deep the snow lies (0 = bare ground, 1 = covered): on the run it is
   // groomed (patchy at its edges when the cover is thin); off it, down to the
   // snow line, deeper in hollows and thinner on steep faces.
@@ -293,7 +314,7 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     });
     return covered;
   })();
-  mat.colorNode = Fn(() => {
+  const colour = Fn(() => {
     const p = positionWorld;
     const near = smoothstep(90, 20, p.distance(cameraPosition));
     const drift = noise4(p.xz.mul(0.045)).x.mul(0.5).add(0.5);
@@ -357,16 +378,34 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
       // A thin cover is scratchy: grass and earth showing through in specks.
       If(LOOK.runSnow.x.greaterThan(0.001), () => {
         const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
-        const speck = cut0(noise4(p.xz.mul(2.3)).x.sub(float(0.8).sub(thinHere.mul(0.4))))
+        // Bare earth in small patches where it is thinnest (grass stands in them: see `grassTufts`).
+        const where = noise4(p.xz.mul(1.3)).x.sub(float(0.86).sub(thinHere.mul(0.4)));
+        const earth = cut0(where)
           .mul(smoothstep(0.05, 0.3, thinHere))
           .mul(near);
-        sc.assign(mix(sc, LOOK.ground2, speck.mul(0.85)));
+        sc.assign(mix(sc, LOOK.ground2, earth.mul(0.8)));
       });
       If(LOOK.runSnow.y.greaterThan(0.001), () => {
         const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
         sc.assign(mix(sc, sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z));
       });
       c = mix(sc, mix(sc, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
+      // Snow blown along the run in a wind: pale streaks snaking downwind.
+      const blown = c.toVar();
+      If(LOOK.wind.length().greaterThan(2.5), () => {
+        const { speed, dir } = windNow();
+        const along = p.xz.dot(dir).sub(LOOK.time.mul(speed).mul(0.8));
+        const across = p.xz.dot(vec2(dir.y.negate(), dir.x));
+        const snake = noise4(
+          vec2(along.mul(0.035), across.mul(0.4).add(noise4(vec2(along.mul(0.02), across.mul(0.05))).x)),
+        );
+        const streak = smoothstep(0.25, 0.6, snake.x.add(snake.y.mul(0.4)))
+          .mul(clamp(speed.sub(2.5).div(9), 0, 1))
+          .mul(gustAt(p.xz).mul(0.7).add(0.3))
+          .mul(snow.x.mul(3).clamp(0, 1));
+        blown.assign(mix(blown, vec3(0.97, 0.98, 1.0), streak.mul(0.55)));
+      });
+      c = blown;
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
@@ -376,10 +415,17 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     // Where it's off: the season's grass, in drifts of two tones.
     const ground = mix(LOOK.ground, LOOK.ground2, smoothstep(0.35, 0.65, drift.add(blotch.mul(0.3)).sub(0.15)));
     c = mix(ground, c, cover);
-    // Steep walls and cliffs show rock.
-    const rock = smoothstep(0.62, 0.45, normalWorld.y);
-    const rockColor = mix(vec3(0.33, 0.33, 0.36), vec3(0.45, 0.44, 0.45), drift);
-    c = mix(c, rockColor, rock.mul(0.85));
+    // Rock in its beds, with snow on the ledges where snow lies.
+    const beds = strata(p);
+    const face = mix(vec3(0.21, 0.19, 0.18), vec3(0.36, 0.32, 0.29), smoothstep(0.3, 0.62, normalWorld.y)).mul(
+      beds.tone,
+    );
+    const lined = mix(face, face.mul(vec3(0.5, 0.48, 0.55)), beds.line.mul(0.8));
+    const ledge = cut0(beds.up.sub(0.58))
+      .mul(cut0(hash(beds.bed.mul(5.3)).sub(0.3)))
+      .mul(cut0(noise4(p.xz.mul(0.13)).y.add(0.25)))
+      .mul(cover);
+    c = mix(c, mix(lined, vec3(0.9, 0.93, 0.99), ledge), rock);
     if (ribbon) {
       // Dye lines, painted on top of everything.
       const dye = smoothstep(0.35, 0.65, attribute("dye", "float"));
@@ -387,103 +433,22 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     }
     return c;
   })();
-  // Glitter: a few cells of snow catch the light close up (in the sun).
-  mat.emissiveNode = Fn(() => {
-    const cell = floor(positionWorld.mul(16));
-    const g = hash(cell.x.add(cell.y.mul(57)).add(cell.z.mul(131)));
-    const near = smoothstep(12, 3, positionWorld.distance(cameraPosition));
-    return vec3(1, 1, 1).mul(smoothstep(0.997, 1.0, g).mul(near).mul(0.35).mul(cover).mul(LOOK.shadow));
-  })();
-  return mat;
+  const mat = new CelMaterial({
+    colorNode: colour,
+    shade: new THREE.Color(...SNOW_SHADE),
+    richness: 1.12,
+    crease: 0.4,
+    // The shade the forest throws across the run.
+    cast: ribbon ? float(1).sub(cut0(attribute("tree", "float").sub(0.5))) : undefined,
+  });
+  mat.shadeNode = mix(snowShade(), vec3(...ROCK_SHADE), rock);
+  // (Lines where things stand on the snow are drawn on the snow too: they fade into the fog with it.)
+  return fadingInk(mat, 1, 0.4, 0, 1);
 }
 
 /** Second difference of heights `a`, `b`, `c`, spaced `h0` then `h1` apart: curvature (1/m), + = a hollow. */
 function bend(a: number, b: number, c: number, h0: number, h1: number): number {
   return h0 > 0 && h1 > 0 ? (2 * ((c - b) / h1 - (b - a) / h0)) / (h0 + h1) : 0;
-}
-
-/** Colours a geometry per vertex (from its height and normal) and unindexes it. */
-function colorize(g: THREE.BufferGeometry, fn: (y: number, ny: number) => THREE.Color): THREE.BufferGeometry {
-  const pos = g.attributes.position!;
-  g.computeVertexNormals();
-  const nrm = g.attributes.normal!;
-  const cols: number[] = [];
-  for (let i = 0; i < pos.count; i++) {
-    const c = fn(pos.getY(i), nrm.getY(i));
-    cols.push(c.r, c.g, c.b);
-  }
-  g.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
-  return g.toNonIndexed();
-}
-
-/** A pine: stacked cones with snow on their tops, and a trunk. Its vertex colours mark the parts: needles (r), snow (g), trunk (b). */
-function pineGeometry(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  const needles = new THREE.Color(1, 0, 0);
-  const snow = new THREE.Color(0, 1, 0);
-  const trunk = new THREE.CylinderGeometry(0.12, 0.18, 1.6, 5);
-  trunk.translate(0, 0.8, 0);
-  parts.push(colorize(trunk, () => new THREE.Color(0, 0, 1)));
-  const tiers = [
-    [1.6, 0.95, 3.2],
-    [1.25, 2.4, 2.8],
-    [0.9, 3.7, 2.4],
-    [0.55, 4.9, 2.0],
-  ] as const;
-  for (const [r, y, h] of tiers) {
-    // Rings up the cone, so the snow band has vertices of its own.
-    const cone = new THREE.ConeGeometry(r, h, 7, 4);
-    cone.translate(0, y + h / 2, 0);
-    parts.push(
-      colorize(cone, (vy) => {
-        // Snow sits on each tier's shoulders; the skirt below stays green.
-        const t = (vy - y) / h;
-        return t > 0.52 && t < 0.9 ? snow : needles;
-      }),
-    );
-  }
-  return mergeGeometries(parts);
-}
-
-/** The pines' material: needles, a trunk, and snow on their shoulders as deep as it lies at their height. */
-function pineMaterial(): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, flatShading: true });
-  m.userData.outdoor = FOLIAGE.evergreen;
-  const needles = new THREE.Color(0x17382a);
-  const bark = new THREE.Color(0x4a3526);
-  m.userData.colorNode = Fn(() => {
-    const p = positionWorld;
-    const parts = attribute<"vec3">("color", "vec3");
-    const above = p.y
-      .sub(LOOK.snowLine)
-      .add(noise4(p.xz.mul(0.013)).x.mul(28))
-      .div(10);
-    const snowy = cut0(above.add(LOOK.snowCover.sub(1).mul(3)));
-    const green = vec3(needles.r, needles.g, needles.b);
-    const snow = mix(green, vec3(SNOW.r, SNOW.g, SNOW.b).mul(0.92), snowy);
-    return green
-      .mul(parts.x)
-      .add(snow.mul(parts.y))
-      .add(vec3(bark.r, bark.g, bark.b).mul(parts.z));
-  })();
-  return m;
-}
-
-/** Concatenates non-indexed geometries with position, normal and colour. */
-function mergeGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const pos: number[] = [];
-  const nrm: number[] = [];
-  const col: number[] = [];
-  for (const g of parts) {
-    pos.push(...g.attributes.position!.array);
-    nrm.push(...g.attributes.normal!.array);
-    col.push(...g.attributes.color!.array);
-  }
-  const out = new THREE.BufferGeometry();
-  out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  out.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
-  out.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-  return out;
 }
 
 /** Red safety netting: a canvas texture with see-through holes. */
@@ -510,32 +475,6 @@ function nettingTexture(): THREE.CanvasTexture {
   g.fillRect(0, 0, 64, 7);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-/** A banner texture: text on a colour. */
-function bannerTexture(text: string, bg: string, fg: string, checker = false): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = 1024;
-  c.height = 128;
-  const g = c.getContext("2d")!;
-  g.fillStyle = bg;
-  g.fillRect(0, 0, 1024, 128);
-  if (checker) {
-    for (let x = 0; x < 64; x++)
-      for (let y = 0; y < 2; y++) {
-        g.fillStyle = (x + y) % 2 === 0 ? "#111" : "#f4f4f0";
-        g.fillRect(x * 16, y * 16, 16, 16);
-        g.fillRect(x * 16, 96 + y * 16, 16, 16);
-      }
-  }
-  g.fillStyle = fg;
-  g.font = "bold 72px ui-rounded, system-ui, sans-serif";
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.fillText(text, 512, 66);
-  const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -586,7 +525,15 @@ export class Mountain implements Environment {
     fadeIn: 5,
   });
   private trails = new CarveTrails();
-  private forest: THREE.InstancedMesh[] = [];
+  private forest: Forest | null = null;
+  private trees: Tree[] = [];
+  private buildings: Building[] = [];
+  private built: Built | null = null;
+  private life: MountainLife | null = null;
+  /** What stands on the mountain (built once its models are in). */
+  private props = new THREE.Group();
+  /** Resolves once the scenery is built and in the scene. */
+  readonly ready: Promise<void>;
   private scenery: RunScenery;
   /** The most thin cover, slush and hard snow anywhere on the run (see `LOOK.runSnow`). */
   private runSnow = new THREE.Vector3();
@@ -608,8 +555,8 @@ export class Mountain implements Environment {
       // Noon's sun stands down the run (+z), and stays ahead of the riders through the day.
       south: [-30, 60],
       swing: 0.55,
-      fogNear: 45,
-      fogFar: 330,
+      fogNear: FOG_NEAR,
+      fogFar: FOG_FAR,
       fogTint: [1.026, 0.91, 0.92],
       snowLine: { summer: top + 600, fall: top - drop * 0.08, winter: bottom - 3000, spring: bottom + drop * 0.6 },
       mountain: true,
@@ -622,26 +569,64 @@ export class Mountain implements Environment {
     }
     this.cumulus = new Cumulus(new THREE.Vector3(cx, bottom + drop * 0.5, cz));
     this.scenery = runScenery(course);
-    this.buildSnow();
     this.buildMountainAround();
-    this.buildForest();
-    this.buildFences();
-    this.buildGates();
-    this.buildLift();
-    this.buildRocks();
-    this.buildLodge();
-    this.buildProps();
-    this.group.add(peakRange(run.path[0]!.y, run.path.at(-1)!.y, run.path));
-    this.group.add(this.trails.group, this.powder.sprite, this.mist.sprite, this.precipitation.group);
-    // Snow shades to a cool lavender, as drawn; the rest takes the usual cel tones.
-    celify(
-      this.group,
-      (m) => (m.colorNode ? { shade: new THREE.Color(0.7, 0.76, 0.98), richness: 1.05, crease: 0.4 } : {}),
-      true,
-    );
+    this.buildings = buildingPlan(run, this.scenery);
+    const { x0, z0, nx, nz } = this.grid;
+    this.trees = plantForest({
+      run,
+      scenery: this.scenery,
+      heights: (points) => terrain.heights(points),
+      around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
+      open: this.clearings(),
+    });
+    this.buildSnow();
     this.trails.group.userData.noMerge = true;
-    mergeStatic(this.group, { cell: 400 });
+    this.group.add(this.trails.group, this.powder.sprite, this.mist.sprite, this.precipitation.group);
     this.group.add(skyDome(), this.cumulus.mesh);
+    this.ready = loadModels("snow").then((models) => this.buildScenery(models));
+  }
+
+  /** What stands on the mountain, once its models are in. */
+  private buildScenery(models: Models): void {
+    const run = this.run;
+    this.buildForest(models);
+    this.buildFences();
+    this.buildRocks(models);
+    this.buildProps();
+    this.built = new Built(run, this.scenery, this.buildings, models, (x, z) => this.ground(x, z));
+    this.props.add(this.built.group);
+    // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
+    const plain = new Set<THREE.Mesh>();
+    this.props.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardNodeMaterial) plain.add(o);
+    });
+    celify(this.props);
+    const lined = new Set<THREE.Material>();
+    for (const mesh of plain) {
+      const material: unknown = mesh.material;
+      if (!(material instanceof CelMaterial) || lined.has(material)) continue;
+      lined.add(material);
+      fadingInk(material, 1, 0.8, 0, 0.9);
+    }
+    mergeStatic(this.props, { cell: 400 });
+    // Choughs over the summit, over the middle of the run and over the finish.
+    const over = (k: number, up: number, aside: number) => {
+      const p = run.path[Math.floor(k * (run.path.length - 1))]!;
+      return new THREE.Vector3(p.x + aside, p.y + up, p.z);
+    };
+    const flocks = [over(0.02, 40, -30), over(0.33, 55, 70), over(0.62, 50, -60), over(0.95, 60, 20)];
+    this.life = new MountainLife(this.trees, this.built.chimneys, flocks);
+    this.props.add(this.life.group);
+    const { x0, z0, nx, nz } = this.grid;
+    this.props.add(
+      farLandscape({
+        run,
+        heights: (points) => this.terrain.heights(points),
+        around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
+        ridgeStart: this.scenery.ridgeStart,
+      }),
+    );
+    this.group.add(this.props);
   }
 
   get sunOffset(): THREE.Vector3 {
@@ -650,7 +635,7 @@ export class Mountain implements Environment {
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     // (One fog for the mountain: a new one would rebuild every shader that draws in it.)
-    this.fog ??= new THREE.Fog(0xc9d4e4, 45, 330);
+    this.fog ??= new THREE.Fog(0xc9d4e4, CLEAR_NEAR, CLEAR_FAR);
     scene.fog = this.fog;
     scene.background = this.background;
     hemi.intensity = 1.9;
@@ -658,7 +643,20 @@ export class Mountain implements Environment {
     this.sun = sun;
     this.hemi = hemi;
     this.look.apply(0, 0, this.run.path[0]!.y, null, this.fog, this.background, sun, hemi);
+    this.openFog(this.fog);
     LOOK.runSnow.value.copy(this.runSnow);
+  }
+
+  /**
+   * Opens the fog the conditions set out to the mountain's range: a clear
+   * day sees most of the way down the run, and bad weather closes in as it did.
+   */
+  private openFog(fog: THREE.Fog): void {
+    const weather = fog.far / FOG_FAR;
+    fog.far = CLEAR_FAR * weather ** 4.1;
+    fog.near = fog.near * (CLEAR_NEAR / FOG_NEAR) * weather ** 1.3;
+    MOUNTAIN.fogNear.value = fog.near;
+    MOUNTAIN.fogFar.value = fog.far;
   }
 
   ground(x: number, z: number): number {
@@ -716,6 +714,8 @@ export class Mountain implements Environment {
     }
     const { shade, dye } = this.shapeOf(xyz, rows, offsets);
     const snowRows = this.snowAlong(xyz, rows.length, cols);
+    this.buildTufts(xyz, rows, offsets, snowRows);
+    const treeShade = forestShade(this.trees, this.look.sun, xyz);
     const mat = snowMaterial(true);
     for (let start = 0; start < n - 1; start += ROWS_PER_CHUNK) {
       const end = Math.min(n - 1, start + ROWS_PER_CHUNK);
@@ -769,6 +769,7 @@ export class Mountain implements Environment {
       geo.setAttribute("dye", new THREE.BufferAttribute(dyed, 1));
       geo.setAttribute("run", new THREE.BufferAttribute(onRun, 1));
       geo.setAttribute("snow", new THREE.BufferAttribute(snowType, 4));
+      geo.setAttribute("tree", new THREE.BufferAttribute(treeShade.slice(start * cols, (end + 1) * cols), 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, mat);
@@ -777,6 +778,83 @@ export class Mountain implements Environment {
       mesh.userData.noMerge = true;
       this.group.add(mesh);
     }
+  }
+
+  /**
+   * Grass standing out of the snow: on the run where the cover is thin
+   * (`snowRows`, as `snowAlong` gives it), and thicker beside it wherever
+   * the ground is below the season's snow line. Riders ride through it.
+   */
+  private buildTufts(xyz: Float32Array, rows: Float32Array, offsets: Float32Array, snowRows: Float32Array): void {
+    const cols = offsets.length;
+    const rand = rng(606);
+    const line = LOOK.snowLine.value;
+    const spots: number[] = [];
+    for (let r = 2; r < rows.length - 2; r += 1) {
+      const limit = this.limitAt(rows[r]!);
+      const thin = Math.max(0, Math.min(1, (0.45 - snowRows[r * 4]!) / 0.3));
+      for (let k = 0; k < 4; k++) {
+        const c = Math.floor(rand() * cols);
+        const off = Math.abs(offsets[c]!);
+        const at = (r * cols + c) * 3;
+        const y = xyz[at + 1]!;
+        const beside = off > limit + 1.5 && off < limit + 26;
+        // Meadow beside the run below the snow line; on it, only through a thin cover.
+        const chance = beside ? (y < line - 12 ? 0.8 : 0) : off < limit + 1 ? thin * 0.6 : 0;
+        if (rand() < chance)
+          spots.push(xyz[at]! + (rand() - 0.5) * 0.8, y, xyz[at + 2]! + (rand() - 0.5) * 0.8, beside ? 1.3 : 0.75);
+      }
+    }
+    const count = spots.length / 4;
+    if (count === 0) return;
+    // A tuft: nine blades fanned out from one foot.
+    const pos: number[] = [];
+    const tip: number[] = [];
+    for (let b = 0; b < 9; b++) {
+      const a = (b / 9) * Math.PI * 2 + rand();
+      const lean = 0.06 + rand() * 0.14;
+      const h = 0.2 + rand() * 0.16;
+      const w = 0.022;
+      const cx = Math.cos(a);
+      const cz = Math.sin(a);
+      pos.push(-cz * w, 0, cx * w, cz * w, 0, -cx * w, cx * lean, h, cz * lean);
+      tip.push(0, 0, 1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("tip", new THREE.Float32BufferAttribute(tip, 1));
+    geo.computeVertexNormals();
+    const mat = new CelMaterial({
+      // Dry at the tip, the season's ground colour at the foot.
+      colorNode: mix(LOOK.ground2.mul(0.8), mix(LOOK.ground, vec3(0.7, 0.62, 0.34), 0.45), attribute("tip", "float")),
+      side: THREE.DoubleSide,
+      silhouette: 0,
+      crease: 0,
+      darkness: 0,
+    });
+    // (Lit as the ground they stand on: every blade's normal is up.)
+    mat.normalNode = vec3(0, 1, 0).transformDirection(cameraViewMatrix);
+    mat.positionNode = Fn(() => {
+      const p = positionLocal;
+      const { speed, dir } = windNow();
+      const sway = attribute("tip", "float")
+        .mul(speed.mul(0.006).add(0.012))
+        .mul(sin(LOOK.time.mul(3.1).add(p.x.mul(2.1)).add(p.z.mul(1.7))).add(gustAt(p.xz).mul(1.5)));
+      return p.add(vec3(dir.x.mul(sway), 0, dir.y.mul(sway)));
+    })();
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    for (let i = 0; i < count; i++) {
+      const s = spots[i * 4 + 3]! * (0.8 + rand() * 0.6);
+      q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rand() * Math.PI * 2);
+      const [x = 0, y = 0, z = 0] = spots.slice(i * 4, i * 4 + 3);
+      m.compose(new THREE.Vector3(x, y - 0.02, z), q, new THREE.Vector3(s, s, s));
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.frustumCulled = false;
+    mesh.userData.noMerge = true;
+    this.group.add(mesh);
   }
 
   /**
@@ -936,92 +1014,47 @@ export class Mountain implements Environment {
     }
   }
 
-  /** Pines: crowding the run's edges (thickest through the tree section), and scattered over the mountain. */
-  private buildForest(): void {
-    const rand = rng(1234);
-    const spots: { x: number; z: number; scale: number }[] = [];
-    const path = this.run.path;
-    for (const p of path) {
-      const section = this.scenery.forest(p.s);
-      const rx = -Math.cos(p.yaw);
-      const rz = Math.sin(p.yaw);
-      for (const side of [-1, 1]) {
-        const tries = Math.round(2 * section + rand());
-        for (let k = 0; k < tries; k++) {
-          const near = p.limit + 2.5 + rand() * rand() * (RIBBON_HALF + 30 - p.limit);
-          const along = (rand() - 0.5) * 4;
-          spots.push({
-            x: p.x + rx * side * near + Math.sin(p.yaw) * along,
-            z: p.z + rz * side * near + Math.cos(p.yaw) * along,
-            scale: 0.75 + rand() * 0.9,
-          });
-        }
-      }
-    }
-    // The mountain around: clumps.
-    const { x0, z0, nx, nz } = this.grid;
-    for (let k = 0; k < 2600; k++) {
-      const x = x0 + rand() * (nx - 1) * GRID_STEP;
-      const z = z0 + rand() * (nz - 1) * GRID_STEP;
-      const clump = Math.sin(x * 0.013) * Math.cos(z * 0.011) + Math.sin(x * 0.031 + z * 0.017) * 0.5;
-      if (clump < 0.2) continue;
-      spots.push({ x, z, scale: 0.8 + rand() * 1.0 });
-    }
-    // Lone pines on the run (they are solid in the sim).
-    for (const o of this.run.obstacles) if (o.kind === "pine") spots.push({ x: o.x, z: o.z, scale: 1.4 });
-    // Keep the riding width clear (but for the run's own pines), the shore
-    // between the run and its lake, and round the lodge.
-    const shore = this.clearings();
-    const clear = spots.filter((p) => {
-      const nearest = this.nearestPath(p.x, p.z);
-      return (nearest.dist > nearest.limit + 1.5 && !shore(p.x, p.z)) || p.scale === 1.4;
-    });
-    const all = new Float32Array(clear.length * 2);
-    clear.forEach((p, i) => all.set([p.x, p.z], i * 2));
-    const heights = this.terrain.heights(all);
-    // Nothing grows above the tree line.
-    const keep = clear.filter((_, i) => heights[i]! < this.scenery.treeLine);
-    const ys = heights.filter((h) => h < this.scenery.treeLine);
-    // In square cells, each its own batch, so the ones out of view (or out
-    // of the sun's shadow box) are left out.
-    const cells = new Map<string, THREE.Matrix4[]>();
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    keep.forEach((p, i) => {
-      q.setFromEuler(e.set(0, rand() * Math.PI * 2, 0));
-      m.compose(
-        new THREE.Vector3(p.x, ys[i]! - 0.4, p.z),
-        q,
-        new THREE.Vector3(p.scale, p.scale * (0.9 + rand() * 0.5), p.scale),
-      );
-      const key = `${Math.floor(p.x / FOREST_CELL)},${Math.floor(p.z / FOREST_CELL)}`;
-      let cell = cells.get(key);
-      if (!cell) cells.set(key, (cell = []));
-      cell.push(m.clone());
-    });
-    const geometry = pineGeometry();
-    const material = pineMaterial();
-    for (const matrices of cells.values()) {
-      const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
-      matrices.forEach((mat, i) => mesh.setMatrixAt(i, mat));
-      mesh.computeBoundingSphere();
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.forest.push(mesh);
-      this.group.add(mesh);
-    }
+  /** The forest, in its batches. */
+  private buildForest(models: Models): void {
+    this.forest = new Forest(this.trees, models);
+    this.props.add(this.forest.group);
   }
 
-  /** Whether a point is in open ground: round the lodge, and from the run's edge across its lake. */
+  /** Whether a point is in open ground: round each building, beside the finish area, and from the run's edge across its lake. */
   private clearings(): (x: number, z: number) => boolean {
-    const lodge = this.scenery.lodge;
-    const at = runPoint(this.run, lodge.s);
-    const home = runAt(this.run, lodge.s, (at.limit + lodge.out) * lodge.side);
-    const yard = 12 * lodge.size;
-    const nearLodge = (x: number, z: number) => (x - home.x) ** 2 + (z - home.z) ** 2 < yard * yard;
+    const yards = this.buildings.map((b) => ({ ...buildingAt(this.run, b), r: b.yard * b.scale }));
+    const path = this.run.path;
+    const finish = this.run.finishS;
+    // Under the chairlift: a swathe cut through the forest along its line, from station to station.
+    const towers = this.run.obstacles.filter((o) => o.kind === "tower");
+    const line: { x: number; z: number }[] = [];
+    if (towers.length >= 2) {
+      const first = towers[0]!;
+      const last = towers.at(-1)!;
+      const length = Math.hypot(last.x - first.x, last.z - first.z);
+      const dx = ((last.x - first.x) / length) * LIFT_REACH;
+      const dz = ((last.z - first.z) / length) * LIFT_REACH;
+      line.push({ x: first.x - dx, z: first.z - dz }, ...towers, { x: last.x + dx, z: last.z + dz });
+    }
+    const built = (x: number, z: number) => {
+      for (const y of yards) if ((x - y.x) ** 2 + (z - y.z) ** 2 < y.r * y.r) return true;
+      for (let i = 0; i < line.length - 1; i++) {
+        const a = line[i]!;
+        const b = line[i + 1]!;
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)));
+        if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < LIFT_SWATHE * LIFT_SWATHE) return true;
+      }
+      // The crowd's side of the fences, from the last pitch to the end of the outrun.
+      for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 20; i--) {
+        const p = path[i]!;
+        if ((x - p.x) ** 2 + (z - p.z) ** 2 < (p.limit + 7) ** 2) return true;
+      }
+      return false;
+    };
     const spot = this.scenery.lake;
-    if (!spot) return nearLodge;
+    if (!spot) return built;
     const side = Math.sign(spot.offset);
     const near = runPoint(this.run, spot.s).limit + 3;
     const far = Math.abs(spot.offset) + spot.across + 10;
@@ -1033,34 +1066,26 @@ export class Mountain implements Environment {
     return (x, z) => {
       const u = (x - c.x) * fx + (z - c.z) * fz;
       const v = (x - c.x) * -fz + (z - c.z) * fx;
-      return (u / along) ** 2 + (v / across) ** 2 < 1 || nearLodge(x, z);
+      return (u / along) ** 2 + (v / across) ** 2 < 1 || built(x, z);
     };
-  }
-
-  /** The closest point of the run's path (coarse: 4 m samples). */
-  private nearestPath(x: number, z: number): { dist: number; limit: number } {
-    let best = Infinity;
-    let limit = 0;
-    for (const p of this.run.path) {
-      const d = (p.x - x) ** 2 + (p.z - z) ** 2;
-      if (d < best) {
-        best = d;
-        limit = p.limit;
-      }
-    }
-    return { dist: Math.sqrt(best), limit };
   }
 
   /** Red netting along both edges of the run (not in the gully, whose walls hold you in). */
   private buildFences(): void {
     const tex = nettingTexture();
-    const mat = new THREE.MeshBasicNodeMaterial({
-      map: tex,
-      transparent: true,
-      alphaTest: 0.4,
-      side: THREE.DoubleSide,
-      fog: true,
-    });
+    const mat = fadingInk(
+      new THREE.MeshBasicNodeMaterial({
+        map: tex,
+        transparent: true,
+        alphaTest: 0.4,
+        side: THREE.DoubleSide,
+        fog: true,
+      }),
+      0.6,
+      0,
+      0,
+      0.7,
+    );
     const posts: THREE.Matrix4[] = [];
     for (const side of [-1, 1]) {
       const pos: number[] = [];
@@ -1099,211 +1124,19 @@ export class Mountain implements Environment {
       geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
       geo.setIndex(idx);
       geo.computeVertexNormals();
-      this.group.add(new THREE.Mesh(geo, mat));
+      this.props.add(new THREE.Mesh(geo, mat));
     }
     const postMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.06, 1.3, 0.06), flat(0x2a2a2a), posts.length);
     posts.forEach((m, i) => postMesh.setMatrixAt(i, m));
-    this.group.add(postMesh);
+    this.props.add(postMesh);
   }
 
-  /** Checkpoint flags, and the start and finish arches. */
-  private buildGates(): void {
-    const red = flat(0xd8342a, { roughness: 0.6, side: THREE.DoubleSide });
-    const pole = flat(0x222222);
-    const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 2.2, 6);
-    poleGeo.translate(0, 1.1, 0);
-    const flagGeo = new THREE.PlaneGeometry(0.75, 0.55);
-    flagGeo.translate(0.375, 1.85, 0);
-    for (const g of this.run.checkpoints) {
-      for (const side of [-1, 1]) {
-        const o = (g.limit + 1.2) * side;
-        const x = g.x - Math.cos(g.yaw) * o;
-        const z = g.z + Math.sin(g.yaw) * o;
-        const y = this.ground(x, z);
-        for (const dz of [-0.45, 0.45]) {
-          const p = new THREE.Mesh(poleGeo, pole);
-          p.position.set(x + Math.sin(g.yaw) * dz, y, z + Math.cos(g.yaw) * dz);
-          this.group.add(p);
-        }
-        const flag = new THREE.Mesh(flagGeo, red);
-        flag.position.set(x - Math.sin(g.yaw) * 0.45, y, z - Math.cos(g.yaw) * 0.45);
-        flag.rotation.y = g.yaw + Math.PI / 2;
-        flag.castShadow = true;
-        this.group.add(flag);
-      }
-    }
-    this.arch(this.run.startGate, bannerTexture("23.4° SHIFTY · COSTA NEVADA", "#1f3b6e", "#ffffff"));
-    this.arch(this.run.finish, bannerTexture("FINISH", "#f4f4f0", "#111111", true));
-    // The start hut behind the grid.
-    const hut = new THREE.Group();
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(14, 4, 6), flat(0x7a4a2c));
-    walls.position.y = 2;
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(9.5, 3, 4), roofMaterial());
-    roof.position.y = 5.5;
-    roof.rotation.y = Math.PI / 4;
-    roof.scale.set(1, 1, 0.5);
-    hut.add(walls, roof);
-    const back = this.run.path[0]!;
-    hut.position.set(
-      back.x - Math.sin(back.yaw) * 10,
-      this.ground(back.x, back.z - 10) - 0.2,
-      back.z - Math.cos(back.yaw) * 10,
-    );
-    hut.rotation.y = back.yaw;
-    hut.traverse((o) => (o.castShadow = true));
-    this.group.add(hut);
-  }
-
-  private arch(g: GateData, banner: THREE.Texture): void {
-    const span = (g.limit + 1.5) * 2;
-    const left = { x: g.x + Math.cos(g.yaw) * (span / 2), z: g.z - Math.sin(g.yaw) * (span / 2) };
-    const right = { x: g.x - Math.cos(g.yaw) * (span / 2), z: g.z + Math.sin(g.yaw) * (span / 2) };
-    const yl = this.ground(left.x, left.z);
-    const yr = this.ground(right.x, right.z);
-    const top = Math.max(yl, yr, g.y) + 5.5;
-    const postMat = flat(0x1f3b6e);
-    for (const [p, y] of [
-      [left, yl],
-      [right, yr],
-    ] as const) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.6, top - y + 1, 0.6), postMat);
-      post.position.set(p.x, (top + y) / 2, p.z);
-      post.castShadow = true;
-      this.group.add(post);
-    }
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(span, 1.4, 0.2), [
-      postMat,
-      postMat,
-      postMat,
-      postMat,
-      new THREE.MeshBasicNodeMaterial({ map: banner }),
-      new THREE.MeshBasicNodeMaterial({ map: banner }),
-    ]);
-    sign.position.set(g.x, top, g.z);
-    sign.rotation.y = g.yaw;
-    sign.castShadow = true;
-    this.group.add(sign);
-  }
-
-  /** Chairlift towers (solid in the sim), the cable between them, and chairs. */
-  private buildLift(): void {
-    const towers = this.run.obstacles.filter((o) => o.kind === "tower");
-    if (towers.length === 0) return;
-    const steel = flat(0x9aa3ad, { roughness: 0.5 });
-    const tops: THREE.Vector3[] = [];
-    for (const t of towers) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, t.height, 8), steel);
-      pole.position.set(t.x, t.y + t.height / 2, t.z);
-      const arm = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.35, 0.35), steel);
-      arm.position.set(t.x, t.y + t.height, t.z);
-      pole.castShadow = arm.castShadow = true;
-      this.group.add(pole, arm);
-      tops.push(new THREE.Vector3(t.x, t.y + t.height - 0.3, t.z));
-    }
-    // The line runs up to the top station (or on past the first tower) and
-    // down past the last tower.
-    const first = tops[0]!;
-    const last = tops.at(-1)!;
-    const dir = last.clone().sub(first).normalize();
-    const top = this.scenery.liftTop;
-    if (top) {
-      const { station, cable } = liftStation(this.run, top, first, (x, z) => this.ground(x, z));
-      this.group.add(station);
-      tops.unshift(cable);
-    } else {
-      tops.unshift(first.clone().addScaledVector(dir, -120));
-    }
-    tops.push(last.clone().addScaledVector(dir, 120));
-    const cable = new THREE.LineBasicNodeMaterial({ color: 0x30343a });
-    const chairs: THREE.Matrix4[] = [];
-    for (const side of [-2.6, 2.6]) {
-      const pts: THREE.Vector3[] = [];
-      for (let i = 0; i < tops.length - 1; i++) {
-        const a = tops[i]!;
-        const b = tops[i + 1]!;
-        const n = 16;
-        for (let k = 0; k <= n; k++) {
-          const t = k / n;
-          const p = a.clone().lerp(b, t);
-          p.y -= Math.sin(t * Math.PI) * 1.6;
-          const right = new THREE.Vector3(-(b.z - a.z), 0, b.x - a.x).normalize();
-          p.addScaledVector(right, side);
-          pts.push(p);
-          if (k % 4 === 2) chairs.push(new THREE.Matrix4().makeTranslation(p.x, p.y - 1.8, p.z));
-        }
-      }
-      this.group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), cable));
-    }
-    const chairGeo = new THREE.BoxGeometry(1.6, 0.9, 0.7);
-    const chairMesh = new THREE.InstancedMesh(chairGeo, flat(0x3b4a5a), chairs.length);
-    chairs.forEach((m, i) => chairMesh.setMatrixAt(i, m));
-    chairMesh.castShadow = true;
-    this.group.add(chairMesh);
-  }
-
-  /** Rocks on the run (solid in the sim), with snow on top as deep as it lies. */
-  private buildRocks(): void {
-    const rock = flat(0x6c6a6e);
-    rock.userData.outdoor = FOLIAGE.none;
-    const snow = rock;
-    // Rocks poking through a thin cover: dark and jagged, bare ground round their foot.
-    const bare = flat(0x4a4038);
-    const ground = flat(0x6e5a3c);
-    for (const o of this.run.obstacles) {
-      if (o.kind !== "rock") continue;
-      if (o.cover) {
-        const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.05, 0), bare);
-        r.position.set(o.x, o.y + o.radius * 0.2, o.z);
-        r.scale.set(1, 0.6 + (o.height / Math.max(o.radius, 0.1)) * 0.2, 0.85);
-        r.rotation.y = o.x * 1.7 + o.z;
-        const skirt = new THREE.Mesh(new THREE.CircleGeometry(o.radius * 1.7, 7), ground);
-        skirt.rotation.x = -Math.PI / 2;
-        skirt.position.set(o.x, this.ground(o.x, o.z) + 0.03, o.z);
-        r.castShadow = true;
-        this.group.add(r, skirt);
-        continue;
-      }
-      const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.1, 0), rock);
-      r.position.set(o.x, o.y + o.radius * 0.35, o.z);
-      r.scale.y = 0.75;
-      const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 0.8, 0), snow);
-      cap.position.set(o.x, o.y + o.radius * 0.75, o.z);
-      cap.scale.y = 0.35;
-      r.castShadow = true;
-      this.group.add(r, cap);
-    }
-  }
-
-  /** The run's lodge (on the mountain run, on the bench above the cliff drop). */
-  private buildLodge(): void {
-    const spot = this.scenery.lodge;
-    const at = this.run.path.find((p) => p.s >= spot.s) ?? this.run.path[0]!;
-    const o = (at.limit + spot.out) * spot.side;
-    const x = at.x - Math.cos(at.yaw) * o;
-    const z = at.z + Math.sin(at.yaw) * o;
-    const lodge = new THREE.Group();
-    const walls = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 16), flat(0x8a5a36));
-    walls.position.y = 2.5;
-    const roof = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 7.5, 4, 4, 1), roofMaterial());
-    roof.position.y = 7;
-    roof.rotation.y = Math.PI / 4;
-    roof.scale.set(1, 1, 1.55);
-    const windows = new THREE.Mesh(new THREE.BoxGeometry(10.1, 1.2, 12), flat(0x2a3440, { roughness: 0.3 }));
-    windows.position.y = 3;
-    lodge.add(walls, roof, windows);
-    if (spot.size !== 1) {
-      // A deck on the run's side, and a chimney.
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(4, 0.5, 14), flat(0x9a6a44));
-      deck.position.set(-7 * spot.side, 0.6, 0);
-      const chimney = new THREE.Mesh(new THREE.BoxGeometry(1.2, 4, 1.2), flat(0x77736e));
-      chimney.position.set(1.8, 8, -4);
-      lodge.add(deck, chimney);
-    }
-    lodge.scale.setScalar(spot.size);
-    lodge.position.set(x, this.ground(x, z) - 0.3, z);
-    lodge.rotation.y = at.yaw;
-    lodge.traverse((obj) => (obj.castShadow = true));
-    this.group.add(lodge);
+  /** The run's rocks: the sim's own, the crags of its scenery and the faces under its rock lips. */
+  private buildRocks(models: Models): void {
+    const heights = (points: Float32Array) => this.terrain.heights(points);
+    for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
+    const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
+    if (patches) this.props.add(patches);
   }
 
   /** What only some runs have: rock outcrops, a frozen lake, a creek, and logs and rocks under their lips. */
@@ -1311,25 +1144,26 @@ export class Mountain implements Environment {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     const ground = (x: number, z: number) => this.ground(x, z);
     const sc = this.scenery;
-    for (const o of outcrops(this.run, sc.outcrops, heights)) {
-      o.userData.noMerge = true;
-      this.group.add(o);
-    }
-    if (sc.lake) this.group.add(lake(this.run, sc.lake, heights));
-    if (sc.creek) this.group.add(creek(this.run, sc.creek, heights));
-    for (const o of lipProps(this.run, this.run.lips, ground)) this.group.add(o);
+    if (sc.lake) this.props.add(lake(this.run, sc.lake, heights));
+    if (sc.creek) this.props.add(creek(this.run, sc.creek, heights));
+    const logs = this.run.lips.filter((lip) => lip.kind === "log");
+    for (const o of lipProps(this.run, logs, ground)) this.props.add(o);
   }
 
   update(f: Frame): void {
     const ground = (x: number, z: number) => this.roughGround(x, z);
-    for (const cell of this.forest) {
-      const sphere = cell.boundingSphere!;
-      cell.visible = sphere.center.distanceTo(f.eye) - sphere.radius < FOREST_FAR;
+    if (this.fog) {
+      this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
+      this.openFog(this.fog);
+      this.forest?.update(f.eye, Math.min(this.fog.far + 40, FOREST_FAR));
     }
-    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
     LOOK.runSnow.value.copy(this.runSnow);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
+    MOUNTAIN.snowing.value = this.look.snow;
+    this.built?.update(f.t);
+    const snowy = Math.min(1, Math.max(0, (f.eye.y - LOOK.snowLine.value + 30) / 40)) * LOOK.snowCover.value;
+    this.life?.update(f.eye, f.t, f.dt, snowy, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);
     this.trails.update(f.riders, f.t);
     this.powder.update(ground, f.dt);

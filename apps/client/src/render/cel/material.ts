@@ -106,6 +106,8 @@ export interface CelOptions {
   outdoor?: number;
   /** How far it fades into the distance's colour (`LOOK.far`), 0-1. */
   haze?: THREE.Node<"float">;
+  /** Shade cast on it besides the shadow map's (1 = in the open, 0 = in shadow): it thins out with the weather alike. */
+  cast?: THREE.Node<"float">;
 }
 
 /** Default shade: a cool, slightly violet tone, as in a painted shadow. */
@@ -138,7 +140,8 @@ class CelLightingModel extends THREE.LightingModel {
     // The light arrives with the cast shadow already in it.
     const unshadowed = clamp(dot(lightColor, vec3(1)).div(SUN_STRENGTH), 0, 1);
     // Cast shadows thin out under an overcast sky.
-    const band = facing.mul(mix(float(1), smoothstep(0.4, 0.6, unshadowed), LOOK.shadow));
+    const open = smoothstep(0.4, 0.6, unshadowed);
+    const band = facing.mul(mix(float(1), m.castNode ? open.mul(m.castNode) : open, LOOK.shadow));
     let albedo: THREE.Node<"vec3"> = diffuseColor.rgb;
     if (m.outdoor !== null) albedo = weathered(albedo, m.outdoor);
 
@@ -197,6 +200,8 @@ export class CelMaterial extends THREE.MeshToonNodeMaterial {
   outdoor: THREE.Node<"float"> | null;
   /** How far it fades into the distance (see `CelOptions.haze`). */
   hazeNode: THREE.Node<"float"> | null;
+  /** Shade cast on it besides the shadow map's (see `CelOptions.cast`). */
+  castNode: THREE.Node<"float"> | null;
   specStrength: number;
   /** How much richer (more saturated) shade is than the colour (1 = a plain multiple). */
   richness: number;
@@ -223,6 +228,7 @@ export class CelMaterial extends THREE.MeshToonNodeMaterial {
     this.rimStrength = o.rim ?? 0;
     this.outdoor = o.outdoor === undefined ? null : uniform(o.outdoor);
     this.hazeNode = o.haze ?? null;
+    this.castNode = o.cast ?? null;
     inkOnlyInPass(this, inkNode(o.silhouette ?? 1, o.crease ?? 1, o.id ?? 0, o.darkness ?? 1));
   }
 

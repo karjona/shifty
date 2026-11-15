@@ -111,6 +111,7 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
   const turn = Number(params.get("turn") ?? 0);
   world.setAppearance(0, botAppearance(3, 0));
   const [model] = world.addRiders([0]);
+  await env.ready;
   await engine.warm(() => world.compile());
   if (model) await Promise.race([model.ready, new Promise((resolve) => setTimeout(resolve, 8000))]);
   booted();
