@@ -111,6 +111,8 @@ export interface Environment {
   readonly topSpeed: number;
   /** Something in it reflects the world (the sea). */
   readonly reflects?: boolean;
+  /** Resolves once everything it shows is built (its models loaded), if some of it comes in later. */
+  readonly ready?: Promise<void>;
   /** Where its sun shines from, relative to what it lights (see `World.setSunOffset`), if it has its own. */
   readonly sunOffset?: THREE.Vector3;
   /** Colours the sky, the fog and the lights. */
