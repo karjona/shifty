@@ -144,6 +144,31 @@ impl JoinClaims {
     pub fn events(&self) -> Vec<sim::conditions::Event> {
         resolve_plan(&self.plan(), self.seed)
     }
+
+    /// The races a room made from these claims runs, in order: its plan
+    /// drawn (at most `MAX_EVENTS`, the bay in its home conditions if
+    /// empty), a time trial's one race in clear, steady weather.
+    pub fn room_plan(&self) -> Vec<sim::conditions::Event> {
+        let mut plan = self.events();
+        plan.truncate(MAX_EVENTS);
+        if plan.is_empty() {
+            plan.push(sim::conditions::Event::home(sim::CourseId::Oval));
+        }
+        if self.trial {
+            plan.truncate(1);
+            let c = &mut plan[0].conditions;
+            c.weather = Weather::Clear;
+            c.turns = Weather::Clear;
+        }
+        plan
+    }
+}
+
+/// The claims a token carries, unchecked: a screen reading its own ticket
+/// (what the room will race). Only race servers verify tokens.
+pub fn read_claims(token: &str) -> Option<JoinClaims> {
+    let payload = URL_SAFE_NO_PAD.decode(token.split_once('.')?.0).ok()?;
+    serde_json::from_slice(&payload).ok()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,5 +566,37 @@ mod tests {
         let std = base64::engine::general_purpose::STANDARD.encode(vk.to_bytes());
         assert_eq!(parse_public_key(&url).unwrap(), vk);
         assert_eq!(parse_public_key(&std).unwrap(), vk);
+    }
+
+    #[test]
+    fn a_screen_reads_the_plan_its_ticket_will_race() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let c = claims();
+        let token = sign(&c, &key);
+        assert_eq!(read_claims(&token).as_ref(), Some(&c));
+        let plan = c.room_plan();
+        assert_eq!(plan, c.events());
+        assert_eq!(plan.len(), 2);
+        assert_eq!(plan[1].course, sim::CourseId::Mountain);
+        // A time trial: its one race, in clear, steady weather.
+        let trial = JoinClaims {
+            trial: true,
+            races: vec![c.races[1].clone()],
+            ..c.clone()
+        };
+        let [race] = &trial.room_plan()[..] else {
+            panic!("one race")
+        };
+        assert_eq!(
+            (race.conditions.weather, race.conditions.turns),
+            (Weather::Clear, Weather::Clear)
+        );
+        // Nothing asked for: the bay. Nothing readable: nothing.
+        let none = JoinClaims {
+            races: Vec::new(),
+            ..c
+        };
+        assert_eq!(none.room_plan().len(), 1);
+        assert_eq!(read_claims("not a token"), None);
     }
 }
