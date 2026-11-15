@@ -163,7 +163,7 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
   });
 
   let t = 0;
-  const base = new THREE.Vector3(CLUB.x + 3, CLUB.floor, CLUB.z - 4);
+  const base = new THREE.Vector3(CLUB.x + 1.3, CLUB.floor, CLUB.z - 4);
   // Facing the bay (−z), toward the camera.
   const facing = Math.PI;
   const framing: Record<Shot, { cy: number; dist: number; fov: number }> = {

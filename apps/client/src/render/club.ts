@@ -3,10 +3,13 @@
 // and moored boats, and the clubhouse behind. Riders gather here before a
 // race. Its art is modelled in art/env/club.py (public/env/club.glb) and
 // drawn in a handful of batches; the paving's pattern is a shader, and what
-// moves (boats at their moorings, sails out at sea) is moved here.
+// moves (boats at their moorings, sails out at sea, a gull, a fan) is moved
+// here. The sea in front of it glints.
 import * as THREE from "three/webgpu";
+import { Fn, attribute, cameraWorldMatrix, float, max, positionLocal, sin, vec3, vec4 } from "three/tsl";
 import { LOOK } from "./cel/look.ts";
-import { EnvLook } from "./env/materials.ts";
+import { UNREFLECTED, inklessBasic } from "./cel/material.ts";
+import { EnvLook, classOf } from "./env/materials.ts";
 import { type EnvAnim, type EnvModel, loadEnv } from "./env/model.ts";
 import { warmUp } from "./warm.ts";
 
@@ -20,6 +23,9 @@ export const CLUB = {
   /** The terrace faces the bay (−z). */
 };
 
+/** The terrace is drawn in squares of ground this size (m), so what the camera has its back to is culled. */
+const CELL = 12;
+
 const ready = new WeakMap<THREE.Object3D, Promise<void>>();
 
 /** Resolves once a club's art is in (and its shaders compiled). */
@@ -32,7 +38,7 @@ export function buildClub(): THREE.Group {
   const g = new THREE.Group();
   ready.set(
     g,
-    loadEnv("club")
+    loadEnv("club", CELL)
       .then(async (model) => {
         const art = assemble(model);
         art.position.set(CLUB.x, CLUB.floor, CLUB.z);
@@ -43,6 +49,12 @@ export function buildClub(): THREE.Group {
   );
   return g;
 }
+
+/** A number in 0-1 from a whole number, for things that happen now and then. */
+const chance = (n: number) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
 
 /** A group of the art that moves, with where it rests. */
 interface Mover {
@@ -82,12 +94,6 @@ function spin(m: Mover, t: number): void {
   m.group.matrix.multiplyMatrices(m.rest, offset);
 }
 
-/** A number in 0-1 from a whole number, for things that happen now and then. */
-const chance = (n: number) => {
-  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-  return x - Math.floor(x);
-};
-
 /** How long a gull holds a look before it turns its head somewhere else (s). */
 const GULL_HOLD = 2.9;
 
@@ -107,13 +113,66 @@ function perch(m: Mover, t: number): void {
 
 const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail, fan: spin, gull: perch };
 
+/** Glints on the sea, in the terrace's coordinates: how many, and the sea's level. */
+const GLINTS = 150;
+const SEA = -CLUB.floor;
+
+/**
+ * Sunlight glinting off the sea in front of the terrace: short dashes
+ * facing the camera, each flashing for a moment now and then, bigger the
+ * further out they are (so they hold a pixel or two). One batch, moved on
+ * the GPU.
+ */
+function glints(): THREE.Mesh {
+  const centre = new Float32Array(GLINTS * 18);
+  const corner = new Float32Array(GLINTS * 12);
+  const phase = new Float32Array(GLINTS * 6);
+  const quad = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1];
+  let placed = 0;
+  for (let n = 0; placed < GLINTS && n < GLINTS * 20; n++) {
+    // Out to sea in front of the stair, thinning with distance; not on the breakwater.
+    const d = 30 + chance(n * 3 + 1) ** 1.5 * 260;
+    const x = 4 + (chance(n * 3 + 2) * 0.82 - 0.6) * d;
+    const z = -8 - d;
+    if (Math.abs(z + CLUB.z) < 12 && x + CLUB.x < 175) continue;
+    if (Math.hypot(x + CLUB.x - 80, z + CLUB.z + 63) < 16) continue;
+    const size = 0.5 + d / 110;
+    for (let k = 0; k < 6; k++) {
+      const o = placed * 6 + k;
+      centre.set([x, SEA + 0.25, z], o * 3);
+      corner.set([quad[k * 2]! * 0.42 * size, quad[k * 2 + 1]! * 0.05 * size], o * 2);
+      phase[o] = chance(n * 3 + 3);
+    }
+    placed++;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(centre, 3));
+  geo.setAttribute("corner", new THREE.BufferAttribute(corner, 2));
+  geo.setAttribute("phase", new THREE.BufferAttribute(phase, 1));
+  geo.setDrawRange(0, placed * 6);
+  const mat = inklessBasic({ color: 0xffffff });
+  mat.positionNode = Fn(() => {
+    const c = attribute<"vec2">("corner", "vec2");
+    const p = attribute<"float">("phase", "float");
+    // A glint is there for a moment in each of its turns, and gone the rest of it.
+    const turn = sin(LOOK.time.mul(p.mul(1.3).add(0.9)).add(p.mul(47)));
+    const flash = max(turn, float(0)).pow(10);
+    const across = cameraWorldMatrix.mul(vec4(1, 0, 0, 0)).xyz;
+    return positionLocal.add(across.mul(c.x.mul(flash))).add(vec3(0, 1, 0).mul(c.y.mul(flash)));
+  })();
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.name = "club.glints";
+  mesh.frustumCulled = false;
+  mesh.layers.set(UNREFLECTED);
+  return mesh;
+}
+
 /** The art as meshes: a batch per material, the paving, and what moves. */
 function assemble(model: EnvModel): THREE.Group {
   const g = new THREE.Group();
   const look = new EnvLook();
   look.setBreeze(model.anchors.get("wind")?.[0]?.data.dir);
   g.add(...look.meshes(model.parts, ["paving"]));
-  const floor = model.parts.get("paving");
   const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
   const count = new Map<string, number>();
   const animated = (a: EnvAnim) => {
@@ -128,16 +187,20 @@ function assemble(model: EnvModel): THREE.Group {
     if (move) movers.push({ move, mover: { group, rest: a.matrix.clone(), index } });
   };
   for (const a of model.anims) animated(a);
-  if (floor) {
+  g.add(glints());
+  const tick = () => {
+    const t = LOOK.time.value;
+    for (const m of movers) m.move(m.mover, t);
+  };
+  for (const [key, floor] of model.parts) {
+    if (classOf(key) !== "paving") continue;
     const mesh = new THREE.Mesh(floor, look.material("paving"));
     mesh.name = "env.paving";
     mesh.receiveShadow = true;
+    mesh.layers.set(UNREFLECTED);
     // The floor is in every picture of the terrace: drawing it moves what moves.
     mesh.frustumCulled = false;
-    mesh.onBeforeRender = () => {
-      const t = LOOK.time.value;
-      for (const m of movers) m.move(m.mover, t);
-    };
+    mesh.onBeforeRender = tick;
     g.add(mesh);
   }
   return g;

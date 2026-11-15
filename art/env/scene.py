@@ -16,18 +16,25 @@ import numpy as np
 import kit
 
 
-def _group(parts):
-    """Parts joined by class and shading."""
+def _group(parts, cell=0.0):
+    """Parts joined by class and shading (and, with `cell`, by the square of ground that size their middle is
+    over, so what is drawn can be culled a square at a time)."""
     out = {}
     for p in parts:
         if p is None or not len(p.F):
             continue
-        out.setdefault((p.cls, p.smooth), []).append(p)
+        where = None
+        if cell:
+            mid = (p.P.min(axis=0) + p.P.max(axis=0)) / 2
+            where = (math.floor(mid[0] / cell), math.floor(mid[2] / cell))
+        out.setdefault((p.cls, p.smooth, where), []).append(p)
     return [kit.join(v) for v in out.values()]
 
 
 class Scene:
-    def __init__(self):
+    def __init__(self, cell=0.0):
+        """`cell`: the scene's own geometry is stored in squares of ground this size (0: all in one)."""
+        self.cell = cell
         self.defs = {}
         self.placed = []
         self.own = []
@@ -76,7 +83,7 @@ class Scene:
     def write(self, path):
         w = _Writer()
         nodes = []
-        for mesh in _group(self.own):
+        for mesh in _group(self.own, self.cell):
             nodes.append(w.mesh_node(mesh, np.eye(4)))
         by_prop = {}
         for name, m in self.placed:

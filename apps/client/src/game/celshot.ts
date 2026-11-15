@@ -1,5 +1,6 @@
 // Dev: look testing the cel look without the menus.
-//  `/?celshot=flyover` (`&fly=0.3&freeze`) or `/?celshot=club`: the menu backdrops.
+//  `/?celshot=flyover` (`&fly=0.3&freeze`) or `/?celshot=club` (`&riders=4`, `&close`: the pro shop's close-up,
+//  `&ride`: with your ride, `&sport=winter`): the menu backdrops.
 //  `/?celshot=bay&eye=x,y,z&look=x,y,z&fov=50`: the bay and its course from there.
 //  `/?celshot=course&event=snow&season=fall&weather=storm&time=dusk`: a circuit in its conditions (courseshot.ts).
 //  `/?celshot=menu&shot=hero|body|face`: a rider on the main menu's colours, with the look test's rider options
@@ -13,7 +14,17 @@ import { CLUB, buildClub } from "../render/club.ts";
 import { celify } from "../render/cel/material.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, hipPose, idlePose } from "../render/rider/poses.ts";
-import { backdrop, setClubRider, setMenuRider, setMenuShot, sharedBay, showMenuRider } from "./backdrops.ts";
+import {
+  backdrop,
+  setClubCloseUp,
+  setClubRider,
+  setClubRiders,
+  setMenuRider,
+  setMenuShot,
+  sharedBay,
+  showClubRide,
+  showMenuRider,
+} from "./backdrops.ts";
 import { Engine } from "./engine.ts";
 import { booted } from "../loading.ts";
 
@@ -53,7 +64,12 @@ export async function celshot(params: URLSearchParams): Promise<void> {
     return;
   }
   if (kind !== "hero") {
-    if (kind === "club") setClubRider(defaultAppearance(), "summer");
+    if (kind === "club") {
+      setClubRider(defaultAppearance(), params.get("sport") === "winter" ? "winter" : "summer");
+      setClubRiders(Number(params.get("riders") ?? 1));
+      setClubCloseUp(params.has("close"));
+      showClubRide(params.has("ride"));
+    }
     engine.show(backdrop(kind === "club" ? "club" : "flyover"));
     return;
   }
@@ -72,7 +88,7 @@ export async function celshot(params: URLSearchParams): Promise<void> {
     Reflect.deleteProperty(appearance.outfits.summer, slot);
   const figure = new RiderFigure(appearance, "summer");
   world.scene.add(figure.group);
-  const base = new THREE.Vector3(CLUB.x + 3, CLUB.floor, CLUB.z - 4);
+  const base = new THREE.Vector3(CLUB.x + 1.3, CLUB.floor, CLUB.z - 4);
   figure.group.position.copy(base);
   figure.group.rotation.y = num("yaw", 0.35);
   const frozen = params.has("t") ? num("t", 0) : null;

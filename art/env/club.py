@@ -23,6 +23,8 @@ STAGE = -3.0
 STAIR_WEST, STAIR_EAST = -0.45, 5.55
 STEPS = 18
 RUN = 0.3
+# The client draws the terrace in squares of ground this size (see render/club.ts).
+CELL = 12.0
 # The signal mast: its height, and where it stands along the landing stage.
 MAST = 7.3
 MAST_X = 3.2
@@ -192,11 +194,11 @@ def east(sc):
     sc.place("pot", T(14.1, 0, 4.0))
     sc.place("fan-palm", T(14.1, 0.57, 4.0) @ RY(2.0))
     # A gull on the lantern at the head of the stair.
-    sc.anim("gull", F.gull(), T(STAIR_WEST - 0.3, 1.23 + 0.76, FRONT + 0.02) @ RY(0.25))
+    sc.anim("gull", F.gull(), T(STAIR_WEST - 0.3, 1.23 + 0.825, FRONT + 0.02) @ RY(0.25))
 
 
 def build():
-    sc = Scene()
+    sc = Scene(cell=CELL)
     sc.anchor("wind", T(), dir=list(WIND))
     terrace(sc)
     landing(sc)

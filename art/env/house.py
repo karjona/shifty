@@ -227,6 +227,20 @@ def clubhouse():
     parts.append(wall(half_moon, 0.01, GLASS, "glass", back=False).at(0, 0, -GALLERY - 0.14))
     for x in (-6, -3, 3, 6):
         placed.append(("window.low", T(x, 1.95, -GALLERY)))
+    # A dado of glazed tiles along the gallery, and benches under the windows.
+    for i in range(50):
+        x = -ARCADE + 2 * ARCADE * (i + 0.5) / 50
+        if abs(x) < 1.1:
+            continue
+        for row in range(3):
+            c = (TILE_BLUE, 0xF4F1E6, 0xE8A72C)[(i + row * 2) % 3 if row == 1 else (i + row) % 2]
+            parts.append(box(2 * ARCADE / 50, 0.3, 0.02, c).at(x, 0.12 + 0.3 * row, -GALLERY + 0.01))
+    parts.append(box(2 * ARCADE, 0.12, 0.05, P.STONE_DARK).at(0, 0, -GALLERY + 0.025))
+    parts.append(box(2 * ARCADE, 0.06, 0.04, TILE_BLUE).at(0, 1.02, -GALLERY + 0.02))
+    for x in (-4.5, 4.5):
+        parts.append(box(2.0, 0.07, 0.42, P.WOOD).at(x, 0.42, -GALLERY + 0.3))
+        for sx in (-0.85, 0.85):
+            parts.append(box(0.08, 0.42, 0.38, P.WOOD_DARK).at(x + sx, 0, -GALLERY + 0.3))
     parts.append(box(2 * ARCADE, 0.12, GALLERY, P.STUCCO_WARM).at(0, GROUND - 0.12, -GALLERY / 2))
     for x in np.arange(-ARCADE + 1.5, ARCADE, 1.5):
         parts.append(box(0.14, 0.16, GALLERY - 0.3, P.WOOD_DARK).at(x, GROUND - 0.28, -GALLERY / 2 - 0.1))
@@ -351,7 +365,7 @@ def bougainvillea(sc, points, spread=0.55, seed=0, hang=0.0):
             r = spread * rng.uniform(0.42, 0.7)
             flower = k < 3 or rng.uniform() < 0.3
             c = (P.BOUGAINVILLEA if rng.uniform() < 0.65 else P.BOUGAINVILLEA_DEEP) if flower else P.LEAF_DARK
-            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, 2))
+            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, 1))
         if hang and rng.uniform() < 0.7:
             # A spray trailing down: clumps on a line, smaller toward its end.
             q = p + rng.normal(size=3) * spread * np.array([0.5, 0.0, 0.5])

@@ -26,7 +26,7 @@ import {
   uniform,
   vec3,
 } from "three/tsl";
-import { CelMaterial, inkId } from "../cel/material.ts";
+import { CelMaterial, UNREFLECTED, inkId } from "../cel/material.ts";
 import { FOLIAGE, LOOK } from "../cel/look.ts";
 import { noise4 } from "../cel/noise.ts";
 import type { EnvParts } from "./model.ts";
@@ -103,19 +103,31 @@ export class EnvLook {
     return m;
   }
 
-  /** A mesh per class of `parts` (`skip` leaves classes to the caller). */
+  /**
+   * A mesh per class of `parts` (`skip` leaves classes to the caller). They
+   * are left out of the sea's mirror image: scenery art stands back from
+   * the water's edge or high over it, where its reflection never shows.
+   */
   meshes(parts: EnvParts, skip: readonly string[] = []): THREE.Mesh[] {
     const out: THREE.Mesh[] = [];
-    for (const [cls, geometry] of parts) {
+    for (const [key, geometry] of parts) {
+      const cls = classOf(key);
       if (skip.includes(cls)) continue;
       const mesh = new THREE.Mesh(geometry, this.material(cls));
       mesh.name = `env.${cls}`;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      mesh.layers.set(UNREFLECTED);
       out.push(mesh);
     }
     return out;
   }
+}
+
+/** The material class of a part's key (`solid#1,-2` is `solid`). */
+export function classOf(key: string): string {
+  const cut = key.indexOf("#");
+  return cut < 0 ? key : key.slice(0, cut);
 }
 
 /** A window pane: the dim room behind it and the sky it mirrors (paler toward the horizon), tinted by its colour,

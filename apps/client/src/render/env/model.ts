@@ -9,7 +9,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-/** The geometry of each material class. */
+/** The geometry of each material class (`solid`), or of each class in each square of ground (`solid#1,-2`). */
 export type EnvParts = Map<string, THREE.BufferGeometry>;
 
 /** A group the scene moves: its pivot, and its geometry about it. */
@@ -148,27 +148,57 @@ function joined(soups: Soup[]): THREE.BufferGeometry {
   return g;
 }
 
-/** Collects the meshes under `root` by class, in the space `to` maps their world into. */
-function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object3D) => boolean): EnvParts {
+/** The middle of a soup's box, on the ground (x, z). */
+function middle(s: Soup): [number, number] {
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  for (let i = 0; i < s.position.length; i += 3) {
+    const x = s.position[i]!;
+    const z = s.position[i + 2]!;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  return [(x0 + x1) / 2, (z0 + z1) / 2];
+}
+
+/**
+ * Collects the meshes under `root` by class, in the space `to` maps their
+ * world into. With `cell`, each class is also split by the square of ground
+ * that size a mesh's middle is over (`solid#1,-2`), so a big scene culls a
+ * square at a time.
+ */
+function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object3D) => boolean, cell = 0): EnvParts {
   const soups = new Map<string, Soup[]>();
   const m = new THREE.Matrix4();
   const placing = new THREE.Matrix4();
   const visit = (o: THREE.Object3D) => {
     if (skip(o)) return;
     if (o instanceof THREE.Mesh) {
-      const cls: unknown = o.userData.c;
-      const key = typeof cls === "string" ? cls : "solid";
-      let list = soups.get(key);
-      if (!list) soups.set(key, (list = []));
+      const c: unknown = o.userData.c;
+      const cls = typeof c === "string" ? c : "solid";
+      const add = (made: Soup) => {
+        let key = cls;
+        if (cell > 0) {
+          const [x, z] = middle(made);
+          key = `${cls}#${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+        }
+        let list = soups.get(key);
+        if (!list) soups.set(key, (list = []));
+        list.push(made);
+      };
       const g: THREE.BufferGeometry = o.geometry;
       const smooth = o.userData.s === 1;
       if (o instanceof THREE.InstancedMesh) {
         // A prop placed many times: once per placing.
         for (let i = 0; i < o.count; i++) {
           o.getMatrixAt(i, placing);
-          list.push(soup(g, m.multiplyMatrices(to, o.matrixWorld).multiply(placing), smooth));
+          add(soup(g, m.multiplyMatrices(to, o.matrixWorld).multiply(placing), smooth));
         }
-      } else list.push(soup(g, m.multiplyMatrices(to, o.matrixWorld), smooth));
+      } else add(soup(g, m.multiplyMatrices(to, o.matrixWorld), smooth));
     }
     for (const c of o.children) visit(c);
   };
@@ -178,8 +208,8 @@ function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object
   return parts;
 }
 
-/** A scene of the art (e.g. `club`), loaded once. */
-export function loadEnv(name: string): Promise<EnvModel> {
+/** A scene of the art (e.g. `club`), loaded once; `cell` splits its classes by squares of ground (see `collect`). */
+export function loadEnv(name: string, cell = 0): Promise<EnvModel> {
   let p = cache.get(name);
   if (!p) {
     p = (async () => {
@@ -207,7 +237,7 @@ export function loadEnv(name: string): Promise<EnvModel> {
           list.push({ matrix: o.matrixWorld.clone(), data });
         }
       });
-      const parts = collect(scene, new THREE.Matrix4(), special);
+      const parts = collect(scene, new THREE.Matrix4(), special, cell);
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           const g: THREE.BufferGeometry = o.geometry;
