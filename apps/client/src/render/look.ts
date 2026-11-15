@@ -299,7 +299,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     sky: [0x262f3c, 0x3c4654, 0x6c7682, 0x8a8a88],
     weight: 0.95,
     lit: rgb(0.7, 0.73, 0.78),
-    shade: rgb(0.92, 0.95, 1.02),
+    shade: rgb(0.8, 0.8, 0.74),
     shadow: 0,
     cirrus: 0,
     puffs: 0,
