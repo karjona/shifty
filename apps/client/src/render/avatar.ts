@@ -6,12 +6,12 @@ import * as THREE from "three/webgpu";
 import { type Appearance, type Colourway, type Sport, botAppearance, item } from "@shifty/rider";
 import { Ride } from "./ride/ride.ts";
 import { RiderFigure } from "./rider/model.ts";
-import { crossedPose, idlePose } from "./rider/poses.ts";
+import { crossedPose, hipPose, idlePose } from "./rider/poses.ts";
 
-/** Anime motion: poses are held on twos (12 a second), not tweened. */
-const ON_TWOS = 12;
 /** Colours for a ride without an item. */
 const PLAIN: Colourway = [0xf2f0ea, 0x1c1d21, 0xd9382e];
+
+const STANCES = { idle: idlePose, hip: hipPose, crossed: crossedPose };
 
 /** Where the ride stands, in the rider's frame (facing +z): a board on its tail at the rider's right, a jetski
  * behind them, turned to show its side. */
@@ -33,8 +33,8 @@ export class Avatar {
   readonly mesh = new THREE.Group();
   private figure: RiderFigure;
   private t: number;
-  /** Arms crossed, as on a character select (else standing about). */
-  crossed = false;
+  /** How they stand: at ease, a hand on the hip, or arms crossed as on a character select. */
+  stance: "idle" | "hip" | "crossed" = "idle";
   private appearance: Appearance;
   private sport: Sport;
   private ride: Ride | null = null;
@@ -97,8 +97,7 @@ export class Avatar {
   /** Idle for `dt` seconds. */
   update(dt: number): void {
     this.t += dt;
-    const t = Math.floor(this.t * ON_TWOS) / ON_TWOS;
-    if (this.figure.body) this.figure.pose((this.crossed ? crossedPose : idlePose)(this.figure.body, t));
+    if (this.figure.body) this.figure.pose(STANCES[this.stance](this.figure.body, this.t));
   }
 
   dispose(): void {

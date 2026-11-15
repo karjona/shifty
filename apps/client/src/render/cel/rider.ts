@@ -63,6 +63,11 @@ const GLINT_TONE = 0.95;
 /** How far a face preset's shape can move the shade line. */
 const SHAPE_SHADE = 1.2;
 
+/** How far the front of the face's normals lean toward straight ahead (see `faceGeometry`). */
+const FACE_FLAT = 1.6;
+/** How far the shade line shifts under the jaw (toward shade). */
+const NECK_SHADE = 0.9;
+
 /** An overlay that covers nothing. */
 export const NO_OVERLAY = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
 NO_OVERLAY.needsUpdate = true;
@@ -167,10 +172,11 @@ export class CelTintMaterial extends CelMaterial {
     // The painter's light nudges the shade line.
     // (From a blurred level of the paint, so the shade line runs in clean shapes.)
     const soft = dot(texture(detail).level(float(kind === "look" ? 5.5 : 4)).rgb, vec3(0.299, 0.587, 0.114));
-    this.biasNode = clamp(soft.sub(0.5).mul(face ? 0.25 : kind === "look" ? 0.55 : 1.2), -0.45, 0.35).sub(
+    const painted = clamp(soft.sub(0.5).mul(face ? 0.25 : kind === "look" ? 0.45 : 0.5), -0.45, 0.35).sub(
       shapeShade.mul(SHAPE_SHADE),
     );
-    if (!face) this.deepNode = smoothstep(0.3, 0.22, soft);
+    this.biasNode = face ? painted.add(attribute<"float">("shadeBias", "float")) : painted;
+    if (kind === "kit") this.deepNode = smoothstep(0.3, 0.22, soft);
     if (kind === "hair") {
       // The sheen on anime hair: a broad, lighter band of the hair's own colour.
       this.specStrength = 0.55;
@@ -291,12 +297,15 @@ const hullGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>()
 const faceGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
 
 /**
- * A head whose normals lean toward an ellipsoid round it, as fighting games
- * tune faces: the shade then falls across the face in one clean shape,
- * not in blobs round every bump. `keep` is how much of the sculpt's own
- * normal stays.
+ * A head whose normals lean toward an ellipsoid round it, flattened across
+ * the front of the face, as fighting games tune faces: the face takes the
+ * light as one plane (lit whole until the light is well round the side,
+ * then shade comes in from the far cheek in one clean shape) instead of in
+ * blobs round every bump. `keep` is how much of the sculpt's own normal
+ * stays. Each vertex also carries how far its shade line shifts
+ * (`shadeBias`): under the jaw the neck is always in shade.
  */
-export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.12): THREE.BufferGeometry {
+export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.BufferGeometry {
   let out = faceGeometries.get(geo);
   if (out) return out;
   const pos = geo.getAttribute("position");
@@ -316,22 +325,36 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.12): THREE.Buff
   const half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
   const span = half.y * 0.25;
   const n = new Float32Array(pos.count * 3);
+  const bias = new Float32Array(pos.count);
   const e = new THREE.Vector3();
   const o = new THREE.Vector3();
+  const smooth = (x: number) => {
+    const t = Math.min(1, Math.max(0, x));
+    return t * t * (3 - 2 * t);
+  };
   for (let i = 0; i < pos.count; i++) {
     p.fromBufferAttribute(pos, i);
     o.fromBufferAttribute(nor, i);
     // Below the jaw (the neck) the sculpt's own normals stay.
-    const t = Math.min(1, Math.max(0, (p.y - (jaw - span)) / (2 * span)));
-    const w = t * t * (3 - 2 * t) * (1 - keep);
+    const head = smooth((p.y - (jaw - span)) / (2 * span));
+    const w = head * (1 - keep);
     p.sub(c);
     e.set(p.x / (half.x * half.x), p.y / (half.y * half.y), p.z / (half.z * half.z)).normalize();
+    // The front of the face (the mask from brow to chin, between the cheekbones) leans toward straight ahead.
+    const front = smooth((p.z / half.z - 0.25) / 0.45) * smooth((0.9 - Math.abs(p.x) / half.x) / 0.35);
+    e.z += FACE_FLAT * front;
+    e.y += FACE_FLAT * 0.12 * front;
+    e.normalize();
     e.multiplyScalar(w)
       .addScaledVector(o, 1 - w)
       .normalize();
     n.set([e.x, e.y, e.z], i * 3);
+    // Under the jaw and behind the chin: the neck, in the head's shade.
+    const under = smooth((jaw + span * 0.2 - (p.y + c.y)) / (span * 0.9));
+    const behind = smooth((half.z * 0.72 - p.z) / (half.z * 0.3));
+    bias[i] = -NECK_SHADE * under * behind;
   }
-  out = derived(geo, new THREE.BufferAttribute(n, 3));
+  out = derived(geo, new THREE.BufferAttribute(n, 3), { shadeBias: new THREE.BufferAttribute(bias, 1) });
   faceGeometries.set(geo, out);
   return out;
 }

@@ -2,6 +2,8 @@
 //  `/?celshot=flyover` (`&fly=0.3&freeze`) or `/?celshot=club`: the menu backdrops.
 //  `/?celshot=bay&eye=x,y,z&look=x,y,z&fov=50`: the bay and its course from there.
 //  `/?celshot=course&event=snow&season=fall&weather=storm&time=dusk`: a circuit in its conditions (courseshot.ts).
+//  `/?celshot=menu&shot=hero|body|face`: a rider on the main menu's colours, with the look test's rider options
+//  (lookdev.ts: seed, body, skin, hair, wear, bare, sport...).
 //  `/?celshot=hero`: your rider on the club's terrace, framed like a
 //  character select. Options: yaw (rider), sun=x,y,z (offset), cx, cy, dist,
 //  fov, orbit, lift, t (freeze the idle), pose (idle, crossed), seed, bare (slots to empty).
@@ -10,13 +12,10 @@ import { botAppearance, defaultAppearance } from "@shifty/rider";
 import { CLUB, buildClub } from "../render/club.ts";
 import { celify } from "../render/cel/material.ts";
 import { RiderFigure } from "../render/rider/model.ts";
-import { crossedPose, idlePose } from "../render/rider/poses.ts";
-import { backdrop, setClubRider, sharedBay } from "./backdrops.ts";
+import { crossedPose, hipPose, idlePose } from "../render/rider/poses.ts";
+import { backdrop, setClubRider, setMenuRider, setMenuShot, sharedBay, showMenuRider } from "./backdrops.ts";
 import { Engine } from "./engine.ts";
 import { booted } from "../loading.ts";
-
-/** Anime motion: poses held on twos (12 a second), not tweened. */
-export const ON_TWOS = 12;
 
 export async function celshot(params: URLSearchParams): Promise<void> {
   const engine = await Engine.get();
@@ -39,6 +38,18 @@ export async function celshot(params: URLSearchParams): Promise<void> {
     const fov = Number(params.get("fov") ?? 50);
     void world.renderer.setAnimationLoop((now: number) => world.renderFrom(eye, look, now / 1000, 1 / 60, fov));
     booted();
+    return;
+  }
+  if (kind === "menu") {
+    const { appearanceFor } = await import("./lookdev.ts");
+    const shot = params.get("shot");
+    setMenuRider(
+      appearanceFor(Number(params.get("seed") ?? 0), 0, params),
+      params.get("sport") === "winter" ? "winter" : "summer",
+    );
+    setMenuShot(shot === "face" || shot === "body" ? shot : "hero", null);
+    showMenuRider(true);
+    engine.show(backdrop("shader"));
     return;
   }
   if (kind !== "hero") {
@@ -71,8 +82,9 @@ export async function celshot(params: URLSearchParams): Promise<void> {
   world.setShadowBox(6);
   void world.renderer.setAnimationLoop((now: number) => {
     t += 1 / 60;
-    const time = frozen ?? Math.floor(t * ON_TWOS) / ON_TWOS;
-    if (figure.body) figure.pose((pose === "crossed" ? crossedPose : idlePose)(figure.body, time));
+    const time = frozen ?? t;
+    if (figure.body)
+      figure.pose((pose === "crossed" ? crossedPose : pose === "hip" ? hipPose : idlePose)(figure.body, time));
     const look = base.clone().add(new THREE.Vector3(num("cx", 0), num("cy", 0.98), 0));
     const dist = num("dist", 4.6);
     const turn = num("orbit", 0) + Math.PI;

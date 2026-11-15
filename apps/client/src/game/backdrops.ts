@@ -305,6 +305,7 @@ class SeasonField implements Stage {
     if (this.avatar) this.avatar.set(appearance, sport);
     else {
       this.avatar = new Avatar(appearance, 0, sport);
+      this.avatar.stance = this.shot === "hero" ? "hip" : "idle";
       this.avatar.showRide(this.withRide);
       this.rider.add(this.avatar.mesh);
     }
@@ -327,6 +328,7 @@ class SeasonField implements Stage {
   setShot(shot: RiderShot, space: (() => ScreenBox | null) | null): void {
     this.shot = shot;
     this.space = space;
+    if (this.avatar) this.avatar.stance = shot === "hero" ? "hip" : "idle";
   }
 
   /** Eases the framing toward the shot's (snaps to it at first). */
@@ -431,7 +433,7 @@ class Club implements Stage {
     }
     this.avatars.forEach((a, i) => {
       const spot = spots[i]!;
-      a.crossed = i === 0;
+      a.stance = i === 0 ? "crossed" : "idle";
       a.mesh.position.set(spot.x, CLUB.floor, spot.z);
       a.mesh.rotation.y = spot.yaw;
       if (i < this.count) this.group.add(a.mesh);
