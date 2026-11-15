@@ -72,21 +72,21 @@ function dress(r: () => number, beach: boolean): Dress {
   };
 }
 
-const HEAD = new THREE.SphereGeometry(0.112, 7, 5).scale(0.94, 1.12, 1);
-const CAP = new THREE.SphereGeometry(0.124, 7, 3, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.96, 1.1, 1.02);
-const LOCKS = new THREE.SphereGeometry(0.12, 6, 4).scale(0.98, 1.45, 0.62);
-const BRIM = new THREE.CylinderGeometry(0.24, 0.26, 0.03, 8);
-const HAND = new THREE.SphereGeometry(0.043, 5, 3);
+const HEAD = new THREE.SphereGeometry(0.112, 6, 4).scale(0.94, 1.12, 1);
+const CAP = new THREE.SphereGeometry(0.124, 6, 2, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(0.96, 1.1, 1.02);
+const LOCKS = new THREE.SphereGeometry(0.12, 5, 3).scale(0.98, 1.45, 0.62);
+const BRIM = new THREE.CylinderGeometry(0.24, 0.26, 0.03, 7);
+const HAND = new THREE.SphereGeometry(0.043, 4, 2);
 /** The trunk: shoulders wider than the waist, flat from front to back. */
-const TORSO = new THREE.CylinderGeometry(1, 0.74, 0.44, 7).translate(0, 0.22, 0).scale(0.2, 1, 0.115);
-const HIPS = new THREE.CylinderGeometry(0.92, 1, 0.2, 7, 1, true).translate(0, 0.1, 0).scale(0.165, 1, 0.115);
-const SKIRT = new THREE.CylinderGeometry(0.62, 1, 0.46, 7, 1, true).translate(0, -0.23, 0).scale(0.25, 1, 0.19);
-const NECK = new THREE.CylinderGeometry(0.045, 0.05, 0.1, 5, 1, true);
+const TORSO = new THREE.CylinderGeometry(1, 0.74, 0.44, 6).translate(0, 0.22, 0).scale(0.2, 1, 0.115);
+const HIPS = new THREE.CylinderGeometry(0.92, 1, 0.2, 6, 1, true).translate(0, 0.1, 0).scale(0.165, 1, 0.115);
+const SKIRT = new THREE.CylinderGeometry(0.62, 1, 0.46, 6, 1, true).translate(0, -0.23, 0).scale(0.25, 1, 0.19);
+const NECK = new THREE.CylinderGeometry(0.045, 0.05, 0.1, 4, 1, true);
 const FOOT = new THREE.BoxGeometry(0.085, 0.07, 0.23).translate(0, 0.035, 0.06);
 
 /** A limb's segment hanging from the origin: `top` thick at the joint, `end` at its far end. */
 function limb(len: number, top: number, end: number): THREE.BufferGeometry {
-  return new THREE.CylinderGeometry(top, end, len, 5, 1, true).translate(0, -len / 2, 0);
+  return new THREE.CylinderGeometry(top, end, len, 4, 1, true).translate(0, -len / 2, 0).rotateY(Math.PI / 4);
 }
 
 /**
@@ -382,6 +382,8 @@ export class Walkers {
     mesh.geometry.setAttribute("walkA", new THREE.Float32BufferAttribute(this.a, 4));
     mesh.geometry.setAttribute("walkB", new THREE.Float32BufferAttribute(this.b, 4));
     mesh.name = "walkers";
+    // (Every walker on a circuit can be drawn as one.)
+    mesh.userData.noMerge = false;
     mesh.layers.set(UNREFLECTED);
     // (They move in the shader: their bounds are their beats'.)
     mesh.frustumCulled = false;

@@ -202,8 +202,7 @@ function addUmbrella(
   const L = new Local(shape, x, y, z, yaw);
   for (const side of [-1.0, 1.0]) {
     const bed = r() < 0.5 ? WHITE : a;
-    L.box(side, 0.22, 0.2, 0.62, 0.1, 1.3, bed);
-    for (const lz of [-0.35, 0.75]) L.box(side, 0, lz, 0.5, 0.22, 0.06, WOOD_DARK);
+    L.box(side, 0.1, 0.2, 0.62, 0.22, 1.3, bed);
     L.quad(
       [side - 0.31, 0.32, -0.45],
       [side + 0.31, 0.32, -0.45],

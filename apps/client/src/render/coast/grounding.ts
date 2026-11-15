@@ -109,6 +109,8 @@ export class Grounding {
     if (this.shape.triangles === 0) return null;
     const mesh = this.shape.mesh(material, "none");
     mesh.name = "shade";
+    // (All the shade on a circuit that shares a material can be drawn as one.)
+    mesh.userData.noMerge = false;
     mesh.layers.set(UNREFLECTED);
     return mesh;
   }

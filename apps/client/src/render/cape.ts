@@ -673,7 +673,6 @@ export class CapeScenery implements WaterScenery {
       m.userData.noMerge = true;
       this.group.add(m);
     }
-    near.castShadow = true;
 
     // The rock: cliffs, the arch over its legs, the stacks.
     const rock = new Shape();

@@ -109,6 +109,8 @@ export function sierra(side: 1 | -1, ranges: readonly Range[], width: number, se
   for (const g of parts) g.dispose();
   mesh.name = "sierra";
   mesh.userData.noMerge = true;
+  // (Too far off to show in the water.)
+  mesh.layers.set(UNREFLECTED);
   return mesh;
 }
 
@@ -304,6 +306,7 @@ export function seaHorizon(side: 1 | -1, seed: number): THREE.Mesh {
   for (const g of parts) g.dispose();
   mesh.name = "headlands";
   mesh.userData.noMerge = true;
+  mesh.layers.set(UNREFLECTED);
   return mesh;
 }
 

@@ -30,7 +30,7 @@ import {
   vec4,
 } from "three/tsl";
 import { LOOK, cut0 } from "./look.ts";
-import { CelMaterial, SUN_DIR, inkId, inklessBasic } from "./material.ts";
+import { CelMaterial, SUN_DIR, UNREFLECTED, inkId, inklessBasic } from "./material.ts";
 import { noise4 } from "./noise.ts";
 
 /** The sun's disc and the ring round it, as cosines of their angles from its centre (2.1° and 5°). */
@@ -295,6 +295,8 @@ export class Cumulus {
     material.positionNode = cloud.xyz.add(positionLocal.mul(vec3(s, s.mul(this.tower), s)));
     this.mesh = new THREE.Mesh(geo, material);
     this.mesh.name = "cumulus";
+    // (Bright against the sky: a mirror image of them would show nothing in the water.)
+    this.mesh.layers.set(UNREFLECTED);
     // (Placed in the shader: its bounds are the ring's.)
     this.mesh.frustumCulled = false;
   }
