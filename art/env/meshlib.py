@@ -70,36 +70,44 @@ class Mesh:
         self.nor = []
         self.col = []
         self.uv = []
+        self.alpha = []
 
-    def tri(self, a, b, c, col, uv=(0.0, 0.0), nor=None):
+    def tri(self, a, b, c, col, uv=(0.0, 0.0), nor=None, alpha=1.0):
         """A triangle (counter-clockwise from its front). `col`, `uv` and
         `nor` are one value for all three corners or a list of three; with
-        no normals it is flat."""
+        no normals it is flat. Given normals, it is wound to face their way."""
         flat = norm(cross(sub(b, a), sub(c, a)))
         cols = col if isinstance(col, list) else [col] * 3
         uvs = uv if isinstance(uv, list) else [uv] * 3
         nors = nor if isinstance(nor, list) else [nor or flat] * 3
-        for p, k, u, n in zip((a, b, c), cols, uvs, nors):
+        nors = [n or flat for n in nors]
+        corners = list(zip((a, b, c), cols, uvs, nors))
+        mean = add(add(nors[0], nors[1]), nors[2])
+        if mean[0] * flat[0] + mean[1] * flat[1] + mean[2] * flat[2] < 0:
+            corners = [corners[0], corners[2], corners[1]]
+        for p, k, u, n in corners:
             self.pos.append(p)
             self.col.append(k)
             self.uv.append(u)
-            self.nor.append(n or flat)
+            self.nor.append(n)
+            self.alpha.append(alpha)
 
-    def quad(self, a, b, c, d, col, uv=(0.0, 0.0), nor=None):
+    def quad(self, a, b, c, d, col, uv=(0.0, 0.0), nor=None, alpha=1.0):
         """A quad a-b-c-d (counter-clockwise), split a-c."""
         cols = col if isinstance(col, list) else [col] * 4
         uvs = uv if isinstance(uv, list) else [uv] * 4
         nors = nor if isinstance(nor, list) else [nor] * 4
-        self.tri(a, b, c, [cols[0], cols[1], cols[2]], [uvs[0], uvs[1], uvs[2]], [nors[0], nors[1], nors[2]])
-        self.tri(a, c, d, [cols[0], cols[2], cols[3]], [uvs[0], uvs[2], uvs[3]], [nors[0], nors[2], nors[3]])
+        self.tri(a, b, c, [cols[0], cols[1], cols[2]], [uvs[0], uvs[1], uvs[2]], [nors[0], nors[1], nors[2]], alpha)
+        self.tri(a, c, d, [cols[0], cols[2], cols[3]], [uvs[0], uvs[2], uvs[3]], [nors[0], nors[2], nors[3]], alpha)
 
     def merge(self, other, at=(0.0, 0.0, 0.0), turn=0.0, size=1.0):
         """Adds another mesh, scaled, turned about y and moved."""
-        for p, n, k, u in zip(other.pos, other.nor, other.col, other.uv):
+        for p, n, k, u, a in zip(other.pos, other.nor, other.col, other.uv, other.alpha):
             self.pos.append(add(rot_y(mul(p, size), turn), at))
             self.nor.append(rot_y(n, turn))
             self.col.append(k)
             self.uv.append(u)
+            self.alpha.append(a)
 
     def count(self):
         return len(self.pos) // 3
@@ -178,7 +186,7 @@ def to_blender(name, m):
     uv = mesh.uv_layers.new(name="UVMap")
     for i, k in enumerate(loops):
         c = m.col[k]
-        col.data[i].color = (c[0], c[1], c[2], 1.0)
+        col.data[i].color = (c[0], c[1], c[2], m.alpha[k])
         # (The exporter flips v.)
         uv.data[i].uv = (m.uv[k][0], 1.0 - m.uv[k][1])
     mesh.color_attributes.active_color = col

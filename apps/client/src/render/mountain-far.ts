@@ -104,7 +104,7 @@ function ridged(x: number, y: number, seed: number, octaves: number): number {
 }
 
 /** The land beyond the sim's, as a height at (x, z): see the file's header. */
-function landscape(site: FarSite): { height(x: number, z: number): number; sea: number } {
+function landscape(site: FarSite): { height: (x: number, z: number) => number; sea: number } {
   const path = site.run.path;
   const first = path[0]!;
   const last = path.at(-1)!;

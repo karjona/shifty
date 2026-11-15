@@ -32,6 +32,8 @@ export interface RunScenery {
   treeLine: number;
   /** Red netting along the edges at `s` (a run `half` wide there). */
   fenced(s: number, half: number, finishS: number): boolean;
+  /** A village stands round the finish (else a few chalets by the lodge). */
+  village: boolean;
   /** A lodge, `out` m beyond the riding limit on `side` (1: right), turned to face the run. */
   lodge: { s: number; out: number; side: 1 | -1; size: number };
   /** A frozen lake beside the run: its centre and half extents (m, along and across). */
@@ -50,6 +52,7 @@ const MOUNTAIN: RunScenery = {
   ridgeStart: false,
   treeLine: Infinity,
   fenced: (s, half, finishS) => half > 10 && s > 50 && s < finishS + 30,
+  village: true,
   lodge: { s: 1040, out: 9, side: 1, size: 1 },
   lake: null,
   liftTop: null,
@@ -76,6 +79,7 @@ const GLADES: RunScenery = {
   ridgeStart: true,
   treeLine: 300,
   fenced: (s, half, finishS) => half > 12 && ((s > 190 && s < 560) || (s > 1600 && s < finishS + 30)),
+  village: false,
   lodge: { s: 2010, out: 18, side: 1, size: 1.5 },
   lake: { s: 2010, offset: -78, along: 46, across: 30 },
   liftTop: { s: 26, offset: 30 },
