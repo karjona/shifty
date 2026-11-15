@@ -145,7 +145,8 @@ export class Podium implements Stage {
   }
 
   loaded(): Promise<void> {
-    return Promise.all([this.scene.ready, ...this.figures.map((f) => f.ready)]).then(() => {});
+    const bay = this.engine?.render ? sharedBay(this.engine).ready : Promise.resolve();
+    return Promise.all([bay, this.scene.ready, ...this.figures.map((f) => f.ready)]).then(() => {});
   }
 
   frame(now: number, dt: number): void {

@@ -10,7 +10,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-/** The geometry of each material class (`solid`), or of each class in each square of ground (`solid#1,-2`). */
+/** The geometry of each material class (`solid`), or of each class in each part of a scene split up (`solid#front`). */
 export type EnvParts = Map<string, THREE.BufferGeometry>;
 
 /** A group the scene moves: its pivot, and its geometry about it. */
@@ -27,7 +27,11 @@ export interface EnvAnchor {
 }
 
 export interface EnvModel {
+  /** What is always drawn. */
   parts: EnvParts;
+  /** What is drawn only from close by (small props, interiors), and only from afar (plain stand-ins). */
+  near: EnvParts;
+  far: EnvParts;
   anims: EnvAnim[];
   anchors: Map<string, EnvAnchor[]>;
 }
@@ -219,11 +223,14 @@ class Pace {
   }
 }
 
+/** Which part of a scene a mesh with its middle over `(x, z)` belongs to, for scenes drawn (and culled) in parts. */
+export type EnvSplit = (x: number, z: number) => string;
+
 /**
  * Collects the meshes under `root` by class, in the space `to` maps their
- * world into. With `cell`, each class is also split by the square of ground
- * that size a mesh's middle is over (`solid#1,-2`), so a big scene culls a
- * square at a time.
+ * world into. With `split`, each class is also split by the part of the
+ * scene a mesh's middle is over (`solid#front`), so a big scene culls a
+ * part at a time.
  */
 async function collect(
   root: THREE.Object3D,
@@ -231,7 +238,7 @@ async function collect(
   skip: (o: THREE.Object3D) => boolean,
   sources: Map<THREE.BufferGeometry, Source>,
   pace: Pace,
-  cell = 0,
+  split: EnvSplit | null = null,
 ): Promise<EnvParts> {
   const meshes: THREE.Mesh[] = [];
   const visit = (o: THREE.Object3D) => {
@@ -247,11 +254,7 @@ async function collect(
     const c: unknown = o.userData.c;
     const cls = typeof c === "string" ? c : "solid";
     const add = (made: Soup) => {
-      let key = cls;
-      if (cell > 0) {
-        const [x, z] = middle(made);
-        key = `${cls}#${Math.floor(x / cell)},${Math.floor(z / cell)}`;
-      }
+      const key = split ? `${cls}#${split(...middle(made))}` : cls;
       let list = soups.get(key);
       if (!list) soups.set(key, (list = []));
       list.push(made);
@@ -284,8 +287,11 @@ async function collect(
   return parts;
 }
 
-/** A scene of the art (e.g. `club`), loaded once; `cell` splits its classes by squares of ground (see `collect`). */
-export function loadEnv(name: string, cell = 0): Promise<EnvModel> {
+/** The level of detail a node of the file is drawn at: 0 always, 1 from close by, 2 from afar. */
+const levelOf = (o: THREE.Object3D) => (typeof o.userData.lod === "number" ? o.userData.lod : 0);
+
+/** A scene of the art (e.g. `club`), loaded once; `split` splits its classes into parts (see `collect`). */
+export function loadEnv(name: string, split: EnvSplit | null = null): Promise<EnvModel> {
   let p = cache.get(name);
   if (!p) {
     p = (async () => {
@@ -314,9 +320,14 @@ export function loadEnv(name: string, cell = 0): Promise<EnvModel> {
         const parts = await collect(o, inverse, (c) => c !== o && special(c), sources, pace);
         anims.push({ name: String(o.userData.anim), matrix: o.matrixWorld.clone(), parts });
       });
-      const parts = await collect(scene, new THREE.Matrix4(), special, sources, pace, cell);
+      const here = new THREE.Matrix4();
+      const at = (level: number) =>
+        collect(scene, here, (o) => special(o) || (o !== scene && levelOf(o) !== level), sources, pace, split);
+      const parts = await at(0);
+      const near = await at(1);
+      const far = await at(2);
       for (const g of sources.keys()) g.dispose();
-      return { parts, anims, anchors };
+      return { parts, near, far, anims, anchors };
     })();
     cache.set(name, p);
   }

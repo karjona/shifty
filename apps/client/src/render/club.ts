@@ -1,64 +1,47 @@
-// The country club: a paved terrace over the sea at the east end of the
-// town quay, a grand stair down to the landing stage with its signal mast
-// and moored boats, and the clubhouse behind. Riders gather here before a
-// race. Its art is modelled in art/scene/club.py (public/env/club.glb) and
-// drawn in a handful of batches; the paving's pattern is a shader, and what
-// moves (boats at their moorings, sails out at sea, a gull, a fan, a waiter
-// and members lifting a glass) is moved here; its lettering is set at
-// runtime (env/signs.ts). The sea in front of it glints.
+// The country club, on the lot the town leaves it at the east end of the
+// quay: a paved terrace over the promenade, a grand stair down to it, the
+// signal mast, palms and a jetty with moored boats in front, and the
+// clubhouse behind. It is part of the bay wherever the bay is drawn (the
+// fly-over, races, the podium's backdrop): from afar a few batches of
+// static scenery; with the mode select up (`setDetail`), also its small
+// props, interiors and people, and what moves (boats rocking at their
+// moorings, a gull, a fan, a waiter and members lifting a glass). Its art is
+// modelled in art/scene/club.py (public/env/club.glb), its lettering set at
+// runtime (env/signs.ts); the paving's pattern is a shader. With the detail
+// on, the sea in front of it glints.
 import * as THREE from "three/webgpu";
 import { Fn, attribute, cameraWorldMatrix, float, max, positionLocal, sin, vec3, vec4 } from "three/tsl";
+import { type Colourway, defaultOutfits, item } from "@shifty/rider";
+import { quietly } from "../loading.ts";
 import { LOOK } from "./cel/look.ts";
 import { UNREFLECTED, inklessBasic } from "./cel/material.ts";
-import { EnvLook, classOf } from "./env/materials.ts";
+import { EnvLook } from "./env/materials.ts";
 import { type EnvAnim, type EnvModel, loadEnv } from "./env/model.ts";
 import { signs } from "./env/signs.ts";
+import { Ride } from "./ride/ride.ts";
 import { warmUp } from "./warm.ts";
 
 /** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
-  x: 170,
-  z: 96,
-  /** Height of the terrace floor. */
-  floor: 5.2,
+  x: 155,
+  z: 100,
+  /** Height of the terrace floor: the town's first terrace, and a finger over its cobbles. */
+  floor: 5.23,
   /** The terrace faces the bay (−z). */
 };
 
 /** The medallion in the paving at the head of the stair (on the terrace, from its middle; m). */
 const MEDALLION = { x: 3.9, z: -8.1, radius: 1.1 };
 
-/** The terrace is drawn in squares of ground this size (m), so what the camera has its back to is culled. */
-const CELL = 12;
+/** The club is drawn in two parts, so what the camera has its back to is culled: the sea side, and the clubhouse's. */
+const split = (_x: number, z: number) => (z < 0 ? "front" : "back");
 
-const ready = new WeakMap<THREE.Object3D, Promise<void>>();
+/** The materials every club is drawn with. */
+const look = new EnvLook();
 
-/** Resolves once a club's art is in (and its shaders compiled). */
-export function clubReady(club: THREE.Object3D): Promise<void> {
-  return ready.get(club) ?? Promise.resolve();
-}
-
-/** The club, in the world's coordinates. Its art arrives a moment later (see `clubReady`). */
-export function buildClub(): THREE.Group {
-  const g = new THREE.Group();
-  ready.set(
-    g,
-    loadEnv("club", CELL)
-      .then(async (model) => {
-        const art = assemble(model);
-        const lettering = await signs(model.anchors.get("sign"));
-        if (lettering) {
-          lettering.layers.set(UNREFLECTED);
-          art.add(lettering);
-        }
-        art.position.set(CLUB.x, CLUB.floor, CLUB.z);
-        await warmUp(art);
-        g.add(art);
-      })
-      .catch((e: unknown) => console.error(e)),
-  );
-  return g;
-}
+/** Colours for the jetski on the trailer, without an item's. */
+const PLAIN: Colourway = [0xf2f0ea, 0x1c1d21, 0xd9382e];
 
 /** A number in 0-1 from a whole number, for things that happen now and then. */
 const chance = (n: number) => {
@@ -83,18 +66,6 @@ function rock(m: Mover, t: number): void {
   const k = m.index * 1.9;
   lean.set(Math.sin(t * 0.83 + k) * 0.055, 0, Math.sin(t * 0.61 + k * 2) * 0.025);
   offset.makeRotationFromEuler(lean).setPosition(0, Math.sin(t * 0.7 + k) * 0.07, 0);
-  m.group.matrix.multiplyMatrices(m.rest, offset);
-}
-
-/** How far a sail out at sea goes before it comes round again (m). */
-const SAIL_REACH = 520;
-
-/** A boat under sail, far out: it crosses slowly, heeled a little, and comes round again. */
-function sail(m: Mover, t: number): void {
-  const speed = (m.index % 2 === 0 ? 1 : -1) * (2.2 + m.index * 0.5);
-  const x = ((((t * speed + m.index * 170) % SAIL_REACH) + SAIL_REACH) % SAIL_REACH) - SAIL_REACH / 2;
-  turn.setFromAxisAngle(up, speed > 0 ? 0 : Math.PI);
-  offset.makeRotationFromQuaternion(turn).setPosition(x, Math.sin(t * 0.5 + m.index) * 0.2, 0);
   m.group.matrix.multiplyMatrices(m.rest, offset);
 }
 
@@ -170,7 +141,7 @@ function serving(first: boolean, to: THREE.Vector3): (m: Mover, t: number) => vo
   };
 }
 
-const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail, fan: spin, gull: perch };
+const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, fan: spin, gull: perch };
 
 /** Glints on the sea, in the terrace's coordinates: how many, and the sea's level. */
 const GLINTS = 150;
@@ -226,50 +197,112 @@ function glints(): THREE.Mesh {
   return mesh;
 }
 
-/** The art as meshes: a batch per material, the paving, and what moves. */
-function assemble(model: EnvModel): THREE.Group {
-  const g = new THREE.Group();
-  const look = new EnvLook();
-  look.setBreeze(model.anchors.get("wind")?.[0]?.data.dir);
-  look.medallion.value.set(CLUB.x + MEDALLION.x, CLUB.z + MEDALLION.z, MEDALLION.radius);
-  g.add(...look.meshes(model.parts, ["paving"]));
-  const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
-  const count = new Map<string, number>();
-  const animated = (a: EnvAnim) => {
-    const group = new THREE.Group();
-    group.matrixAutoUpdate = false;
-    group.matrix.copy(a.matrix);
-    group.add(...look.meshes(a.parts));
-    g.add(group);
-    const index = count.get(a.name) ?? 0;
-    count.set(a.name, index + 1);
-    // Figures come as two poses to swap between: `sit0.a` and `sit0.b`.
-    const pose = /^([a-z]+)(\d*)\.([ab])$/u.exec(a.name);
-    let move = MOVES[a.name];
-    if (pose?.[1] === "sit") move = posed(pose[3] === "a", sipping);
-    if (pose?.[1] === "waiter") {
-      const to = new THREE.Vector3().setFromMatrixPosition(model.anchors.get("waiter")?.[0]?.matrix ?? a.matrix);
-      move = serving(pose[3] === "a", to.sub(new THREE.Vector3().setFromMatrixPosition(a.matrix)));
-    }
-    if (move)
-      movers.push({ move, mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index } });
-  };
-  for (const a of model.anims) animated(a);
-  g.add(glints());
-  const tick = () => {
-    const t = LOOK.time.value;
-    for (const m of movers) m.move(m.mover, t);
-  };
-  for (const [key, floor] of model.parts) {
-    if (classOf(key) !== "paving") continue;
-    const mesh = new THREE.Mesh(floor, look.material("paving"));
-    mesh.name = "env.paving";
-    mesh.receiveShadow = true;
-    mesh.layers.set(UNREFLECTED);
-    // The floor is in every picture of the terrace: drawing it moves what moves.
-    mesh.frustumCulled = false;
-    mesh.onBeforeRender = tick;
-    g.add(mesh);
+/** Marks everything under `root` as shared between clubs: an environment going away leaves it (see game/dispose.ts). */
+function share(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    o.userData.shared = true;
+  });
+}
+
+/** The club as the bay draws it. */
+export class ClubArt {
+  readonly group = new THREE.Group();
+  /** Resolves once its art is in (and its shaders compiled). */
+  readonly ready: Promise<void>;
+  /** What only shows with the detail on, and what stands in for some of it from afar. */
+  private near = new THREE.Group();
+  private far = new THREE.Group();
+  /** Its stonework, which shows in the sea's mirror image from afar. */
+  private stone: THREE.Mesh[] = [];
+  private detail = false;
+  /** Where the jetski stands on its trailer (in the club's space), and the jetski once it has been asked for. */
+  private trailer: THREE.Matrix4 | null = null;
+  private ride: Ride | null = null;
+
+  constructor() {
+    this.group.position.set(CLUB.x, CLUB.floor, CLUB.z);
+    // (Hidden, but compiled with the rest: see `World.compile`.)
+    this.near.visible = false;
+    this.near.userData.weather = true;
+    this.ready = loadEnv("club", split)
+      .then(async (model) => {
+        const art = this.assemble(model);
+        const lettering = await signs(model.anchors.get("sign"));
+        if (lettering) {
+          lettering.layers.set(UNREFLECTED);
+          art.add(lettering);
+        }
+        share(art);
+        await warmUp(art);
+        this.group.add(art);
+        this.apply();
+      })
+      .catch((e: unknown) => console.error(e));
   }
-  return g;
+
+  /** Shows the club's small props, interiors, people and what moves (the mode select is up), or only its bulk. */
+  setDetail(on: boolean): void {
+    this.detail = on;
+    this.apply();
+  }
+
+  private apply(): void {
+    this.near.visible = this.detail;
+    this.far.visible = !this.detail;
+    // From the terrace the water under its walls is out of sight: no mirror image to draw.
+    for (const m of this.stone) {
+      m.layers.set(UNREFLECTED);
+      if (!this.detail) m.layers.enable(0);
+    }
+    if (this.detail && !this.ride && this.trailer) {
+      const id = defaultOutfits("male").summer.ride;
+      const ride = quietly(() => new Ride("summer", id, (id ? item(id)?.colours : undefined) ?? PLAIN));
+      ride.group.applyMatrix4(this.trailer);
+      this.near.add(ride.group);
+      this.ride = ride;
+    }
+  }
+
+  /** The art as meshes: a batch per material and part, what only shows from close by or from afar, and what moves. */
+  private assemble(model: EnvModel): THREE.Group {
+    const g = new THREE.Group();
+    look.setBreeze(model.anchors.get("wind")?.[0]?.data.dir);
+    look.medallion.value.set(CLUB.x + MEDALLION.x, CLUB.z + MEDALLION.z, MEDALLION.radius);
+    const base = look.meshes(model.parts);
+    this.stone = base.filter((m) => m.name === "env.solid");
+    g.add(...base, this.near, this.far);
+    this.near.add(...look.meshes(model.near));
+    this.far.add(...look.meshes(model.far));
+    this.trailer = model.anchors.get("ride")?.[0]?.matrix ?? null;
+    const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
+    const count = new Map<string, number>();
+    const animated = (a: EnvAnim) => {
+      const group = new THREE.Group();
+      group.matrixAutoUpdate = false;
+      group.matrix.copy(a.matrix);
+      group.add(...look.meshes(a.parts));
+      this.near.add(group);
+      const index = count.get(a.name) ?? 0;
+      count.set(a.name, index + 1);
+      // Figures come as two poses to swap between: `sit0.a` and `sit0.b`.
+      const pose = /^([a-z]+)(\d*)\.([ab])$/u.exec(a.name);
+      let move = MOVES[a.name];
+      if (pose?.[1] === "sit") move = posed(pose[3] === "a", sipping);
+      if (pose?.[1] === "waiter") {
+        const to = new THREE.Vector3().setFromMatrixPosition(model.anchors.get("waiter")?.[0]?.matrix ?? a.matrix);
+        move = serving(pose[3] === "a", to.sub(new THREE.Vector3().setFromMatrixPosition(a.matrix)));
+      }
+      if (move)
+        movers.push({ move, mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index } });
+    };
+    for (const a of model.anims) animated(a);
+    // The glints are in every picture taken with the detail on: drawing them moves what moves.
+    const sparkle = glints();
+    sparkle.onBeforeRender = () => {
+      const t = LOOK.time.value;
+      for (const m of movers) m.move(m.mover, t);
+    };
+    this.near.add(sparkle);
+    return g;
+  }
 }

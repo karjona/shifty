@@ -104,8 +104,9 @@ function boulder(stone: Shape, l: LandData, seed: number): void {
 }
 
 /**
- * Ground on the bay's quay left bare: the country club's lot at its east end (render/club.ts), and the square
- * on the promenade where the podium stands (game/podium.ts).
+ * Ground on the bay's quay left bare of houses, street furniture and people: the country club's lot at its east
+ * end, with the forecourt on the promenade below its stair (render/club.ts), and the square on the promenade where
+ * the podium stands (game/podium.ts).
  */
 const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24.6, z - 68) < 10;
 

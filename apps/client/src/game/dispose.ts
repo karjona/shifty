@@ -1,10 +1,14 @@
 import * as THREE from "three/webgpu";
 
-/** Frees the GPU memory of everything under `root` (geometry, materials, textures). */
+/**
+ * Frees the GPU memory of everything under `root` (geometry, materials,
+ * textures), but for what is marked `userData.shared`: art other scenes
+ * draw too.
+ */
 export function disposeTree(root: THREE.Object3D): void {
   root.removeFromParent();
   root.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
+    if (!(o instanceof THREE.Mesh) || o.userData.shared === true) return;
     o.geometry.dispose();
     const mats: unknown[] = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of mats) {

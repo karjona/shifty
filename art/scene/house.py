@@ -203,8 +203,9 @@ def door(w=1.7, h=2.5, colour=DOOR):
 
 def clubhouse():
     """The clubhouse (in its own frame: see the module's notes): its parts, the props it places as (name, matrix)
-    pairs, and its signs as (text, matrix, width, height, style, ink, paper)."""
-    parts, placed, signs = [], [], []
+    pairs, its signs as (text, matrix, width, height, style, ink, paper), and what is inside it (parts and placed
+    props to draw only from close by)."""
+    parts, placed, signs, inner, inner_placed = [], [], [], [], []
     arches = [(BAY * k, ARCH_HALF, SPRING) for k in range(-2, 3)]
 
     # The arcade, and the stone round each arch.
@@ -234,13 +235,24 @@ def clubhouse():
             continue
         for row in range(3):
             c = (TILE_BLUE, 0xF4F1E6, 0xE8A72C)[(i + row * 2) % 3 if row == 1 else (i + row) % 2]
-            parts.append(box(2 * ARCADE / 50, 0.3, 0.02, c).at(x, 0.12 + 0.3 * row, -GALLERY + 0.01))
-    parts.append(box(2 * ARCADE, 0.12, 0.05, P.STONE_DARK).at(0, 0, -GALLERY + 0.025))
-    parts.append(box(2 * ARCADE, 0.06, 0.04, TILE_BLUE).at(0, 1.02, -GALLERY + 0.02))
+            inner.append(box(2 * ARCADE / 50, 0.3, 0.02, c).at(x, 0.12 + 0.3 * row, -GALLERY + 0.01))
+    inner.append(box(2 * ARCADE, 0.12, 0.05, P.STONE_DARK).at(0, 0, -GALLERY + 0.025))
+    inner.append(box(2 * ARCADE, 0.06, 0.04, TILE_BLUE).at(0, 1.02, -GALLERY + 0.02))
     for x in (-4.5, 4.5):
-        parts.append(box(2.0, 0.07, 0.42, P.WOOD).at(x, 0.42, -GALLERY + 0.3))
+        inner.append(box(2.0, 0.07, 0.42, P.WOOD).at(x, 0.42, -GALLERY + 0.3))
         for sx in (-0.85, 0.85):
-            parts.append(box(0.08, 0.42, 0.38, P.WOOD_DARK).at(x + sx, 0, -GALLERY + 0.3))
+            inner.append(box(0.08, 0.42, 0.38, P.WOOD_DARK).at(x + sx, 0, -GALLERY + 0.3))
+    # Lanterns hanging from the gallery's beams, a notice board by the door, a rug at it.
+    for x in (-6.0, -3.0, 3.0, 6.0):
+        inner.append(rod((x, GROUND - 0.28, -GALLERY / 2), (x, GROUND - 0.7, -GALLERY / 2), 0.012, 3, P.IRON))
+        inner.append(taper(0.16, 0.16, 0.24, 0.24, 0.3, P.GLOW).at(x, GROUND - 1.0, -GALLERY / 2))
+        inner.append(taper(0.3, 0.3, 0.05, 0.05, 0.1, P.IRON).at(x, GROUND - 0.7, -GALLERY / 2))
+    inner.append(box(1.0, 0.8, 0.04, P.WOOD).at(1.75, 1.35, -GALLERY + 0.03))
+    inner.append(box(0.88, 0.68, 0.02, 0xE9DFC8).at(1.75, 1.41, -GALLERY + 0.055))
+    for k, c in enumerate((0x2B3FD0, 0xC24A1C, 0xD4262F, 0x24804A, 0xF2C14E)):
+        inner.append(box(0.2, 0.26, 0.01, c).at(1.45 + 0.3 * (k % 3), 1.5 + 0.32 * (k // 3), -GALLERY + 0.07))
+    inner.append(box(2.4, 0.015, 1.3, 0xA8452E).at(0, 0.0, -GALLERY + 0.8))
+    inner.append(box(2.1, 0.02, 1.0, 0xD9B77A).at(0, 0.0, -GALLERY + 0.8))
     parts.append(box(2 * ARCADE, 0.12, GALLERY, P.STUCCO_WARM).at(0, GROUND - 0.12, -GALLERY / 2))
     for x in np.arange(-ARCADE + 1.5, ARCADE, 1.5):
         parts.append(box(0.14, 0.16, GALLERY - 0.3, P.WOOD_DARK).at(x, GROUND - 0.28, -GALLERY / 2 - 0.1))
@@ -283,7 +295,7 @@ def clubhouse():
     for y in (1.79, 2.29):
         for i in range(16):
             x = 8.55 + 3.4 * i / 15 + rng.uniform(-0.03, 0.03)
-            placed.append((f"bottle.{int(rng.integers(len(BOTTLES)))}", T(x, y, -1.46) @ S(1, rng.uniform(0.8, 1.2), 1)))
+            inner_placed.append((f"bottle.{int(rng.integers(len(BOTTLES)))}", T(x, y, -1.46) @ S(1, rng.uniform(0.8, 1.2), 1)))
     parts += kit.xf(awning(3.7, 1.5, 0.55, [P.BRANDS["Garbí"][0], P.STUCCO]), T(-10.8, 3.15, 0.02))
     parts += kit.xf(awning(4.6, 1.7, 0.6, [P.BRANDS["Xaloc"][0], P.STUCCO]), T(10.25, 3.2, 0.02))
     # Above the wings' openings.
@@ -301,7 +313,7 @@ def clubhouse():
         if abs(x) < 4:
             placed.append(("balcony", T(x, GROUND + 0.8, 0)))
         else:
-            placed.append((f"flowers.{i % 2}", T(x, GROUND + 0.8, 0.02)))
+            inner_placed.append((f"flowers.{i % 2}", T(x, GROUND + 0.8, 0.02)))
     # Mouldings: a plinth, a string course between the storeys, a tiled frieze and the cornice.
     run = [np.array([-HALF - 0.02, 0, 0.0]), np.array([HALF + 0.02, 0, 0.0])]
     parts.append(extrude([(0.0, GROUND - 0.1), (-0.07, GROUND - 0.06), (-0.1, GROUND + 0.06), (-0.04, GROUND + 0.12), (0.0, GROUND + 0.12)], run, P.STONE_LIGHT))
@@ -331,7 +343,7 @@ def clubhouse():
     parts += kit.xf(hip_roof(HALF + 0.55, DEPTH / 2 + 0.55, EAVE + 0.02, EAVE + 2.5), T(0, 0, -DEPTH / 2))
     parts.append(box(0.9, 1.5, 0.7, P.STUCCO).at(-7.5, EAVE + 1.2, -DEPTH / 2 - 1.0))
     parts.append(taper(1.1, 0.9, 0.5, 0.3, 0.3, P.ROOF).at(-7.5, EAVE + 2.7, -DEPTH / 2 - 1.0))
-    return parts, placed, signs
+    return parts, placed, signs, inner, inner_placed
 
 
 def corbel():
@@ -354,8 +366,9 @@ def define(sc):
         sc.define(f"bottle.{i}", [lathe([(0.04, 0), (0.04, 0.17), (0.015, 0.22), (0.015, 0.28)], 5, c)])
 
 
-def bougainvillea(sc, points, spread=0.55, seed=0, hang=0.0):
-    """Bougainvillea massed along a line of points: clumps of flower over darker leaf, some trailing down."""
+def bougainvillea(sc, points, spread=0.55, seed=0, hang=0.0, detail=2):
+    """Bougainvillea massed along a line of points: clumps of flower over darker leaf, some trailing down.
+    `detail` is how finely its clumps are made (the same plant either way, for close by and for afar)."""
     rng = np.random.default_rng(seed)
     parts = []
     for p in points:
@@ -365,7 +378,7 @@ def bougainvillea(sc, points, spread=0.55, seed=0, hang=0.0):
             r = spread * rng.uniform(0.55, 0.85)
             flower = k < 2 or rng.uniform() < 0.3
             c = (P.BOUGAINVILLEA if rng.uniform() < 0.65 else P.BOUGAINVILLEA_DEEP) if flower else P.LEAF_DARK
-            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, 2))
+            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, detail))
         if hang and rng.uniform() < 0.7:
             # A spray trailing down: clumps on a line, smaller toward its end.
             q = p + rng.normal(size=3) * spread * np.array([0.5, 0.0, 0.5])

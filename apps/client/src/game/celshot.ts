@@ -10,8 +10,7 @@
 //  fov, orbit, lift, t (freeze the idle), pose (idle, crossed), seed, bare (slots to empty).
 import * as THREE from "three/webgpu";
 import { botAppearance, defaultAppearance } from "@shifty/rider";
-import { CLUB, buildClub } from "../render/club.ts";
-import { celify } from "../render/cel/material.ts";
+import { CLUB } from "../render/club.ts";
 import { RiderFigure } from "../render/rider/model.ts";
 import { crossedPose, hipPose, idlePose } from "../render/rider/poses.ts";
 import {
@@ -75,9 +74,7 @@ export async function celshot(params: URLSearchParams): Promise<void> {
   }
   const world = engine.world;
   world.setEnvironment(sharedBay(engine));
-  const club = buildClub();
-  celify(club);
-  world.scene.add(club);
+  sharedBay(engine).club?.setDetail(true);
   const num = (k: string, d: number) => Number(params.get(k) ?? d);
   const sun = (params.get("sun") ?? "-30,38,-26").split(",").map(Number);
   world.setSunOffset(sun[0] ?? -30, sun[1] ?? 38, sun[2] ?? -26);
