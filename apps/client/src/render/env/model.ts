@@ -5,7 +5,8 @@
 // placed many times. Here everything of a class becomes one geometry
 // (positions, normals, colours and how far the wind sways each vertex), so
 // a scene draws in a handful of batches. Groups the scene moves (a fan, a
-// gull) stay apart, and named places come along as anchors.
+// gull) stay apart, and named places come along as anchors. The work is
+// done a few milliseconds at a time, so the page keeps drawing meanwhile.
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
@@ -35,7 +36,18 @@ const BASE = `${import.meta.env.BASE_URL}env`;
 const gltf = new GLTFLoader();
 const cache = new Map<string, Promise<EnvModel>>();
 
-/** Triangles as they come out of the file, per class, before they are joined. */
+/** How long the loader works before it lets the page draw a frame (ms). */
+const SLICE_MS = 5;
+
+/** A mesh of the file, decoded once however many times it is placed: its vertices as plain numbers, its triangles. */
+interface Source {
+  position: Float32Array;
+  color: Float32Array;
+  sway: Float32Array;
+  index: Uint32Array;
+}
+
+/** Triangles of one class, in the scene's space, before they are joined. */
 interface Soup {
   position: Float32Array;
   normal: Float32Array;
@@ -43,25 +55,43 @@ interface Soup {
   sway: Float32Array;
 }
 
-/** A mesh of the file as loose triangles in `m`'s space, with normals: per face, or smooth across shared vertices. */
-function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup {
+function decode(g: THREE.BufferGeometry): Source {
   const pos = g.getAttribute("position");
   const col = g.getAttribute("color");
-  const index = g.index;
   const n = pos.count;
-  const count = index ? index.count : n;
+  const position = new Float32Array(n * 3);
+  const color = new Float32Array(n * 3);
+  const sway = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    position[i * 3] = pos.getX(i);
+    position[i * 3 + 1] = pos.getY(i);
+    position[i * 3 + 2] = pos.getZ(i);
+    color[i * 3] = col.getX(i);
+    color[i * 3 + 1] = col.getY(i);
+    color[i * 3 + 2] = col.getZ(i);
+    sway[i] = col.getW(i);
+  }
+  const index = new Uint32Array(g.index ? g.index.count : n);
+  for (let i = 0; i < index.length; i++) index[i] = g.index ? g.index.getX(i) : i;
+  return { position, color, sway, index };
+}
+
+/** A mesh as loose triangles in `m`'s space, with normals: per face, or smooth across shared vertices. */
+function soup(src: Source, m: THREE.Matrix4, smooth: boolean): Soup {
+  const e = m.elements;
+  const n = src.sway.length;
+  const count = src.index.length;
+  const p = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i += 3) {
+    const x = src.position[i]!;
+    const y = src.position[i + 1]!;
+    const z = src.position[i + 2]!;
+    p[i] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    p[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    p[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  }
   // A mirrored placing turns its faces inside out: read them the other way round.
   const mirrored = m.determinant() < 0;
-  const corner = (i: number) => (mirrored && i % 3 !== 0 ? i + (i % 3 === 1 ? 1 : -1) : i);
-  const at = (i: number) => (index ? index.getX(corner(i)) : corner(i));
-  const p = new Float32Array(n * 3);
-  const v = new THREE.Vector3();
-  for (let i = 0; i < n; i++) {
-    v.fromBufferAttribute(pos, i).applyMatrix4(m);
-    p[i * 3] = v.x;
-    p[i * 3 + 1] = v.y;
-    p[i * 3 + 2] = v.z;
-  }
   const out: Soup = {
     position: new Float32Array(count * 3),
     normal: new Float32Array(count * 3),
@@ -69,10 +99,14 @@ function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup 
     sway: new Float32Array(count),
   };
   const shared = smooth ? new Float32Array(n * 3) : null;
+  const corners = [0, 0, 0];
   for (let f = 0; f < count; f += 3) {
-    const a = at(f) * 3;
-    const b = at(f + 1) * 3;
-    const c = at(f + 2) * 3;
+    corners[0] = src.index[f]!;
+    corners[1] = src.index[mirrored ? f + 2 : f + 1]!;
+    corners[2] = src.index[mirrored ? f + 1 : f + 2]!;
+    const a = corners[0] * 3;
+    const b = corners[1] * 3;
+    const c = corners[2] * 3;
     const ux = p[b]! - p[a]!;
     const uy = p[b + 1]! - p[a + 1]!;
     const uz = p[b + 2]! - p[a + 2]!;
@@ -83,42 +117,43 @@ function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup 
     let nx = uy * wz - uz * wy;
     let ny = uz * wx - ux * wz;
     let nz = ux * wy - uy * wx;
-    if (shared) {
-      for (const k of [a, b, c]) {
-        shared[k] = shared[k]! + nx;
-        shared[k + 1] = shared[k + 1]! + ny;
-        shared[k + 2] = shared[k + 2]! + nz;
-      }
-    } else {
+    if (!shared) {
       const len = Math.hypot(nx, ny, nz) || 1;
       nx /= len;
       ny /= len;
       nz /= len;
     }
-    [a, b, c].forEach((k, nth) => {
-      const o = (f + nth) * 3;
-      out.position[o] = p[k]!;
-      out.position[o + 1] = p[k + 1]!;
-      out.position[o + 2] = p[k + 2]!;
-      if (!shared) {
+    for (let k = 0; k < 3; k++) {
+      const vertex = corners[k]!;
+      const v = vertex * 3;
+      const o = (f + k) * 3;
+      out.position[o] = p[v]!;
+      out.position[o + 1] = p[v + 1]!;
+      out.position[o + 2] = p[v + 2]!;
+      out.color[o] = src.color[v]!;
+      out.color[o + 1] = src.color[v + 1]!;
+      out.color[o + 2] = src.color[v + 2]!;
+      out.sway[f + k] = src.sway[vertex]!;
+      if (shared) {
+        shared[v] = shared[v]! + nx;
+        shared[v + 1] = shared[v + 1]! + ny;
+        shared[v + 2] = shared[v + 2]! + nz;
+        // (The vertex whose summed normal goes here, read back below.)
+        out.normal[o] = vertex;
+      } else {
         out.normal[o] = nx;
         out.normal[o + 1] = ny;
         out.normal[o + 2] = nz;
       }
-      const vertex = k / 3;
-      out.color[o] = col.getX(vertex);
-      out.color[o + 1] = col.getY(vertex);
-      out.color[o + 2] = col.getZ(vertex);
-      out.sway[f + nth] = col.getW(vertex);
-    });
+    }
   }
   if (shared) {
-    for (let f = 0; f < count; f++) {
-      const k = at(f) * 3;
-      const len = Math.hypot(shared[k]!, shared[k + 1]!, shared[k + 2]!) || 1;
-      out.normal[f * 3] = shared[k]! / len;
-      out.normal[f * 3 + 1] = shared[k + 1]! / len;
-      out.normal[f * 3 + 2] = shared[k + 2]! / len;
+    for (let o = 0; o < count * 3; o += 3) {
+      const v = out.normal[o]! * 3;
+      const len = Math.hypot(shared[v]!, shared[v + 1]!, shared[v + 2]!) || 1;
+      out.normal[o] = shared[v]! / len;
+      out.normal[o + 1] = shared[v + 1]! / len;
+      out.normal[o + 2] = shared[v + 2]! / len;
     }
   }
   return out;
@@ -165,46 +200,87 @@ function middle(s: Soup): [number, number] {
   return [(x0 + x1) / 2, (z0 + z1) / 2];
 }
 
+/** How many placings of a prop are worked out between looks at the clock. */
+const PLACINGS = 16;
+
+/** Runs `work` on each item, one after another. */
+function inTurn<T>(items: readonly T[], work: (item: T) => Promise<void>): Promise<void> {
+  return items.reduce((before, item) => before.then(() => work(item)), Promise.resolve());
+}
+
+/** Lets the page draw a frame once the loader has worked for a slice (see `SLICE_MS`). */
+class Pace {
+  private since = performance.now();
+
+  async breathe(): Promise<void> {
+    if (performance.now() - this.since < SLICE_MS) return;
+    await new Promise<void>((resolve) => setTimeout(resolve));
+    this.since = performance.now();
+  }
+}
+
 /**
  * Collects the meshes under `root` by class, in the space `to` maps their
  * world into. With `cell`, each class is also split by the square of ground
  * that size a mesh's middle is over (`solid#1,-2`), so a big scene culls a
  * square at a time.
  */
-function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object3D) => boolean, cell = 0): EnvParts {
-  const soups = new Map<string, Soup[]>();
-  const m = new THREE.Matrix4();
-  const placing = new THREE.Matrix4();
+async function collect(
+  root: THREE.Object3D,
+  to: THREE.Matrix4,
+  skip: (o: THREE.Object3D) => boolean,
+  sources: Map<THREE.BufferGeometry, Source>,
+  pace: Pace,
+  cell = 0,
+): Promise<EnvParts> {
+  const meshes: THREE.Mesh[] = [];
   const visit = (o: THREE.Object3D) => {
     if (skip(o)) return;
-    if (o instanceof THREE.Mesh) {
-      const c: unknown = o.userData.c;
-      const cls = typeof c === "string" ? c : "solid";
-      const add = (made: Soup) => {
-        let key = cls;
-        if (cell > 0) {
-          const [x, z] = middle(made);
-          key = `${cls}#${Math.floor(x / cell)},${Math.floor(z / cell)}`;
-        }
-        let list = soups.get(key);
-        if (!list) soups.set(key, (list = []));
-        list.push(made);
-      };
-      const g: THREE.BufferGeometry = o.geometry;
-      const smooth = o.userData.s === 1;
-      if (o instanceof THREE.InstancedMesh) {
-        // A prop placed many times: once per placing.
-        for (let i = 0; i < o.count; i++) {
-          o.getMatrixAt(i, placing);
-          add(soup(g, m.multiplyMatrices(to, o.matrixWorld).multiply(placing), smooth));
-        }
-      } else add(soup(g, m.multiplyMatrices(to, o.matrixWorld), smooth));
-    }
+    if (o instanceof THREE.Mesh) meshes.push(o);
     for (const c of o.children) visit(c);
   };
   visit(root);
+  const soups = new Map<string, Soup[]>();
+  const m = new THREE.Matrix4();
+  const placing = new THREE.Matrix4();
+  await inTurn(meshes, async (o) => {
+    const c: unknown = o.userData.c;
+    const cls = typeof c === "string" ? c : "solid";
+    const add = (made: Soup) => {
+      let key = cls;
+      if (cell > 0) {
+        const [x, z] = middle(made);
+        key = `${cls}#${Math.floor(x / cell)},${Math.floor(z / cell)}`;
+      }
+      let list = soups.get(key);
+      if (!list) soups.set(key, (list = []));
+      list.push(made);
+    };
+    const g: THREE.BufferGeometry = o.geometry;
+    let src = sources.get(g);
+    if (!src) sources.set(g, (src = decode(g)));
+    const from = src;
+    const smooth = o.userData.s === 1;
+    if (!(o instanceof THREE.InstancedMesh)) {
+      add(soup(from, m.multiplyMatrices(to, o.matrixWorld), smooth));
+      await pace.breathe();
+      return;
+    }
+    // A prop placed many times: once per placing, a few at a time.
+    const starts = Array.from({ length: Math.ceil(o.count / PLACINGS) }, (_, k) => k * PLACINGS);
+    await inTurn(starts, async (start) => {
+      for (let i = start; i < Math.min(o.count, start + PLACINGS); i++) {
+        o.getMatrixAt(i, placing);
+        add(soup(from, m.multiplyMatrices(to, o.matrixWorld).multiply(placing), smooth));
+      }
+      await pace.breathe();
+    });
+  });
   const parts: EnvParts = new Map();
-  for (const [cls, list] of soups) parts.set(cls, joined(list));
+  await inTurn([...soups], async ([key, list]) => {
+    parts.set(key, joined(list));
+    await pace.breathe();
+  });
   return parts;
 }
 
@@ -218,32 +294,28 @@ export function loadEnv(name: string, cell = 0): Promise<EnvModel> {
       scene.updateMatrixWorld(true);
       const anims: EnvAnim[] = [];
       const anchors = new Map<string, EnvAnchor[]>();
+      const sources = new Map<THREE.BufferGeometry, Source>();
+      const pace = new Pace();
       const special = (o: THREE.Object3D) =>
         o !== scene && (typeof o.userData.anim === "string" || "anchor" in o.userData);
+      const moved: THREE.Object3D[] = [];
       scene.traverse((o) => {
-        const anim: unknown = o.userData.anim;
         const anchor: unknown = o.userData.anchor;
-        if (typeof anim === "string") {
-          const inverse = o.matrixWorld.clone().invert();
-          anims.push({
-            name: anim,
-            matrix: o.matrixWorld.clone(),
-            parts: collect(o, inverse, (c) => c !== o && special(c)),
-          });
-        } else if (typeof anchor === "string") {
+        if (typeof o.userData.anim === "string") moved.push(o);
+        else if (typeof anchor === "string") {
           let list = anchors.get(anchor);
           if (!list) anchors.set(anchor, (list = []));
           const data: Record<string, unknown> = { ...o.userData };
           list.push({ matrix: o.matrixWorld.clone(), data });
         }
       });
-      const parts = collect(scene, new THREE.Matrix4(), special, cell);
-      scene.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          const g: THREE.BufferGeometry = o.geometry;
-          g.dispose();
-        }
+      await inTurn(moved, async (o) => {
+        const inverse = o.matrixWorld.clone().invert();
+        const parts = await collect(o, inverse, (c) => c !== o && special(c), sources, pace);
+        anims.push({ name: String(o.userData.anim), matrix: o.matrixWorld.clone(), parts });
       });
+      const parts = await collect(scene, new THREE.Matrix4(), special, sources, pace, cell);
+      for (const g of sources.keys()) g.dispose();
       return { parts, anims, anchors };
     })();
     cache.set(name, p);
