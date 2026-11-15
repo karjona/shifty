@@ -6,7 +6,8 @@ import * as THREE from "three/webgpu";
 import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { Glow, propMaterial } from "./materials.ts";
-import { type Crowd, addPerson } from "./people.ts";
+import { Grounding, OVERHEAD, type Sunlight } from "./grounding.ts";
+import { type Crowd, Walkers, addPerson } from "./people.ts";
 import {
   ARMOUR,
   LIMESTONE,
@@ -310,6 +311,55 @@ export function flashLanterns(lanterns: readonly Lantern[], t: number): void {
   }
 }
 
+/** The breakwater's deck: its height over the water and half its width (m), and its parapet's height. */
+const DECK = { top: 2.6, half: 4.4, parapet: 1.44 };
+/** A television camera's stand on the deck, and the camera's lens over what it stands on (m). */
+const CAMERA_STAND = 1;
+const CAMERA_EYE = 1.7;
+
+/**
+ * Where the television's cameras stand on the bay's breakwater (the
+ * lens): one by the start, on the start's side (`startSide`: the sign of
+ * its z), and one near the middle on the other side. On the open sea's
+ * side (-z) a camera stands on the parapet; on the town's, on a stand at
+ * the deck's edge.
+ */
+export function breakwaterCameras(
+  straightHalf: number,
+  startX: number,
+  startSide: number,
+): { x: number; y: number; z: number }[] {
+  const at = (x: number, side: number) =>
+    side < 0
+      ? { x, y: DECK.top + DECK.parapet + CAMERA_EYE, z: -(DECK.half - 0.35) }
+      : { x, y: DECK.top + CAMERA_STAND + CAMERA_EYE, z: DECK.half - 0.5 };
+  return [at(startX + 20, startSide), at(straightHalf * 0.2, -startSide)];
+}
+
+/**
+ * A television camera on its tripod, standing on `ground`, looking along
+ * `yaw`: the picture is taken from `(x, y, z)`, just over its top.
+ */
+function addCamera(shape: Shape, x: number, eye: number, z: number, yaw: number, ground: number): void {
+  const body = 0x2c3038;
+  const y = eye - 0.5;
+  shape.take(box(0.34, 0.3, 0.7).translate(0, -0.15, 0), body, place(x, y, z, yaw));
+  shape.take(post(0.13, 0.11, 0.3, 8).rotateX(Math.PI / 2).translate(0, 0, 0.35), 0x15171c, place(x, y, z, yaw));
+  shape.take(box(0.1, 0.16, 0.3).translate(0, 0.15, -0.1), body, place(x, y, z, yaw));
+  // The tripod: three legs spread from under the head.
+  const head = y - 0.32;
+  for (let k = 0; k < 3; k++) {
+    const a = yaw + (k / 3) * Math.PI * 2 + 0.5;
+    const foot = new THREE.Vector3(x + Math.sin(a) * 0.55, ground, z + Math.cos(a) * 0.55);
+    const top = new THREE.Vector3(x, head, z);
+    const m = new THREE.Matrix4()
+      .lookAt(foot, top, new THREE.Vector3(0, 1, 0))
+      .setPosition(foot.clone().add(top).multiplyScalar(0.5))
+      .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+    shape.take(new THREE.BoxGeometry(0.05, foot.distanceTo(top), 0.05), 0x8b919b, m);
+  }
+}
+
 /** What the bay's breakwater is made of. */
 export interface Breakwater {
   group: THREE.Group;
@@ -330,11 +380,15 @@ export function buildBreakwater(
   lighthouseX: number,
   crowd: number,
   wavers: Crowd,
+  /** Where the television's cameras stand (`breakwaterCameras`). */
+  cameras: readonly { x: number; y: number; z: number }[] = [],
+  /** Which way shade falls. */
+  light: Sunlight = OVERHEAD,
 ): Breakwater {
   const group = new THREE.Group();
   const l: Capsule = { ax: -straightHalf, az: 0, bx: straightHalf, bz: 0 };
-  const top = 2.6;
-  const half = 4.4;
+  const top = DECK.top;
+  const half = DECK.half;
   const stone = new Shape();
   addCore(stone, l, half, radius, top);
   addArmour(stone, l, half, radius, top, 7);
@@ -354,20 +408,43 @@ export function buildBreakwater(
   for (let x = -straightHalf + 4; x < straightHalf; x += 14) addBollard(works, x, top, half - 0.5);
   for (let x = -straightHalf + 30; x < straightHalf - 20; x += 55) addBench(works, x, top, wallZ + 1.1, 0);
   // Anglers on the deck's edge over the stones, walkers, and people who wave from the wall.
+  const shades = new Grounding(light);
+  const shade = { on: shades, colour: CONCRETE };
   const r = random(19);
   const people = Math.round(22 * crowd);
   for (let i = 0; i < people; i++) {
     const x = -straightHalf + 10 + r() * (straightHalf * 2 - 20);
     const kind = r();
+    // (Nobody stands in front of a camera.)
+    if (cameras.some((c) => Math.abs(c.x - x) < 4)) continue;
     if (kind < 0.4) addPerson(works, x, top + 0.02, half - 0.15, 0, r, { pose: "fish" });
-    else if (kind < 0.6) wavers.add(works, x, top, r() < 0.5 ? half - 1 : wallZ + 0.9, r() < 0.5 ? 0 : Math.PI, r);
-    else addPerson(works, x, top, (r() - 0.5) * 3, (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk" });
+    else if (kind < 0.6)
+      wavers.add(works, x, top, r() < 0.5 ? half - 1 : wallZ + 0.9, r() < 0.5 ? 0 : Math.PI, r, false, shade);
+    else
+      addPerson(works, x, top, -0.3 - r() * 1.7, (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk", shade });
+  }
+  // A few walk the breakwater out to the lighthouse and back.
+  const walkers = new Walkers();
+  const strolling = Math.round(5 * Math.min(1, crowd * 1.4));
+  for (let i = 0; i < strolling; i++) {
+    const beat = 40 + r() * 50;
+    const from = -straightHalf + 8 + r() * (straightHalf * 2 - 16 - beat);
+    const way = r() < 0.5 ? 1 : -1;
+    walkers.add(way > 0 ? from : from + beat, top, 1.2 + r() * 1.2, way, 0, beat, 1.05 + r() * 0.5, 700 + i * 31, CONCRETE);
+  }
+  // The television's cameras: on the parapet, or on a stand at the deck's edge.
+  for (const c of cameras) {
+    const onWall = c.z < 0;
+    const ground = onWall ? top + DECK.parapet : top + CAMERA_STAND;
+    if (!onWall) works.take(box(1.3, CAMERA_STAND, 1.3), 0x8b919b, place(c.x, top, c.z - 0.2));
+    addCamera(works, c.x, c.y, c.z, onWall ? Math.PI : 0, ground);
   }
   const lanterns = [
     addLighthouse(works, lighthouseX, top + 0.3, 0, 0),
     addHarbourLight(works, -straightHalf - 1.5, top, 0, "green", 1.2),
   ];
   group.add(works.mesh(propMaterial()));
+  for (const extra of [shades.build(), walkers.build()]) if (extra) group.add(extra);
   for (const lantern of lanterns) group.add(lantern.mesh);
   return { group, lanterns, top, half };
 }

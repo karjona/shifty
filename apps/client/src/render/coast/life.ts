@@ -7,7 +7,7 @@ import { clothMaterial } from "./materials.ts";
 import { Shape, place } from "./shape.ts";
 
 /** The heading flags fly toward: downwind of the coast's usual wind. */
-const DOWNWIND = -2.42;
+export const DOWNWIND = -2.42;
 
 /** Costa Nevada's colours: sea, snow and sun. */
 export const COSTA_NEVADA = [0x2a6fb0, 0xf6f2ea, 0xf2c14e];
