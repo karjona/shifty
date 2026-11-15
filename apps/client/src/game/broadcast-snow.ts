@@ -284,7 +284,7 @@ export function snowRigs(
   if (lodge.size !== 1) {
     // On the lodge's deck, over the finish area.
     const p = run.path.find((q) => q.s >= lodge.s) ?? run.path.at(-1)!;
-    rigs.push(onlooker("deck", on(lodge.s - 6, (p.limit + lodge.out) * lodge.side, 3.6), 5, 0.5));
+    rigs.push(onlooker("deck", on(lodge.s - 6, (p.limit + lodge.out) * lodge.side, 4.6), 5, 0.5));
   }
   if (scenery.lake) {
     // Across the frozen lake, low: the ice, the finish area, the mountain behind.

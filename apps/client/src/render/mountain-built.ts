@@ -392,13 +392,6 @@ export class Built {
     this.glows();
   }
 
-  /** How far (x, z) is beyond the riding limit (m; negative on the run). */
-  private clearOfRun(x: number, z: number): number {
-    let best = Infinity;
-    for (const p of this.run.path) best = Math.min(best, Math.hypot(p.x - x, p.z - z) - p.limit);
-    return best;
-  }
-
   /** Lowest ground under a `w` by `d` footprint at (x, z), turned by `turn`. */
   private footing(x: number, z: number, turn: number, w: number, d: number): number {
     let low = Infinity;
@@ -517,23 +510,7 @@ export class Built {
     const yaw = Math.atan2(down.x, down.z);
     for (const t of towers) this.place("lift_tower", t.x, t.y, t.z, yaw, t.height / 14);
     // The top station (where the run's scenery has it, or up the line) and the bottom one.
-    // (Along the line, at the first place well clear of the riding width.)
-    const along = (from: THREE.Vector3, way: number) => {
-      let best = { x: from.x + down.x * way * 110, z: from.z + down.z * way * 110 };
-      let room = -Infinity;
-      for (let d = 70; d <= 260; d += 10) {
-        const at = { x: from.x + down.x * way * d, z: from.z + down.z * way * d };
-        const clear = this.clearOfRun(at.x, at.z);
-        if (clear > room) {
-          room = clear;
-          best = at;
-        }
-        if (clear > STATION_ROOM) break;
-      }
-      return best;
-    };
-    const topAt = scenery.liftTop ? runAt(this.run, scenery.liftTop.s, scenery.liftTop.offset) : along(first, -1);
-    const bottomAt = along(last, 1);
+    const [topAt, bottomAt] = liftEnds(this.run, scenery)!;
     const ends: THREE.Vector3[] = [];
     for (const [at, toward] of [
       [topAt, first],
@@ -851,19 +828,20 @@ export class Built {
       }
     }
     // The timing board by the line, snowcats parked beyond the crowd, and floodlights along the fences.
-    const board = runAt(run, finish + 9, -(runPoint(run, finish + 9).limit + 5.5));
+    // (Up the run from the line: what stands tall beyond it would stand between the cameras and the finishers.)
+    const board = runAt(run, finish - 36, -(runPoint(run, finish - 36).limit + 5.5));
     this.tinted.push({
       model: "timing_board",
       x: board.x,
       y: this.ground(board.x, board.z),
       z: board.z,
-      turn: inward(board, -1) + 0.5,
+      turn: inward(board, -1) - 0.5,
       scale: 1.3,
       tint: this.accent,
     });
     for (const [s, out, side, yaw] of [
-      [finish + 50, 8.5, 1, 0.25],
-      [finish + 58, 9, -1, Math.PI - 0.3],
+      [finish - 44, 9, 1, 0.25],
+      [finish - 58, 9.5, -1, Math.PI - 0.3],
       [run.startS - 14, 9, -1, 0.5],
     ] as const) {
       const at = runAt(run, s, (runPoint(run, s).limit + out) * side);
@@ -903,6 +881,54 @@ const UP = new THREE.Vector3(0, 1, 0);
 const ONE = new THREE.Vector3(1, 1, 1);
 /** What puts an instance out of sight. */
 const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
+
+/** How far (x, z) is beyond a run's riding limit (m; negative on the run). */
+function clearOfRun(run: RunData, x: number, z: number): number {
+  let best = Infinity;
+  for (const p of run.path) best = Math.min(best, Math.hypot(p.x - x, p.z - z) - p.limit);
+  return best;
+}
+
+/**
+ * Where a run's chairlift ends: its top and its bottom station (null with
+ * no lift). The top is where the run's scenery has it; otherwise a station
+ * stands off the end of the line, turned aside if the line runs on down
+ * the run: the nearest place clear of the riding width that the chairs can
+ * come down to without crossing it low.
+ */
+export function liftEnds(
+  run: RunData,
+  scenery: RunScenery,
+): [{ x: number; z: number }, { x: number; z: number }] | null {
+  const towers = run.obstacles.filter((o) => o.kind === "tower");
+  if (towers.length < 2) return null;
+  const first = towers[0]!;
+  const last = towers.at(-1)!;
+  const length = Math.hypot(last.x - first.x, last.z - first.z);
+  const down = { x: (last.x - first.x) / length, z: (last.z - first.z) / length };
+  const station = (from: { x: number; z: number }, way: number) => {
+    let best = { x: from.x + down.x * way * 110, z: from.z + down.z * way * 110 };
+    let least = Infinity;
+    for (const bend of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]) {
+      const dx = (down.x * Math.cos(bend) + down.z * Math.sin(bend)) * way;
+      const dz = (down.z * Math.cos(bend) - down.x * Math.sin(bend)) * way;
+      for (let d = 40; d <= 260; d += 10) {
+        const cost = Math.abs(bend) * 150 + d;
+        if (cost >= least || clearOfRun(run, from.x + dx * d, from.z + dz * d) < STATION_ROOM) continue;
+        // (Over the last of the span the chairs hang within reach of the snow.)
+        let low = true;
+        for (let k = 0.45; k <= 1 && low; k += 0.05)
+          low = clearOfRun(run, from.x + dx * d * k, from.z + dz * d * k) > 2;
+        if (!low) continue;
+        least = cost;
+        best = { x: from.x + dx * d, z: from.z + dz * d };
+      }
+    }
+    return best;
+  };
+  const top = scenery.liftTop ? runAt(run, scenery.liftTop.s, scenery.liftTop.offset) : station(first, -1);
+  return [top, station(last, 1)];
+}
 
 /** A lift station stands at least this far beyond the riding limit (m). */
 const STATION_ROOM = 14;
