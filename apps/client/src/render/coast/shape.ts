@@ -14,6 +14,8 @@ export interface AddOptions {
   uv?: readonly [number, number, number, number];
   /** The weight carried by every vertex (how far the wind moves it), or one worked out per vertex. */
   weight?: number | ((p: THREE.Vector3) => number);
+  /** Texture coordinates worked out from where each vertex lands (in place of `uv`). */
+  at?: (p: THREE.Vector3) => readonly [number, number];
 }
 
 const IDENTITY = new THREE.Matrix4();
@@ -67,11 +69,12 @@ export class Shape {
     this.wts.push(w);
   }
 
-  /** Adds `geo` (left as it is), placed by `m`. */
-  add(geo: THREE.BufferGeometry, paint: Paint, m: THREE.Matrix4 = IDENTITY, o: AddOptions = {}): this {
+  /** Adds `geo` (left as it is), placed by `m`, painted (or, with `null`, in the colours it carries). */
+  add(geo: THREE.BufferGeometry, paint: Paint | null, m: THREE.Matrix4 = IDENTITY, o: AddOptions = {}): this {
     const position = geo.attributes.position!;
     const normal = geo.attributes.normal;
     const uv = geo.attributes.uv;
+    const own = paint === null ? geo.attributes.color : undefined;
     const index = geo.index;
     const count = index ? index.count : position.count;
     const rect = o.uv ?? WHITE_UV;
@@ -99,17 +102,32 @@ export class Shape {
       for (const k of order) {
         const p = corner[k]!;
         const n = facing[k]!;
-        const u = uv ? rect[0] + uv.getX(at[k]!) * (rect[2] - rect[0]) : rect[0];
-        const v = uv ? rect[1] + uv.getY(at[k]!) * (rect[3] - rect[1]) : rect[1];
+        const placed = o.at?.(p);
+        const u = placed ? placed[0] : uv ? rect[0] + uv.getX(at[k]!) * (rect[2] - rect[0]) : rect[0];
+        const v = placed ? placed[1] : uv ? rect[1] + uv.getY(at[k]!) * (rect[3] - rect[1]) : rect[1];
         const w = typeof o.weight === "function" ? o.weight(p) : (o.weight ?? 0);
-        this.push(p, n, this.colour(paint, p, n), u, v, w);
+        const c = own ? this.c.fromBufferAttribute(own, at[k]!) : this.colour(paint ?? 0xffffff, p, n);
+        this.push(p, n, c, u, v, w);
       }
     }
     return this;
   }
 
+  /**
+   * Goes over the vertices added since vertex `from`, in order: `touch` gets
+   * each one's place in that run and its colour (to change), and returns
+   * its weight.
+   */
+  retouch(from: number, touch: (i: number, colour: THREE.Color) => number): void {
+    for (let v = from; v < this.wts.length; v++) {
+      this.c.fromArray(this.col, v * 3);
+      this.wts[v] = touch(v - from, this.c);
+      this.c.toArray(this.col, v * 3);
+    }
+  }
+
   /** Adds `geo` and frees it. */
-  take(geo: THREE.BufferGeometry, paint: Paint, m: THREE.Matrix4 = IDENTITY, o: AddOptions = {}): this {
+  take(geo: THREE.BufferGeometry, paint: Paint | null, m: THREE.Matrix4 = IDENTITY, o: AddOptions = {}): this {
     this.add(geo, paint, m, o);
     geo.dispose();
     return this;
@@ -172,6 +190,7 @@ export class Shape {
   /** A mesh of everything added so far. */
   mesh(material: THREE.Material, shadows: "cast" | "receive" | "both" | "none" = "both"): THREE.Mesh {
     const mesh = new THREE.Mesh(this.build(), material);
+    mesh.name = material.name;
     mesh.castShadow = shadows === "cast" || shadows === "both";
     mesh.receiveShadow = shadows === "receive" || shadows === "both";
     mesh.userData.noMerge = true;

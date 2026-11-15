@@ -4,6 +4,7 @@
 // Each kind is a few shapes drawn many times (instanced); they sway with
 // the wind and take the season's greens (see materials.ts).
 import * as THREE from "three/webgpu";
+import { UNREFLECTED } from "../cel/material.ts";
 import { foliageMaterial, frondMaterial } from "./materials.ts";
 import { type Paint, Shape, place, random } from "./shape.ts";
 
@@ -62,17 +63,49 @@ export function tube(points: THREE.Vector3[], radii: number[], sides: number): T
   return g;
 }
 
-/** A lobe of foliage: a ball about 1 in radius with a flat base at `base` (-1 to 0). */
-function lobe(detail: number, base: number): THREE.BufferGeometry {
-  const g = new THREE.IcosahedronGeometry(1, detail);
-  const p = g.attributes.position!;
-  const n = g.attributes.normal!;
-  for (let i = 0; i < p.count; i++) {
-    if (p.getY(i) < base) {
-      p.setY(i, base);
-      n.setXYZ(i, 0, -1, 0);
+/**
+ * A lobe of foliage: a dome about 1 in radius, `sides` round, on a flat
+ * base at `base` (-1 to 0), shaded as a ball.
+ */
+function lobe(sides: number, base: number): THREE.BufferGeometry {
+  const rings: [number, number][] = [
+    [0.62, 0.76],
+    [1, 0.18],
+    [0.9, base],
+  ];
+  const pos: number[] = [0, 1, 0];
+  const nor: number[] = [0, 1, 0];
+  for (const [r, y] of rings) {
+    for (let i = 0; i < sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      pos.push(x, y, z);
+      // The rim turns under: its shade falls where the base begins.
+      const ny = y <= base ? -0.45 : y;
+      const len = Math.hypot(x, ny, z);
+      nor.push(x / len, ny / len, z / len);
     }
   }
+  const under = pos.length / 3;
+  pos.push(0, base, 0);
+  nor.push(0, -1, 0);
+  const idx: number[] = [];
+  for (let i = 0; i < sides; i++) {
+    const j = (i + 1) % sides;
+    idx.push(0, 1 + j, 1 + i);
+    for (let k = 0; k < rings.length - 1; k++) {
+      const a = 1 + k * sides;
+      const b = a + sides;
+      idx.push(a + i, a + j, b + i, a + j, b + j, b + i);
+    }
+    const rim = 1 + (rings.length - 1) * sides;
+    idx.push(under, rim + i, rim + j);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
   return g;
 }
 
@@ -91,11 +124,11 @@ export function pineGeometry(seed: number, height: number, spread: number, lobes
   const trunk = [0, 0.3, 0.62, 1].map(
     (k) => new THREE.Vector3(lean * k * k + Math.sin(k * 3.1) * 0.25, top * k, leanZ * k * k),
   );
-  s.take(tube(trunk, [0.34, 0.27, 0.22, 0.18], 6), (p) => (p.y < top * 0.5 ? BARK_DARK : BARK), undefined, {
+  s.take(tube(trunk, [0.34, 0.27, 0.22, 0.18], 5), (p) => (p.y < top * 0.5 ? BARK_DARK : BARK), undefined, {
     weight: weigh,
   });
   const head = trunk[3]!;
-  const ball = lobe(1, -0.28);
+  const ball = lobe(lobes > 4 ? 7 : 6, -0.28);
   const paint = needles;
   const rad = spread / 2;
   // The crown: a big lobe over the trunk, smaller ones round and below it.
@@ -270,7 +303,7 @@ export function agaveGeometry(seed: number): THREE.BufferGeometry {
 export function bushGeometry(seed: number): THREE.BufferGeometry {
   const r = random(seed);
   const s = new Shape();
-  const ball = lobe(1, -0.2);
+  const ball = lobe(6, -0.2);
   const n = 2 + Math.floor(r() * 2);
   const tone = BUSH[Math.floor(r() * BUSH.length)]!;
   const dark = tone.clone().multiplyScalar(0.72);
@@ -331,42 +364,89 @@ function variants(): Record<Plant, Variant[]> {
   return kit;
 }
 
+export interface PlantingOptions {
+  /** Whether the plants cast shadows (only where riders or cameras come close). */
+  shadows?: boolean;
+  /** Whether the sea mirrors them. */
+  reflected?: boolean;
+  /** Plants are drawn in batches this wide (m), so those out of view are skipped. */
+  cell?: number;
+}
+
 /**
  * Plants to stand somewhere: `add` them one by one, `build` draws each
- * kind's shapes as one batch. They are never turned (the wind blows the
+ * kind's shapes in batches. They are never turned (the wind blows the
  * same way through all of them), only sized and tinted.
  */
 export class Planting {
-  private items = new Map<Variant, { m: THREE.Matrix4; tint: number }[]>();
+  private items = new Map<string, { variant: Variant; list: { m: THREE.Matrix4; tint: number }[] }>();
   private n = 0;
+  private o: Required<PlantingOptions>;
+
+  constructor(o: PlantingOptions = {}) {
+    this.o = { shadows: o.shadows ?? false, reflected: o.reflected ?? false, cell: o.cell ?? 1e6 };
+  }
 
   /** A plant of `kind` at `(x, y, z)`, `size` tall (m; across for agaves and bushes), `tint` (about 1) its shade of green. */
   add(kind: Plant, x: number, y: number, z: number, size: number, tint = 1): void {
     const list = variants()[kind];
-    const variant = list[this.n++ % list.length]!;
+    const index = this.n++ % list.length;
+    const variant = list[index]!;
     const k = size / variant.size;
     // Wider or narrower than its height, a little: no two alike.
     const wide = k * (0.9 + ((this.n * 0.618) % 1) * 0.25);
-    let batch = this.items.get(variant);
-    if (!batch) this.items.set(variant, (batch = []));
-    batch.push({ m: place(x, y, z, 0, wide, k, wide), tint });
+    const key = `${kind}${index} ${Math.floor(x / this.o.cell)} ${Math.floor(z / this.o.cell)}`;
+    let batch = this.items.get(key);
+    if (!batch) this.items.set(key, (batch = { variant, list: [] }));
+    batch.list.push({ m: place(x, y, z, 0, wide, k, wide), tint });
   }
 
-  build(): THREE.Group {
+  /**
+   * The plants as meshes: each kind's shapes as one batch of instances,
+   * or, `merged`, all of them as one mesh per material (for a handful of
+   * plants, where a draw each would cost more than their triangles).
+   */
+  build(merged = false): THREE.Group {
     const g = new THREE.Group();
     const c = new THREE.Color();
-    for (const [variant, list] of this.items) {
+    g.userData.noMerge = true;
+    if (merged) {
+      const shapes = new Map<THREE.Material, Shape>();
+      for (const { variant, list } of this.items.values()) {
+        let shape = shapes.get(variant.material);
+        if (!shape) shapes.set(variant.material, (shape = new Shape()));
+        const weights = variant.geometry.attributes.sway!;
+        for (const it of list) {
+          const tint = it.tint;
+          const from = shape.triangles * 3;
+          shape.add(variant.geometry, null, it.m);
+          shape.retouch(from, (i, colour) => {
+            colour.multiplyScalar(tint);
+            return weights.getX(i);
+          });
+        }
+      }
+      for (const [material, shape] of shapes) {
+        const mesh = shape.mesh(material, this.o.shadows ? "cast" : "none");
+        mesh.name = "plants";
+        if (!this.o.reflected) mesh.layers.set(UNREFLECTED);
+        g.add(mesh);
+      }
+      return g;
+    }
+    for (const { variant, list } of this.items.values()) {
       const mesh = new THREE.InstancedMesh(variant.geometry, variant.material, list.length);
       list.forEach((it, i) => {
         mesh.setMatrixAt(i, it.m);
         mesh.setColorAt(i, c.setScalar(it.tint));
       });
-      mesh.castShadow = variant.shadows;
+      mesh.name = "plants";
+      mesh.castShadow = this.o.shadows && variant.shadows;
       mesh.receiveShadow = false;
+      if (!this.o.reflected) mesh.layers.set(UNREFLECTED);
       mesh.computeBoundingSphere();
       g.add(mesh);
     }
-    g.userData.noMerge = true;
     return g;
   }
 }

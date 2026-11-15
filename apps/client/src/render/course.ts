@@ -4,7 +4,7 @@
 // comes from the sim (`courseJson`), so what you see is what you collide
 // with.
 import * as THREE from "three/webgpu";
-import { BobbingBatch, type Bobbing, at, placed } from "./bobbing.ts";
+import type { Season } from "../game/conditions.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
 import { type Lantern, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
@@ -100,62 +100,6 @@ function wedge(length: number, width: number, height: number): THREE.BufferGeome
   return g;
 }
 
-/** A llaüt's hull: 5.2 m, pinched at bow and stern, rising toward them, a round bilge. */
-function llautHull(): THREE.BufferGeometry {
-  const hull = new THREE.BoxGeometry(5.2, 1, 1.9, 8, 2, 2);
-  const pos = hull.attributes.position!;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i) / 2.6;
-    const k = Math.abs(x);
-    pos.setZ(i, pos.getZ(i) * (1 - Math.pow(k, 2.6)) * (pos.getY(i) < 0 ? 0.75 : 1));
-    pos.setY(i, pos.getY(i) + k * k * (x > 0 ? 0.55 : 0.3));
-  }
-  hull.computeVertexNormals();
-  return hull;
-}
-
-/** Where a boat lies moored: the middle of its hull at the water line, and its heading. */
-export interface Mooring {
-  x: number;
-  z: number;
-  yaw: number;
-}
-
-/**
- * Fishing boats (llaüts), one per mooring, riding the swell as a few
- * batches (hulls, rails, cabins, masts). `seed` picks their colours.
- */
-export function mooredBoats(spots: readonly Mooring[], seed: number): BobbingBatch[] {
-  const hull = llautHull();
-  const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
-  const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
-  let s = seed;
-  const rnd = () => {
-    s = (s * 16807) % 2147483647;
-    return s / 2147483647;
-  };
-  const bodies: (Bobbing & { color: number })[] = [];
-  const rails: (Bobbing & { color: number })[] = [];
-  const cabins: Bobbing[] = [];
-  const masts: Bobbing[] = [];
-  for (const { x, z, yaw } of spots) {
-    const body = colours[Math.floor(rnd() * colours.length)]!;
-    const rail = stripes[Math.floor(rnd() * stripes.length)]!;
-    bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
-    rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
-    if (rnd() < 0.6) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
-    if (rnd() < 0.5) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
-  }
-  const batches = [
-    new BobbingBatch(hull, std(0xffffff), bodies),
-    new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
-    new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
-    new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
-  ];
-  for (const b of batches) b.mesh.castShadow = true;
-  return batches;
-}
-
 interface Floating {
   obj: THREE.Object3D;
   x: number;
@@ -166,8 +110,6 @@ interface Floating {
 export class CourseView {
   readonly group = new THREE.Group();
   private floating: Floating[] = [];
-  /** Batches riding the swell: moored boats. */
-  private bobbing: BobbingBatch[] = [];
   private buoys: BuoyMarks;
   private chevrons: ChevronBoards;
   private boundary: THREE.InstancedMesh;
@@ -178,18 +120,17 @@ export class CourseView {
 
   readonly data: CourseData;
 
-  constructor(data: CourseData) {
+  constructor(data: CourseData, season: Season = "summer") {
     this.data = data;
     if (data.place === "bay") {
       this.buildBreakwater();
-      this.group.add(buildLand(this.data.land));
+      this.group.add(buildLand(this.data.land, season));
     }
     this.buildStartGate();
     this.buoys = new BuoyMarks(this.data);
     this.chevrons = new ChevronBoards(this.data);
     this.buildRamps();
     this.boundary = this.buildBoundary();
-    if (data.place === "bay") this.buildBoats();
     for (const g of [this.buoys.group, this.chevrons.group]) {
       g.userData.noMerge = true;
       this.group.add(g);
@@ -202,60 +143,6 @@ export class CourseView {
     const breakwater = buildBreakwater(d.straightHalf, d.breakwaterRadius, d.straightHalf + d.breakwaterRadius * 0.45);
     this.lanterns.push(...breakwater.lanterns);
     this.group.add(breakwater.group);
-  }
-
-  /** Fishing boats (llaüts) moored off the town quay, riding the swell. */
-  private buildBoats(): void {
-    const town = this.data.land.find((l) => l.kind === "town");
-    if (!town) return;
-    const dx = town.bx - town.ax;
-    const dz = town.bz - town.az;
-    const len = Math.hypot(dx, dz);
-    const ux = dx / len;
-    const uz = dz / len;
-    let nx = -uz;
-    let nz = ux;
-    if (nx * -town.ax + nz * -town.az < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
-    const hull = llautHull();
-    const colours = [0xf4f1ea, 0x2f6fb0, 0xf4f1ea, 0x2d8a7a, 0xc8483a, 0xf4f1ea];
-    const stripes = [0x2f6fb0, 0xf4f1ea, 0xc8483a, 0xf2c14e];
-    let seed = 11;
-    const rnd = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-    const bodies: (Bobbing & { color: number })[] = [];
-    const rails: (Bobbing & { color: number })[] = [];
-    const cabins: Bobbing[] = [];
-    const masts: Bobbing[] = [];
-    for (let a = 8; a < len - 8; a += 9 + rnd() * 10) {
-      const body = colours[Math.floor(rnd() * colours.length)]!;
-      const rail = stripes[Math.floor(rnd() * stripes.length)]!;
-      const cabin = rnd() < 0.6;
-      const mast = rnd() < 0.5;
-      const d = town.radius + 5 + rnd() * 3;
-      const x = town.ax + ux * a + nx * d;
-      const z = town.az + uz * a + nz * d;
-      const yaw = Math.atan2(-uz, ux) + (rnd() - 0.5) * 0.3;
-      bodies.push({ x, z, base: placed(x, z, yaw, at(0, 0.15, 0)), color: body });
-      rails.push({ x, z, base: placed(x, z, yaw, at(0, 0.62, 0)), color: rail });
-      if (cabin) cabins.push({ x, z, base: placed(x, z, yaw, at(-0.6, 1.1, 0)) });
-      if (mast) masts.push({ x, z, base: placed(x, z, yaw, at(1, 2.4, 0)) });
-    }
-    const batches = [
-      new BobbingBatch(hull, std(0xffffff), bodies),
-      new BobbingBatch(new THREE.BoxGeometry(4.2, 0.14, 1.95), std(0xffffff), rails),
-      new BobbingBatch(new THREE.BoxGeometry(1.4, 1, 1.2), std(0xf4f1ea), cabins),
-      new BobbingBatch(new THREE.CylinderGeometry(0.06, 0.08, 4, 6), std(0x7a5a3c), masts),
-    ];
-    for (const b of batches) {
-      b.mesh.castShadow = true;
-      this.group.add(b.mesh);
-      this.bobbing.push(b);
-    }
   }
 
   private buildStartGate(): void {
@@ -371,7 +258,6 @@ export class CourseView {
     });
     this.boundary.instanceMatrix.needsUpdate = true;
 
-    for (const b of this.bobbing) b.update(waves, t);
     flashLanterns(this.lanterns, t);
     this.buoys.update(waves, t, dt, riders, nextBuoy);
     this.chevrons.update(waves, t);

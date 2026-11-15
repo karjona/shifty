@@ -1,13 +1,11 @@
-// Land along the course, drawn from the sim's capsules (`courseJson`), so
-// the shore you see is the shore you hit: the town quay with its waterfront,
-// the island with its pines and chapel, and rocks. Low-poly and
-// flat-shaded; anything repeated is instanced. All of it is out in the
-// weather (see cel/look.ts): snow on roofs and rocks in winter, the
-// island's grass and trees in the season's colours.
+// Land along the bay's course, drawn from the sim's capsules (`courseJson`),
+// so the shore you see is the shore you hit: the town on its quay
+// (coast/town.ts), the islet with its pines and hermitage, and rocks. All
+// of it is out in the weather (see cel/look.ts): snow on roofs and rocks
+// in winter, grass and trees in the season's colours.
 import * as THREE from "three/webgpu";
+import type { Season } from "../game/conditions.ts";
 import type { LandData } from "./course.ts";
-import { FOLIAGE } from "./cel/look.ts";
-import { Fn, float, fract, fwidth, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
 import { propMaterial } from "./coast/materials.ts";
 import {
   CLIFF,
@@ -23,74 +21,13 @@ import {
   sweepCliff,
 } from "./coast/rock.ts";
 import { Shape, box, place, turned } from "./coast/shape.ts";
+import { capsuleOutline, landDistance, prism, rng } from "./coast/outline.ts";
+import { buildTown } from "./coast/town.ts";
 import { Planting } from "./coast/trees.ts";
 
-/** Distance from (x, z) to a piece of land's shore (negative inside it). */
-export function landDistance(l: LandData, x: number, z: number): number {
-  const abx = l.bx - l.ax;
-  const abz = l.bz - l.az;
-  const len2 = abx * abx + abz * abz;
-  const t = len2 > 1e-6 ? Math.min(1, Math.max(0, ((x - l.ax) * abx + (z - l.az) * abz) / len2)) : 0;
-  return Math.hypot(x - (l.ax + abx * t), z - (l.az + abz * t)) - l.radius;
-}
+export { capsuleOutline, landDistance, prism, rng };
 
-/** Seeded noise in [0, 1). */
-export function rng(seed: number): () => number {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    return (s >>> 0) / 4294967296;
-  };
-}
-
-/** A flat-shaded material out in the weather, as foliage of `kind` (see `FOLIAGE`). */
-const mat = (
-  color: number,
-  opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {},
-  kind: number = FOLIAGE.none,
-) => {
-  const m = new THREE.MeshStandardNodeMaterial({ color, roughness: 0.9, flatShading: true, ...opts });
-  m.userData.outdoor = kind;
-  return m;
-};
-
-const STONE = 0xb4a58c;
-const PAVING = 0xd9cbb0;
-const TRUNK = 0x7a5a3c;
-const PALM = 0x4f8a3a;
 const ROOF = 0xc0623a;
-const WALLS = [0xf6f2ea, 0xf3ead8, 0xf2e2b6, 0xf0d5c4, 0xe8e4dc, 0xdfe8ea];
-/** Awnings over the waterfront. */
-const AWNINGS = [0x2a8fb0, 0xd94a3a, 0x3f8a4a, 0xf2c14e, 0xf6f2ea];
-/** Window shutters, Mediterranean greens and blues. */
-const SHUTTERS = [0x2f7d6b, 0x3a6ea5, 0x2d8a9a, 0x4f7f3a, 0x6b8fb3, 0x2f7d6b];
-
-/** Outline of a capsule in world xz, counter-clockwise seen from above. */
-export function capsuleOutline(l: LandData, steps = 16): THREE.Vector2[] {
-  const dir = Math.atan2(l.bz - l.az, l.bx - l.ax);
-  const out: THREE.Vector2[] = [];
-  const arc = (cx: number, cz: number, from: number) => {
-    for (let i = 0; i <= steps; i++) {
-      const a = from + (i / steps) * Math.PI;
-      out.push(new THREE.Vector2(cx + Math.cos(a) * l.radius, cz + Math.sin(a) * l.radius));
-    }
-  };
-  arc(l.bx, l.bz, dir - Math.PI / 2);
-  arc(l.ax, l.az, dir + Math.PI / 2);
-  return out;
-}
-
-/** A prism over `outline` (world xz) from `bottom` to `top`: [top, sides] material groups. */
-export function prism(outline: THREE.Vector2[], bottom: number, top: number): THREE.BufferGeometry {
-  // Shape y is world -z (the extrusion is turned to stand up along +y).
-  const shape = new THREE.Shape(outline.map((p) => new THREE.Vector2(p.x, -p.y)));
-  const geo = new THREE.ExtrudeGeometry(shape, { depth: top - bottom, bevelEnabled: false, curveSegments: 1 });
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, bottom, 0);
-  return geo;
-}
 
 /** Instanced boxes: `add` one per call, `build` makes the mesh. */
 export class Boxes {
@@ -120,189 +57,6 @@ export class Boxes {
 export function unitBox(): THREE.BufferGeometry {
   const g = new THREE.BoxGeometry(1, 1, 1);
   g.translate(0, 0.5, 0);
-  return g;
-}
-
-/** A four-sided roof sitting on y = 0. */
-export function unitRoof(): THREE.BufferGeometry {
-  const g = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1);
-  g.rotateY(Math.PI / 4);
-  g.translate(0, 0.5, 0);
-  return g;
-}
-
-/** A seven-sided cone sitting on y = 0 (pines, palm crowns). */
-export function unitCone(): THREE.BufferGeometry {
-  const g = new THREE.ConeGeometry(0.5, 1, 7);
-  g.translate(0, 0.5, 0);
-  return g;
-}
-
-/** Jitter a geometry's vertices so it reads as rock (seeded, radial in xz). */
-export function roughen(geo: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
-  const r = rng(seed);
-  const pos = geo.attributes.position!;
-  for (let i = 0; i < pos.count; i++) {
-    const k = 1 + (r() - 0.5) * amount;
-    pos.setX(i, pos.getX(i) * k);
-    pos.setZ(i, pos.getZ(i) * k);
-    pos.setY(i, pos.getY(i) + (r() - 0.5) * amount * 2);
-  }
-  geo.computeVertexNormals();
-  return geo;
-}
-
-const QUAY_TOP = 2.2;
-
-/** The town quay: a stone block with a palm promenade and the town on top. */
-function town(l: LandData, seed: number): THREE.Group {
-  const g = new THREE.Group();
-  const quay = new THREE.Mesh(prism(capsuleOutline(l, 24), -6, QUAY_TOP), [mat(PAVING), mat(STONE)]);
-  quay.receiveShadow = true;
-  g.add(quay);
-
-  const r = rng(seed);
-  // The waterfront faces the course: walk along the near edge of the capsule.
-  const dx = l.bx - l.ax;
-  const dz = l.bz - l.az;
-  const len = Math.hypot(dx, dz);
-  const ux = dx / len;
-  const uz = dz / len;
-  // Unit normal from the spine toward the course side (toward the origin).
-  let nx = -uz;
-  let nz = ux;
-  if (nx * -l.ax + nz * -l.az < 0) {
-    nx = -nx;
-    nz = -nz;
-  }
-  const yaw = Math.atan2(nx, nz);
-  const at = (along: number, inland: number) => {
-    const d = l.radius - inland;
-    return { x: l.ax + ux * along + nx * d, z: l.az + uz * along + nz * d };
-  };
-
-  const walls = new Boxes();
-  const roofs = new Boxes();
-  const windows = new Boxes();
-  const trunks = new Boxes();
-  const crowns = new Boxes();
-  const awnings = new Boxes();
-
-  // Palms along the promenade.
-  for (let a = -10; a <= len + 10; a += 13 + r() * 3) {
-    const p = at(a, 4);
-    const h = 6 + r() * 3;
-    trunks.add(p.x, QUAY_TOP, p.z, 0.5, h, 0.5, TRUNK);
-    crowns.add(p.x, QUAY_TOP + h - 0.6, p.z, 4.6, 1.6, 4.6, PALM, r() * Math.PI);
-  }
-  // Two rows of houses: low ones on the front, taller ones behind.
-  // Rows behind them fill the quay back to its far side, in blocks with streets between.
-  const rows = [
-    { inland: 14, depth: 9, minH: 5, maxH: 9 },
-    { inland: 27, depth: 10, minH: 8, maxH: 15 },
-  ];
-  for (let inland = 41; inland + 6 < l.radius * 2 - 8; inland += 13) {
-    const back = inland / (l.radius * 2);
-    rows.push({ inland, depth: 10, minH: 7 + back * 4, maxH: 13 + back * 6 });
-  }
-  for (const row of rows) {
-    // Along the quay as far as its rounded ends allow at this depth.
-    const fromSpine = Math.abs(l.radius - row.inland);
-    const reach = Math.sqrt(Math.max(0, l.radius * l.radius - fromSpine * fromSpine)) - 8;
-    for (let a = -Math.min(20, reach); a < len + Math.min(20, reach);) {
-      // A street now and then between blocks.
-      if (row.inland > 30 && r() < 0.12) {
-        a += 6 + r() * 4;
-        continue;
-      }
-      const w = 6 + r() * 7;
-      const h = row.minH + r() * (row.maxH - row.minH);
-      const p = at(a + w / 2, row.inland);
-      walls.add(p.x, QUAY_TOP, p.z, w, h, row.depth, WALLS[Math.floor(r() * WALLS.length)]!, yaw);
-      if (r() < 0.6) roofs.add(p.x, QUAY_TOP + h, p.z, w * 1.05, 1.6 + r(), row.depth * 1.05, ROOF, yaw);
-      // An awning over the ground floor on the waterfront row.
-      if (row.inland === 14 && r() < 0.6) {
-        const front0 = { x: p.x + nx * (row.depth / 2 + 0.9), z: p.z + nz * (row.depth / 2 + 0.9) };
-        awnings.add(
-          front0.x,
-          QUAY_TOP + 2.7,
-          front0.z,
-          w * 0.85,
-          0.12,
-          1.8,
-          AWNINGS[Math.floor(r() * AWNINGS.length)]!,
-          yaw,
-        );
-      }
-      // Windows on the face toward the water, one row per storey.
-      const shutter = SHUTTERS[Math.floor(r() * SHUTTERS.length)]!;
-      const front = { x: p.x + nx * (row.depth / 2 + 0.05), z: p.z + nz * (row.depth / 2 + 0.05) };
-      for (let y = 1.6; y < h - 1; y += 3) {
-        for (let wx = -w / 2 + 1.5; wx < w / 2 - 1; wx += 2.4) {
-          windows.add(front.x + ux * wx, QUAY_TOP + y, front.z + uz * wx, 1.1, 1.4, 0.12, shutter, yaw);
-        }
-      }
-      a += w + 0.6 + r() * 1.5;
-    }
-  }
-  // The church: a bell tower over the rooftops.
-  const c = at(len * 0.4, 22);
-  walls.add(c.x, QUAY_TOP, c.z, 5, 22, 5, 0xf3ead8, yaw);
-  roofs.add(c.x, QUAY_TOP + 22, c.z, 5.6, 4, 5.6, ROOF, yaw);
-
-  const plain = mat(0xffffff);
-  g.add(
-    walls.build(unitBox(), plain),
-    roofs.build(unitRoof(), tiledRoof()),
-    windows.build(unitBox(), mat(0xffffff, { roughness: 0.3 }), false),
-    trunks.build(unitBox(), plain),
-    crowns.build(palmCrown(), mat(0xffffff, { side: THREE.DoubleSide }, FOLIAGE.evergreen)),
-    awnings.build(unitBox(), plain),
-  );
-  return g;
-}
-
-/** Terracotta roofs in rows of tiles: darker lines every course. */
-function tiledRoof(): THREE.MeshStandardNodeMaterial {
-  const m = mat(0xffffff);
-  m.userData.colorNode = Fn(() => {
-    const row = fract(positionWorld.y.mul(2.2));
-    const w = fwidth(positionWorld.y.mul(2.2)).max(1e-4);
-    const line = smoothstep(w.mul(1.5), float(0), row);
-    return mix(vec3(1), vec3(0.72, 0.62, 0.6), line);
-  })();
-  return m;
-}
-
-/** A palm's crown of drooping fronds, about a unit across, its heart at y = 0. */
-export function palmCrown(): THREE.BufferGeometry {
-  const pos: number[] = [];
-  const fronds = 9;
-  const segs = 7;
-  for (let f = 0; f < fronds; f++) {
-    const a = (f / fronds) * Math.PI * 2 + Math.sin(f * 2.3) * 0.25;
-    const lift = 0.35 + Math.sin(f * 1.7) * 0.2;
-    const ca = Math.cos(a);
-    const sa = Math.sin(a);
-    const point = (t: number, side: number): [number, number, number] => {
-      const reach = t * 0.55;
-      const w = 0.11 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.15)), 0.6) * side;
-      const y = lift * t - 1.25 * t * t - Math.abs(side) * 0.04;
-      return [ca * reach - sa * w, y, sa * reach + ca * w];
-    };
-    for (let i = 0; i < segs; i++) {
-      const t0 = i / segs;
-      const t1 = (i + 1) / segs;
-      for (const side of [-1, 1]) {
-        pos.push(...point(t0, 0), ...point(t0, side), ...point(t1, side));
-        pos.push(...point(t0, 0), ...point(t1, side), ...point(t1, 0));
-      }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  g.translate(0, 0.6, 0);
   return g;
 }
 
@@ -370,7 +124,7 @@ function island(l: LandData, seed: number): THREE.Group {
   chapel(works, l.ax + 1.2, 5.6, l.az + 0.6, Math.atan2(-l.ax, -l.az));
   g.add(works.mesh(propMaterial()));
 
-  const plants = new Planting();
+  const plants = new Planting({ shadows: true, reflected: true });
   plants.add("pine", l.ax - 2.6, 5.5, l.az - 1.2, 7.5);
   plants.add("pine", l.ax + 0.4, 5.6, l.az - 3.2, 6.2, 0.92);
   plants.add("pine", l.ax - 1.2, 5.6, l.az + 2.8, 5.4, 1.06);
@@ -379,7 +133,7 @@ function island(l: LandData, seed: number): THREE.Group {
     const d = 2.5 + r() * 2.2;
     plants.add(i % 2 === 0 ? "agave" : "bush", l.ax + Math.cos(a) * d, 5.5, l.az + Math.sin(a) * d, 1 + r() * 0.5);
   }
-  g.add(plants.build());
+  g.add(plants.build(true));
   return g;
 }
 
@@ -410,11 +164,12 @@ function boulder(l: LandData, seed: number): THREE.Mesh {
   return stone.mesh(rockMaterial());
 }
 
-export function buildLand(land: LandData[]): THREE.Group {
+/** The bay's land, as it is in `season`. */
+export function buildLand(land: LandData[], season: Season = "summer"): THREE.Group {
   const g = new THREE.Group();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(town(l, seed));
+    if (l.kind === "town") g.add(buildTown(l, seed, season).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else g.add(boulder(l, seed));
   });

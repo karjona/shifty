@@ -4,7 +4,7 @@
 // the prop materials; lamps that flash are meshes of their own (`Glow`).
 import * as THREE from "three/webgpu";
 import type { LandData } from "../course.ts";
-import { capsuleOutline, prism } from "../land.ts";
+import { capsuleOutline, prism } from "./outline.ts";
 import { Glow, propMaterial } from "./materials.ts";
 import {
   ARMOUR,

@@ -16,12 +16,13 @@ import { Fn, attribute, clamp, max, mix, positionWorld, smoothstep, vec3 } from 
 import type { Season } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
 import { FOLIAGE, cut0 } from "./cel/look.ts";
-import { CelMaterial, UNREFLECTED, inkId } from "./cel/material.ts";
+import { CelMaterial, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { CircuitLook } from "./look.ts";
-import type { BobbingBatch } from "./bobbing.ts";
 import { noise3 } from "./cel/terrain.ts";
+import { type Berth, Fleet, Roamer, yacht } from "./coast/boats.ts";
 import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
+import { boatMaterial } from "./coast/materials.ts";
 import {
   CLIFF,
   DRY_GRASS,
@@ -38,7 +39,7 @@ import {
 import { Shape, random, turned } from "./coast/shape.ts";
 import { cutShore, traceShore } from "./coast/shoreline.ts";
 import { Planting } from "./coast/trees.ts";
-import { type CourseData, type LandData, type Mooring, mooredBoats } from "./course.ts";
+import type { CourseData, LandData } from "./course.ts";
 import { Boxes, buildLand, landDistance, rng, unitBox } from "./land.ts";
 import { hash, peak } from "./scenery.ts";
 
@@ -352,14 +353,14 @@ function addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[])
         for (let n = 0; n < count; n++) {
           const size = 1.3 + r() * 1.3;
           const out = -0.6 + r() * 0.8;
-          const along = (r() - 0.5) * 4;
+          const slide = (r() - 0.5) * 4;
           shape.add(
             kit[Math.floor(r() * kit.length)]!,
             stonePaint(LIMESTONE, LIMESTONE_TOP, r),
             turned(
-              p.x + p.nx * out - p.nz * along,
+              p.x + p.nx * out - p.nz * slide,
               0.1 + r() * 0.3,
-              p.z + p.nz * out + p.nx * along,
+              p.z + p.nz * out + p.nx * slide,
               r(),
               r() * 6,
               r(),
@@ -585,10 +586,10 @@ function plants(ground: CoastGround): THREE.Group {
     to.add(kind, x, y - 0.3, z, 7 + hash(seed + 2) * 4.5, 0.86 + hash(seed + 3) * 0.26);
   };
   let k = 0;
-  for (let z = NEAR.z0; z < NEAR.z1; z += 9) {
-    for (let x = NEAR.x0; x < NEAR.x1; x += 9) {
+  for (let z = NEAR.z0; z < NEAR.z1; z += 10) {
+    for (let x = NEAR.x0; x < NEAR.x1; x += 10) {
       k++;
-      tryAt(near, "pine", x + (hash(k * 1.3) - 0.5) * 8, z + (hash(k * 2.7) - 0.5) * 8, 0.55, k * 3.1);
+      tryAt(near, "pine", x + (hash(k * 1.3) - 0.5) * 9, z + (hash(k * 2.7) - 0.5) * 9, 0.5, k * 3.1);
     }
   }
   for (let z = FAR.z0 + 300; z < 320; z += 22) {
@@ -617,9 +618,7 @@ function plants(ground: CoastGround): THREE.Group {
       );
     }
   }
-  const distant = far.build();
-  distant.traverse((o) => o.layers.set(UNREFLECTED));
-  g.add(near.build(), distant);
+  g.add(near.build(), far.build());
   return g;
 }
 
@@ -637,19 +636,67 @@ function sierra(): THREE.Group {
   return g;
 }
 
-/** Fishing boats moored in the harbour, along the town's quay and in the lee of the mole. */
-function harbourMoorings(town: LandData, breakwater: LandData): Mooring[] {
+/** The centre line at `s`, `offset` m to its right. */
+function along(course: CourseData, s: number, offset: number): { x: number; z: number; yaw: number } {
+  const step = course.path.length > 1 ? course.path[1]!.s : 2;
+  const p = course.path[Math.round(s / step) % course.path.length] ?? course.path[0]!;
+  return { x: p.x - Math.cos(p.yaw) * offset, z: p.z + Math.sin(p.yaw) * offset, yaw: p.yaw };
+}
+
+/**
+ * Where the television's camera boats lie: outside the limit, halfway
+ * round the widest right-hander (the point) and round the bend off the
+ * stacks.
+ */
+export function cameraBoats(course: CourseData): { name: string; x: number; z: number; yaw: number }[] {
+  const out = course.outerLimit + 16;
+  const spots: { name: string; x: number; z: number; yaw: number }[] = [];
+  const boat = (name: string, s: number) => {
+    const p = along(course, s, -out);
+    if (course.land.some((l) => landDistance(l, p.x, p.z) < 6)) return;
+    spots.push({ name, ...p });
+  };
+  const rights = course.path.filter((p) => p.curve > 1e-4);
+  const widest = Math.min(...rights.map((p) => p.curve));
+  const sweep = rights.filter((p) => Math.abs(p.curve - widest) < 1e-5);
+  const middle = sweep[Math.floor(sweep.length / 2)];
+  if (middle) boat("boat-point", middle.s);
+  boat("boat-stacks", course.length * 0.73);
+  return spots;
+}
+
+/** The cape's boats: moored in the harbour along the town's quay and in the lee of the mole, and the television's. */
+function berths(course: CourseData, town: LandData | undefined, mole: LandData | undefined): Berth[] {
   const r = rng(23);
-  const spots: Mooring[] = [];
-  // The quay's face toward the harbour (+x), from the harbour's head to the mole.
-  const face = town.ax + town.radius + 3.2;
-  for (let z = -112; z < breakwater.az - breakwater.radius - 6; z += 7 + r() * 4) {
-    if (r() < 0.2) continue;
-    spots.push({ x: face + r() * 0.8, z, yaw: -Math.PI / 2 + (r() - 0.5) * 0.15 });
+  const spots: Berth[] = [];
+  const seed = () => Math.floor(r() * 1000);
+  if (town && mole) {
+    // Stern to the quay's face toward the harbour (+x), from the harbour's head to the mole.
+    const face = town.ax + town.radius;
+    for (let z = -112; z < mole.az - mole.radius - 6; z += 4.2 + r() * 3.4) {
+      if (r() < 0.15) continue;
+      const big = r() < 0.16;
+      spots.push({
+        x: face + (big ? 7.4 : 3.6) + r() * 0.5,
+        z: z + (big ? 3 : 0),
+        yaw: Math.PI / 2 + (r() - 0.5) * 0.12,
+        kind: big ? "trawler" : r() < 0.2 ? "inflatable" : "llaut",
+        seed: seed(),
+      });
+      if (big) z += 6;
+    }
+    // Alongside, inside the mole.
+    for (let x = mole.ax + 6; x < mole.bx - 6; x += 8 + r() * 3)
+      spots.push({
+        x,
+        z: mole.az - mole.radius - 1.9,
+        yaw: Math.PI / 2 + (r() < 0.5 ? Math.PI : 0),
+        kind: "llaut",
+        seed: seed(),
+      });
   }
-  // Inside the mole.
-  for (let x = breakwater.ax + 6; x < breakwater.bx - 6; x += 8 + r() * 3)
-    spots.push({ x, z: breakwater.az - breakwater.radius - 3, yaw: (r() - 0.5) * 0.15 });
+  for (const b of cameraBoats(course))
+    spots.push({ x: b.x - Math.cos(b.yaw) * 2.5, z: b.z + Math.sin(b.yaw) * 2.5, yaw: b.yaw, kind: "camera", seed: 1 });
   return spots;
 }
 
@@ -687,7 +734,8 @@ export class CapeScenery implements WaterScenery {
   readonly gulls = new THREE.Vector3(-20, 0, 40);
   readonly inland = 2.5;
   readonly ground: CoastGround;
-  private boats: BobbingBatch[] = [];
+  private fleet: Fleet;
+  private roamers: Roamer[];
   private lanterns: Lantern[] = [];
 
   constructor(course: CourseData, season: Season) {
@@ -746,7 +794,7 @@ export class CapeScenery implements WaterScenery {
     // The harbour: the town on its quay (as the bay's), the mole, the boats.
     const town = land.find((l) => l.kind === "town");
     const harbourMole = land.find((l) => l.kind === "mole");
-    if (town) this.group.add(buildLand([town]));
+    if (town) this.group.add(buildLand([town], season));
     if (harbourMole) {
       // The open sea is to the south (+z) of the mole.
       const dx = harbourMole.bx - harbourMole.ax;
@@ -754,12 +802,20 @@ export class CapeScenery implements WaterScenery {
       this.lanterns.push(...mole.lanterns);
       this.group.add(mole.group);
     }
-    if (town && harbourMole) {
-      for (const b of mooredBoats(harbourMoorings(town, harbourMole), 29)) {
-        this.boats.push(b);
-        this.group.add(b.mesh);
-      }
-    }
+    this.fleet = new Fleet(berths(course, town, harbourMole));
+    this.group.add(this.fleet.mesh);
+    // Sails out past the point.
+    const sails: [number, number][] = [
+      [-700, 420],
+      [-100, 560],
+      [620, 470],
+      [420, 700],
+      [-380, 720],
+    ];
+    this.roamers = [0.08, 0.37, 0.7].map(
+      (offset, i) => new Roamer(yacht(4 + i * 5, true), boatMaterial(), sails, 2.6, offset),
+    );
+    for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);
     if (tower) this.group.add(watchtower(tower.x, tower.y - 0.5, tower.z, 0.4));
@@ -785,7 +841,8 @@ export class CapeScenery implements WaterScenery {
   }
 
   update(waves: Float32Array, t: number): void {
-    for (const b of this.boats) b.update(waves, t);
+    this.fleet.update(waves, t);
+    for (const boat of this.roamers) boat.update(waves, t);
     flashLanterns(this.lanterns, t);
   }
 }
