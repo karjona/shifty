@@ -27,6 +27,7 @@ import { Precipitation } from "./cel/precip.ts";
 import { type CircuitLook, ConditionsLook } from "./look.ts";
 import { Gulls } from "./cel/gulls.ts";
 import { BaySide } from "./bayside.ts";
+import { crowdOf } from "./coast/people.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
 import { Spray } from "./spray.ts";
@@ -41,7 +42,7 @@ import {
   waterGrid,
   waveHeight,
 } from "./waves.ts";
-import type { CameraTuning, Environment, Frame, RiderModel } from "./world.ts";
+import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
 const WATER_SIZE = 1400;
@@ -106,8 +107,8 @@ export interface WaterScenery {
   readonly gulls: THREE.Vector3;
   /** The sea is hidden this far inside the land (m), where swells would show through low shores (null: past the bay's plain). */
   readonly inland: number | null;
-  /** Per frame: what floats rides the swell. */
-  update(waves: Float32Array, t: number): void;
+  /** Per frame: what floats rides the swell, and people wave at the riders. */
+  update(waves: Float32Array, t: number, riders: readonly RiderView[]): void;
 }
 
 export class Bay implements Environment {
@@ -163,7 +164,7 @@ export class Bay implements Environment {
     this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
     this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
-    this.course = new CourseView(opts.course, this.conditions.season);
+    this.course = new CourseView(opts.course, this.conditions.season, crowdOf(this.conditions));
     this.group.add(this.course.group);
     this.sea?.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);
@@ -263,7 +264,7 @@ export class Bay implements Environment {
     if (this.gulls) this.gulls.group.visible = this.look.rain < 0.3 && this.look.snow < 0.5;
     this.gulls?.update(f.t);
     this.course.update(this.waveParams, f.t, f.dt, f.riders, f.nextBuoy);
-    this.scenery.update(this.waveParams, f.t);
+    this.scenery.update(this.waveParams, f.t, f.riders);
     const water = (x: number, z: number) => waveHeight(this.waveParams, x, z, f.t);
     for (const r of f.riders) {
       const model = f.models.get(r.slot);

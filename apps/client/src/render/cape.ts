@@ -13,16 +13,20 @@
 // in the season's colours, snow on what faces up above the snow line.
 import * as THREE from "three/webgpu";
 import { Fn, attribute, clamp, max, mix, positionWorld, smoothstep, vec3 } from "three/tsl";
-import type { Season } from "../game/conditions.ts";
+import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
 import { FOLIAGE, cut0 } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { CircuitLook } from "./look.ts";
 import { noise3 } from "./cel/terrain.ts";
+import { type BeachSite, addBeach } from "./coast/beach.ts";
 import { type Berth, Fleet, Roamer, yacht } from "./coast/boats.ts";
+import { townMaterial } from "./coast/facades.ts";
 import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
+import { addWatchtower } from "./coast/landmarks.ts";
 import { boatMaterial } from "./coast/materials.ts";
+import { Crowd, crowdOf } from "./coast/people.ts";
 import {
   CLIFF,
   DRY_GRASS,
@@ -38,9 +42,11 @@ import {
 } from "./coast/rock.ts";
 import { Shape, random, turned } from "./coast/shape.ts";
 import { cutShore, traceShore } from "./coast/shoreline.ts";
+import { buildTown } from "./coast/town.ts";
 import { Planting } from "./coast/trees.ts";
 import type { CourseData, LandData } from "./course.ts";
-import { Boxes, buildLand, landDistance, rng, unitBox } from "./land.ts";
+import { landDistance, rng } from "./land.ts";
+import type { RiderView } from "./world.ts";
 import { hash, peak } from "./scenery.ts";
 
 /** The cape under the sky: the bay's sun, snow down to the beach in winter and only on the sierra otherwise. */
@@ -435,138 +441,6 @@ function addArch(shape: Shape, legs: LandData[]): void {
   }
 }
 
-const std = (hex: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
-  new THREE.MeshStandardNodeMaterial({ color: hex, roughness: 0.85, ...opts });
-
-/** A mesh of `geo` at `(x, y, z)`, casting and taking shadows. */
-function put(geo: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z: number, yaw = 0): THREE.Mesh {
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.position.set(x, y, z);
-  mesh.rotation.y = yaw;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  return mesh;
-}
-
-/** The old watchtower (torre de guaita): a round sandstone tower with a crenellated top and its door high up. */
-function watchtower(x: number, y: number, z: number, yaw: number): THREE.Group {
-  const g = new THREE.Group();
-  const stone = std(0xcdb48a);
-  g.add(put(new THREE.CylinderGeometry(3.1, 3.7, 12, 14, 3), stone, 0, 5, 0));
-  g.add(put(new THREE.CylinderGeometry(3.45, 3.3, 1.2, 14), stone, 0, 11.6, 0));
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    g.add(put(new THREE.BoxGeometry(1.1, 1, 0.7), stone, Math.cos(a) * 3.1, 12.7, Math.sin(a) * 3.1, -a));
-  }
-  // The door, 6 m up, and the corbels of its long-gone gallery.
-  g.add(put(new THREE.BoxGeometry(0.4, 1.9, 1.1), std(0x4a3a2c), 3.25, 6.6, 0));
-  for (const dz of [-0.7, 0.7]) g.add(put(new THREE.BoxGeometry(0.8, 0.35, 0.3), stone, 3.5, 5.4, dz));
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** The beach bar: a timber hut on a deck, a reed roof, its counter and stools; shut up out of season. */
-function chiringuito(x: number, y: number, z: number, yaw: number, open: boolean): THREE.Group {
-  const g = new THREE.Group();
-  const wood = std(0xa77a4f);
-  const pale = std(0xf2ead8);
-  g.add(put(new THREE.BoxGeometry(13, 0.4, 9), std(0xb88a5c), 0, 0.2, 0));
-  g.add(put(new THREE.BoxGeometry(7, 3, 4.5), pale, 0, 1.9, -1.6));
-  // The front: a counter when open, shutters down when not.
-  g.add(put(new THREE.BoxGeometry(7.2, 1.1, 0.8), wood, 0, 0.95, 1));
-  if (!open) g.add(put(new THREE.BoxGeometry(6.8, 1.7, 0.15), std(0x4f86a8), 0, 2.4, 0.6));
-  for (const px of [-3.4, 3.4]) g.add(put(new THREE.BoxGeometry(0.3, 3.2, 0.3), wood, px, 1.9, 1.3));
-  const roof = new THREE.ConeGeometry(6.4, 2.2, 4, 1);
-  roof.rotateY(Math.PI / 4);
-  roof.scale(1.25, 1, 0.95);
-  g.add(put(roof, std(0xcfae6d, { flatShading: true }), 0, 4.4, -0.6));
-  // A painted board over the counter: the sea, a sun.
-  g.add(put(new THREE.BoxGeometry(4.2, 0.9, 0.12), std(0x2a8fb0), 0, 3.6, 1.45));
-  g.add(put(new THREE.CircleGeometry(0.32, 12), std(0xf2c14e), 1.3, 3.65, 1.52));
-  if (open) {
-    const stools = new Boxes();
-    for (let i = -2; i <= 2; i++) stools.add(i * 1.4, 0.4, 2.1, 0.45, 0.8, 0.45, 0x7a5a3c);
-    g.add(stools.build(unitBox(), std(0xffffff)));
-    // Tables with parasols on the deck.
-    for (const [tx, tz] of [
-      [-5, 2.8],
-      [5, 2.8],
-    ] as const) {
-      g.add(put(new THREE.CylinderGeometry(0.6, 0.6, 0.08, 10), pale, tx, 1.15, tz));
-      g.add(put(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 6), wood, tx, 1.7, tz));
-      g.add(put(new THREE.ConeGeometry(1.6, 0.6, 8), std(0xf6f2ea), tx, 3.1, tz));
-    }
-  }
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** The lifeguard tower: a white hut on stilts with a red band, a ramp, and its flag. */
-function lifeguardTower(x: number, y: number, z: number, yaw: number, flag: number): THREE.Group {
-  const g = new THREE.Group();
-  const wood = std(0xe9e4d8);
-  for (const [lx, lz] of [
-    [-1, -1],
-    [1, -1],
-    [-1, 1],
-    [1, 1],
-  ] as const)
-    g.add(put(new THREE.BoxGeometry(0.22, 3.2, 0.22), wood, lx * 1.1, 1.6, lz * 1.1));
-  g.add(put(new THREE.BoxGeometry(2.9, 0.2, 2.9), wood, 0, 3.2, 0));
-  g.add(put(new THREE.BoxGeometry(2.4, 2, 2.4), wood, 0, 4.3, -0.1));
-  g.add(put(new THREE.BoxGeometry(2.45, 0.4, 2.45), std(0xd6402e), 0, 4.6, -0.1));
-  const roof = new THREE.ConeGeometry(2.1, 0.9, 4);
-  roof.rotateY(Math.PI / 4);
-  g.add(put(roof, std(0x8a9aa8), 0, 5.75, -0.1));
-  const ramp = new THREE.BoxGeometry(1, 0.12, 5);
-  ramp.rotateX(-0.62);
-  g.add(put(ramp, wood, 0, 1.6, 3.4));
-  g.add(put(new THREE.CylinderGeometry(0.05, 0.05, 4, 6), wood, 1.3, 7, 1.3));
-  g.add(put(new THREE.BoxGeometry(0.05, 0.8, 1.2), std(flag, { side: THREE.DoubleSide }), 1.3, 8.5, 0.7));
-  g.position.set(x, y, z);
-  g.rotation.y = yaw;
-  return g;
-}
-
-/** Sun umbrellas and loungers in rows down the beach, between `from` and `to` along it. */
-function umbrellas(ground: CoastGround, beach: LandData, count: number): THREE.Group {
-  const g = new THREE.Group();
-  const r = rng(91);
-  const poles = new Boxes();
-  const canopies = new Boxes();
-  const loungers = new Boxes();
-  const colours = [0x2a8fb0, 0xf2c14e, 0xd94a3a, 0xf6f2ea, 0x3f8a4a, 0xf08a3c];
-  let placedCount = 0;
-  for (let i = 0; i < 400 && placedCount < count; i++) {
-    const z = beach.az - 70 + r() * (beach.bz - beach.az + 120);
-    // Along the shore, 10 to 30 m up the sand.
-    const inlandWanted = 10 + r() * 20;
-    let x = beach.ax - beach.radius;
-    for (let k = 0; k < 40; k++) {
-      const s = ground.sample(x, z);
-      if (s.kind === "beach" && s.inland >= inlandWanted) break;
-      x += 1.5;
-    }
-    const s = ground.sample(x, z);
-    if (s.kind !== "beach" || s.inland > 34) continue;
-    const c = colours[Math.floor(r() * colours.length)]!;
-    poles.add(x, s.h, z, 0.08, 2.4, 0.08, 0xf2f0ea);
-    canopies.add(x, s.h + 2.1, z, 2.6, 0.55, 2.6, c, r() * Math.PI);
-    for (const side of [-1, 1]) loungers.add(x + 0.6, s.h, z + side * 1.1, 1.9, 0.35, 0.65, r() < 0.5 ? 0xf6f2ea : c);
-    placedCount++;
-  }
-  const cone = new THREE.ConeGeometry(0.5, 1, 8, 1);
-  cone.translate(0, 0.5, 0);
-  g.add(
-    poles.build(unitBox(), std(0xffffff)),
-    canopies.build(cone, std(0xffffff, { side: THREE.DoubleSide })),
-    loungers.build(unitBox(), std(0xffffff)),
-  );
-  return g;
-}
-
 /** Stone pines in groves on the clifftops and the hills, scrub and agaves along the cliffs' edges. */
 function plants(ground: CoastGround): THREE.Group {
   const g = new THREE.Group();
@@ -737,8 +611,10 @@ export class CapeScenery implements WaterScenery {
   private fleet: Fleet;
   private roamers: Roamer[];
   private lanterns: Lantern[] = [];
+  private crowd = new Crowd();
 
-  constructor(course: CourseData, season: Season) {
+  constructor(course: CourseData, conditions: Conditions) {
+    const season = conditions.season;
     const land = course.land;
     const ground = (this.ground = new CoastGround(land));
     const soil = groundMaterial();
@@ -791,14 +667,17 @@ export class CapeScenery implements WaterScenery {
       this.group.add(beacon.group);
     }
 
-    // The harbour: the town on its quay (as the bay's), the mole, the boats.
+    // What people built, in the town's material: the watchtower and the beach's own; the town on its quay.
+    const works = new Shape();
+    const r = random(91);
+    const crowd = crowdOf(conditions);
     const town = land.find((l) => l.kind === "town");
     const harbourMole = land.find((l) => l.kind === "mole");
-    if (town) this.group.add(buildLand([town], season));
+    if (town) this.group.add(buildTown(town, 1000, season, crowd, this.crowd).group);
     if (harbourMole) {
       // The open sea is to the south (+z) of the mole.
       const dx = harbourMole.bx - harbourMole.ax;
-      const mole = buildMole(harbourMole, MOLE_TOP, dx >= 0 ? 1 : -1);
+      const mole = buildMole(harbourMole, MOLE_TOP, dx >= 0 ? 1 : -1, crowd, this.crowd);
       this.lanterns.push(...mole.lanterns);
       this.group.add(mole.group);
     }
@@ -818,21 +697,29 @@ export class CapeScenery implements WaterScenery {
     for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);
-    if (tower) this.group.add(watchtower(tower.x, tower.y - 0.5, tower.z, 0.4));
+    if (tower) addWatchtower(works, tower.x, tower.y - 0.5, tower.z, 0.4);
 
-    // The beach: the bar, the lifeguard tower, umbrellas in season.
+    // The beach: the bar, the lifeguard's tower, umbrellas and people in season.
     const beach = land.find((l) => l.kind === "beach");
     if (beach) {
-      const bar = onBeach(ground, beach, BAR.z, BAR.inland);
-      // Facing the sea (west, -x).
-      this.group.add(chiringuito(bar.x, bar.y, bar.z, -Math.PI / 2, season === "summer" || season === "spring"));
-      const lifeguard = onBeach(ground, beach, LIFEGUARD.z, LIFEGUARD.inland);
-      this.group.add(
-        lifeguardTower(lifeguard.x, lifeguard.y, lifeguard.z, -Math.PI / 2, season === "summer" ? 0x2fb34a : 0xf2c14e),
-      );
-      const count = season === "summer" ? 70 : season === "winter" ? 0 : 18;
-      if (count > 0) this.group.add(umbrellas(ground, beach, count));
+      const site: BeachSite = {
+        at: (z, inland) => onBeach(ground, beach, z, inland),
+        from: beach.az - 70,
+        to: beach.bz + 50,
+        // The sea is to the west (-x).
+        seaward: -Math.PI / 2,
+      };
+      addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, r);
+      const palms = new Planting({ shadows: true, reflected: true });
+      for (let z = site.from + 30; z < site.to - 20; z += 15 + r() * 6) {
+        const p = site.at(z, 41);
+        palms.add("palm", p.x, p.y, p.z, 6 + r() * 2.5, 0.9 + r() * 0.2);
+      }
+      this.group.add(palms.build(true));
     }
+    this.group.add(works.mesh(townMaterial()));
+    const arms = this.crowd.build();
+    if (arms) this.group.add(arms);
 
     this.group.add(plants(ground));
     const sierraGroup = sierra();
@@ -840,7 +727,8 @@ export class CapeScenery implements WaterScenery {
     this.group.add(sierraGroup);
   }
 
-  update(waves: Float32Array, t: number): void {
+  update(waves: Float32Array, t: number, riders: readonly RiderView[]): void {
+    this.crowd.update(t, riders);
     this.fleet.update(waves, t);
     for (const boat of this.roamers) boat.update(waves, t);
     flashLanterns(this.lanterns, t);
@@ -853,7 +741,7 @@ export class Cape extends Bay {
   readonly land: CoastGround;
 
   constructor(opts: BayOptions) {
-    const scenery = new CapeScenery(opts.course, opts.conditions?.season ?? "summer");
+    const scenery = new CapeScenery(opts.course, opts.conditions ?? homeConditions("jetski"));
     super({ ...opts, scenery, look: CAPE_LOOK });
     this.land = scenery.ground;
   }

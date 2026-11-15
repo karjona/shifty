@@ -6,6 +6,7 @@ import * as THREE from "three/webgpu";
 import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { Glow, propMaterial } from "./materials.ts";
+import { type Crowd, addPerson } from "./people.ts";
 import {
   ARMOUR,
   LIMESTONE,
@@ -323,7 +324,13 @@ export interface Breakwater {
  * deck with a parapet on the seaward side, lamp posts, bollards and
  * benches, the lighthouse on its east head and a green light on the west.
  */
-export function buildBreakwater(straightHalf: number, radius: number, lighthouseX: number): Breakwater {
+export function buildBreakwater(
+  straightHalf: number,
+  radius: number,
+  lighthouseX: number,
+  crowd: number,
+  wavers: Crowd,
+): Breakwater {
   const group = new THREE.Group();
   const l: Capsule = { ax: -straightHalf, az: 0, bx: straightHalf, bz: 0 };
   const top = 2.6;
@@ -345,6 +352,16 @@ export function buildBreakwater(straightHalf: number, radius: number, lighthouse
   for (let x = -straightHalf + 12; x < straightHalf - 8; x += 37.5) addLampPost(works, x, top, wallZ + 0.9);
   for (let x = -straightHalf + 4; x < straightHalf; x += 14) addBollard(works, x, top, half - 0.5);
   for (let x = -straightHalf + 30; x < straightHalf - 20; x += 55) addBench(works, x, top, wallZ + 1.1, 0);
+  // Anglers on the deck's edge over the stones, walkers, and people who wave from the wall.
+  const r = random(19);
+  const people = Math.round(22 * crowd);
+  for (let i = 0; i < people; i++) {
+    const x = -straightHalf + 10 + r() * (straightHalf * 2 - 20);
+    const kind = r();
+    if (kind < 0.4) addPerson(works, x, top + 0.02, half - 0.15, 0, r, { pose: "fish" });
+    else if (kind < 0.6) wavers.add(works, x, top, r() < 0.5 ? half - 1 : wallZ + 0.9, r() < 0.5 ? 0 : Math.PI, r);
+    else addPerson(works, x, top, (r() - 0.5) * 3, (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk" });
+  }
   const lanterns = [
     addLighthouse(works, lighthouseX, top + 0.3, 0, 0),
     addHarbourLight(works, -straightHalf - 1.5, top, 0, "green", 1.2),
@@ -366,7 +383,7 @@ export interface Mole {
  * 1 or -1, which side of a to b the open sea is), and a green light on
  * its head (b).
  */
-export function buildMole(l: LandData, top: number, sea: 1 | -1): Mole {
+export function buildMole(l: LandData, top: number, sea: 1 | -1, crowd: number, wavers: Crowd): Mole {
   const group = new THREE.Group();
   const dx = l.bx - l.ax;
   const dz = l.bz - l.az;
@@ -393,6 +410,18 @@ export function buildMole(l: LandData, top: number, sea: 1 | -1): Mole {
   const lanterns = [
     addHarbourLight(works, l.bx + ux * (l.radius - 2.2), top, l.bz + uz * (l.radius - 2.2), "green", 0),
   ];
+  // Anglers along the harbour side, and people out on the mole to watch the riders come in.
+  const r = random(37);
+  const towardHarbour = Math.atan2(-sx, -sz);
+  for (let a = 6; a < len - 2; a += 5 + r() * 6) {
+    if (r() > crowd) continue;
+    const x = l.ax + ux * a;
+    const z = l.az + uz * a;
+    if (r() < 0.5) {
+      const edge = l.radius - 0.2;
+      addPerson(works, x - sx * edge, top + 0.02, z - sz * edge, towardHarbour, r, { pose: "fish" });
+    } else wavers.add(works, x - sx * 1.5, top, z - sz * 1.5, towardHarbour + (r() - 0.5), r);
+  }
   group.add(works.mesh(propMaterial()));
   for (const lantern of lanterns) group.add(lantern.mesh);
   return { group, lanterns };

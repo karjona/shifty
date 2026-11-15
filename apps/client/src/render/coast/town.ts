@@ -12,7 +12,8 @@ import type { LandData } from "../course.ts";
 import { capsuleOutline, prism } from "./outline.ts";
 import { SHUTTERS, TILE, type Tile, house, townMaterial } from "./facades.ts";
 import { addBench, addBollard, addLampPost, capsuleEdge } from "./harbour.ts";
-import { type Paint, Shape, box, pick, place, post, random } from "./shape.ts";
+import { type Crowd, addPerson } from "./people.ts";
+import { Local, Shape, box, pick, place, post, random } from "./shape.ts";
 import { Planting } from "./trees.ts";
 
 /** The quay's top (m over the water). */
@@ -92,48 +93,6 @@ function groundAt(inland: number): number {
   let y = QUAY_TOP;
   for (const [from, top] of TERRACES) if (inland >= from) y = top;
   return y;
-}
-
-/** A builder of things standing at a place and facing the water: points in its own frame (x along, y up, z to the water). */
-class Local {
-  private m: THREE.Matrix4;
-  private shape: Shape;
-
-  constructor(shape: Shape, x: number, y: number, z: number, yaw: number) {
-    this.shape = shape;
-    this.m = place(x, y, z, yaw);
-  }
-
-  p(x: number, y: number, z: number): THREE.Vector3 {
-    return new THREE.Vector3(x, y, z).applyMatrix4(this.m);
-  }
-
-  /** A quad given by its corners in this frame (counter-clockwise from outside, the first two along its foot). */
-  quad(a: number[], b: number[], c: number[], d: number[], paint: Paint, uv: Tile = TILE.white): void {
-    this.shape.quad(
-      this.p(a[0]!, a[1]!, a[2]!),
-      this.p(b[0]!, b[1]!, b[2]!),
-      this.p(c[0]!, c[1]!, c[2]!),
-      this.p(d[0]!, d[1]!, d[2]!),
-      paint,
-      uv,
-    );
-  }
-
-  /** An upright wall panel facing +z: from `x0` to `x1` at depth `z`, from `y0` to `y1`. */
-  front(x0: number, x1: number, y0: number, y1: number, z: number, paint: Paint, uv: Tile = TILE.white): void {
-    this.quad([x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z], paint, uv);
-  }
-
-  /** A box: `w` × `h` × `d`, its foot's middle at `(x, y, z)`. */
-  box(x: number, y: number, z: number, w: number, h: number, d: number, paint: Paint): void {
-    this.shape.take(box(w, h, d), paint, this.m.clone().multiply(place(x, y, z)), { uv: TILE.white });
-  }
-
-  /** A geometry placed in this frame. */
-  take(geo: THREE.BufferGeometry, paint: Paint, x: number, y: number, z: number, flat = false): void {
-    this.shape.take(geo, paint, this.m.clone().multiply(place(x, y, z)), { uv: TILE.white, flat });
-  }
 }
 
 /** A house on its lot: `w` wide and `d` deep, `storeys` high, facing the water. */
@@ -419,8 +378,31 @@ function addChurch(shape: Shape, x: number, y: number, z: number, yaw: number): 
 }
 
 /** What stands on the promenade: lamps, bollards, benches, cafe tables under parasols, crates and nets by the boats. */
-function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season): void {
+function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, crowd: number, wavers: Crowd): void {
   const span = reach(q, 3) - 6;
+  // People: strolling the promenade, standing in talk, fishing off the edge, waving at the riders.
+  const strollers = Math.round(((q.len + span * 2) / 6.5) * crowd);
+  for (let i = 0; i < strollers; i++) {
+    const a = -span + r() * (q.len + span * 2);
+    const kind = r();
+    if (kind < 0.16) {
+      const p = at(q, a, 1.3);
+      wavers.add(shape, p.x, QUAY_TOP, p.z, q.yaw + (r() - 0.5) * 0.5, r);
+    } else if (kind < 0.26) {
+      const p = at(q, a, 0.2);
+      addPerson(shape, p.x, QUAY_TOP + 0.02, p.z, q.yaw, r, { pose: "fish" });
+    } else if (kind < 0.5) {
+      // Two in talk.
+      const p = at(q, a, 4 + r() * 4);
+      const turn = r() * 6;
+      addPerson(shape, p.x, QUAY_TOP, p.z, turn, r);
+      addPerson(shape, p.x + Math.sin(turn) * 0.8, QUAY_TOP, p.z + Math.cos(turn) * 0.8, turn + Math.PI, r);
+    } else {
+      const p = at(q, a, 3 + r() * 5.5);
+      const way = q.yaw + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) + (r() - 0.5) * 0.3;
+      addPerson(shape, p.x, QUAY_TOP, p.z, way, r, { pose: "walk" });
+    }
+  }
   for (let a = -span; a < q.len + span; a += 8) {
     const p = at(q, a, 0.8);
     addBollard(shape, p.x, QUAY_TOP, p.z);
@@ -432,6 +414,8 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season): v
   for (let a = -span + 14; a < q.len + span; a += 26) {
     const p = at(q, a, 6.4);
     addBench(shape, p.x, QUAY_TOP, p.z, q.yaw);
+    if (r() < crowd * 0.6)
+      addPerson(shape, p.x + q.ux * 0.3, QUAY_TOP + 0.48, p.z + q.uz * 0.3, q.yaw, r, { pose: "sit" });
   }
   // Fish boxes and nets on the quay's edge.
   const crate = [0x3a6ea5, 0xf6f2ea, 0xd94a3a, 0x2d8a7a, 0xf2c14e];
@@ -469,13 +453,14 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season): v
         uv: TILE.white,
         flat: true,
       });
-      for (const side of [-0.8, 0.8])
-        shape.take(
-          box(0.42, 0.45, 0.42),
-          new THREE.Color(0x8a6a46),
-          place(p.x + q.ux * side, QUAY_TOP, p.z + q.uz * side),
-          { uv: TILE.white },
-        );
+      for (const side of [-0.8, 0.8]) {
+        const cx = p.x + q.ux * side;
+        const cz = p.z + q.uz * side;
+        shape.take(box(0.42, 0.45, 0.42), new THREE.Color(0x8a6a46), place(cx, QUAY_TOP, cz), { uv: TILE.white });
+        // Facing each other across the table.
+        if (r() < crowd * 0.7)
+          addPerson(shape, cx, QUAY_TOP + 0.46, cz, Math.atan2(-q.ux * side, -q.uz * side), r, { pose: "sit" });
+      }
     }
   }
 }
@@ -498,8 +483,8 @@ export interface Town {
   group: THREE.Group;
 }
 
-/** The town on the quay `l`, as it is in `season`. */
-export function buildTown(l: LandData, seed: number, season: Season): Town {
+/** The town on the quay `l`, as it is in `season`, with as many people out as `crowd` (0-1) says. */
+export function buildTown(l: LandData, seed: number, season: Season, crowd: number, wavers: Crowd): Town {
   const group = new THREE.Group();
   const q = quayOf(l);
   const r = random(seed);
@@ -594,7 +579,7 @@ export function buildTown(l: LandData, seed: number, season: Season): Town {
       }
     }
   });
-  addPromenade(shape, q, r, season);
+  addPromenade(shape, q, r, season, crowd, wavers);
   group.add(shape.mesh(townMaterial()));
   const upper = uphill.mesh(townMaterial(), "receive");
   upper.layers.set(UNREFLECTED);

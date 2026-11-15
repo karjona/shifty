@@ -8,6 +8,7 @@ import type { Season } from "../game/conditions.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
 import { type Lantern, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
+import { Crowd } from "./coast/people.ts";
 import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
 import type { RiderView } from "./world.ts";
@@ -117,14 +118,19 @@ export class CourseView {
   private matrix = new THREE.Matrix4();
   /** The breakwater's lamps. */
   private lanterns: Lantern[] = [];
+  /** The people on the bay's land who wave. */
+  private crowd = new Crowd();
 
   readonly data: CourseData;
 
-  constructor(data: CourseData, season: Season = "summer") {
+  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land. */
+  constructor(data: CourseData, season: Season = "summer", crowd = 1) {
     this.data = data;
     if (data.place === "bay") {
-      this.buildBreakwater();
-      this.group.add(buildLand(this.data.land, season));
+      this.buildBreakwater(crowd);
+      this.group.add(buildLand(this.data.land, season, crowd, this.crowd));
+      const arms = this.crowd.build();
+      if (arms) this.group.add(arms);
     }
     this.buildStartGate();
     this.buoys = new BuoyMarks(this.data);
@@ -138,9 +144,15 @@ export class CourseView {
     for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
-  private buildBreakwater(): void {
+  private buildBreakwater(crowd: number): void {
     const d = this.data;
-    const breakwater = buildBreakwater(d.straightHalf, d.breakwaterRadius, d.straightHalf + d.breakwaterRadius * 0.45);
+    const breakwater = buildBreakwater(
+      d.straightHalf,
+      d.breakwaterRadius,
+      d.straightHalf + d.breakwaterRadius * 0.45,
+      crowd,
+      this.crowd,
+    );
     this.lanterns.push(...breakwater.lanterns);
     this.group.add(breakwater.group);
   }
@@ -259,6 +271,7 @@ export class CourseView {
     this.boundary.instanceMatrix.needsUpdate = true;
 
     flashLanterns(this.lanterns, t);
+    this.crowd.update(t, riders);
     this.buoys.update(waves, t, dt, riders, nextBuoy);
     this.chevrons.update(waves, t);
   }

@@ -19,7 +19,11 @@ export interface AddOptions {
 }
 
 const IDENTITY = new THREE.Matrix4();
-const WHITE_UV = [0, 0, 0, 0] as const;
+/** A rectangle of a material's texture (u0, v0, u1, v1). */
+export type UvRect = readonly [number, number, number, number];
+
+/** Where an untextured vertex looks its colour up: a white corner of the sheet. */
+const WHITE_UV: UvRect = [0, 0, 0, 0];
 
 /** A transform: moved to `(x, y, z)`, turned `yaw` about y, scaled. */
 export function place(x: number, y: number, z: number, yaw = 0, sx = 1, sy = sx, sz = sx): THREE.Matrix4 {
@@ -195,6 +199,51 @@ export class Shape {
     mesh.receiveShadow = shadows === "receive" || shadows === "both";
     mesh.userData.noMerge = true;
     return mesh;
+  }
+}
+
+/** A builder of things standing at a place and facing the water: points in its own frame (x along, y up, z to the water). */
+export class Local {
+  /** The way it faces (its +z), as a heading. */
+  readonly yaw: number;
+  private m: THREE.Matrix4;
+  private shape: Shape;
+
+  constructor(shape: Shape, x: number, y: number, z: number, yaw: number) {
+    this.shape = shape;
+    this.yaw = yaw;
+    this.m = place(x, y, z, yaw);
+  }
+
+  p(x: number, y: number, z: number): THREE.Vector3 {
+    return new THREE.Vector3(x, y, z).applyMatrix4(this.m);
+  }
+
+  /** A quad given by its corners in this frame (counter-clockwise from outside, the first two along its foot). */
+  quad(a: number[], b: number[], c: number[], d: number[], paint: Paint, uv: UvRect = WHITE_UV): void {
+    this.shape.quad(
+      this.p(a[0]!, a[1]!, a[2]!),
+      this.p(b[0]!, b[1]!, b[2]!),
+      this.p(c[0]!, c[1]!, c[2]!),
+      this.p(d[0]!, d[1]!, d[2]!),
+      paint,
+      uv,
+    );
+  }
+
+  /** An upright wall panel facing +z: from `x0` to `x1` at depth `z`, from `y0` to `y1`. */
+  front(x0: number, x1: number, y0: number, y1: number, z: number, paint: Paint, uv: UvRect = WHITE_UV): void {
+    this.quad([x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z], paint, uv);
+  }
+
+  /** A box: `w` × `h` × `d`, its foot's middle at `(x, y, z)`. */
+  box(x: number, y: number, z: number, w: number, h: number, d: number, paint: Paint): void {
+    this.shape.take(box(w, h, d), paint, this.m.clone().multiply(place(x, y, z)), { uv: WHITE_UV });
+  }
+
+  /** A geometry placed in this frame. */
+  take(geo: THREE.BufferGeometry, paint: Paint, x: number, y: number, z: number, flat = false): void {
+    this.shape.take(geo, paint, this.m.clone().multiply(place(x, y, z)), { uv: WHITE_UV, flat });
   }
 }
 

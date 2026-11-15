@@ -6,7 +6,9 @@
 import * as THREE from "three/webgpu";
 import type { Season } from "../game/conditions.ts";
 import type { LandData } from "./course.ts";
-import { propMaterial } from "./coast/materials.ts";
+import { townMaterial } from "./coast/facades.ts";
+import { addHermitage } from "./coast/landmarks.ts";
+import type { Crowd } from "./coast/people.ts";
 import {
   CLIFF,
   type CliffStyle,
@@ -20,14 +22,12 @@ import {
   stonePaint,
   sweepCliff,
 } from "./coast/rock.ts";
-import { Shape, box, place, turned } from "./coast/shape.ts";
+import { Shape, place, turned } from "./coast/shape.ts";
 import { capsuleOutline, landDistance, prism, rng } from "./coast/outline.ts";
 import { buildTown } from "./coast/town.ts";
 import { Planting } from "./coast/trees.ts";
 
 export { capsuleOutline, landDistance, prism, rng };
-
-const ROOF = 0xc0623a;
 
 /** Instanced boxes: `add` one per call, `build` makes the mesh. */
 export class Boxes {
@@ -63,35 +63,6 @@ export function unitBox(): THREE.BufferGeometry {
 /** How the islet's cliffs are cut: short planes round a small rock. */
 const ISLET: CliffStyle = { ...CLIFF, face: [3, 5.5], out: [0.7, 1.5], flange: 2.2, ledge: [0.5, 1.1], tiers: 4 };
 
-/** The hermitage on the islet: a whitewashed chapel with a bell gable over its door, facing `yaw`. */
-function chapel(shape: Shape, x: number, y: number, z: number, yaw: number): void {
-  const white = 0xf6f2ea;
-  const m = (dx: number, dy: number, dz: number) => {
-    const c = Math.cos(yaw);
-    const s = Math.sin(yaw);
-    return place(x + dx * c + dz * s, y + dy, z - dx * s + dz * c, yaw);
-  };
-  shape.take(box(3, 2.6, 4.2), white, m(0, 0, 0));
-  // A gabled roof of tiles, its ridge along the nave.
-  const roof = new THREE.CylinderGeometry(0.01, 1.9, 1.2, 4, 1).rotateY(Math.PI / 4).scale(1, 1, 1.75);
-  shape.take(roof, ROOF, m(0, 3.2, 0), { flat: true });
-  // The bell gable over the door, with its arch and bell.
-  shape.take(box(1.7, 2.2, 0.45), white, m(0, 2.6, 2.0));
-  shape.take(box(0.55, 0.8, 0.5), 0x3f4a5a, m(0, 3.6, 2.0));
-  shape.take(
-    new THREE.CylinderGeometry(0.01, 1.05, 0.5, 4, 1).rotateY(Math.PI / 4).scale(1, 1, 0.36),
-    ROOF,
-    m(0, 5.05, 2.0),
-    {
-      flat: true,
-    },
-  );
-  shape.take(box(0.08, 0.7, 0.08), 0x3a3f46, m(0, 5.2, 2.0));
-  shape.take(box(0.4, 0.08, 0.08), 0x3a3f46, m(0, 5.6, 2.0));
-  shape.take(box(0.9, 1.7, 0.2), 0x6a4a32, m(0, 0, 2.08));
-  shape.take(box(0.2, 0.7, 0.5), 0x3f4a5a, m(1.45, 1.3, -0.4));
-}
-
 /** A rocky islet: cliffs round a grassy top, stone pines leaning over it and a white hermitage. */
 function island(l: LandData, seed: number): THREE.Group {
   const g = new THREE.Group();
@@ -121,8 +92,8 @@ function island(l: LandData, seed: number): THREE.Group {
 
   const works = new Shape();
   // Facing the course.
-  chapel(works, l.ax + 1.2, 5.6, l.az + 0.6, Math.atan2(-l.ax, -l.az));
-  g.add(works.mesh(propMaterial()));
+  addHermitage(works, l.ax + 1.4, 5.7, l.az + 0.4, Math.atan2(-l.ax, -l.az));
+  g.add(works.mesh(townMaterial()));
 
   const plants = new Planting({ shadows: true, reflected: true });
   plants.add("pine", l.ax - 2.6, 5.5, l.az - 1.2, 7.5);
@@ -164,12 +135,12 @@ function boulder(l: LandData, seed: number): THREE.Mesh {
   return stone.mesh(rockMaterial());
 }
 
-/** The bay's land, as it is in `season`. */
-export function buildLand(land: LandData[], season: Season = "summer"): THREE.Group {
+/** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`. */
+export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd): THREE.Group {
   const g = new THREE.Group();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season).group);
+    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else g.add(boulder(l, seed));
   });
