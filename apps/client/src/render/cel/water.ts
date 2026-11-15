@@ -4,7 +4,8 @@
 // the shallows; white wave lines drawn where the ripples cross, glints of
 // sun, the reflections laid in as flat darker shapes, and foam as cut-out
 // white with a pale blue rim. Its colours are the season's and the
-// weather's (see look.ts): the wind raises whitecaps, the rain rings it.
+// weather's (see look.ts): the wind raises whitecaps, darkens it in gusts
+// and draws its foam out in streaks, and the rain rings it.
 import * as THREE from "three/webgpu";
 import {
   Fn,
@@ -137,13 +138,30 @@ export function celWaterMaterial(i: CelWaterInputs): THREE.MeshBasicNodeMaterial
       .mul(0.7)
       .mul(cut(0.35, flowNoise(xz.mul(0.25), i.time, 0.2)));
     const caps = float(0).toVar();
+    const blown = c.toVar();
     If(LOOK.whitecaps.greaterThan(0.001), () => {
       caps.assign(
         cut(float(0.9).sub(LOOK.whitecaps.mul(0.32)), flowNoise(xz.mul(0.11), i.time, 0.35))
           .mul(cut(0.2, flowNoise(xz.mul(0.6).add(31), i.time, 1.2)))
           .mul(LOOK.whitecaps),
       );
+      // The wind on the water: gusts cross it as darker patches, and foam is drawn out in streaks along it.
+      const speed = max(LOOK.wind.length(), float(1e-3));
+      const down = LOOK.wind.div(speed);
+      const gusts = noise4(xz.sub(LOOK.wind.mul(i.time.mul(0.55))).mul(0.011));
+      const gust = cut(0.16, gusts.x.add(gusts.y.mul(0.35))).mul(LOOK.whitecaps);
+      blown.assign(mix(blown, blown.mul(vec3(0.8, 0.84, 0.88)), gust.mul(0.6)));
+      const run = dot(xz, down).sub(i.time.mul(speed).mul(0.25));
+      const beside = dot(xz, vec2(down.y.negate(), down.x));
+      const rows = noise4(vec2(run.mul(0.016), beside.mul(0.42)));
+      const dashed = noise4(vec2(run.mul(0.09), beside.mul(0.13)).add(3.3)).z;
+      const streak = cut(0.4, rows.x)
+        .mul(cut(-0.05, dashed))
+        .mul(smoothstep(260, 60, dist))
+        .mul(LOOK.whitecaps);
+      blown.assign(mix(blown, foamShade, streak.mul(0.7)));
     });
+    c = blown;
     const wake = smoothstep(0.04, 0.7, i.wake).mul(
       mix(float(0.55), float(1), flowNoise(xz.mul(0.7), i.time, 1).mul(0.5).add(0.5)),
     );

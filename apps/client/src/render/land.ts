@@ -7,6 +7,7 @@ import * as THREE from "three/webgpu";
 import type { Season } from "../game/conditions.ts";
 import type { LandData } from "./course.ts";
 import { townMaterial } from "./coast/facades.ts";
+import { OVERHEAD, type Sunlight } from "./coast/grounding.ts";
 import { addHermitage } from "./coast/landmarks.ts";
 import type { Life } from "./coast/life.ts";
 import type { Crowd } from "./coast/people.ts";
@@ -110,14 +111,25 @@ function boulder(stone: Shape, l: LandData, seed: number): void {
  */
 const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24.6, z - 68) < 10;
 
+/** The market hall on the bay's waterfront: east of the podium's square, by the flags. */
+const MARKET = { kind: "market", along: 128 } as const;
+
 /** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
-export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd, life: Life): THREE.Group {
+export function buildLand(
+  land: LandData[],
+  season: Season,
+  crowd: number,
+  wavers: Crowd,
+  life: Life,
+  /** Which way shade falls. */
+  light: Sunlight = OVERHEAD,
+): THREE.Group {
   const g = new THREE.Group();
   // (The rocks out in the bay are one mesh.)
   const rocks = new Shape();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept).group);
+    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept, light, MARKET).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else boulder(rocks, l, seed);
   });

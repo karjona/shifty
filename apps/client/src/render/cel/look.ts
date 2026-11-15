@@ -44,7 +44,7 @@ export const LOOK = {
   cirrus: uniform(1),
   streaks: uniform(0),
   /** Bands of soft flat cloud at mid height (0-1), and veils of rain under the deck (0-1). */
-  puffs: uniform(0.2),
+  puffs: uniform(0),
   veil: uniform(0),
   /** A cloud deck over the sky (0 = none, 1 = closed), lit and in shade. */
   overcast: uniform(0),

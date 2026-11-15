@@ -1,13 +1,14 @@
 // What lies round the bay's course besides its land (see land.ts): the
 // backdrop behind the town (scenery.ts), the boats moored along the quay
 // and at anchor off its ends and out past the course, a trawler working
-// along the coast and sails far out.
+// along the coast, sails far out, and the train that runs behind the town.
 import * as THREE from "three/webgpu";
 import type { WaterScenery } from "./bay.ts";
 import { UNREFLECTED } from "./cel/material.ts";
 import { type Berth, Fleet, Roamer, ferry, trawler, yacht } from "./coast/boats.ts";
 import { boatMaterial } from "./coast/materials.ts";
 import { random } from "./coast/shape.ts";
+import { Train } from "./coast/train.ts";
 import type { CourseData } from "./course.ts";
 import { buildScenery, farMaterial } from "./scenery.ts";
 
@@ -59,8 +60,8 @@ function berths(course: CourseData): Berth[] {
     out.push({ x, z, yaw: Math.PI / 2 + (r() - 0.5) * 0.5, kind, seed: Math.floor(r() * 1000) });
   // The television's boats off each turn (see game/broadcast-bay.ts).
   const off = sh + course.outerLimit + 16;
-  out.push({ x: off + 2.5, z: 6, yaw: -Math.PI / 2, kind: "camera", seed: 1 });
-  out.push({ x: -off - 2.5, z: -6, yaw: Math.PI / 2, kind: "camera", seed: 2 });
+  out.push({ x: off, z: 6, yaw: -Math.PI / 2, kind: "camera", seed: 1 });
+  out.push({ x: -off, z: -6, yaw: Math.PI / 2, kind: "camera", seed: 2 });
   return out;
 }
 
@@ -70,9 +71,11 @@ export class BaySide implements WaterScenery {
   readonly inland = null;
   private fleet: Fleet;
   private roamers: Roamer[];
+  /** The train on the plain behind the town, at the foot of the hills. */
+  private train = new Train(-1050, 1050, 2.2, 346);
 
   constructor(course: CourseData) {
-    this.group.add(buildScenery());
+    this.group.add(buildScenery(), this.train.group);
     this.fleet = new Fleet(berths(course));
     this.group.add(this.fleet.mesh);
     const hull = boatMaterial();
@@ -126,5 +129,6 @@ export class BaySide implements WaterScenery {
   update(waves: Float32Array, t: number): void {
     this.fleet.update(waves, t);
     for (const boat of this.roamers) boat.update(waves, t);
+    this.train.update(t);
   }
 }

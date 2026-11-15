@@ -8,6 +8,15 @@ import type { World } from "../render/world.ts";
 
 const isObject = (v: unknown): v is object => typeof v === "object" && v !== null;
 
+/** How many of a geometry's positions aren't finite numbers. */
+function broken(g: THREE.BufferGeometry): number {
+  const p = g.attributes.position;
+  if (!p) return 0;
+  let bad = 0;
+  for (let i = 0; i < p.count; i++) if (!Number.isFinite(p.getX(i) + p.getY(i) + p.getZ(i))) bad++;
+  return bad;
+}
+
 export function installBench(world: World, pause: (on: boolean) => void): void {
   const renderer = world.renderer;
   const device: unknown = Reflect.get(renderer.backend, "device");
@@ -160,7 +169,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     });
     return rows;
   };
-  /** Every visible mesh: its triangles, name, instances, and whether it casts shadows (S) and is mirrored (R). */
+  /** Every visible mesh: its triangles, name, instances, whether it casts shadows (S) and is mirrored (R), and how many of its positions are broken (NaN). */
   const meshes = () => {
     const rows: string[] = [];
     world.scene.traverseVisible((o) => {
@@ -171,7 +180,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       const material: THREE.Material | THREE.Material[] = o.material;
       const name = o.name || (Array.isArray(material) ? "" : material.name) || o.type;
       rows.push(
-        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}`,
+        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}${broken(g) > 0 ? ` NaN:${broken(g)}` : ""}`,
       );
     });
     return rows;

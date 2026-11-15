@@ -189,7 +189,7 @@ const BASE: WeatherLook = {
   shadow: 1,
   cirrus: 1,
   streaks: 0,
-  puffs: 0.2,
+  puffs: 0,
   veil: 0,
   overcast: 0,
   deck: [0xd8dde4, 0x9aa4b4],
@@ -299,7 +299,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     sky: [0x262f3c, 0x3c4654, 0x6c7682, 0x8a8a88],
     weight: 0.95,
     lit: rgb(0.7, 0.73, 0.78),
-    shade: rgb(0.92, 0.95, 1.02),
+    shade: rgb(0.8, 0.8, 0.74),
     shadow: 0,
     cirrus: 0,
     puffs: 0,
@@ -497,6 +497,21 @@ function blend(out: Sky, a: Sky, b: Sky, t: number): void {
   }
 }
 
+/** The way to the sun (a unit vector) over a circuit in its conditions: never lower than the light comes in. */
+export function sunOver(conditions: Conditions, circuit: CircuitLook): THREE.Vector3 {
+  const sun = sunAt(conditions.season, conditions.time);
+  // Azimuth from noon's direction (south), kept to the circuit's swing.
+  const off = (sun.azimuth - Math.PI) * circuit.swing;
+  const [sx, sz] = circuit.south;
+  const len = Math.hypot(sx, sz) || 1;
+  const south = new THREE.Vector2(sx / len, sz / len);
+  // East is a quarter turn from south toward the morning sun: north × up.
+  const east = new THREE.Vector2(south.y, -south.x);
+  const dir = south.clone().multiplyScalar(Math.cos(off)).addScaledVector(east, -Math.sin(off));
+  const lift = Math.max(SUN_LOWEST, sun.elevation);
+  return new THREE.Vector3(dir.x * Math.cos(lift), Math.sin(lift), dir.y * Math.cos(lift));
+}
+
 /** The look of a race's conditions on a circuit. */
 export class ConditionsLook {
   readonly conditions: Conditions;
@@ -529,18 +544,10 @@ export class ConditionsLook {
     this.from = skyOf(conditions.weather, season, el, morning);
     this.to = skyOf(conditions.turns, season, el, morning);
     this.now = skyOf(conditions.weather, season, el, morning);
-    // Azimuth from noon's direction (south), kept to the circuit's swing.
-    const off = (sun.azimuth - Math.PI) * circuit.swing;
+    this.sun = sunOver(conditions, circuit).multiplyScalar(SUN_DISTANCE);
     const [sx, sz] = circuit.south;
     const len = Math.hypot(sx, sz) || 1;
     const south = new THREE.Vector2(sx / len, sz / len);
-    // East is a quarter turn from south toward the morning sun: north × up.
-    const east = new THREE.Vector2(south.y, -south.x);
-    const dir = south.clone().multiplyScalar(Math.cos(off)).addScaledVector(east, -Math.sin(off));
-    const lift = Math.max(SUN_LOWEST, sun.elevation);
-    this.sun = new THREE.Vector3(dir.x * Math.cos(lift), Math.sin(lift), dir.y * Math.cos(lift)).multiplyScalar(
-      SUN_DISTANCE,
-    );
     // The wind blows across the circuit from the sun's side, a little off it.
     this.wind = new THREE.Vector2(-south.y, south.x).add(south.clone().multiplyScalar(-0.4)).normalize();
     this.setSeason();

@@ -28,6 +28,7 @@ import { Precipitation } from "./cel/precip.ts";
 import { type CircuitLook, ConditionsLook } from "./look.ts";
 import { Gulls } from "./cel/gulls.ts";
 import { BaySide } from "./bayside.ts";
+import { sunlight } from "./coast/grounding.ts";
 import { crowdOf } from "./coast/people.ts";
 import { CourseView, type CourseData } from "./course.ts";
 import { JetskiModel } from "./rider.ts";
@@ -169,7 +170,12 @@ export class Bay implements Environment {
     this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
     this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
-    this.course = new CourseView(opts.course, this.conditions.season, crowdOf(this.conditions));
+    this.course = new CourseView(
+      opts.course,
+      this.conditions.season,
+      crowdOf(this.conditions),
+      sunlight(this.look.sun),
+    );
     this.group.add(this.course.group);
     this.sea?.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);

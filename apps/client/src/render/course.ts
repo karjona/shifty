@@ -7,11 +7,15 @@ import * as THREE from "three/webgpu";
 import type { Season } from "../game/conditions.ts";
 import { BuoyMarks } from "./buoys.ts";
 import { ChevronBoards } from "./chevrons.ts";
-import { type Lantern, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
-import { Life } from "./coast/life.ts";
+import { type Lantern, breakwaterCameras, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
+import { OVERHEAD, type Sunlight } from "./coast/grounding.ts";
+import { COSTA_NEVADA, DOWNWIND, Life } from "./coast/life.ts";
+import { boatMaterial, clothMaterial } from "./coast/materials.ts";
 import { Crowd } from "./coast/people.ts";
+import { Shape, box, place, post } from "./coast/shape.ts";
 import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
+import { UNREFLECTED } from "./cel/material.ts";
 import type { RiderView } from "./world.ts";
 
 /** Which water course: the bay's oval, or the cape's loop. */
@@ -67,39 +71,175 @@ const BOUNDARY_SPACING = 18;
 const std = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
   new THREE.MeshStandardNodeMaterial({ color, roughness: 0.6, ...opts });
 
-function checkerTexture(): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 32;
-  const g = c.getContext("2d")!;
-  for (let x = 0; x < 16; x++)
-    for (let y = 0; y < 2; y++) {
-      g.fillStyle = (x + y) % 2 === 0 ? "#111" : "#f4f4f0";
-      g.fillRect(x * 16, y * 16, 16, 16);
-    }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.magFilter = THREE.NearestFilter;
-  return t;
+/** The race's colours on what floats on the course: marker orange, white, ink, and the ramps' yellow. */
+const MARK = { orange: 0xf2682a, white: 0xf6f4ee, ink: 0x1c2230, yellow: 0xf7bd2c, steel: 0x9aa1ab, red: 0xd6402e };
+
+/** A float: a tube lying along z, `length` long, its top `above` the water. */
+function tube(shape: Shape, x: number, z: number, length: number, radius: number, above: number, colour: number): void {
+  const geo = new THREE.CapsuleGeometry(radius, length - radius * 2, 3, 8).rotateX(Math.PI / 2);
+  shape.take(geo, colour, place(x, above - radius, z));
 }
 
-/** A ramp wedge: `length` along +Z, rising from 0 to `height`, centred on the footprint. */
-function wedge(length: number, width: number, height: number): THREE.BufferGeometry {
+/**
+ * One tower of the start gate, its foot at the water: a raft on two
+ * floats, a banded mast `tall` high with a lamp head, and stays down to
+ * the raft's corners.
+ */
+function gateTower(tall: number): THREE.Mesh {
+  const shape = new Shape();
+  for (const side of [-1, 1]) tube(shape, side * 1.05, 0, 4.4, 0.5, 0.42, MARK.orange);
+  shape.take(box(2.9, 0.16, 3.2), MARK.white, place(0, 0.4, 0));
+  shape.take(box(1.1, 0.5, 1.1), MARK.steel, place(0, 0.56, 0));
+  // The mast, in bands.
+  const bands = 6;
+  const from = 1.06;
+  for (let k = 0; k < bands; k++) {
+    const h = (tall - from) / bands;
+    shape.take(post(0.3, 0.3, h, 8), k % 2 === 0 ? MARK.white : MARK.red, place(0, from + k * h, 0));
+  }
+  shape.take(post(0.42, 0.42, 0.18, 8), MARK.ink, place(0, tall, 0));
+  shape.take(new THREE.SphereGeometry(0.34, 8, 5).translate(0, 0.42, 0), MARK.yellow, place(0, tall, 0));
+  // Stays: struts from the mast to the raft's corners.
+  for (const sx of [-1, 1])
+    for (const sz of [-1, 1]) {
+      const foot = new THREE.Vector3(sx * 1.25, 0.56, sz * 1.4);
+      const head = new THREE.Vector3(0, 3.6, 0);
+      const mid = foot.clone().add(head).multiplyScalar(0.5);
+      const m = new THREE.Matrix4()
+        .lookAt(foot, head, new THREE.Vector3(0, 1, 0))
+        .setPosition(mid)
+        .multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+      shape.take(new THREE.BoxGeometry(0.1, foot.distanceTo(head), 0.1), MARK.steel, m);
+    }
+  const mesh = shape.mesh(boatMaterial(), "cast");
+  mesh.name = "gate-tower";
+  return mesh;
+}
+
+/**
+ * The start gate's span, `width` across (along x, centred), its banner's
+ * foot at y = 0: a truss of two chords and posts, the chequered banner
+ * hung in it, a board in Costa Nevada's colours over its middle and
+ * pennants at its ends. `yaw` is the heading it will be turned to.
+ */
+function gateSpan(width: number, yaw: number): THREE.Group {
+  const g = new THREE.Group();
+  const shape = new Shape();
+  const half = width / 2;
+  const tall = 1.6;
+  for (const y of [-0.12, tall + 0.12]) shape.take(new THREE.BoxGeometry(width, 0.2, 0.2), MARK.steel, place(0, y, 0));
+  const bays = 16;
+  for (let k = 0; k <= bays; k++)
+    shape.take(
+      new THREE.BoxGeometry(0.1, tall + 0.24, 0.24),
+      MARK.steel,
+      place(-half + (k / bays) * width, tall / 2, 0),
+    );
+  // The banner: two rows of squares, seen from both sides.
+  const cell = width / bays;
+  for (let k = 0; k < bays; k++)
+    for (let row = 0; row < 2; row++) {
+      const colour = (k + row) % 2 === 0 ? MARK.ink : MARK.white;
+      const x0 = -half + k * cell;
+      const y0 = row * (tall / 2);
+      for (const z of [0.06, -0.06]) {
+        const a = new THREE.Vector3(x0, y0, z);
+        const b = new THREE.Vector3(x0 + cell, y0, z);
+        const c = new THREE.Vector3(x0 + cell, y0 + tall / 2, z);
+        const d = new THREE.Vector3(x0, y0 + tall / 2, z);
+        if (z > 0) shape.quad(a, b, c, d, colour);
+        else shape.quad(b, a, d, c, colour);
+      }
+    }
+  // The board over the middle, in three stripes.
+  const board = Math.min(7, width * 0.42);
+  COSTA_NEVADA.forEach((colour, k) =>
+    shape.take(new THREE.BoxGeometry(board / 3, 1.0, 0.16), colour, place((k - 1) * (board / 3), tall + 0.76, 0)),
+  );
+  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 1.3, 0));
+  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 0.22, 0));
+  // Pennants flying from both ends.
+  const cloth = new Shape();
+  for (const side of [-1, 1]) {
+    const x = side * (half - 0.2);
+    shape.take(post(0.05, 0.04, 3.6, 5), MARK.steel, place(x, tall, 0));
+    COSTA_NEVADA.forEach((colour, k) => {
+      const geo = new THREE.PlaneGeometry(1.9, 0.4, 5, 1).translate(0.95, -(k + 0.5) * 0.4, 0);
+      cloth.take(geo, colour, place(x, tall + 3.55, 0, DOWNWIND - yaw), { weight: (p) => Math.hypot(p.x - x, p.z) });
+    });
+  }
+  const frame = shape.mesh(boatMaterial(), "cast");
+  frame.name = "gate-span";
+  g.add(frame);
+  const pennants = cloth.mesh(clothMaterial(), "none");
+  pennants.layers.set(UNREFLECTED);
+  pennants.frustumCulled = false;
+  g.add(pennants);
+  return g;
+}
+
+/**
+ * A ramp, `length` along +z rising from the water to `height`, centred on
+ * its footprint: a yellow deck with arrows pointing up it and a white lip,
+ * red and white skirts, and a float along each side.
+ */
+function rampMesh(length: number, width: number, height: number): THREE.Mesh {
+  const shape = new Shape();
   const l = length / 2;
   const w = width / 2;
-  // prettier-ignore
-  const v = [
-    -w, 0, -l,  w, 0, -l,  w, height, l,  -w, height, l, // deck
-    -w, 0, -l,  -w, 0, l,  -w, height, l, // left side
-    w, 0, -l,  w, height, l,  w, 0, l, // right side
-    -w, 0, l,  -w, height, l,  w, height, l,  w, 0, l, // back
-  ];
-  const idx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 7, 8, 9, 10, 12, 11, 10, 13, 12];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return g;
+  const at = (x: number, t: number, lift = 0) => new THREE.Vector3(x * w, t * height + lift, -l + t * length);
+  // The deck: yellow, white along its lip.
+  shape.quad(at(1, 0), at(-1, 0), at(-1, 0.9), at(1, 0.9), MARK.yellow);
+  shape.quad(at(1, 0.9), at(-1, 0.9), at(-1, 1), at(1, 1), MARK.white);
+  // Arrows up the deck.
+  for (const t of [0.16, 0.42, 0.68]) {
+    const lift = 0.02;
+    const arm = 0.16;
+    const tip = at(0, t + arm, lift);
+    for (const side of [-1, 1]) {
+      const outer = at(side * 0.62, t, lift);
+      const inner = at(side * 0.62, t - 0.09, lift);
+      const notch = at(0, t + arm - 0.09, lift);
+      if (side > 0) shape.quad(tip, outer, inner, notch, MARK.ink);
+      else shape.quad(outer, tip, notch, inner, MARK.ink);
+    }
+  }
+  // The skirts in red and white, and the back.
+  const panels = 4;
+  for (const side of [-1, 1])
+    for (let k = 0; k < panels; k++) {
+      const t0 = k / panels;
+      const t1 = (k + 1) / panels;
+      const colour = k % 2 === 0 ? MARK.red : MARK.white;
+      const a = at(side, t0).setY(-0.4);
+      const b = at(side, t1).setY(-0.4);
+      if (side > 0) shape.quad(b, a, at(side, t0), at(side, t1), colour);
+      else shape.quad(a, b, at(side, t1), at(side, t0), colour);
+    }
+  for (let k = 0; k < panels; k++) {
+    const x0 = -1 + (k / panels) * 2;
+    const x1 = -1 + ((k + 1) / panels) * 2;
+    shape.quad(at(x0, 1).setY(-0.4), at(x1, 1).setY(-0.4), at(x1, 1), at(x0, 1), k % 2 === 0 ? MARK.white : MARK.red);
+  }
+  for (const side of [-1, 1]) tube(shape, side * (w + 0.4), 0, length * 0.94, 0.45, 0.4, MARK.orange);
+  const mesh = shape.mesh(boatMaterial());
+  mesh.name = "ramp";
+  return mesh;
+}
+
+/** The start gate: how high the banner's foot hangs over the water (m), and the banner's height. */
+const GATE = { foot: 6.4, banner: 1.6 };
+
+/** Where the start gate's two towers float, and how tall and wide they stand (m), for what they hide. */
+export function gateTowers(d: CourseData): { x: number; z: number; radius: number; top: number }[] {
+  const { x, z, yaw } = d.start;
+  const half = d.laneHalf + 2;
+  return [-1, 1].map((side) => ({
+    x: x - Math.cos(yaw) * half * side,
+    z: z + Math.sin(yaw) * half * side,
+    radius: 1.8,
+    top: GATE.foot + GATE.banner + 1.2,
+  }));
 }
 
 interface Floating {
@@ -121,16 +261,18 @@ export class CourseView {
   private lanterns: Lantern[] = [];
   /** The people on the bay's land who wave. */
   private crowd = new Crowd();
+  /** The start gate's span and the towers that carry it (`left` at the span's -x end). */
+  private gate: { span: THREE.Object3D; left: THREE.Object3D; right: THREE.Object3D; width: number } | null = null;
 
   readonly data: CourseData;
 
-  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land. */
-  constructor(data: CourseData, season: Season = "summer", crowd = 1) {
+  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land; `light` is which way its shade falls. */
+  constructor(data: CourseData, season: Season = "summer", crowd = 1, light: Sunlight = OVERHEAD) {
     this.data = data;
     if (data.place === "bay") {
-      this.buildBreakwater(crowd);
       const life = new Life();
-      this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life));
+      this.buildBreakwater(crowd, light, life);
+      this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life, light));
       this.group.add(...life.build());
       const arms = this.crowd.build();
       if (arms) this.group.add(arms);
@@ -147,7 +289,7 @@ export class CourseView {
     for (const f of this.floating) f.obj.userData.noMerge = true;
   }
 
-  private buildBreakwater(crowd: number): void {
+  private buildBreakwater(crowd: number, light: Sunlight, life: Life): void {
     const d = this.data;
     const breakwater = buildBreakwater(
       d.straightHalf,
@@ -155,6 +297,9 @@ export class CourseView {
       d.straightHalf + d.breakwaterRadius * 0.45,
       crowd,
       this.crowd,
+      breakwaterCameras(d.straightHalf, d.start.x, Math.sign(d.start.z) || -1),
+      light,
+      life,
     );
     this.lanterns.push(...breakwater.lanterns);
     this.group.add(breakwater.group);
@@ -163,34 +308,27 @@ export class CourseView {
   private buildStartGate(): void {
     const d = this.data;
     const { x, z, yaw } = d.start;
-    const rx = -Math.cos(yaw);
-    const rz = Math.sin(yaw);
     const half = d.laneHalf + 2;
-    const poleMat = std(0xf4f4f0);
-    for (const side of [-1, 1]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 9, 8), poleMat);
-      const px = x + rx * half * side;
-      const pz = z + rz * half * side;
-      pole.position.set(px, 3.5, pz);
-      pole.castShadow = true;
-      this.group.add(pole);
-      this.floating.push({ obj: pole, x: px, z: pz, lift: 3.5 });
+    const towers: THREE.Mesh[] = [];
+    for (const { x: px, z: pz } of gateTowers(d)) {
+      const tower = gateTower(GATE.foot + GATE.banner);
+      tower.position.set(px, 0, pz);
+      tower.rotation.y = yaw;
+      this.group.add(tower);
+      this.floating.push({ obj: tower, x: px, z: pz, lift: 0 });
+      towers.push(tower);
     }
-    const banner = new THREE.Mesh(
-      new THREE.PlaneGeometry(half * 2, 1.6),
-      new THREE.MeshStandardNodeMaterial({ map: checkerTexture(), side: THREE.DoubleSide, roughness: 0.8 }),
-    );
-    banner.position.set(x, 7.2, z);
-    banner.rotation.y = yaw;
-    this.group.add(banner);
+    const span = gateSpan(half * 2, yaw);
+    span.position.set(x, GATE.foot, z);
+    span.rotation.y = yaw;
+    span.userData.noMerge = true;
+    this.group.add(span);
+    this.gate = { span, right: towers[1]!, left: towers[0]!, width: half * 2 };
   }
 
   private buildRamps(): void {
-    const deck = std(0xf2b630, { roughness: 0.7 });
     for (const r of this.data.ramps) {
-      const m = new THREE.Mesh(wedge(r.length, r.width, r.height), deck);
-      m.castShadow = true;
-      m.receiveShadow = true;
+      const m = rampMesh(r.length, r.width, r.height);
       m.position.set(r.x, 0, r.z);
       m.rotation.y = r.yaw;
       this.group.add(m);
@@ -267,6 +405,12 @@ export class CourseView {
   /** Floats everything on the swells, swings the buoys riders hit, and marks the next buoy. */
   update(waves: Float32Array, t: number, dt: number, riders: readonly RiderView[], nextBuoy: number | null): void {
     for (const f of this.floating) f.obj.position.y = waveHeight(waves, f.x, f.z, t) + f.lift;
+    if (this.gate) {
+      // The span rides on its two towers.
+      const { span, left, right, width } = this.gate;
+      span.position.y = (left.position.y + right.position.y) / 2 + GATE.foot;
+      span.rotation.z = Math.atan2(left.position.y - right.position.y, width);
+    }
     this.boundaryPoints.forEach((p, i) => {
       this.matrix.makeTranslation(p.x, waveHeight(waves, p.x, p.z, t), p.z);
       this.boundary.setMatrixAt(i, this.matrix);
