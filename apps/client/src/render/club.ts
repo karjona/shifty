@@ -40,6 +40,9 @@ const split = (_x: number, z: number) => (z < 0 ? "front" : "back");
 /** The materials every club is drawn with. */
 const look = new EnvLook();
 
+/** The club's lettering (see env/signs.ts), once it has been asked for. */
+let lettering: Promise<THREE.Mesh | null> | null = null;
+
 /** Colours for the jetski on the trailer, without an item's. */
 const PLAIN: Colourway = [0xf2f0ea, 0x1c1d21, 0xd9382e];
 
@@ -227,10 +230,15 @@ export class ClubArt {
     this.ready = loadEnv("club", split)
       .then(async (model) => {
         const art = this.assemble(model);
-        const lettering = await signs(model.anchors.get("sign"));
-        if (lettering) {
-          lettering.layers.set(UNREFLECTED);
-          art.add(lettering);
+        // The lettering is set once, and every club draws it.
+        lettering ??= signs(model.anchors.get("sign"));
+        const set = await lettering;
+        if (set) {
+          const letters = new THREE.Mesh(set.geometry, set.material);
+          letters.name = set.name;
+          letters.receiveShadow = true;
+          letters.layers.set(UNREFLECTED);
+          art.add(letters);
         }
         share(art);
         await warmUp(art);
@@ -260,6 +268,7 @@ export class ClubArt {
       ride.group.applyMatrix4(this.trailer);
       this.near.add(ride.group);
       this.ride = ride;
+      void ride.ready.then(() => ride.group.traverse((o) => o.layers.set(UNREFLECTED)));
     }
   }
 

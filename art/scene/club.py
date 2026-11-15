@@ -26,7 +26,8 @@ STAGE = -3.0
 STAIR_WEST, STAIR_EAST = 0.55, 6.55
 STEPS = 18
 RUN = 0.3
-# The client draws the terrace in squares of ground this size (see render/club.ts).
+# The scene's own geometry is stored in squares of ground this size: the client draws the club in two parts, what
+# stands on the sea side of z = 0 and the rest (see render/club.ts), so the squares must not straddle that line.
 CELL = 12.0
 # The signal mast on the promenade, past the stair's foot: its height, and where it stands.
 MAST = 9.6
