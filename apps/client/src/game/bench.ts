@@ -176,6 +176,23 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     });
     return rows;
   };
+  /** Meshes whose positions hold a number that isn't one (they have no bounds, so they are never culled): where
+   * each hangs in the scene, and how many of its vertices are broken. */
+  const broken = () => {
+    const rows: string[] = [];
+    world.scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const pos: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined = o.geometry.attributes.position;
+      if (!pos) return;
+      let bad = 0;
+      for (let i = 0; i < pos.count; i++) if (!Number.isFinite(pos.getX(i) + pos.getY(i) + pos.getZ(i))) bad++;
+      if (bad === 0) return;
+      const path: string[] = [];
+      for (let at: THREE.Object3D | null = o; at; at = at.parent) path.push(at.name || at.type);
+      rows.push(`${bad}/${pos.count} ${path.join(" < ")}`);
+    });
+    return rows;
+  };
   Object.assign(window, {
     __shiftyBench: {
       bench,
@@ -186,6 +203,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       scene,
       census,
       meshes,
+      broken,
       /** Moves the sun to `(x, y, z)` from the point it shines on (held frames). */
       sun: (x: number, y: number, z: number) => {
         const sun = world.sunLight;
