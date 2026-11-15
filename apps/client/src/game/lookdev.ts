@@ -84,8 +84,9 @@ export async function lookdev(params: URLSearchParams): Promise<void> {
     }),
   );
   scenery.free();
-  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(18, 45, 40);
-  else world.setSunOffset(-25, 55, -30);
+  // The sun from the camera's left, in front of the riders.
+  if ((params.get("shot") ?? "select") === "select") world.setSunOffset(-18, 45, 40);
+  else world.setSunOffset(25, 55, -30);
   world.scene.add(buildClub());
 
   const shotParam = params.get("shot");

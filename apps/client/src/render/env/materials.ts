@@ -118,7 +118,8 @@ export class EnvLook {
   }
 }
 
-/** A window pane: the sky it mirrors (paler toward the horizon), tinted by its colour, with slanting glints. */
+/** A window pane: the dim room behind it and the sky it mirrors (paler toward the horizon), tinted by its colour,
+ * with slanting glints. */
 function glass(): THREE.Node<"vec3"> {
   return Fn(() => {
     const view = positionWorld.sub(cameraPosition).normalize();
@@ -127,7 +128,8 @@ function glass(): THREE.Node<"vec3"> {
     const slant = fract(positionWorld.x.add(positionWorld.z).mul(0.42).add(positionWorld.y.mul(0.7)));
     const glint = smoothstep(0.0, 0.02, slant).mul(smoothstep(0.2, 0.18, slant));
     const tint = attribute<"vec3">("color", "vec3");
-    return mix(sky.mul(tint), vec3(1), glint.mul(0.45));
+    const pane = mix(tone(0x24465a), sky, 0.55).mul(tint);
+    return mix(pane, vec3(1), glint.mul(0.4));
   })();
 }
 

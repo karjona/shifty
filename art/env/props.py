@@ -180,9 +180,29 @@ def frond(length, tilt, az, droop, width=0.95, colour=PALM, tip=PALM_YOUNG, teet
     return mesh
 
 
-def palm(height=7.0, lean=0.5, seed=0, fronds=20, reach=3.4):
-    """A date palm: a ringed trunk with a swollen head, a full crown of arching fronds, a skirt of dry ones and
-    bunches of dates."""
+def palm_fronds(sc):
+    """The fronds palms are crowned with, as props of the scene (each reaching toward +x from the origin): their
+    names by tier (upright, arching, drooping, dry), two of each."""
+    tiers = {}
+    specs = (("up", 0.42, 0.12, 0.82, PALM_YOUNG, 0xA6C85A, 0.55, 0.22), ("out", 0.95, 0.3, 1.0, PALM, PALM_YOUNG, 0.8, 0.12), ("down", 1.38, 0.52, 0.95, PALM_OLD, PALM, 1.0, -0.14))
+    for name, tilt, droop, length, colour, tip, sway, fold in specs:
+        tiers[name] = []
+        for v in range(2):
+            key = f"frond.{name}.{v}"
+            if key not in sc.defs:
+                sc.define(key, [frond(length * (1.0 + 0.08 * v), tilt + 0.08 * v, 0.0, droop - 0.03 * v, 0.95, colour, tip, seed=len(name) * 10 + v, sway=sway, fold=fold)])
+            tiers[name].append(key)
+    tiers["dry"] = []
+    for v in range(2):
+        key = f"frond.dry.{v}"
+        if key not in sc.defs:
+            sc.define(key, [frond(0.62, 2.1 + 0.1 * v, 0.0, 0.12, 0.6, PALM_DRY, 0xA98C52, 6, 40 + v, 0.6, -0.15)])
+        tiers["dry"].append(key)
+    return tiers
+
+
+def palm(sc, height=7.0, lean=0.5, seed=0, fronds=20, reach=3.4):
+    """A date palm: a ringed trunk with a swollen head, a full crown of arching fronds and a skirt of dry ones."""
     rng = np.random.default_rng(seed)
     az0 = rng.uniform(0, TAU)
     steps = max(6, round(height / 0.34))
@@ -205,21 +225,15 @@ def palm(height=7.0, lean=0.5, seed=0, fronds=20, reach=3.4):
     # The head: old frond bases, a pineapple of orange-brown stubs.
     head = lathe([(0.3, -0.5), (0.43, -0.15), (0.47, 0.15), (0.36, 0.5), (0.14, 0.75)], 9, 0xA9713A, colours=[TRUNK, 0xA9713A, 0xC08A42, 0xB88A45, PALM_OLD])
     parts.append(head.xf(T(*top)))
-    crown = []
+    tiers = palm_fronds(sc)
+    crown = T(top[0], top[1] + 0.35, top[2])
     for i in range(fronds):
-        tier = i % 3
+        name = ("up", "out", "down")[i % 3]
         az = TAU * i / fronds + rng.uniform(-0.12, 0.12)
-        tilt = (0.42, 0.95, 1.38)[tier] + rng.uniform(-0.1, 0.1)
-        droop = (0.12, 0.3, 0.52)[tier] + rng.uniform(-0.04, 0.04)
-        length = reach * (0.82, 1.0, 0.95)[tier] * rng.uniform(0.92, 1.08)
-        colour = (PALM_YOUNG, PALM, PALM_OLD)[tier]
-        tipc = (0xA6C85A, PALM_YOUNG, PALM)[tier]
-        crown.append(frond(length, tilt, az, droop, 0.95, colour, tipc, seed=seed * 100 + i, sway=(0.55, 0.8, 1.0)[tier], fold=(0.22, 0.12, -0.14)[tier]))
+        parts.append((tiers[name][int(rng.integers(2))], crown @ RY(-az) @ S(reach * rng.uniform(0.92, 1.08))))
     for i in range(4):
         az = TAU * i / 4 + rng.uniform(-0.3, 0.3)
-        crown.append(frond(reach * 0.62, 2.1 + rng.uniform(-0.1, 0.1), az, 0.12, 0.6, PALM_DRY, 0xA98C52, 6, seed * 100 + 50 + i, 0.6, -0.15))
-    crown = [f.xf(T(top[0], top[1] + 0.35, top[2])) for f in crown]
-    parts += crown
+        parts.append((tiers["dry"][i % 2], crown @ RY(-az) @ S(reach)))
     return parts
 
 
@@ -310,16 +324,20 @@ def bunting(a, b, sag, count, colours, size=0.26):
 
 
 def string_lights(a, b, sag, count):
-    """A string of lamps from `a` to `b`."""
+    """A string of lamps from `a` to `b` (the scene's `lamp`)."""
     a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
     parts = [tube(kit.catenary(a, b, sag, 12), 0.011, 3, IRON, caps=False)]
     for i in range(count):
         t = (i + 0.5) / count
         p = a + (b - a) * t
         p[1] -= sag * 4 * t * (1 - t)
-        parts.append(box(0.035, 0.05, 0.035, IRON).at(p[0], p[1] - 0.05, p[2]))
-        parts.append(ball(0.055, 6, 4, GLOW, squash=1.25).at(p[0], p[1] - 0.12, p[2]))
+        parts.append(("lamp", T(*p)))
     return parts
+
+
+def lamp():
+    """A lamp of a string of lights, hanging from the origin."""
+    return [box(0.035, 0.05, 0.035, IRON).at(0, -0.05, 0), ball(0.055, 6, 4, GLOW, squash=1.25).at(0, -0.12, 0)]
 
 
 def hull(length=6.0, beam=2.0, colour=WHITE, stripe=NAVY):
@@ -380,3 +398,34 @@ def far_sail(height=9.0, colour=0xFFFFFF, hull_colour=0xF2F0EA):
         tri((0.5, 1.2, 0), (3.9, 1.2, 0), (0.5, height * 0.86, 0), colour, "cloth"),
         rod((0.3, 1.0, 0), (0.3, height + 0.3, 0), 0.07, 4, 0x6B4528),
     ]
+
+
+def clump(sc, colour, variant=0, detail=2, sway=0.08):
+    """A clump of leaves or flowers of unit radius, as a prop of the scene (defined on first use): its name. A
+    rounded mass with leaves standing out of it all round, so its outline is ragged. Trees and climbers are placed
+    clumps."""
+    name = f"clump.{colour:06x}.{variant}.{detail}"
+    if name not in sc.defs:
+        rng = np.random.default_rng(100 + variant)
+        parts = [blob(1.0, 11 + variant * 7, colour, "foliage", 0.32, 1.0, detail).sway(sway)]
+        light = kit.shade(colour, 1.18)
+        for k in range(10 + 6 * detail):
+            d = rng.normal(size=3)
+            d[1] = d[1] * 0.8 + 0.25
+            d /= np.linalg.norm(d)
+            side = np.cross(d, rng.normal(size=3))
+            side /= np.linalg.norm(side)
+            lift = np.cross(side, d)
+            tip = d * rng.uniform(1.22, 1.42) + lift * rng.uniform(-0.2, 0.3)
+            w = rng.uniform(0.14, 0.22)
+            leaf = tri(d * 0.86 - side * w, d * 0.86 + side * w, tip, light if k % 3 == 0 else colour, "foliage")
+            parts.append(leaf.sway(sway * 1.6))
+        sc.define(name, parts)
+    return name
+
+
+def clumps(sc, centre, radius, colour, seed=0, squash=0.8, detail=2):
+    """A clump placed: (name, matrix), turned at random."""
+    rng = np.random.default_rng(seed)
+    m = T(*centre) @ RY(rng.uniform(0, TAU)) @ RZ(rng.uniform(-0.3, 0.3)) @ S(radius, radius * squash, radius)
+    return (clump(sc, colour, int(rng.integers(2)), detail), m)

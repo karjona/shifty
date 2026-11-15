@@ -91,4 +91,5 @@ export async function celshot(params: URLSearchParams): Promise<void> {
     const eye = look.clone().add(new THREE.Vector3(Math.sin(turn) * dist, num("lift", -0.25), -Math.cos(turn) * dist));
     world.renderFrom(eye, look, now / 1000, 1 / 60, num("fov", 26));
   });
+  booted();
 }

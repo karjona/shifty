@@ -50,7 +50,10 @@ function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup 
   const index = g.index;
   const n = pos.count;
   const count = index ? index.count : n;
-  const at = (i: number) => (index ? index.getX(i) : i);
+  // A mirrored placing turns its faces inside out: read them the other way round.
+  const mirrored = m.determinant() < 0;
+  const corner = (i: number) => (mirrored && i % 3 !== 0 ? i + (i % 3 === 1 ? 1 : -1) : i);
+  const at = (i: number) => (index ? index.getX(corner(i)) : corner(i));
   const p = new Float32Array(n * 3);
   const v = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
@@ -149,6 +152,7 @@ function joined(soups: Soup[]): THREE.BufferGeometry {
 function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object3D) => boolean): EnvParts {
   const soups = new Map<string, Soup[]>();
   const m = new THREE.Matrix4();
+  const placing = new THREE.Matrix4();
   const visit = (o: THREE.Object3D) => {
     if (skip(o)) return;
     if (o instanceof THREE.Mesh) {
@@ -157,7 +161,14 @@ function collect(root: THREE.Object3D, to: THREE.Matrix4, skip: (o: THREE.Object
       let list = soups.get(key);
       if (!list) soups.set(key, (list = []));
       const g: THREE.BufferGeometry = o.geometry;
-      list.push(soup(g, m.multiplyMatrices(to, o.matrixWorld), o.userData.s === 1));
+      const smooth = o.userData.s === 1;
+      if (o instanceof THREE.InstancedMesh) {
+        // A prop placed many times: once per placing.
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, placing);
+          list.push(soup(g, m.multiplyMatrices(to, o.matrixWorld).multiply(placing), smooth));
+        }
+      } else list.push(soup(g, m.multiplyMatrices(to, o.matrixWorld), smooth));
     }
     for (const c of o.children) visit(c);
   };

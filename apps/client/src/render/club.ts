@@ -13,7 +13,7 @@ import { warmUp } from "./warm.ts";
 /** Where the club stands. */
 export const CLUB = {
   /** Centre of the terrace floor (world). */
-  x: 157,
+  x: 170,
   z: 96,
   /** Height of the terrace floor. */
   floor: 5.2,
@@ -76,7 +76,36 @@ function sail(m: Mover, t: number): void {
   m.group.matrix.multiplyMatrices(m.rest, offset);
 }
 
-const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail };
+/** A ceiling fan's blades: they turn. */
+function spin(m: Mover, t: number): void {
+  offset.makeRotationY(t * 2.4);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+/** A number in 0-1 from a whole number, for things that happen now and then. */
+const chance = (n: number) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+/** How long a gull holds a look before it turns its head somewhere else (s). */
+const GULL_HOLD = 2.9;
+
+/** A gull standing about: every few seconds it turns to look another way, and now and then dips to preen, on twos. */
+function perch(m: Mover, t: number): void {
+  const held = Math.floor(t * 12) / 12 + m.index * 1.7;
+  const beat = Math.floor(held / GULL_HOLD);
+  const into = held / GULL_HOLD - beat;
+  const heading = (n: number) => (chance(n) - 0.5) * 1.5;
+  const k = Math.min(1, into / 0.1);
+  const yaw = heading(beat - 1) + (heading(beat) - heading(beat - 1)) * k * k * (3 - 2 * k);
+  const dip = chance(beat + 0.5) > 0.6 && into > 0.45 && into < 0.75 ? Math.sin(((into - 0.45) / 0.3) * Math.PI) : 0;
+  lean.set(0, yaw, -dip * 0.5);
+  offset.makeRotationFromEuler(lean);
+  m.group.matrix.multiplyMatrices(m.rest, offset);
+}
+
+const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail, fan: spin, gull: perch };
 
 /** The art as meshes: a batch per material, the paving, and what moves. */
 function assemble(model: EnvModel): THREE.Group {

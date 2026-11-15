@@ -1,13 +1,14 @@
 """A scene of scenery, and its file: a compact .glb the client reads (render/env/model.ts).
 
-A scene holds props defined once and placed many times (`define`, `place`), geometry of its own (`add`), groups the
+A scene holds props defined once and placed many times (`define`, `place`; a prop can place others within it), geometry of its own (`add`), groups the
 client moves (`anim`) and named places (`anchor`). In the file every mesh is one material class (`extras.c`), smooth
 or faceted (`extras.s`), with positions quantized to 16 bits over its box (KHR_mesh_quantization; the node's matrix
-puts them back), a colour per vertex (linear RGB, alpha the sway weight) and no normals: the client makes them,
+puts them back; a prop placed many times is one node with EXT_mesh_gpu_instancing), a colour per vertex (linear RGB, alpha the sway weight) and no normals: the client makes them,
 faceted or smooth across shared vertices.
 """
 
 import json
+import math
 import struct
 
 import numpy as np
@@ -34,16 +35,28 @@ class Scene:
         self.anchors = []
 
     def define(self, name, parts):
-        """A prop, to `place`."""
-        self.defs[name] = _group(parts)
+        """A prop, to `place`: meshes, and (name, matrix) pairs placing other props within it."""
+        meshes = [p for p in parts if isinstance(p, kit.Mesh)]
+        self.defs[name] = (_group(meshes), [p for p in parts if isinstance(p, tuple)])
 
     def place(self, name, m):
-        self.placed.append((name, np.asarray(m, dtype=float)))
+        m = np.asarray(m, dtype=float)
+        meshes, within = self.defs[name]
+        if meshes:
+            self.placed.append((name, m))
+        for sub, local in within:
+            self.place(sub, m @ local)
 
     def add(self, parts, m=None):
-        """Geometry of the scene's own (drawn once)."""
+        """Geometry of the scene's own (drawn once); (name, matrix) pairs among it place props."""
         parts = parts if isinstance(parts, list) else [parts]
-        self.own += [p if m is None else p.xf(m) for p in parts if p is not None]
+        for p in parts:
+            if p is None:
+                continue
+            if isinstance(p, tuple):
+                self.place(p[0], p[1] if m is None else m @ p[1])
+            else:
+                self.own.append(p if m is None else p.xf(m))
 
     def anim(self, name, parts, m=None):
         """A group the client moves, with its pivot at `m`."""
@@ -55,8 +68,8 @@ class Scene:
 
     def triangles(self):
         own = sum(len(p.F) for p in self.own)
-        placed = sum(sum(len(p.F) for p in self.defs[n]) for n, _ in self.placed)
-        unique = sum(sum(len(p.F) for p in d) for d in self.defs.values())
+        placed = sum(sum(len(p.F) for p in self.defs[n][0]) for n, _ in self.placed)
+        unique = sum(sum(len(p.F) for p in d[0]) for d in self.defs.values())
         anim = sum(sum(len(p.F) for p in parts) for _, parts, _ in self.anims)
         return {"own": own, "placed": placed, "defs": unique, "anim": anim, "drawn": own + placed + anim}
 
@@ -65,12 +78,16 @@ class Scene:
         nodes = []
         for mesh in _group(self.own):
             nodes.append(w.mesh_node(mesh, np.eye(4)))
-        cache = {}
+        by_prop = {}
         for name, m in self.placed:
-            if name not in cache:
-                cache[name] = [w.mesh(p) for p in self.defs[name]]
-            for index, dequant in cache[name]:
-                nodes.append(w.node({"mesh": index, "matrix": _flat(m @ dequant)}))
+            by_prop.setdefault(name, []).append(m)
+        for name, matrices in by_prop.items():
+            for mesh in self.defs[name][0]:
+                index, dequant = w.mesh(mesh)
+                if len(matrices) == 1:
+                    nodes.append(w.node({"mesh": index, "matrix": _flat(matrices[0] @ dequant)}))
+                else:
+                    nodes.append(w.instances(index, [m @ dequant for m in matrices]))
         for name, parts, m in self.anims:
             children = [w.mesh_node(p, np.eye(4)) for p in parts]
             nodes.append(w.node({"name": name, "matrix": _flat(m), "children": children, "extras": {"anim": name}}))
@@ -81,6 +98,27 @@ class Scene:
 
 def _flat(m):
     return [float(f"{v:.6g}") for v in np.asarray(m).T.reshape(-1)]
+
+
+def _trs(m):
+    """A matrix as a translation, a rotation (a quaternion: x, y, z, w) and a scale (one axis negative if it
+    mirrors)."""
+    a = np.asarray(m, dtype=float)[:3, :3]
+    scale = np.linalg.norm(a, axis=0)
+    if np.linalg.det(a) < 0:
+        scale[0] = -scale[0]
+    r = a / scale
+    w = math.sqrt(max(0.0, 1 + r[0, 0] + r[1, 1] + r[2, 2])) / 2
+    if w > 1e-6:
+        q = [(r[2, 1] - r[1, 2]) / (4 * w), (r[0, 2] - r[2, 0]) / (4 * w), (r[1, 0] - r[0, 1]) / (4 * w), w]
+    else:
+        # A half turn: the axis is the largest diagonal's.
+        i = int(np.argmax(np.diag(r)))
+        j, k = (i + 1) % 3, (i + 2) % 3
+        x = math.sqrt(max(0.0, 1 + r[i, i] - r[j, j] - r[k, k])) / 2
+        q = [0.0, 0.0, 0.0, (r[k, j] - r[j, k]) / (4 * x)]
+        q[i], q[j], q[k] = x, (r[j, i] + r[i, j]) / (4 * x), (r[k, i] + r[i, k]) / (4 * x)
+    return np.asarray(m)[:3, 3].tolist(), q, scale.tolist()
 
 
 def _weld(mesh):
@@ -108,7 +146,11 @@ def _weld(mesh):
 class _Writer:
     def __init__(self):
         self.bin = bytearray()
-        self.views = []
+        # Every mesh's vertices share one view, their indices another (a third for meshes too big for 16 bits).
+        self.vertices = bytearray()
+        self.small = bytearray()
+        self.large = bytearray()
+        self.views = [None, None, None]
         self.accessors = []
         self.meshes = []
         self.nodes = []
@@ -116,7 +158,9 @@ class _Writer:
     def _view(self, data, target, stride=None):
         while len(self.bin) % 4:
             self.bin.append(0)
-        view = {"buffer": 0, "byteOffset": len(self.bin), "byteLength": len(data), "target": target}
+        view = {"buffer": 0, "byteOffset": len(self.bin), "byteLength": len(data)}
+        if target:
+            view["target"] = target
         if stride:
             view["byteStride"] = stride
         self.bin += data
@@ -128,13 +172,17 @@ class _Writer:
         n = len(q)
         vertex = np.zeros(n, dtype=[("p", "<i2", 3), ("pad", "<u2"), ("c", "u1", 3), ("s", "u1")])
         vertex["p"], vertex["c"], vertex["s"] = q, c, s
-        view = self._view(vertex.tobytes(), 34962, 12)
-        self.accessors.append({"bufferView": view, "byteOffset": 0, "componentType": 5122, "normalized": True, "count": n, "type": "VEC3", "min": q.min(axis=0).tolist(), "max": q.max(axis=0).tolist()})
-        self.accessors.append({"bufferView": view, "byteOffset": 8, "componentType": 5121, "normalized": True, "count": n, "type": "VEC4"})
+        first = len(self.vertices) // 12
+        self.vertices += vertex.tobytes()
+        self.accessors.append({"bufferView": 0, "byteOffset": first * 12, "componentType": 5122, "normalized": True, "count": n, "type": "VEC3", "min": q.min(axis=0).tolist(), "max": q.max(axis=0).tolist()})
+        self.accessors.append({"bufferView": 0, "byteOffset": first * 12 + 8, "componentType": 5121, "normalized": True, "count": n, "type": "VEC4"})
         small = n <= 65535
         index = F.astype("<u2" if small else "<u4").reshape(-1)
-        iview = self._view(index.tobytes(), 34963)
-        self.accessors.append({"bufferView": iview, "componentType": 5123 if small else 5125, "count": len(index), "type": "SCALAR"})
+        store = self.small if small else self.large
+        while len(store) % 4:
+            store.append(0)
+        self.accessors.append({"bufferView": 1 if small else 2, "byteOffset": len(store), "componentType": 5123 if small else 5125, "count": len(index), "type": "SCALAR"})
+        store += index.tobytes()
         a = len(self.accessors)
         self.meshes.append({"primitives": [{"attributes": {"POSITION": a - 3, "COLOR_0": a - 2}, "indices": a - 1}], "extras": {"c": mesh.cls, "s": 1 if mesh.smooth else 0}})
         return len(self.meshes) - 1, dequant
@@ -143,16 +191,31 @@ class _Writer:
         index, dequant = self.mesh(mesh)
         return self.node({"mesh": index, "matrix": _flat(m @ dequant)})
 
+    def instances(self, mesh, matrices):
+        """A node drawing a mesh once per matrix (EXT_mesh_gpu_instancing: a translation, a rotation and a scale
+        each)."""
+        t, r, sc = zip(*(_trs(m) for m in matrices))
+        accessors = []
+        for data, kind in ((t, "VEC3"), (r, "VEC4"), (sc, "VEC3")):
+            view = self._view(np.asarray(data, dtype="<f4").tobytes(), None)
+            self.accessors.append({"bufferView": view, "componentType": 5126, "count": len(matrices), "type": kind})
+            accessors.append(len(self.accessors) - 1)
+        attributes = {"TRANSLATION": accessors[0], "ROTATION": accessors[1], "SCALE": accessors[2]}
+        return self.node({"mesh": mesh, "extensions": {"EXT_mesh_gpu_instancing": {"attributes": attributes}}})
+
     def node(self, node):
         self.nodes.append(node)
         return len(self.nodes) - 1
 
     def save(self, path, roots):
+        for slot, (data, target, stride) in enumerate(((self.vertices, 34962, 12), (self.small, 34963, None), (self.large, 34963, None))):
+            self._view(bytes(data) if data else bytes(4), target, stride)
+            self.views[slot] = self.views.pop()
         while len(self.bin) % 4:
             self.bin.append(0)
         doc = {
             "asset": {"version": "2.0", "generator": "shifty art/env"},
-            "extensionsUsed": ["KHR_mesh_quantization"],
+            "extensionsUsed": ["KHR_mesh_quantization", "EXT_mesh_gpu_instancing"],
             "extensionsRequired": ["KHR_mesh_quantization"],
             "scene": 0,
             "scenes": [{"nodes": roots}],

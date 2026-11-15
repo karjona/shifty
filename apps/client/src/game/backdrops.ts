@@ -501,7 +501,7 @@ class Club implements Stage {
 const HERO_VIEW = (() => {
   const at = new THREE.Vector3(CLUB.x + 2.5, CLUB.floor, CLUB.z - 5.2);
   // The camera stands inland of the rider, looking out over the bay (−z), a little from the east.
-  const theta = 0.245;
+  const theta = 0.37;
   const fwd = new THREE.Vector3(-Math.sin(theta), 0, -Math.cos(theta));
   const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
   const key = right
