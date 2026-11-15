@@ -819,10 +819,10 @@ export class Mountain implements Environment {
     mat.positionNode = Fn(() => {
       const p = positionLocal;
       const { speed, dir } = windNow();
-      const bend = attribute("tip", "float")
+      const sway = attribute("tip", "float")
         .mul(speed.mul(0.006).add(0.012))
         .mul(sin(LOOK.time.mul(3.1).add(p.x.mul(2.1)).add(p.z.mul(1.7))).add(gustAt(p.xz).mul(1.5)));
-      return p.add(vec3(dir.x.mul(bend), 0, dir.y.mul(bend)));
+      return p.add(vec3(dir.x.mul(sway), 0, dir.y.mul(sway)));
     })();
     const mesh = new THREE.InstancedMesh(geo, mat, count);
     const m = new THREE.Matrix4();
@@ -830,11 +830,8 @@ export class Mountain implements Environment {
     for (let i = 0; i < count; i++) {
       const s = spots[i * 4 + 3]! * (0.8 + rand() * 0.6);
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rand() * Math.PI * 2);
-      m.compose(
-        new THREE.Vector3(spots[i * 4]!, spots[i * 4 + 1]! - 0.02, spots[i * 4 + 2]!),
-        q,
-        new THREE.Vector3(s, s, s),
-      );
+      const [x = 0, y = 0, z = 0] = spots.slice(i * 4, i * 4 + 3);
+      m.compose(new THREE.Vector3(x, y - 0.02, z), q, new THREE.Vector3(s, s, s));
       mesh.setMatrixAt(i, m);
     }
     mesh.frustumCulled = false;
