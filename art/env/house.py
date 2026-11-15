@@ -211,7 +211,7 @@ def clubhouse():
     parts.append(wall(arcade_outline(-ARCADE, ARCADE, GROUND, arches), 0.55, P.STUCCO, reveal=P.STUCCO_WARM))
     for cx, hw, spring in arches:
         parts.append(wall(archivolt(hw, spring, foot=spring), 0.06, 0xE4D0A8, back=False).at(cx, 0, 0.06))
-        parts.append(taper(0.26, 0.1, 0.36, 0.12, 0.34, P.STONE_LIGHT).at(cx, spring + hw - 0.04, 0.07))
+        parts.append(taper(0.26, 0.1, 0.34, 0.12, 0.22, P.STONE_LIGHT).at(cx, spring + hw - 0.04, 0.07))
     for k in range(-3, 3):
         x = BAY * (k + 0.5)
         w = BAY - 2 * ARCH_HALF
@@ -316,7 +316,7 @@ def clubhouse():
     for i in range(44):
         x = -HALF + 0.3 + (2 * HALF - 0.6) * i / 43
         placed.append(("corbel", T(x, EAVE - 0.02, 0)))
-    signs.append(("COSTA NEVADA COUNTRY CLUB", T(0, GROUND + 0.42, 0.03), 11.5, 0.42, "caps", P.NAVY, None))
+    signs.append(("COSTA NEVADA COUNTRY CLUB", T(0, GROUND - 0.22, 0.03), 10.5, 0.24, "caps", P.NAVY, None))
 
     # The rest of the house: side and back walls, the roof, a chimney.
     side = [(0.0, 0.0), (DEPTH, 0.0), (DEPTH, EAVE), (0.0, EAVE)]
@@ -360,12 +360,12 @@ def bougainvillea(sc, points, spread=0.55, seed=0, hang=0.0):
     parts = []
     for p in points:
         p = np.asarray(p, dtype=float)
-        for k in range(5):
-            o = rng.normal(size=3) * spread * np.array([0.7, 0.35, 0.7])
-            r = spread * rng.uniform(0.42, 0.7)
-            flower = k < 3 or rng.uniform() < 0.3
+        for k in range(3):
+            o = rng.normal(size=3) * spread * np.array([0.7, 0.3, 0.7])
+            r = spread * rng.uniform(0.55, 0.85)
+            flower = k < 2 or rng.uniform() < 0.3
             c = (P.BOUGAINVILLEA if rng.uniform() < 0.65 else P.BOUGAINVILLEA_DEEP) if flower else P.LEAF_DARK
-            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, 1))
+            parts.append(P.clumps(sc, p + o + np.array([0, 0.08 if flower else -0.05, 0]), r, c, int(rng.integers(1 << 30)), 0.72, 2))
         if hang and rng.uniform() < 0.7:
             # A spray trailing down: clumps on a line, smaller toward its end.
             q = p + rng.normal(size=3) * spread * np.array([0.5, 0.0, 0.5])

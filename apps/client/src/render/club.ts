@@ -3,14 +3,16 @@
 // and moored boats, and the clubhouse behind. Riders gather here before a
 // race. Its art is modelled in art/env/club.py (public/env/club.glb) and
 // drawn in a handful of batches; the paving's pattern is a shader, and what
-// moves (boats at their moorings, sails out at sea, a gull, a fan) is moved
-// here. The sea in front of it glints.
+// moves (boats at their moorings, sails out at sea, a gull, a fan, a waiter
+// and members lifting a glass) is moved here; its lettering is set at
+// runtime (env/signs.ts). The sea in front of it glints.
 import * as THREE from "three/webgpu";
 import { Fn, attribute, cameraWorldMatrix, float, max, positionLocal, sin, vec3, vec4 } from "three/tsl";
 import { LOOK } from "./cel/look.ts";
 import { UNREFLECTED, inklessBasic } from "./cel/material.ts";
 import { EnvLook, classOf } from "./env/materials.ts";
 import { type EnvAnim, type EnvModel, loadEnv } from "./env/model.ts";
+import { signs } from "./env/signs.ts";
 import { warmUp } from "./warm.ts";
 
 /** Where the club stands. */
@@ -44,6 +46,11 @@ export function buildClub(): THREE.Group {
     loadEnv("club", CELL)
       .then(async (model) => {
         const art = assemble(model);
+        const lettering = await signs(model.anchors.get("sign"));
+        if (lettering) {
+          lettering.layers.set(UNREFLECTED);
+          art.add(lettering);
+        }
         art.position.set(CLUB.x, CLUB.floor, CLUB.z);
         await warmUp(art);
         g.add(art);
@@ -114,6 +121,55 @@ function perch(m: Mover, t: number): void {
   m.group.matrix.multiplyMatrices(m.rest, offset);
 }
 
+/** How long someone sitting takes over a sip (s): now and then they lift their glass. */
+const SIP_EVERY = 5.6;
+
+/** Whether someone sitting has their glass up at `t` (on twos). */
+function sipping(m: Mover, t: number): boolean {
+  const held = Math.floor(t * 12) / 12 + m.index * 2.3;
+  const into = held / SIP_EVERY - Math.floor(held / SIP_EVERY);
+  return into > 0.62 && into < 0.86;
+}
+
+/** The waiter's walk: how fast (m/s), how long he stops at each end (s), and steps a second. */
+const WAITER = { speed: 0.85, stop: 2.6, steps: 3 };
+
+/**
+ * The waiter, going from where he stands to `to` and back, stopping at
+ * each end: where he is at `t` along the way (0-1), which way he faces, and
+ * whether he is mid-stride (the second of his two poses).
+ */
+function waiting(to: THREE.Vector3, t: number): { along: number; back: boolean; stride: boolean } {
+  const walk = Math.max(0.1, to.length() / WAITER.speed);
+  const lap = 2 * (walk + WAITER.stop);
+  const into = t - Math.floor(t / lap) * lap;
+  const half = walk + WAITER.stop;
+  const back = into >= half;
+  const leg = back ? into - half : into;
+  const moving = leg < walk;
+  const k = Math.min(1, leg / walk);
+  const stride = moving && Math.floor(t * WAITER.steps) % 2 === 1;
+  return { along: back ? 1 - k : k, back: back === moving, stride };
+}
+
+/** Two poses of one figure, swapped: which of them (`first`) a group is, and when it is the one on show. */
+function posed(first: boolean, second: (m: Mover, t: number) => boolean): (m: Mover, t: number) => void {
+  return (m, t) => {
+    m.group.visible = second(m, t) !== first;
+  };
+}
+
+/** The waiter's two poses, walking (see `waiting`). */
+function serving(first: boolean, to: THREE.Vector3): (m: Mover, t: number) => void {
+  return (m, t) => {
+    const w = waiting(to, t);
+    m.group.visible = w.stride !== first;
+    turn.setFromAxisAngle(up, Math.atan2(to.x, to.z) + (w.back ? Math.PI : 0));
+    offset.makeRotationFromQuaternion(turn).setPosition(to.x * w.along, 0, to.z * w.along);
+    m.group.matrix.multiplyMatrices(m.rest, offset);
+  };
+}
+
 const MOVES: Record<string, (m: Mover, t: number) => void> = { boat: rock, sail, fan: spin, gull: perch };
 
 /** Glints on the sea, in the terrace's coordinates: how many, and the sea's level. */
@@ -158,8 +214,8 @@ function glints(): THREE.Mesh {
     const c = attribute<"vec2">("corner", "vec2");
     const p = attribute<"float">("phase", "float");
     // A glint is there for a moment in each of its turns, and gone the rest of it.
-    const turn = sin(LOOK.time.mul(p.mul(1.3).add(0.9)).add(p.mul(47)));
-    const flash = max(turn, float(0)).pow(10);
+    const wink = sin(LOOK.time.mul(p.mul(1.3).add(0.9)).add(p.mul(47)));
+    const flash = max(wink, float(0)).pow(10);
     const across = cameraWorldMatrix.mul(vec4(1, 0, 0, 0)).xyz;
     return positionLocal.add(across.mul(c.x.mul(flash))).add(vec3(0, 1, 0).mul(c.y.mul(flash)));
   })();
@@ -187,8 +243,16 @@ function assemble(model: EnvModel): THREE.Group {
     g.add(group);
     const index = count.get(a.name) ?? 0;
     count.set(a.name, index + 1);
-    const move = MOVES[a.name];
-    if (move) movers.push({ move, mover: { group, rest: a.matrix.clone(), index } });
+    // Figures come as two poses to swap between: `sit0.a` and `sit0.b`.
+    const pose = /^([a-z]+)(\d*)\.([ab])$/u.exec(a.name);
+    let move = MOVES[a.name];
+    if (pose?.[1] === "sit") move = posed(pose[3] === "a", sipping);
+    if (pose?.[1] === "waiter") {
+      const to = new THREE.Vector3().setFromMatrixPosition(model.anchors.get("waiter")?.[0]?.matrix ?? a.matrix);
+      move = serving(pose[3] === "a", to.sub(new THREE.Vector3().setFromMatrixPosition(a.matrix)));
+    }
+    if (move)
+      movers.push({ move, mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index } });
   };
   for (const a of model.anims) animated(a);
   g.add(glints());

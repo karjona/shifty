@@ -11,6 +11,7 @@ import numpy as np
 import furniture as F
 import house as H
 import kit
+import people
 import props as P
 from kit import RX, RY, RZ, S, T, TAU, box, slab
 from scene import Scene
@@ -114,7 +115,7 @@ def clubhouse(sc):
     for i, b in enumerate(boards):
         stand = T(-12.0 + 0.62 * i, 0.76, -1.0) @ RX(-0.1) @ T(0, b["length"] / 2, 0) @ RZ(math.pi / 2) @ RX(math.pi / 2)
         sc.add(F.snowboard(b["colours"], b["length"], b.get("shape", "twin")), m @ stand)
-    sc.anchor("sign", m @ T(-9.75, 2.0, -1.08), text="THE TILT", w=0.8, h=0.95, style="poster", ink=P.STUCCO, paper=0x2B3FD0)
+    sc.anchor("sign", m @ T(-9.75, 2.05, -1.08), text="THE TILT", w=0.85, h=0.5, style="display", ink=P.STUCCO, paper=0x2B3FD0)
     # Outside the shop: a rack of boards, and a jetski on its trailer.
     rack = [
         {"colours": (0x2F7D5B, 0xF7F1E5, 0xE8A72C), "length": 1.54},
@@ -197,6 +198,33 @@ def east(sc):
     sc.anim("gull", F.gull(), T(STAIR_WEST - 0.3, 1.23 + 0.825, FRONT + 0.02) @ RY(0.25))
 
 
+def folk(sc):
+    """The club's members and staff: two at a table under the pergola (one lifts a glass now and then), one
+    leaning on the balustrade, one sitting at the head of the stair looking out to sea, and a waiter going between
+    the bar and the tables."""
+    seated = (
+        (T(-8.3, 0, 1.3 + 0.72) @ RY(math.pi), 11, True),
+        (T(-8.3 + 0.72, 0, 1.3) @ RY(-math.pi / 2), 4, False),
+        # On the top step: the floor is the seat, the feet two steps down.
+        (T(5.1, -0.46, FRONT + 0.22) @ RY(math.pi), 9, True),
+    )
+    for k, (m, seed, lively) in enumerate(seated):
+        body, a, b = people.pair(people.look(seed), "sit")
+        sc.add(body, m)
+        if lively:
+            sc.anim(f"sit{k}.a", a, m)
+            sc.anim(f"sit{k}.b", b, m)
+        else:
+            sc.add(a, m)
+    sc.add(people.figure(people.look(6), "lean"), T(-11.0, 0, FRONT + 0.42) @ RY(math.pi))
+    # The waiter walks from the bar to a table and back (the anchor is where he turns round).
+    a, b = people.pair(people.look(2), "waiter", whole=True)
+    start = T(-10.2, 0, 3.4)
+    sc.anim("waiter.a", a, start)
+    sc.anim("waiter.b", b, start)
+    sc.anchor("waiter", T(-9.3, 0, -0.9))
+
+
 def build():
     sc = Scene(cell=CELL)
     sc.anchor("wind", T(), dir=list(WIND))
@@ -205,4 +233,5 @@ def build():
     clubhouse(sc)
     west(sc)
     east(sc)
+    folk(sc)
     return sc

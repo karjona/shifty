@@ -95,8 +95,8 @@ function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup 
       ny /= len;
       nz /= len;
     }
-    [a, b, c].forEach((k, corner) => {
-      const o = (f + corner) * 3;
+    [a, b, c].forEach((k, nth) => {
+      const o = (f + nth) * 3;
       out.position[o] = p[k]!;
       out.position[o + 1] = p[k + 1]!;
       out.position[o + 2] = p[k + 2]!;
@@ -109,7 +109,7 @@ function soup(g: THREE.BufferGeometry, m: THREE.Matrix4, smooth: boolean): Soup 
       out.color[o] = col.getX(vertex);
       out.color[o + 1] = col.getY(vertex);
       out.color[o + 2] = col.getZ(vertex);
-      out.sway[f + corner] = col.getW(vertex);
+      out.sway[f + nth] = col.getW(vertex);
     });
   }
   if (shared) {
