@@ -449,6 +449,29 @@ export function buildBreakwater(
   return { group, lanterns, top, half };
 }
 
+/** How far the mole's parapet stands from its axis, toward the open sea (m). */
+const MOLE_WALL = 2.1;
+
+/** Which side of a mole from a to b the open sea is on, as a unit vector (x, z): `sea` is 1 or -1. */
+function seaSide(l: Capsule, sea: 1 | -1): { ux: number; uz: number; sx: number; sz: number; len: number } {
+  const dx = l.bx - l.ax;
+  const dz = l.bz - l.az;
+  const len = Math.hypot(dx, dz);
+  const ux = dx / len;
+  const uz = dz / len;
+  return { ux, uz, sx: -uz * sea, sz: ux * sea, len };
+}
+
+/** Where the television's camera stands on a mole (the lens): on its parapet, short of the light on its head. */
+export function moleCamera(l: Capsule, top: number, sea: 1 | -1): { x: number; y: number; z: number } {
+  const { ux, uz, sx, sz } = seaSide(l, sea);
+  return {
+    x: l.bx - ux * 7 + sx * MOLE_WALL,
+    y: top + DECK.parapet + CAMERA_EYE,
+    z: l.bz - uz * 7 + sz * MOLE_WALL,
+  };
+}
+
 /** What the cape's mole is made of. */
 export interface Mole {
   group: THREE.Group;
@@ -463,14 +486,8 @@ export interface Mole {
  */
 export function buildMole(l: LandData, top: number, sea: 1 | -1, crowd: number, wavers: Crowd): Mole {
   const group = new THREE.Group();
-  const dx = l.bx - l.ax;
-  const dz = l.bz - l.az;
-  const len = Math.hypot(dx, dz);
-  const ux = dx / len;
-  const uz = dz / len;
-  // Out to sea: the edge's normal on that side.
-  const sx = -uz * sea;
-  const sz = ux * sea;
+  // (Out to sea: the edge's normal on that side.)
+  const { ux, uz, sx, sz, len } = seaSide(l, sea);
   const yaw = Math.atan2(ux, uz) - Math.PI / 2;
   const stone = new Shape();
   addArmour(stone, l, 1.6, l.radius + 0.6, top + 0.6, 77, (p) => !p.end && p.nx * sx + p.nz * sz > 0.5);
@@ -480,8 +497,10 @@ export function buildMole(l: LandData, top: number, sea: 1 | -1, crowd: number, 
   works.take(prism(capsuleOutline(l, 6), -5, top), paved, undefined, { flat: true });
   const mx = (l.ax + l.bx) / 2;
   const mz = (l.az + l.bz) / 2;
-  works.take(box(len + 2, 1.3, 0.7), WALL, place(mx + sx * 2.1, top, mz + sz * 2.1, yaw));
-  works.take(box(len + 2.3, 0.14, 0.9), 0xe0d8c6, place(mx + sx * 2.1, top + 1.3, mz + sz * 2.1, yaw));
+  works.take(box(len + 2, 1.3, 0.7), WALL, place(mx + sx * MOLE_WALL, top, mz + sz * MOLE_WALL, yaw));
+  works.take(box(len + 2.3, 0.14, 0.9), 0xe0d8c6, place(mx + sx * MOLE_WALL, top + 1.3, mz + sz * MOLE_WALL, yaw));
+  const camera = moleCamera(l, top, sea);
+  addCamera(works, camera.x, camera.y, camera.z, Math.atan2(sx, sz), top + DECK.parapet);
   for (let a = 4; a < len; a += 7)
     addBollard(works, l.ax + ux * a - sx * (l.radius - 0.7), top, l.az + uz * a - sz * (l.radius - 0.7));
   for (let a = 8; a < len - 4; a += 16) addLampPost(works, l.ax + ux * a + sx * 1.3, top, l.az + uz * a + sz * 1.3);
@@ -495,6 +514,8 @@ export function buildMole(l: LandData, top: number, sea: 1 | -1, crowd: number, 
     if (r() > crowd) continue;
     const x = l.ax + ux * a;
     const z = l.az + uz * a;
+    // (Nobody stands in front of the camera.)
+    if (Math.hypot(x - camera.x, z - camera.z) < 5) continue;
     if (r() < 0.5) {
       const edge = l.radius - 0.2;
       addPerson(works, x - sx * edge, top + 0.02, z - sz * edge, towardHarbour, r, { pose: "fish" });

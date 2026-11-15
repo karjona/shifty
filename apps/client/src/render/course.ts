@@ -213,7 +213,11 @@ function rampMesh(length: number, width: number, height: number): THREE.Mesh {
       if (side > 0) shape.quad(b, a, at(side, t0), at(side, t1), colour);
       else shape.quad(a, b, at(side, t1), at(side, t0), colour);
     }
-  shape.quad(at(-1, 1).setY(-0.4), at(1, 1).setY(-0.4), at(1, 1), at(-1, 1), MARK.red);
+  for (let k = 0; k < panels; k++) {
+    const x0 = -1 + (k / panels) * 2;
+    const x1 = -1 + ((k + 1) / panels) * 2;
+    shape.quad(at(x0, 1).setY(-0.4), at(x1, 1).setY(-0.4), at(x1, 1), at(x0, 1), k % 2 === 0 ? MARK.white : MARK.red);
+  }
   for (const side of [-1, 1]) tube(shape, side * (w + 0.4), 0, length * 0.94, 0.45, 0.4, MARK.orange);
   const mesh = shape.mesh(boatMaterial());
   mesh.name = "ramp";

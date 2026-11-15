@@ -3,6 +3,7 @@
 // then down to the grid and into the chase camera behind your rider. While
 // the race waits for every screen, the opening shot holds, drifting.
 import * as THREE from "three/webgpu";
+import { Cape } from "../render/cape.ts";
 import type { RunPoint } from "../render/mountain.ts";
 import type { CameraShot, Environment } from "../render/world.ts";
 import type { CourseInfo } from "../wasm-json.ts";
@@ -153,7 +154,12 @@ function capeShots(course: Extract<CourseInfo, { sport: "jetski" }>["bay"], env:
       { eye: on(stacks - 40, 9, -6), look: on(stacks + 40, 5), fov: 50 },
       { eye: on(stacks - 5, 6, -4), look: on(stacks + 75, 4), fov: 50 },
     ),
-    round(2.0, grid, (x, z) => env.ground(x, z, 0), env.camera.fov),
+    round(
+      2.0,
+      grid,
+      (x, z) => Math.max(env.ground(x, z, 0), env instanceof Cape ? env.land.height(x, z) * 1.1 + 1 : 0),
+      env.camera.fov,
+    ),
   ];
 }
 

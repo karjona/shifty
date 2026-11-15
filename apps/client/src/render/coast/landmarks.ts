@@ -69,11 +69,11 @@ export function addWatchtower(shape: Shape, x: number, y: number, z: number, yaw
     S.box(0, 7.6, 3.3, 0.22, 1.1, 0.2, new THREE.Color(0x3a3340));
   }
   // The flagstaff on the platform.
-  shape.take(post(0.06, 0.04, 4.6, 5), IRON, place(x, y + 12.2, z), { uv: TILE.white });
+  shape.take(post(0.07, 0.04, 7, 5), IRON, place(x, y + 12.2, z), { uv: TILE.white });
 }
 
 /** Where the watchtower's flag flies from: the top of its staff, over its foot. */
-export const WATCHTOWER_STAFF = 16.6;
+export const WATCHTOWER_STAFF = 19;
 
 /** The hermitage on the islet: a whitewashed chapel under a tiled gable, a bell gable over its door, facing `yaw`. */
 export function addHermitage(shape: Shape, x: number, y: number, z: number, yaw: number): void {
