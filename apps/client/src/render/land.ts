@@ -30,37 +30,6 @@ import { Planting } from "./coast/trees.ts";
 
 export { capsuleOutline, landDistance, prism, rng };
 
-/** Instanced boxes: `add` one per call, `build` makes the mesh. */
-export class Boxes {
-  private items: { m: THREE.Matrix4; c: THREE.Color }[] = [];
-  private q = new THREE.Quaternion();
-  private e = new THREE.Euler();
-
-  add(x: number, y: number, z: number, w: number, h: number, d: number, color: number, yaw = 0): void {
-    this.q.setFromEuler(this.e.set(0, yaw, 0));
-    const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), this.q, new THREE.Vector3(w, h, d));
-    this.items.push({ m, c: new THREE.Color(color) });
-  }
-
-  build(geo: THREE.BufferGeometry, material: THREE.Material, shadows = true): THREE.InstancedMesh {
-    const mesh = new THREE.InstancedMesh(geo, material, this.items.length);
-    this.items.forEach((it, i) => {
-      mesh.setMatrixAt(i, it.m);
-      mesh.setColorAt(i, it.c);
-    });
-    mesh.castShadow = shadows;
-    mesh.receiveShadow = true;
-    return mesh;
-  }
-}
-
-/** A box geometry sitting on y = 0. */
-export function unitBox(): THREE.BufferGeometry {
-  const g = new THREE.BoxGeometry(1, 1, 1);
-  g.translate(0, 0.5, 0);
-  return g;
-}
-
 /** How the islet's cliffs are cut: short planes round a small rock. */
 const ISLET: CliffStyle = { ...CLIFF, face: [3, 5.5], out: [0.7, 1.5], flange: 2.2, ledge: [0.5, 1.1], tiers: 4 };
 
@@ -136,12 +105,18 @@ function boulder(l: LandData, seed: number): THREE.Mesh {
   return stone.mesh(rockMaterial());
 }
 
+/**
+ * Ground on the bay's quay left bare: the country club's lot at its east end (render/club.ts), and the square
+ * on the promenade where the podium stands (game/podium.ts).
+ */
+const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24.6, z - 68) < 10;
+
 /** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
 export function buildLand(land: LandData[], season: Season, crowd: number, wavers: Crowd, life: Life): THREE.Group {
   const g = new THREE.Group();
   land.forEach((l, i) => {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life).group);
+    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else g.add(boulder(l, seed));
   });

@@ -13,7 +13,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { FOLIAGE, LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial, HAZE, UNREFLECTED, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
-import { type PeakStyle, celPeak, noise3, peakGeometry, peakMaterial } from "./cel/terrain.ts";
+import { type PeakStyle, noise3, peakGeometry, peakMaterial } from "./cel/terrain.ts";
 import { GRASSY } from "./coast/rock.ts";
 import { Shape, box, place, random } from "./coast/shape.ts";
 import { Planting } from "./coast/trees.ts";
@@ -41,28 +41,6 @@ import {
 export function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
-}
-
-/** A ridged peak, snow-capped above `snowline` (0-1) and hazed toward the sky. */
-export function peak(
-  radius: number,
-  height: number,
-  seed: number,
-  snowline: number,
-  haze: number,
-  rock = 0x5f6f8a,
-  /** Extra haze at the foot of the peak (fading up), so it melts into the distance. */
-  footHaze = 0,
-) {
-  const m = celPeak(radius, height, seed, {
-    rock,
-    snow: 0xf7f9fd,
-    snowline,
-    haze: haze * 0.75,
-    footHaze: Math.max(footHaze, 0.35),
-  });
-  m.position.y = -20;
-  return m;
 }
 
 /** How far scenery fades into the distance by how far it is from the camera: by hand, and more on a hazy day. */

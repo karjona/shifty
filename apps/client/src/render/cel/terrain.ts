@@ -136,11 +136,6 @@ export function peakGeometry(radius: number, height: number, seed: number, s: Pe
   return geo;
 }
 
-/** A mountain about `radius` across its base and `height` tall, its foot at y = 0. */
-export function celPeak(radius: number, height: number, seed: number, s: PeakStyle): THREE.Mesh {
-  return new THREE.Mesh(peakGeometry(radius, height, seed, s), peakMaterial(s));
-}
-
 const peakMaterials = new Map<string, CelMaterial>();
 
 /** The peaks' material for one set of colours (shared: each peak's numbers are on its vertices). */

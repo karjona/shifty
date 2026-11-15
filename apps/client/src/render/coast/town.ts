@@ -78,7 +78,7 @@ function quayOf(l: LandData): Quay {
 }
 
 /** The point `along` the quay (m from its start) and `inland` from the water's edge. */
-function at(q: Quay, along: number, inland: number): { x: number; z: number } {
+function quayPoint(q: Quay, along: number, inland: number): { x: number; z: number } {
   const d = q.l.radius - inland;
   return { x: q.l.ax + q.ux * along + q.nx * d, z: q.l.az + q.uz * along + q.nz * d };
 }
@@ -379,7 +379,23 @@ function addChurch(shape: Shape, x: number, y: number, z: number, yaw: number): 
 }
 
 /** What stands on the promenade: lamps, bollards, benches, cafe tables under parasols, crates and nets by the boats. */
-function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, crowd: number, wavers: Crowd): void {
+function addPromenade(
+  target: Shape,
+  q: Quay,
+  r: () => number,
+  season: Season,
+  crowd: number,
+  wavers: Crowd,
+  clear: (x: number, z: number) => boolean,
+): void {
+  // What would stand on ground kept clear goes to a shape that is never drawn.
+  const spare = new Shape();
+  let shape = target;
+  const spot = (quay: Quay, along: number, inland: number) => {
+    const p = quayPoint(quay, along, inland);
+    shape = clear(p.x, p.z) ? spare : target;
+    return p;
+  };
   const span = reach(q, 3) - 6;
   // People: strolling the promenade, standing in talk, fishing off the edge, waving at the riders.
   const strollers = Math.round(((q.len + span * 2) / 6.5) * crowd);
@@ -387,33 +403,33 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, cr
     const a = -span + r() * (q.len + span * 2);
     const kind = r();
     if (kind < 0.16) {
-      const p = at(q, a, 1.3);
-      wavers.add(shape, p.x, QUAY_TOP, p.z, q.yaw + (r() - 0.5) * 0.5, r);
+      const p = spot(q, a, 1.3);
+      if (shape === target) wavers.add(shape, p.x, QUAY_TOP, p.z, q.yaw + (r() - 0.5) * 0.5, r);
     } else if (kind < 0.26) {
-      const p = at(q, a, 0.2);
+      const p = spot(q, a, 0.2);
       addPerson(shape, p.x, QUAY_TOP + 0.02, p.z, q.yaw, r, { pose: "fish" });
     } else if (kind < 0.5) {
       // Two in talk.
-      const p = at(q, a, 4 + r() * 4);
+      const p = spot(q, a, 4 + r() * 4);
       const turn = r() * 6;
       addPerson(shape, p.x, QUAY_TOP, p.z, turn, r);
       addPerson(shape, p.x + Math.sin(turn) * 0.8, QUAY_TOP, p.z + Math.cos(turn) * 0.8, turn + Math.PI, r);
     } else {
-      const p = at(q, a, 3 + r() * 5.5);
+      const p = spot(q, a, 3 + r() * 5.5);
       const way = q.yaw + (r() < 0.5 ? 1 : -1) * (Math.PI / 2) + (r() - 0.5) * 0.3;
       addPerson(shape, p.x, QUAY_TOP, p.z, way, r, { pose: "walk" });
     }
   }
   for (let a = -span; a < q.len + span; a += 8) {
-    const p = at(q, a, 0.8);
+    const p = spot(q, a, 0.8);
     addBollard(shape, p.x, QUAY_TOP, p.z);
   }
   for (let a = -span + 5; a < q.len + span; a += 26) {
-    const p = at(q, a, 2.2);
+    const p = spot(q, a, 2.2);
     addLampPost(shape, p.x, QUAY_TOP, p.z, q.yaw);
   }
   for (let a = -span + 14; a < q.len + span; a += 26) {
-    const p = at(q, a, 6.4);
+    const p = spot(q, a, 6.4);
     addBench(shape, p.x, QUAY_TOP, p.z, q.yaw);
     if (r() < crowd * 0.6)
       addPerson(shape, p.x + q.ux * 0.3, QUAY_TOP + 0.48, p.z + q.uz * 0.3, q.yaw, r, { pose: "sit" });
@@ -421,7 +437,7 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, cr
   // Fish boxes and nets on the quay's edge.
   const crate = [0x3a6ea5, 0xf6f2ea, 0xd94a3a, 0x2d8a7a, 0xf2c14e];
   for (let a = -span + 10; a < q.len + span; a += 17 + r() * 16) {
-    const p = at(q, a + r() * 4, 1.8 + r() * 1.2);
+    const p = spot(q, a + r() * 4, 1.8 + r() * 1.2);
     const turn = q.yaw + (r() - 0.5);
     const stack = 1 + Math.floor(r() * 3);
     for (let k = 0; k < stack; k++)
@@ -431,7 +447,7 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, cr
         place(p.x, QUAY_TOP + k * 0.36, p.z, turn + (r() - 0.5) * 0.3),
         { uv: TILE.white },
       );
-    const n = at(q, a + 2.2, 2.2);
+    const n = spot(q, a + 2.2, 2.2);
     shape.take(
       new THREE.SphereGeometry(1, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2),
       WHITE,
@@ -445,7 +461,7 @@ function addPromenade(shape: Shape, q: Quay, r: () => number, season: Season, cr
   for (let a = -span + 20; a < q.len + span - 10; a += 30 + r() * 30) {
     const colour = new THREE.Color(pick(parasol, r));
     for (let k = 0; k < 3; k++) {
-      const p = at(q, a + k * 3.4, 7.6);
+      const p = spot(q, a + k * 3.4, 7.6);
       shape.take(post(0.5, 0.5, 0.06, 8), new THREE.Color(0xf4efe2), place(p.x, QUAY_TOP + 0.74, p.z), {
         uv: TILE.white,
       });
@@ -485,7 +501,16 @@ export interface Town {
 }
 
 /** The town on the quay `l`, as it is in `season`, with as many people out as `crowd` (0-1) says. */
-export function buildTown(l: LandData, seed: number, season: Season, crowd: number, wavers: Crowd, life: Life): Town {
+export function buildTown(
+  l: LandData,
+  seed: number,
+  season: Season,
+  crowd: number,
+  wavers: Crowd,
+  life: Life,
+  /** Ground to leave bare of houses, street furniture and people (something else stands there). */
+  clear: (x: number, z: number) => boolean = () => false,
+): Town {
   const group = new THREE.Group();
   const q = quayOf(l);
   const r = random(seed);
@@ -540,7 +565,7 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
   // The church stands on the upper terraces, its tower over the roofs.
   const churchAlong = q.len * 0.42;
   const churchInland = 79;
-  const church = at(q, churchAlong, churchInland);
+  const church = quayPoint(q, churchAlong, churchInland);
   addChurch(uphill, church.x, groundAt(churchInland - 10), church.z, q.yaw);
 
   // The houses, row by row, with streets between them.
@@ -555,8 +580,8 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
       // Leave the church its place, and the square in front of it.
       const mid = a + w / 2;
       const byChurch = Math.abs(mid - churchAlong - 2.5) < 13 && row.inland > churchInland - 26;
-      if (!byChurch) {
-        const p = at(q, mid, row.inland);
+      const p = quayPoint(q, mid, row.inland);
+      if (!byChurch && !clear(p.x, p.z)) {
         const [lo, hi] = row.storeys;
         addHouse(
           k < 2 ? shape : uphill,
@@ -580,15 +605,15 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
       }
     }
   });
-  addPromenade(shape, q, r, season, crowd, wavers);
+  addPromenade(shape, q, r, season, crowd, wavers, clear);
   // Flags on the promenade in front of the town's middle, and a bakery's chimney up the hill, smoking.
   const flags = [[0x2d8a9a, 0xf6f2ea, 0xf08a3c], COSTA_NEVADA, [0x7a5aa8, 0xf2c14e]];
   flags.forEach((colours, i) => {
-    const p = at(q, q.len * 0.5 + (i - 1) * 3.2, 8.6);
+    const p = quayPoint(q, q.len * 0.5 + (i - 1) * 3.2, 8.6);
     shape.take(post(0.07, 0.05, 8, 5), IRON, place(p.x, QUAY_TOP, p.z), { uv: TILE.white });
     life.flag(p.x, QUAY_TOP + 7.9, p.z, 2.4, 1.5, colours);
   });
-  const stack = at(q, q.len * 0.72, 61);
+  const stack = quayPoint(q, q.len * 0.72, 61);
   uphill.take(post(0.75, 0.5, 13, 6), new THREE.Color(0xb86a4a), place(stack.x, groundAt(61), stack.z), {
     uv: TILE.white,
   });
@@ -603,7 +628,8 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
   const plants = new Planting();
   const span = reach(q, 5) - 6;
   for (let a = -span + 3; a < q.len + span; a += 12.5 + r() * 3) {
-    const p = at(q, a, 4.6);
+    const p = quayPoint(q, a, 4.6);
+    if (clear(p.x, p.z)) continue;
     palms.add("palm", p.x, QUAY_TOP, p.z, 6.2 + r() * 2.6, 0.9 + r() * 0.2);
   }
   for (const [da, di] of [
@@ -613,13 +639,13 @@ export function buildTown(l: LandData, seed: number, season: Season, crowd: numb
     [17, 4],
     [13, 12],
   ] as const) {
-    const p = at(q, churchAlong + da, churchInland + di);
+    const p = quayPoint(q, churchAlong + da, churchInland + di);
     plants.add("cypress", p.x, groundAt(churchInland + di), p.z, 9 + r() * 5, 0.9 + r() * 0.2);
   }
   const back = l.radius * 2 - 9;
   const backSpan = reach(q, back) - 4;
   for (let a = -backSpan; a < q.len + backSpan; a += 9 + r() * 8) {
-    const p = at(q, a, back + r() * 4);
+    const p = quayPoint(q, a, back + r() * 4);
     plants.add(r() < 0.3 ? "cypress" : "pine", p.x, groundAt(back) - 0.5, p.z, 8 + r() * 4, 0.88 + r() * 0.2);
   }
   group.add(palms.build(true), plants.build(true));

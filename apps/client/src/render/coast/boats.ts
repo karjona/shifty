@@ -353,6 +353,47 @@ export function cameraBoat(): THREE.BufferGeometry {
   return s.build();
 }
 
+/** The ferry, about 110 m: a dark hull under white decks, a funnel in the line's colours. Seen from far off. */
+export function ferry(): THREE.BufferGeometry {
+  const s = new Shape();
+  const hull = 0x2a3f5a;
+  const deck = loft(s, {
+    length: 110,
+    beam: 19,
+    stations: 8,
+    half: (t) =>
+      Math.max(
+        0.05,
+        t < 0.6
+          ? 0.85 + 0.15 * Math.sin((Math.PI * t) / 0.6)
+          : Math.pow(Math.cos(((t - 0.6) / 0.4) * (Math.PI / 2)), 0.7),
+      ),
+    sheer: (t) => 9 + 2.5 * t * t,
+    keel: () => -3,
+    strake: 2,
+    well: 0.5,
+    rim: 0.5,
+    bottom: ANTIFOUL,
+    side: hull,
+    band: WHITE,
+    deck: 0xb9b4a8,
+    transom: true,
+  });
+  // Decks stepping in toward the top, rows of windows, the bridge forward, the funnel aft.
+  s.take(box(17, 5, 78), WHITE, place(0, deck, -6));
+  s.take(box(15, 3.6, 62), WHITE, place(0, deck + 5, -8));
+  s.take(box(13, 3.2, 12), WHITE, place(0, deck + 8.6, 18));
+  for (const sx of [-8.55, 8.55]) {
+    pane(s, sx, deck + 1.2, -6, 0.1, 1.1, 70);
+    pane(s, sx * 0.885, deck + 6, -8, 0.1, 1.2, 54);
+  }
+  pane(s, 0, deck + 9.6, 24.05, 12, 1.3, 0.1);
+  s.take(post(3.2, 2.6, 7.5, 8), 0xd6402e, place(0, deck + 8.6, -22));
+  s.take(post(2.7, 2.7, 1.2, 8), 0x2a2c32, place(0, deck + 16.1, -22));
+  s.take(post(0.25, 0.15, 9, 5), WHITE, place(0, deck + 11.8, 20));
+  return s.build();
+}
+
 export type BoatKind = "llaut" | "trawler" | "yacht" | "inflatable" | "camera";
 
 /** Where a boat lies: the middle of its hull at the water line, its heading, and what it is. */

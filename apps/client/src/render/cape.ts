@@ -16,12 +16,12 @@ import { Fn, attribute, clamp, max, mix, positionWorld, smoothstep, vec3 } from 
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Bay, type BayOptions, type WaterScenery } from "./bay.ts";
 import { cut0 } from "./cel/look.ts";
-import { CelMaterial, inkId } from "./cel/material.ts";
+import { CelMaterial, UNREFLECTED, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { CircuitLook } from "./look.ts";
 import { noise3 } from "./cel/terrain.ts";
 import { type BeachSite, addBeach } from "./coast/beach.ts";
-import { type Berth, Fleet, Roamer, yacht } from "./coast/boats.ts";
+import { type Berth, Fleet, Roamer, ferry, yacht } from "./coast/boats.ts";
 import { townMaterial } from "./coast/facades.ts";
 import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
 import { WATCHTOWER_STAFF, addWatchtower } from "./coast/landmarks.ts";
@@ -49,7 +49,7 @@ import { Planting } from "./coast/trees.ts";
 import type { CourseData, LandData } from "./course.ts";
 import { landDistance, rng } from "./land.ts";
 import type { RiderView } from "./world.ts";
-import { COAST_SIERRA, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
+import { COAST_SIERRA, farMaterial, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
 
 /** The cape under the sky: the bay's sun, snow down to the beach in winter and only on the sierra otherwise. */
 const CAPE_LOOK: CircuitLook = {
@@ -683,6 +683,24 @@ export class CapeScenery implements WaterScenery {
     this.roamers = [0.08, 0.37, 0.7].map(
       (offset, i) => new Roamer(yacht(4 + i * 5, true), boatMaterial(), sails, 2.6, offset),
     );
+    // The ferry, far out past the point.
+    const liner = new Roamer(
+      ferry(),
+      farMaterial(),
+      [
+        [-2600, 1500],
+        [0, 1800],
+        [2600, 1500],
+        [2900, 2300],
+        [0, 2600],
+        [-2900, 2300],
+      ],
+      6,
+      0.55,
+    );
+    liner.mesh.castShadow = false;
+    liner.mesh.layers.set(UNREFLECTED);
+    this.roamers.push(liner);
     for (const boat of this.roamers) this.group.add(boat.mesh);
 
     const tower = watchtowerSpot(ground, land);

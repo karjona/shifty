@@ -4,11 +4,12 @@
 // along the coast and sails far out.
 import * as THREE from "three/webgpu";
 import type { WaterScenery } from "./bay.ts";
-import { type Berth, Fleet, Roamer, trawler, yacht } from "./coast/boats.ts";
+import { UNREFLECTED } from "./cel/material.ts";
+import { type Berth, Fleet, Roamer, ferry, trawler, yacht } from "./coast/boats.ts";
 import { boatMaterial } from "./coast/materials.ts";
 import { random } from "./coast/shape.ts";
 import type { CourseData } from "./course.ts";
-import { buildScenery } from "./scenery.ts";
+import { buildScenery, farMaterial } from "./scenery.ts";
 
 /** The bay's boats at their berths. */
 function berths(course: CourseData): Berth[] {
@@ -101,6 +102,24 @@ export class BaySide implements WaterScenery {
       new Roamer(yacht(8, true), hull, sails, 2.6, 0.31),
       new Roamer(yacht(12, true), hull, sails, 2.6, 0.72),
     ];
+    // The ferry, far out, on its way along the coast.
+    const liner = new Roamer(
+      ferry(),
+      farMaterial(),
+      [
+        [-2600, -1500],
+        [0, -1750],
+        [2600, -1500],
+        [2900, -2300],
+        [0, -2600],
+        [-2900, -2300],
+      ],
+      6,
+      0.2,
+    );
+    liner.mesh.castShadow = false;
+    liner.mesh.layers.set(UNREFLECTED);
+    this.roamers.push(liner);
     for (const boat of this.roamers) this.group.add(boat.mesh);
   }
 
