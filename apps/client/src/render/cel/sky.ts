@@ -110,26 +110,27 @@ export function skyDome(): THREE.Mesh {
       .mul(smoothstep(0.55, 0.35, y))
       .mul(LOOK.cirrus);
     c = mix(c, mix(c, vec3(1), 0.3), wisp);
-    // Fields of small puffs at mid height (a mackerel sky), each with its lit core.
+    // A band or two of soft flat clouds at mid height: large, pale, most of the sky left plain.
     const puffSky = c.toVar();
     If(LOOK.puffs.greaterThan(0.001), () => {
-      // (Stretched across the wind, in ranks.)
-      const pq = vec2(plane.x.mul(3.4), plane.y.mul(5.2)).add(drift.mul(9));
+      // (Drawn out across the wind.)
+      const pq = vec2(plane.x.mul(0.9), plane.y.mul(2.1)).add(drift.mul(5));
       const cells = noise4(pq)
-        .x.mul(0.62)
-        .add(noise4(pq.mul(2.3)).y.mul(0.38));
-      const field = noise4(plane.mul(0.24).add(drift.mul(2))).z;
+        .x.mul(0.85)
+        .add(noise4(pq.mul(2.1)).y.mul(0.15));
+      // They gather where a slow field is high: a patch or two on a fair day, half the sky under cloud.
+      const field = noise4(plane.mul(0.13).add(drift.mul(2))).z;
       const inField = field
-        .sub(float(0.44).sub(LOOK.puffs.mul(0.56)))
+        .sub(float(0.5).sub(LOOK.puffs.mul(0.62)))
         .min(0)
-        .mul(4);
-      const puff = cut0(cells.sub(0.2).add(inField))
+        .mul(5);
+      const puff = cut0(cells.sub(0.18).add(inField))
         .mul(smoothstep(0.1, 0.2, y))
-        .mul(smoothstep(0.62, 0.4, y));
-      const core = cut0(cells.sub(0.4).add(inField));
-      puffSky.assign(
-        mix(puffSky, mix(mix(puffSky, LOOK.cloud.rgb.mul(LOOK.cloudShade.rgb), 0.75), LOOK.cloud, core), puff.mul(0.9)),
-      );
+        .mul(smoothstep(0.5, 0.3, y));
+      const core = cut0(cells.sub(0.42).add(inField));
+      const pale = mix(puffSky, LOOK.cloud, 0.42);
+      const lit = mix(puffSky, LOOK.cloud, 0.78);
+      puffSky.assign(mix(puffSky, mix(pale, lit, core), puff.mul(LOOK.puffs.mul(0.4).add(0.6))));
     });
     c = puffSky;
     // The cloud deck: masses that close in with the weather, lighter at their edges, fading into the horizon

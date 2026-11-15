@@ -21,9 +21,6 @@ const CYPRESS_TOP = new THREE.Color(0x3c7240);
 const AGAVE = new THREE.Color(0x6a9c7c);
 const BUSH = [new THREE.Color(0x6a8e42), new THREE.Color(0x587c3a), new THREE.Color(0x7c9a4c)];
 
-/** A pine's needles: dark under the crown, lightest on top. */
-const needles: Paint = (_p, n) => (n.y < -0.5 ? NEEDLES_UNDER : n.y > 0.55 ? NEEDLES_TOP : NEEDLES);
-
 /** A tube through `points` with a radius at each, `sides` round, smooth: a trunk or a limb. */
 export function tube(points: THREE.Vector3[], radii: number[], sides: number): THREE.BufferGeometry {
   const pos: number[] = [];
@@ -109,58 +106,73 @@ function lobe(sides: number, base: number): THREE.BufferGeometry {
   return g;
 }
 
+const NEEDLE_TOPS = [NEEDLES_TOP, new THREE.Color(0x6aa64a), new THREE.Color(0x548f40)];
+
 /**
  * A stone pine about `height` tall with a crown `spread` across, its foot
- * at the origin. `lobes` is how many the crown is made of (fewer for one
- * seen from far).
+ * at the origin: a trunk that bends on its way up and forks into limbs,
+ * each carrying a clump of the umbrella (broad flat lobes, dark
+ * underneath, sky between the clumps). `lobes` is how many the crown is
+ * made of (fewer for one seen from far).
  */
 export function pineGeometry(seed: number, height: number, spread: number, lobes: number): THREE.BufferGeometry {
   const r = random(seed);
   const s = new Shape();
-  const lean = (r() - 0.5) * 2.4;
-  const leanZ = (r() - 0.5) * 1.6;
-  const top = height * 0.74;
-  const weigh = (p: THREE.Vector3) => (p.y * Math.max(0, p.y)) / height;
-  const trunk = [0, 0.3, 0.62, 1].map(
-    (k) => new THREE.Vector3(lean * k * k + Math.sin(k * 3.1) * 0.25, top * k, leanZ * k * k),
-  );
-  s.take(tube(trunk, [0.34, 0.27, 0.22, 0.18], 5), (p) => (p.y < top * 0.5 ? BARK_DARK : BARK), undefined, {
-    weight: weigh,
-  });
-  const head = trunk[3]!;
-  const ball = lobe(lobes > 4 ? 7 : 6, -0.28);
-  const paint = needles;
   const rad = spread / 2;
-  // The crown: a big lobe over the trunk, smaller ones round and below it.
-  const middle = new THREE.Vector3(head.x, head.y + rad * 0.42, head.z);
-  s.add(ball, paint, place(middle.x, middle.y, middle.z, r() * 6, rad * 0.66, rad * 0.4, rad * 0.66), {
+  // The trunk leans one way, then back: an S up to the fork.
+  const lean = (r() < 0.5 ? -1 : 1) * (0.9 + r() * 1.7);
+  const leanZ = (r() - 0.5) * 1.8;
+  const fork = height * (0.56 + r() * 0.08);
+  const weigh = (p: THREE.Vector3) => (p.y * Math.max(0, p.y)) / height;
+  const bend = (k: number) => new THREE.Vector3(lean * (k * k - 0.35 * Math.sin(k * Math.PI)), fork * k, leanZ * k * k);
+  const trunk = [0, 0.28, 0.55, 0.8, 1].map(bend);
+  s.take(tube(trunk, [0.36, 0.29, 0.24, 0.21, 0.19], 5), (p) => (p.y < fork * 0.5 ? BARK_DARK : BARK), undefined, {
     weight: weigh,
   });
+  const base = trunk[4]!;
+  const ball = lobe(lobes > 4 ? 7 : 6, -0.3);
+  const under = height - fork;
+  // The clumps: two or three round the fork, at their own heights, the crown longer one way than the other.
+  const clumps = lobes > 4 ? 3 : 2;
   const turn = r() * Math.PI * 2;
-  for (let i = 0; i < lobes - 1; i++) {
-    const a = turn + ((i + (r() - 0.5) * 0.5) / (lobes - 1)) * Math.PI * 2;
-    const out = rad * (0.5 + r() * 0.16);
-    const size = rad * (0.42 + r() * 0.16);
-    const at = new THREE.Vector3(
-      head.x + Math.cos(a) * out,
-      head.y + rad * (0.12 + r() * 0.16),
-      head.z + Math.sin(a) * out,
+  const long = 1 + r() * 0.35;
+  let left = lobes;
+  for (let c = 0; c < clumps; c++) {
+    const a = turn + ((c + (r() - 0.5) * 0.4) / clumps) * Math.PI * 2;
+    const out = rad * (0.42 + r() * 0.14);
+    const centre = new THREE.Vector3(
+      base.x + Math.cos(a) * out * long,
+      base.y + under * (0.62 + r() * 0.3),
+      base.z + (Math.sin(a) * out) / long,
     );
-    s.add(ball, paint, place(at.x, at.y, at.z, r() * 6, size, size * (0.5 + r() * 0.12), size), { weight: weigh });
-    // A limb from the fork up into every other lobe.
-    if (i % 2 === 0) {
-      const fork = trunk[2]!.clone().lerp(head, 0.5);
-      const knee = fork
-        .clone()
-        .lerp(at, 0.55)
-        .add(new THREE.Vector3(0, -rad * 0.12, 0));
-      s.take(
-        tube([fork, knee, at.clone().add(new THREE.Vector3(0, -size * 0.1, 0))], [0.15, 0.11, 0.07], 4),
-        BARK,
-        undefined,
-        {
-          weight: weigh,
-        },
+    // A limb from the fork out under the clump.
+    const knee = base.clone().lerp(centre, 0.5);
+    knee.y -= under * 0.16;
+    const tip = centre.clone();
+    tip.y -= rad * 0.1;
+    s.take(tube([base, knee, tip], [0.17, 0.12, 0.07], 4), BARK, undefined, { weight: weigh });
+    // Its lobes: a broad one, smaller ones against it.
+    const mine = c === clumps - 1 ? left : Math.max(1, Math.round(lobes / clumps));
+    left -= mine;
+    const top = NEEDLE_TOPS[c % NEEDLE_TOPS.length]!;
+    const paint: Paint = (_p, n) => (n.y < -0.5 ? NEEDLES_UNDER : n.y > 0.5 ? top : NEEDLES);
+    for (let k = 0; k < mine; k++) {
+      const size = k === 0 ? rad * (0.52 + r() * 0.1) : rad * (0.32 + r() * 0.12);
+      const b = a + (k === 0 ? 0 : (k % 2 === 0 ? 1 : -1) * (0.9 + r() * 0.5));
+      const off = k === 0 ? 0 : rad * (0.42 + r() * 0.12);
+      s.add(
+        ball,
+        paint,
+        place(
+          centre.x + Math.cos(b) * off,
+          centre.y + (k === 0 ? 0 : (r() - 0.65) * rad * 0.2),
+          centre.z + Math.sin(b) * off,
+          r() * 6,
+          size,
+          size * (0.4 + r() * 0.1),
+          size * (0.86 + r() * 0.2),
+        ),
+        { weight: weigh },
       );
     }
   }

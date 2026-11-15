@@ -158,7 +158,7 @@ interface WeatherLook {
   shadow: number;
   cirrus: number;
   streaks: number;
-  /** Fields of small puffs at mid height, and veils of rain under the deck (0-1 each). */
+  /** Bands of soft flat cloud at mid height, and veils of rain under the deck (0-1 each). */
   puffs: number;
   veil: number;
   overcast: number;
@@ -189,7 +189,7 @@ const BASE: WeatherLook = {
   shadow: 1,
   cirrus: 1,
   streaks: 0,
-  puffs: 0.3,
+  puffs: 0.2,
   veil: 0,
   overcast: 0,
   deck: [0xd8dde4, 0x9aa4b4],
@@ -239,7 +239,7 @@ const WEATHER: Record<Weather, WeatherLook> = {
     weight: 0.4,
     cirrus: 1,
     streaks: 1,
-    puffs: 0.12,
+    puffs: 0,
     cover: 0.42,
     tower: 0.6,
     whitecaps: 0.8,
