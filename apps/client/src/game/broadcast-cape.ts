@@ -58,7 +58,7 @@ function solid(course: CourseData, ground: CoastGround): (x: number, z: number) 
     }
     if (tower && Math.hypot(x - tower.x, z - tower.z) < 3.8) h = Math.max(h, tower.y + TOWER_TOP);
     for (const b of boards) if (Math.hypot(x - b.x, z - b.z) < BOARD.half) h = Math.max(h, BOARD.top);
-    for (const g of gate) if (Math.hypot(x - g.x, z - g.z) < g.radius) h = Math.max(h, g.top);
+    for (const t of gate) if (Math.hypot(x - t.x, z - t.z) < t.radius) h = Math.max(h, t.top);
     for (const r of course.ramps) if (Math.hypot(x - r.x, z - r.z) < r.length / 2) h = Math.max(h, r.height);
     for (const b of course.buoys)
       if (Math.hypot(x - b.x, z - b.z) < course.buoyRadius) h = Math.max(h, course.buoyHeight);

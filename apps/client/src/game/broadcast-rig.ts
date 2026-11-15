@@ -89,10 +89,10 @@ export function clear(
 
 /**
  * A drone behind and beside the rider, low, following its path smoothly.
- * With `clear`, it keeps off whatever stands more than that (m) over the
+ * With `keepOff`, it keeps off whatever stands more than that (m) over the
  * rider: it closes in on the rider rather than fly through a cliff.
  */
-export function drone(name: string, ground: (x: number, z: number, t: number) => number, clear?: number): Rig {
+export function drone(name: string, ground: (x: number, z: number, t: number) => number, keepOff?: number): Rig {
   const eye = new THREE.Vector3();
   const to = new THREE.Vector3();
   let heading = 0;
@@ -117,13 +117,13 @@ export function drone(name: string, ground: (x: number, z: number, t: number) =>
       const fz = Math.cos(heading);
       let x = r.x - fx * 10 - fz * 3.5 * side;
       let z = r.z - fz * 10 + fx * 3.5 * side;
-      if (clear !== undefined) {
-        for (let k = 0; k < 5 && ground(x, z, w.simT) > r.y + clear; k++) {
+      if (keepOff !== undefined) {
+        for (let k = 0; k < 5 && ground(x, z, w.simT) > r.y + keepOff; k++) {
           x = (x + r.x) / 2;
           z = (z + r.z) / 2;
         }
         // (And off what it would cross on its way there.)
-        if (ground((x + eye.x) / 2, (z + eye.z) / 2, w.simT) > r.y + clear) eye.set(x, eye.y, z);
+        if (ground((x + eye.x) / 2, (z + eye.z) / 2, w.simT) > r.y + keepOff) eye.set(x, eye.y, z);
       }
       const y = Math.max(r.y + 3.2, ground(x, z, w.simT) + 2.5);
       eye.lerp(to.set(x, y, z), 1 - Math.exp(-w.dt * 3));
