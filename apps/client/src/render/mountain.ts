@@ -21,6 +21,7 @@ import {
   abs,
   attribute,
   cameraPosition,
+  cameraViewMatrix,
   clamp,
   float,
   floor,
@@ -31,6 +32,7 @@ import {
   mix,
   mx_noise_float,
   normalWorld,
+  positionLocal,
   positionWorld,
   sin,
   smoothstep,
@@ -369,10 +371,12 @@ function snowMaterial(ribbon: boolean): CelMaterial {
       // A thin cover is scratchy: grass and earth showing through in specks.
       If(LOOK.runSnow.x.greaterThan(0.001), () => {
         const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
-        const speck = cut0(noise4(p.xz.mul(2.3)).x.sub(float(0.8).sub(thinHere.mul(0.4))))
+        // Bare earth in small patches where it is thinnest (grass stands in them: see `grassTufts`).
+        const where = noise4(p.xz.mul(1.3)).x.sub(float(0.86).sub(thinHere.mul(0.4)));
+        const earth = cut0(where)
           .mul(smoothstep(0.05, 0.3, thinHere))
           .mul(near);
-        sc.assign(mix(sc, LOOK.ground2, speck.mul(0.85)));
+        sc.assign(mix(sc, LOOK.ground2, earth.mul(0.8)));
       });
       If(LOOK.runSnow.y.greaterThan(0.001), () => {
         const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
@@ -692,6 +696,7 @@ export class Mountain implements Environment {
     }
     const { shade, dye } = this.shapeOf(xyz, rows, offsets);
     const snowRows = this.snowAlong(xyz, rows.length, cols);
+    this.buildTufts(xyz, rows, offsets, snowRows);
     const treeShade = forestShade(this.trees, this.look.sun, xyz);
     const mat = snowMaterial(true);
     for (let start = 0; start < n - 1; start += ROWS_PER_CHUNK) {
@@ -755,6 +760,86 @@ export class Mountain implements Environment {
       mesh.userData.noMerge = true;
       this.group.add(mesh);
     }
+  }
+
+  /**
+   * Grass standing out of the snow: on the run where the cover is thin
+   * (`snowRows`, as `snowAlong` gives it), and thicker beside it wherever
+   * the ground is below the season's snow line. Riders ride through it.
+   */
+  private buildTufts(xyz: Float32Array, rows: Float32Array, offsets: Float32Array, snowRows: Float32Array): void {
+    const cols = offsets.length;
+    const rand = rng(606);
+    const line = LOOK.snowLine.value;
+    const spots: number[] = [];
+    for (let r = 2; r < rows.length - 2; r += 1) {
+      const limit = this.limitAt(rows[r]!);
+      const thin = Math.max(0, Math.min(1, (0.45 - snowRows[r * 4]!) / 0.3));
+      for (let k = 0; k < 4; k++) {
+        const c = Math.floor(rand() * cols);
+        const off = Math.abs(offsets[c]!);
+        const at = (r * cols + c) * 3;
+        const y = xyz[at + 1]!;
+        const beside = off > limit + 1.5 && off < limit + 26;
+        // Meadow beside the run below the snow line; on it, only through a thin cover.
+        const chance = beside ? (y < line - 12 ? 0.8 : 0) : off < limit + 1 ? thin * 0.6 : 0;
+        if (rand() < chance)
+          spots.push(xyz[at]! + (rand() - 0.5) * 0.8, y, xyz[at + 2]! + (rand() - 0.5) * 0.8, beside ? 1.3 : 0.75);
+      }
+    }
+    const count = spots.length / 4;
+    if (count === 0) return;
+    // A tuft: nine blades fanned out from one foot.
+    const pos: number[] = [];
+    const tip: number[] = [];
+    for (let b = 0; b < 9; b++) {
+      const a = (b / 9) * Math.PI * 2 + rand();
+      const lean = 0.06 + rand() * 0.14;
+      const h = 0.2 + rand() * 0.16;
+      const w = 0.022;
+      const cx = Math.cos(a);
+      const cz = Math.sin(a);
+      pos.push(-cz * w, 0, cx * w, cz * w, 0, -cx * w, cx * lean, h, cz * lean);
+      tip.push(0, 0, 1);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute("tip", new THREE.Float32BufferAttribute(tip, 1));
+    geo.computeVertexNormals();
+    const mat = new CelMaterial({
+      // Dry at the tip, the season's ground colour at the foot.
+      colorNode: mix(LOOK.ground2.mul(0.8), mix(LOOK.ground, vec3(0.7, 0.62, 0.34), 0.45), attribute("tip", "float")),
+      side: THREE.DoubleSide,
+      silhouette: 0,
+      crease: 0,
+      darkness: 0,
+    });
+    // (Lit as the ground they stand on: every blade's normal is up.)
+    mat.normalNode = vec3(0, 1, 0).transformDirection(cameraViewMatrix);
+    mat.positionNode = Fn(() => {
+      const p = positionLocal;
+      const { speed, dir } = windNow();
+      const bend = attribute("tip", "float")
+        .mul(speed.mul(0.006).add(0.012))
+        .mul(sin(LOOK.time.mul(3.1).add(p.x.mul(2.1)).add(p.z.mul(1.7))).add(gustAt(p.xz).mul(1.5)));
+      return p.add(vec3(dir.x.mul(bend), 0, dir.y.mul(bend)));
+    })();
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    for (let i = 0; i < count; i++) {
+      const s = spots[i * 4 + 3]! * (0.8 + rand() * 0.6);
+      q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rand() * Math.PI * 2);
+      m.compose(
+        new THREE.Vector3(spots[i * 4]!, spots[i * 4 + 1]! - 0.02, spots[i * 4 + 2]!),
+        q,
+        new THREE.Vector3(s, s, s),
+      );
+      mesh.setMatrixAt(i, m);
+    }
+    mesh.frustumCulled = false;
+    mesh.userData.noMerge = true;
+    this.group.add(mesh);
   }
 
   /**

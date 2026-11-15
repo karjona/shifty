@@ -3,7 +3,11 @@
 // gully, and what natural lips are made of (a log's ends sticking out of
 // the snow, a rock's face under the crest).
 import * as THREE from "three/webgpu";
-import { FOLIAGE } from "./cel/look.ts";
+import { Fn, float, fwidth, mix, positionWorld, smoothstep, vec2, vec3, vertexStage } from "three/tsl";
+import { FOLIAGE, LOOK, cut0 } from "./cel/look.ts";
+import { CelMaterial } from "./cel/material.ts";
+import { noise4 } from "./cel/noise.ts";
+import { snowLoad } from "./mountain-look.ts";
 import type { LipData, RunData, RunPoint } from "./mountain.ts";
 import type { Outcrops, RunScenery } from "./runs.ts";
 
@@ -215,9 +219,41 @@ export function lake(run: RunData, spot: NonNullable<RunScenery["lake"]>, height
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, flat(0xa9c4dc, { roughness: 0.25, flatShading: false }));
+  const mesh = new THREE.Mesh(geo, lakeMaterial());
   mesh.receiveShadow = true;
+  mesh.userData.noMerge = true;
   return mesh;
+}
+
+/**
+ * The lake's surface: where snow lies, ice under drifts of blown snow, with
+ * dark windows of clear ice and a few cracks; below the snow line, open
+ * water in the season's colours.
+ */
+function lakeMaterial(): CelMaterial {
+  return new CelMaterial({
+    colorNode: Fn(() => {
+      const p = positionWorld;
+      const frozen = cut0(vertexStage(snowLoad(p)).sub(0.35));
+      const wide = noise4(p.xz.mul(0.045));
+      const fine = noise4(p.xz.mul(0.21));
+      // Drifts of snow over the ice, clear ice between them.
+      const drift = cut0(wide.x.add(fine.y.mul(0.3)).add(0.12));
+      const clear = mix(vec3(0.42, 0.62, 0.78), vec3(0.3, 0.5, 0.7), cut0(wide.z.add(0.1)));
+      // Cracks: thin pale lines where a stretched noise crosses zero.
+      const crack = fine.z.add(wide.w.mul(0.6)).abs();
+      const w = fwidth(crack).max(1e-4);
+      const cracked = smoothstep(w.mul(2.2), w.mul(0.8), crack).mul(float(1).sub(drift));
+      const ice = mix(mix(clear, vec3(0.8, 0.9, 0.97), cracked.mul(0.7)), vec3(0.92, 0.95, 1.0), drift);
+      const ripple = cut0(noise4(p.xz.mul(vec2(0.5, 1.6)).add(LOOK.time.mul(0.05))).x.sub(0.25));
+      const water = mix(LOOK.seaMid, LOOK.seaLight, ripple.mul(0.5));
+      return mix(water, ice, frozen);
+    })(),
+    shade: new THREE.Color(0.62, 0.68, 0.95),
+    silhouette: 0.5,
+    crease: 0,
+    darkness: 0.5,
+  });
 }
 
 /** The creek along the foot of a gully's wall: a strip of ice in the snow. */

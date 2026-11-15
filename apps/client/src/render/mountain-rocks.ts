@@ -147,7 +147,7 @@ const CRAGS = ["crag_a", "crag_b", "crag_c", "wall_a", "wall_c"];
 const WALLS = ["wall_a", "wall_b", "wall_c"];
 
 /**
- * Every rock of a run, in one batch per model: the sim's rocks (as big as
+ * Every rock of a run: the sim's rocks (as big as
  * they are solid), the walls and crags of the run's scenery (clear of the
  * riding width, crags facing down the slope they stand on), and the faces
  * under rock lips.
@@ -157,7 +157,7 @@ export function rockMeshes(
   scenery: RunScenery,
   models: Models,
   heights: (points: Float32Array) => Float32Array,
-): THREE.InstancedMesh[] {
+): THREE.Mesh[] {
   const placed: Placed[] = [];
   let n = 0;
   for (const o of run.obstacles) {
@@ -280,29 +280,18 @@ export function rockMeshes(
       size: new THREE.Vector3(p.s, p.s * p.tall, p.s * (p.thin ?? 1)),
     });
   });
-  const byModel = new Map<string, Placed[]>();
-  for (const p of placed) {
-    let list = byModel.get(p.model);
-    if (!list) byModel.set(p.model, (list = []));
-    list.push(p);
-  }
-  const out: THREE.InstancedMesh[] = [];
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
+  // (Each a mesh of its own: the mountain merges them by where they stand.)
+  const out: THREE.Mesh[] = [];
   const up = new THREE.Vector3(0, 1, 0);
-  const at = new THREE.Vector3();
-  for (const [model, list] of byModel) {
-    const geometry = models.get(model);
+  for (const p of placed) {
+    const geometry = models.get(p.model);
     if (!geometry) continue;
-    const mesh = new THREE.InstancedMesh(geometry, rockMaterial(), list.length);
-    list.forEach((p, i) => {
-      q.setFromAxisAngle(up, p.turn);
-      mesh.setMatrixAt(i, m.compose(at.set(p.x, p.y, p.z), q, p.size));
-    });
-    mesh.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, rockMaterial());
+    mesh.position.set(p.x, p.y, p.z);
+    mesh.quaternion.setFromAxisAngle(up, p.turn);
+    mesh.scale.copy(p.size);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.userData.noMerge = true;
     out.push(mesh);
   }
   return out;
