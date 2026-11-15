@@ -122,7 +122,8 @@ export class EnvLook {
       if (skip.includes(cls)) continue;
       const mesh = new THREE.Mesh(geometry, this.material(cls));
       mesh.name = `env.${cls}`;
-      mesh.castShadow = true;
+      // (A floor casts no shadow that shows, nor does a pane set in its wall.)
+      mesh.castShadow = cls !== "paving" && cls !== "glass";
       mesh.receiveShadow = true;
       mesh.layers.set(UNREFLECTED);
       out.push(mesh);

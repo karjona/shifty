@@ -217,6 +217,8 @@ export class ClubArt {
   private far = new THREE.Group();
   /** Its stonework, which shows in the sea's mirror image from afar. */
   private stone: THREE.Mesh[] = [];
+  /** Its flags, awnings and parasols: their shadows only show from close by. */
+  private cloth: THREE.Mesh[] = [];
   private detail = false;
   /** Where the jetski stands on its trailer (in the club's space), and the jetski once it has been asked for. */
   private trailer: THREE.Matrix4 | null = null;
@@ -262,6 +264,7 @@ export class ClubArt {
       m.layers.set(UNREFLECTED);
       if (!this.detail) m.layers.enable(0);
     }
+    for (const m of this.cloth) m.castShadow = this.detail;
     if (this.detail && !this.ride && this.trailer) {
       const id = defaultOutfits("male").summer.ride;
       const ride = quietly(() => new Ride("summer", id, (id ? item(id)?.colours : undefined) ?? PLAIN));
@@ -279,6 +282,7 @@ export class ClubArt {
     look.medallion.value.set(CLUB.x + MEDALLION.x, CLUB.z + MEDALLION.z, MEDALLION.radius);
     const base = look.meshes(model.parts);
     this.stone = base.filter((m) => m.name === "env.solid");
+    this.cloth = base.filter((m) => m.name === "env.cloth");
     g.add(...base, this.near, this.far);
     this.near.add(...look.meshes(model.near));
     this.far.add(...look.meshes(model.far));
