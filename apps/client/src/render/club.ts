@@ -23,6 +23,9 @@ export const CLUB = {
   /** The terrace faces the bay (−z). */
 };
 
+/** The medallion in the paving at the head of the stair (on the terrace, from its middle; m). */
+const MEDALLION = { x: 3.9, z: -8.1, radius: 1.1 };
+
 /** The terrace is drawn in squares of ground this size (m), so what the camera has its back to is culled. */
 const CELL = 12;
 
@@ -172,6 +175,7 @@ function assemble(model: EnvModel): THREE.Group {
   const g = new THREE.Group();
   const look = new EnvLook();
   look.setBreeze(model.anchors.get("wind")?.[0]?.data.dir);
+  look.medallion.value.set(CLUB.x + MEDALLION.x, CLUB.z + MEDALLION.z, MEDALLION.radius);
   g.add(...look.meshes(model.parts, ["paving"]));
   const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
   const count = new Map<string, number>();

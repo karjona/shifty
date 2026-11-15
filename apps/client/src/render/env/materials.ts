@@ -44,6 +44,8 @@ const CLOTH_SWAY: Sway = { along: 0.05, across: 0.16, lift: 0.05 };
 export class EnvLook {
   /** Where the breeze blows (x, z; the art's flags fly that way). */
   readonly breeze = uniform(new THREE.Vector2(1, 0));
+  /** A medallion set into the paving: its middle (world x, z) and radius (m; 0 = none). */
+  readonly medallion = uniform(new THREE.Vector3(0, 0, 0));
   private materials = new Map<string, THREE.Material>();
 
   /** Sets the breeze from the art's `wind` anchor. */
@@ -95,7 +97,12 @@ export class EnvLook {
     } else if (cls === "glass") {
       m = new CelMaterial({ colorNode: glass(), spec: 0.5, specSize: 0.06, crease: 0, id: inkId("env.glass") });
     } else if (cls === "paving") {
-      m = new CelMaterial({ colorNode: paving(), crease: 0, outdoor: FOLIAGE.none, shade: PAVING_SHADE });
+      m = new CelMaterial({
+        colorNode: paving(this.medallion),
+        crease: 0,
+        outdoor: FOLIAGE.none,
+        shade: PAVING_SHADE,
+      });
     } else {
       m = new CelMaterial({ vertexColors: true, outdoor: FOLIAGE.none });
     }
@@ -154,8 +161,16 @@ const tone = (hex: number) => {
 /** The shade that falls on paving: deep enough that a rider's shadow grounds them on the pale stone. */
 const PAVING_SHADE = new THREE.Color(0.5, 0.5, 0.78);
 
-/** Paving: limestone slabs with grout, a small glazed or terracotta tile set in at every corner. */
-function paving(): THREE.Node<"vec3"> {
+/** The game's slash leans this far (rad): the Earth's tilt. */
+const TILT = (23.4 * Math.PI) / 180;
+
+/**
+ * Paving: limestone slabs with grout, a small glazed or terracotta tile set
+ * in at every corner, and a round medallion of glazed tile where `medallion`
+ * says (its middle and radius): a glazed ring round a pale field with the
+ * game's tilted slash across it.
+ */
+function paving(medallion: THREE.Node<"vec3">): THREE.Node<"vec3"> {
   return Fn(() => {
     const q = positionWorld.xz.div(0.66);
     const cell = q.floor();
@@ -174,6 +189,21 @@ function paving(): THREE.Node<"vec3"> {
     const tile = mix(mix(tone(0xc8683f), tone(0xb4552f), smoothstep(-0.4, 0.4, k.y)), tone(0x2f7f9a), step(0.42, k.z));
     const groutLine = grout.mul(float(1).sub(smoothstep(float(0.86).sub(ca), float(0.86).add(ca), corner)));
     const pattern = mix(mix(slab, tile, inset), tone(0xb7a27e), groutLine);
-    return mix(pattern, tone(0xdfcba6), smoothstep(0.5, 1.4, span));
+    const paved = mix(pattern, tone(0xdfcba6), smoothstep(0.5, 1.4, span));
+    // The medallion: bands by distance from its middle, the slash a leaning bar.
+    const d = positionWorld.xz.sub(medallion.xy).div(max(medallion.z, float(1e-3)));
+    const r = d.length();
+    const ra = max(fwidth(r), float(1e-4));
+    const within = (to: number) => smoothstep(float(to).add(ra), float(to).sub(ra), r);
+    const along = d.x.mul(Math.sin(TILT)).sub(d.y.mul(Math.cos(TILT)));
+    const across = d.x.mul(Math.cos(TILT)).add(d.y.mul(Math.sin(TILT)));
+    const bar = smoothstep(float(0.1).add(ra), float(0.1).sub(ra), across.abs()).mul(
+      smoothstep(float(0.5).add(ra), float(0.5).sub(ra), along.abs()),
+    );
+    let disc: THREE.Node<"vec3"> = tone(0x2f7f9a);
+    disc = mix(disc, tone(0xc8683f), within(0.9));
+    disc = mix(disc, tone(0xf0e2c4), within(0.86));
+    disc = mix(disc, tone(0x2b3fd0), bar);
+    return mix(paved, disc, within(1).mul(step(0.01, medallion.z)));
   })();
 }
