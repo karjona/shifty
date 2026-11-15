@@ -166,16 +166,19 @@ def young(seed, height, green, green_top):
 
 
 def pad(m, at, radius, thick, col, r, sides=7):
-    """A clump of a pine's crown: a lumpy dome, dark below."""
-    rim, mid, cap = [], [], []
+    """A clump of a pine's crown: a billowing dome, lumpy round its rim, bellied and dark below, tipped a little."""
+    tip = (r.uniform(-0.2, 0.2), r.uniform(-0.2, 0.2))
+    rim, mid, cap, belly = [], [], [], []
     for i in range(sides):
         a = (i / sides) * math.tau
-        k = radius * r.uniform(0.8, 1.2)
-        rim.append(add(at, (math.cos(a) * k, r.uniform(-0.15, 0.1) * thick, math.sin(a) * k)))
-        mid.append(add(at, (math.cos(a + 0.22) * k * 0.82, thick * r.uniform(0.42, 0.56), math.sin(a + 0.22) * k * 0.82)))
-        cap.append(add(at, (math.cos(a + 0.45) * k * 0.42, thick * r.uniform(0.82, 0.96), math.sin(a + 0.45) * k * 0.42)))
-    top = add(at, (0.0, thick, 0.0))
-    below = add(at, (0.0, -thick * 0.5, 0.0))
+        k = radius * r.uniform(0.82, 1.2)
+        lift = lambda q: (q[0], q[1] + q[0] * tip[0] + q[2] * tip[1], q[2])
+        rim.append(add(at, lift((math.cos(a) * k, r.uniform(-0.1, 0.12) * thick, math.sin(a) * k))))
+        mid.append(add(at, lift((math.cos(a + 0.22) * k * 0.86, thick * r.uniform(0.5, 0.66), math.sin(a + 0.22) * k * 0.86))))
+        cap.append(add(at, lift((math.cos(a + 0.45) * k * 0.48, thick * r.uniform(0.9, 1.05), math.sin(a + 0.45) * k * 0.48))))
+        belly.append(add(at, lift((math.cos(a) * k * 0.6, -thick * r.uniform(0.34, 0.48), math.sin(a) * k * 0.6))))
+    top = add(at, (0.0, thick * 1.12, 0.0))
+    below = add(at, (0.0, -thick * 0.55, 0.0))
 
     def nrm(p, up):
         d = (p[0] - at[0], 0.0, p[2] - at[2])
@@ -183,23 +186,29 @@ def pad(m, at, radius, thick, col, r, sides=7):
         return norm((d[0] / length, up, d[2] / length))
 
     light = scale(col, 1.1)
+    dark = scale(col, 0.55)
     for i in range(sides):
         j = (i + 1) % sides
         m.quad(
             rim[i], mid[i], mid[j], rim[j],
             [col, col, col, col],
-            [(0.7, 0.0), (0.5, 0.45), (0.5, 0.45), (0.7, 0.0)],
+            [(0.7, 0.0), (0.5, 0.5), (0.5, 0.5), (0.7, 0.0)],
             [nrm(rim[i], 0.0), nrm(mid[i], 0.6), nrm(mid[j], 0.6), nrm(rim[j], 0.0)],
         )
         m.quad(
             mid[i], cap[i], cap[j], mid[j],
             [col, light, light, col],
-            [(0.5, 0.45), (0.4, 0.95), (0.4, 0.95), (0.5, 0.45)],
+            [(0.5, 0.5), (0.4, 0.95), (0.4, 0.95), (0.5, 0.5)],
             [nrm(mid[i], 0.6), nrm(cap[i], 1.6), nrm(cap[j], 1.6), nrm(mid[j], 0.6)],
         )
         m.tri(cap[i], top, cap[j], light, [(0.4, 0.95), (0.3, 1.0), (0.4, 0.95)], [nrm(cap[i], 1.6), (0, 1, 0), nrm(cap[j], 1.6)])
-        dark = scale(col, 0.5)
-        m.tri(rim[j], below, rim[i], dark, (0.5, 0.0), [nrm(rim[j], -0.6), (0, -1, 0), nrm(rim[i], -0.6)])
+        m.quad(
+            rim[j], belly[j], belly[i], rim[i],
+            [scale(col, 0.75), dark, dark, scale(col, 0.75)],
+            (0.5, 0.0),
+            [nrm(rim[j], -0.3), nrm(belly[j], -1.2), nrm(belly[i], -1.2), nrm(rim[i], -0.3)],
+        )
+        m.tri(belly[j], below, belly[i], dark, (0.5, 0.0), [nrm(belly[j], -1.2), (0, -1, 0), nrm(belly[i], -1.2)])
 
 
 def limb(m, a, b, ra, rb, col, sides=4):
@@ -248,7 +257,7 @@ def pine(seed, height, green):
         centre = add(base, (math.cos(az) * out, out * 0.3, math.sin(az) * out))
         if out > 0:
             limb(m, add(base, (0, -0.8, 0)), add(centre, (0, -0.2, 0)), 0.13, 0.07, PINE_BARK)
-        pad(m, centre, rad, rad * 0.62, scale(green, r.uniform(0.92, 1.08)), r)
+        pad(m, centre, rad, rad * 0.8, scale(green, r.uniform(0.92, 1.08)), r)
     return m
 
 

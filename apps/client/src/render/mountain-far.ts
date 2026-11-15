@@ -145,7 +145,9 @@ function landscape(site: FarSite): { height: (x: number, z: number) => number; s
     const spur = ridged(wx / 640, wz / 640, 23, 3);
     // Now and then a peak stands over its range.
     const peak = Math.max(0, noise2(wx / 1900 + 5, wz / 1900, 57)) ** 2 * 1.5;
-    const hills = crest * open * (0.16 + 1.25 * range ** 1.5 + 0.3 * spur * open + peak * inland);
+    // Crests are broken into teeth and notches.
+    const jag = ridged(wx / 300 + 7, wz / 300, 71, 2) * range;
+    const hills = crest * open * (0.16 + 1.25 * range ** 1.5 + 0.3 * spur * open + peak * inland + 0.22 * jag * inland);
     // The shore: a ragged line across the valley's mouth, the ground running out under the sea.
     const shore = z1 + COAST + 700 * noise2(x / 2600, 0.5, 5) + 260 * noise2(x / 700, 2.5, 7);
     const dry = 1 - ramp(z, shore - 500, shore + 900);

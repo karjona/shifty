@@ -2,12 +2,16 @@
 // heights (a ribbon of vertices along the run, fine where the riding is, and
 // a coarse grid for the mountain around it), so the slope you see is the
 // slope you ride. The snow shows its shape: a low sun, shade baked into
-// hollows, blue dye lines on lips and knuckles, and old board tracks
-// streaking down the run. Around it: pines crowding the run's edges, red
-// netting fences, checkpoint flags, the start and finish arches, the
-// chairlift, rocks, a lodge, peaks in the haze, falling snow, powder thrown
-// up by the boards, and the tracks they carve; and what each run has of its
-// own (runs.ts: outcrops, a lift station, a lake, a creek, logs).
+// hollows, the forest's shade thrown across it, blue dye lines on lips and
+// knuckles, old board tracks streaking down the run, and bare rock in its
+// beds where the mountain is steep. Around it, built once the scenery's
+// models are in (`ready`): the forest (mountain-forest.ts), rocks and rock
+// walls (mountain-rocks.ts), the village, the lift, gantries, gates, flags
+// and the crowd (mountain-built.ts), blown snow, smoke and birds
+// (mountain-life.ts), the land beyond down to the sea (mountain-far.ts),
+// red netting, falling snow, powder thrown up by the boards and the tracks
+// they carve; and what each run has of its own (runs.ts: a lake, a creek,
+// logs).
 //
 // All of it in the race's conditions (see look.ts): deep powder in winter;
 // in fall a thin white run through brown slopes, rocks poking through; in

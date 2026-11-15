@@ -1,39 +1,20 @@
-// Props round a run that only some runs have (see runs.ts): rock outcrops
-// on its walls, the chairlift's top station, a frozen lake, the creek in a
-// gully, and what natural lips are made of (a log's ends sticking out of
-// the snow, a rock's face under the crest).
+// Props round a run that only some runs have (see runs.ts): a lake, the
+// creek in a gully, and the log a log lip is made of (its ends sticking out
+// of the snow).
 import * as THREE from "three/webgpu";
 import { Fn, float, fwidth, mix, positionWorld, smoothstep, vec2, vec3, vertexStage } from "three/tsl";
-import { FOLIAGE, LOOK, cut0 } from "./cel/look.ts";
+import { LOOK, cut0 } from "./cel/look.ts";
 import { CelMaterial } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import { snowLoad } from "./mountain-look.ts";
 import type { LipData, RunData, RunPoint } from "./mountain.ts";
-import type { Outcrops, RunScenery } from "./runs.ts";
+import type { RunScenery } from "./runs.ts";
 
 /** Ground heights at many points at once: `[x0, z0, x1, z1, ...]`. */
 export type Heights = (points: Float32Array) => Float32Array;
 
-/** Deterministic noise in [0, 1). */
-function rng(seed: number): () => number {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s ^= s << 13;
-    s ^= s >>> 17;
-    s ^= s << 5;
-    return (s >>> 0) / 4294967296;
-  };
-}
-
 const flat = (color: number, opts: Partial<THREE.MeshStandardNodeMaterialParameters> = {}) =>
   new THREE.MeshStandardNodeMaterial({ color, roughness: 0.85, flatShading: true, ...opts });
-
-/** Out in the weather: snow settles on it as deep as it lies (see cel/look.ts). */
-const weathered = (color: number) => {
-  const m = flat(color);
-  m.userData.outdoor = FOLIAGE.none;
-  return m;
-};
 
 /** The centre line at `s` (from the run's points every few metres; straight on past either end). */
 export function runPoint(run: RunData, s: number): RunPoint {
@@ -70,104 +51,6 @@ export function runPoint(run: RunData, s: number): RunPoint {
 export function runAt(run: RunData, s: number, offset: number): { x: number; z: number; yaw: number } {
   const p = runPoint(run, s);
   return { x: p.x - Math.cos(p.yaw) * offset, z: p.z + Math.sin(p.yaw) * offset, yaw: p.yaw };
-}
-
-/** A lumpy rock, its foot at y = 0, about 2 m across. */
-function rockGeometry(seed: number): THREE.BufferGeometry {
-  const g = new THREE.DodecahedronGeometry(1, 1);
-  const rand = rng(seed);
-  const pos = g.attributes.position!;
-  const seen = new Map<string, number>();
-  for (let i = 0; i < pos.count; i++) {
-    const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
-    let k = seen.get(key);
-    if (k === undefined) seen.set(key, (k = 0.8 + rand() * 0.35));
-    pos.setXYZ(i, pos.getX(i) * k, Math.max(-0.2, pos.getY(i) * k * 0.8) + 0.2, pos.getZ(i) * k);
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
-/** Rock outcrops on the walls and round the run: one batch of rocks and one of the snow on them. */
-export function outcrops(run: RunData, bands: Outcrops[], heights: Heights): THREE.Object3D[] {
-  if (bands.length === 0) return [];
-  const rand = rng(4242);
-  const spots: { x: number; z: number; size: number; tall: number; turn: number }[] = [];
-  for (const b of bands) {
-    for (let k = 0; k < b.count; k++) {
-      const s = b.from + rand() * (b.to - b.from);
-      const p = runPoint(run, s);
-      const side = rand() < 0.5 ? -1 : 1;
-      const out = p.limit + b.near + rand() * rand() * (b.far - b.near);
-      const at = runAt(run, s, side * out);
-      const size = b.size * (0.35 + rand() * 0.65);
-      spots.push({ x: at.x, z: at.z, size, tall: 0.5 + rand() * 0.7, turn: rand() * Math.PI * 2 });
-    }
-  }
-  const pts = new Float32Array(spots.length * 2);
-  spots.forEach((p, i) => pts.set([p.x, p.z], i * 2));
-  const ys = heights(pts);
-  const rocks = new THREE.InstancedMesh(rockGeometry(7), flat(0x67646b), spots.length);
-  const caps = new THREE.InstancedMesh(rockGeometry(9), weathered(0x67646b), spots.length);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const e = new THREE.Euler();
-  spots.forEach((p, i) => {
-    const r = p.size / 2;
-    q.setFromEuler(e.set(0, p.turn, 0));
-    m.compose(new THREE.Vector3(p.x, ys[i]! - r * 0.35, p.z), q, new THREE.Vector3(r, r * p.tall, r));
-    rocks.setMatrixAt(i, m);
-    m.compose(
-      new THREE.Vector3(p.x, ys[i]! - r * 0.35 + r * p.tall * 0.62, p.z),
-      q,
-      new THREE.Vector3(r * 0.78, r * p.tall * 0.42, r * 0.78),
-    );
-    caps.setMatrixAt(i, m);
-  });
-  for (const mesh of [rocks, caps]) {
-    mesh.computeBoundingSphere();
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-  }
-  return [rocks, caps];
-}
-
-/** The chairlift's top station: a housing over the bullwheel on a concrete base. Returns it and where its cable leaves. */
-export function liftStation(
-  run: RunData,
-  top: NonNullable<RunScenery["liftTop"]>,
-  towards: THREE.Vector3,
-  ground: (x: number, z: number) => number,
-): { station: THREE.Group; cable: THREE.Vector3 } {
-  const at = runAt(run, top.s, top.offset);
-  const y = ground(at.x, at.z);
-  const station = new THREE.Group();
-  const concrete = flat(0xb9b6ae);
-  const steel = flat(0x9aa3ad, { roughness: 0.5 });
-  // The base, the hut where the chairs come round, the housing over the
-  // bullwheel reaching out over the line, and the wheel under it.
-  const base = new THREE.Mesh(new THREE.BoxGeometry(8, 1.2, 12), concrete);
-  base.position.y = 0.4;
-  const hut = new THREE.Mesh(new THREE.BoxGeometry(5, 3, 5), flat(0x7a4a2c));
-  hut.position.set(-3.5, 2.5, -3);
-  const hutRoof = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.35, 5.6), weathered(0x4e4440));
-  hutRoof.position.set(-3.5, 4.15, -3);
-  const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.6, 4.2, 1.6), steel);
-  pillar.position.set(0, 3, 1);
-  const housing = new THREE.Mesh(new THREE.BoxGeometry(6.8, 1.6, 10), flat(0x1f3b6e));
-  housing.position.set(0, 5.6, 3);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.3, 10.4), weathered(0x4e4440));
-  roof.position.set(0, 6.55, 3);
-  const wheel = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 0.3, 20), steel);
-  wheel.position.set(0, 4.6, 5.5);
-  station.add(base, hut, hutRoof, pillar, housing, roof, wheel);
-  station.position.set(at.x, y - 0.3, at.z);
-  // Its open end faces down the line.
-  station.rotation.y = Math.atan2(towards.x - at.x, towards.z - at.z);
-  station.traverse((o) => (o.castShadow = true));
-  station.updateMatrixWorld(true);
-  const cable = new THREE.Vector3(0, 4.6, 8).applyMatrix4(station.matrixWorld);
-  return { station, cable };
 }
 
 /** A frozen lake: flat ice over the lowest ground, with its edge sunk into the snow. */
@@ -291,49 +174,37 @@ export function creek(run: RunData, spot: NonNullable<RunScenery["creek"]>, heig
   return mesh;
 }
 
-/** What natural lips are made of: a log's ends out of the snow either side, a rock's face under a rock lip's crest. */
+/** What log lips are made of: the log's ends out of the snow either side of the run. */
 export function lipProps(run: RunData, lips: LipData[], ground: (x: number, z: number) => number): THREE.Object3D[] {
   const out: THREE.Object3D[] = [];
   const bark = flat(0x4a3526);
   const cut = flat(0xc8a27a);
-  const stone = flat(0x5f5c63);
   for (const lip of lips) {
-    if (lip.kind === "log") {
-      const p = runPoint(run, lip.lip);
-      const reach = lip.halfWidth + 3.2;
-      const a = runAt(run, lip.lip, lip.offset - reach);
-      const b = runAt(run, lip.lip, lip.offset + reach);
-      const ya = ground(a.x, a.z);
-      const yb = ground(b.x, b.z);
-      const len = Math.hypot(b.x - a.x, b.z - a.z, yb - ya);
-      const log = new THREE.Group();
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, len, 9), bark);
-      trunk.rotation.z = Math.PI / 2;
-      const end = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.04, 9), cut);
-      end.rotation.z = Math.PI / 2;
-      end.position.x = len / 2;
-      log.add(trunk, end);
-      // A broken branch stub.
-      const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.9, 5), bark);
-      stub.position.set(-len / 2 + 0.8, 0.45, 0.1);
-      stub.rotation.z = 0.5;
-      log.add(stub);
-      log.position.set((a.x + b.x) / 2, (ya + yb) / 2 + 0.2, (a.z + b.z) / 2);
-      log.rotation.y = p.yaw;
-      log.rotation.z = Math.atan2(ya - yb, len);
-      log.traverse((o) => (o.castShadow = true));
-      out.push(log);
-    } else if (lip.kind === "rock") {
-      // The crest is snow over the rock's top; its face shows below it, on the drop.
-      const at = runAt(run, lip.lip + lip.height * 0.6, lip.offset);
-      const r = lip.height * 1.25;
-      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), stone);
-      rock.scale.set(Math.max(lip.halfWidth, 1.5) * 0.9, r, r * 0.8);
-      rock.position.set(at.x, ground(at.x, at.z) - r * 0.45, at.z);
-      rock.rotation.y = at.yaw + Math.PI / 2;
-      rock.castShadow = true;
-      out.push(rock);
-    }
+    if (lip.kind !== "log") continue;
+    const p = runPoint(run, lip.lip);
+    const reach = lip.halfWidth + 3.2;
+    const a = runAt(run, lip.lip, lip.offset - reach);
+    const b = runAt(run, lip.lip, lip.offset + reach);
+    const ya = ground(a.x, a.z);
+    const yb = ground(b.x, b.z);
+    const len = Math.hypot(b.x - a.x, b.z - a.z, yb - ya);
+    const log = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.4, len, 9), bark);
+    trunk.rotation.z = Math.PI / 2;
+    const end = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.04, 9), cut);
+    end.rotation.z = Math.PI / 2;
+    end.position.x = len / 2;
+    log.add(trunk, end);
+    // A broken branch stub.
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.9, 5), bark);
+    stub.position.set(-len / 2 + 0.8, 0.45, 0.1);
+    stub.rotation.z = 0.5;
+    log.add(stub);
+    log.position.set((a.x + b.x) / 2, (ya + yb) / 2 + 0.2, (a.z + b.z) / 2);
+    log.rotation.y = p.yaw;
+    log.rotation.z = Math.atan2(ya - yb, len);
+    log.traverse((o) => (o.castShadow = true));
+    out.push(log);
   }
   return out;
 }
