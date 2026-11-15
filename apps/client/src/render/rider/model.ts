@@ -18,7 +18,15 @@ import {
 } from "@shifty/rider";
 import { type ModelAsset, type TintSource, builtModels, loadModel, loadOverlay } from "./assets.ts";
 import { inkId } from "../cel/material.ts";
-import { CelTintMaterial, type FaceOverlays, NO_OVERLAY, faceGeometry, limbGeometry, outlineOf } from "../cel/rider.ts";
+import {
+  CelTintMaterial,
+  type FaceOverlays,
+  NO_OVERLAY,
+  type NeckShade,
+  faceGeometry,
+  limbGeometry,
+  outlineOf,
+} from "../cel/rider.ts";
 import { whileLoading } from "../../loading.ts";
 import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
@@ -191,6 +199,12 @@ export class RiderFigure {
         if (w?.pieces && !w.pieces.includes(piece.name)) continue;
         const regions = piece.geometry.hasAttribute("_region");
         const face = i === 0 && piece.name === "face";
+        const geometry = face
+          ? faceGeometry(piece.geometry)
+          : piece.tints === "hair"
+            ? piece.geometry
+            : limbGeometry(piece.geometry, body.rest);
+        const neck: unknown = face ? geometry.userData.neck : null;
         const mat = new CelTintMaterial(
           piece.detail,
           piece.mask,
@@ -202,15 +216,11 @@ export class RiderFigure {
           face,
           piece.flat,
           face ? overlays : null,
+          isNeckShade(neck) ? neck : null,
         );
         if (regions) mat.hide(hidden);
         const colours = w?.colours ?? null;
         mat.setTints(...tintsOf(look, piece.tints, colours));
-        const geometry = face
-          ? faceGeometry(piece.geometry)
-          : piece.tints === "hair"
-            ? piece.geometry
-            : limbGeometry(piece.geometry, body.rest);
         const mesh = new THREE.SkinnedMesh(geometry, mat);
         for (const part of SHAPES) {
           const target = piece.morphs[`${part}.${look[part]}`];
@@ -224,7 +234,8 @@ export class RiderFigure {
         group.add(mesh);
         mesh.bind(rig.skeleton, new THREE.Matrix4());
         meshes.push(mesh);
-        mesh.receiveShadow = true;
+        // A face takes no cast shadows: hair and hats would throw blocks of shade across it.
+        mesh.receiveShadow = !face;
         const outline = outlineOf(mesh, mat);
         group.add(outline);
         outline.bind(rig.skeleton, new THREE.Matrix4());
@@ -283,6 +294,10 @@ export class RiderFigure {
     this.version++;
     this.clear();
   }
+}
+
+function isNeckShade(v: unknown): v is NeckShade {
+  return typeof v === "object" && v !== null && "jaw" in v && "fall" in v && "chin" in v && "depth" in v;
 }
 
 /** A look built and waiting to go on. */

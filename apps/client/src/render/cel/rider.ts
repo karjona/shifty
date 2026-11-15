@@ -22,6 +22,7 @@ import {
   modelViewMatrix,
   modelWorldMatrix,
   normalLocal,
+  positionGeometry,
   positionLocal,
   pow,
   smoothstep,
@@ -44,6 +45,17 @@ export const RIDER_LINE = uniform(3.2);
 
 const WARM_SHADE = new THREE.Color(0.86, 0.62, 0.66);
 const COOL_SHADE = new THREE.Color(0.66, 0.62, 0.86);
+
+/**
+ * Where a head keeps its neck in shade, in the piece's rest space: fully
+ * `fall` below `jaw` (a height) and `depth` behind `chin` (how far forward).
+ */
+export interface NeckShade {
+  jaw: number;
+  fall: number;
+  chin: number;
+  depth: number;
+}
 
 /** What a face wears over its paint. */
 export interface FaceOverlays {
@@ -97,6 +109,8 @@ export class CelTintMaterial extends CelMaterial {
     flat: THREE.Texture | null = null,
     /** The brows and beard over the flat paint. */
     overlays: FaceOverlays | null = null,
+    /** The head's neck shade (see `faceGeometry`). */
+    neck: NeckShade | null = null,
   ) {
     const glossy = finish.roughness < 0.45;
     super({
@@ -105,7 +119,7 @@ export class CelTintMaterial extends CelMaterial {
       threshold: face ? -0.3 : kind === "look" ? -0.08 : 0.02,
       spec: glossy ? 0.55 : kind === "look" && !face ? 0.06 : 0,
       specSize: glossy ? 0.035 : 0.1,
-      rim: face ? 0 : kind === "look" ? 0.3 : 0.6,
+      rim: face ? 0 : kind === "look" ? 0.3 : kind === "hair" ? 0.15 : 0.6,
       // The shell draws the outline; the ink pass adds lines where pieces meet, and sharp folds.
       silhouette: 0,
       crease: 0.7,
@@ -177,7 +191,12 @@ export class CelTintMaterial extends CelMaterial {
     const soft = dot(texture(detail).level(float(kind === "look" ? 5.5 : 4)).rgb, vec3(0.299, 0.587, 0.114));
     // (Skin takes its shade from its shape alone: clean shapes on a face, an arm, a leg.)
     const painted = clamp(soft.sub(0.5).mul(kind === "look" ? 0 : 0.5), -0.45, 0.35).sub(shapeShade.mul(SHAPE_SHADE));
-    this.biasNode = face ? painted.add(attribute<"float">("shadeBias", "float")) : painted;
+    if (neck) {
+      // Under the jaw and behind the chin the neck is always in the head's shade.
+      const under = smoothstep(neck.jaw, neck.jaw - neck.fall, positionGeometry.y);
+      const behind = smoothstep(neck.chin, neck.chin - neck.depth, positionGeometry.z);
+      this.biasNode = painted.sub(under.mul(behind).mul(NECK_SHADE));
+    } else this.biasNode = painted;
     if (kind === "kit") this.deepNode = smoothstep(0.3, 0.22, soft);
     if (kind === "hair") {
       // The sheen on anime hair: a broad, lighter band of the hair's own colour.
@@ -322,8 +341,7 @@ const faceGeometries = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>()
  * light as one plane (lit whole until the light is well round the side,
  * then shade comes in from the far cheek in one clean shape) instead of in
  * blobs round every bump. `keep` is how much of the sculpt's own normal
- * stays. Each vertex also carries how far its shade line shifts
- * (`shadeBias`): under the jaw the neck is always in shade.
+ * stays. Its `userData.neck` says where the neck's shade falls.
  */
 export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.BufferGeometry {
   let out = faceGeometries.get(geo);
@@ -345,7 +363,6 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.Buffe
   const half = box.getSize(new THREE.Vector3()).multiplyScalar(0.5);
   const span = half.y * 0.25;
   const n = new Float32Array(pos.count * 3);
-  const bias = new Float32Array(pos.count);
   const e = new THREE.Vector3();
   const o = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
@@ -365,12 +382,11 @@ export function faceGeometry(geo: THREE.BufferGeometry, keep = 0.1): THREE.Buffe
       .addScaledVector(o, 1 - w)
       .normalize();
     n.set([e.x, e.y, e.z], i * 3);
-    // Under the jaw and behind the chin: the neck, in the head's shade.
-    const under = smooth((jaw + span * 0.5 - (p.y + c.y)) / (span * 1.5));
-    const behind = smooth((half.z * 0.78 - p.z) / (half.z * 0.45));
-    bias[i] = -NECK_SHADE * under * behind;
   }
-  out = derived(geo, new THREE.BufferAttribute(n, 3), { shadeBias: new THREE.BufferAttribute(bias, 1) });
+  out = derived(geo, new THREE.BufferAttribute(n, 3));
+  // Where the neck's shade falls (see `CelTintMaterial`): below the jaw, behind the chin.
+  const neck: NeckShade = { jaw: jaw + span * 0.5, fall: span * 1.5, chin: c.z + half.z * 0.78, depth: half.z * 0.45 };
+  out.userData.neck = neck;
   faceGeometries.set(geo, out);
   return out;
 }
