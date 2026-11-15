@@ -214,3 +214,83 @@ def export(path):
 
 def rng(seed):
     return random.Random(seed)
+
+
+def dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def clip_polygon(poly, n, d):
+    """The part of a polygon where n·p <= d, and the points where it was cut."""
+    out = []
+    cut = []
+    for i, p in enumerate(poly):
+        q = poly[(i + 1) % len(poly)]
+        dp = dot(n, p) - d
+        dq = dot(n, q) - d
+        if dp <= 0:
+            out.append(p)
+        if (dp < 0 < dq) or (dq < 0 < dp):
+            t = dp / (dp - dq)
+            x = lerp3(p, q, t)
+            out.append(x)
+            cut.append(x)
+    return out, cut
+
+
+def convex(lo, hi, planes):
+    """A box cut by planes (each `(normal, distance)`, keeping n·p <= d): its faces, each a polygon wound counter-clockwise from outside."""
+    x0, y0, z0 = lo
+    x1, y1, z1 = hi
+    polys = [
+        [(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)],
+        [(x1, y0, z1), (x1, y0, z0), (x1, y1, z0), (x1, y1, z1)],
+        [(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)],
+        [(x0, y1, z1), (x1, y1, z1), (x1, y1, z0), (x0, y1, z0)],
+        [(x1, y0, z0), (x0, y0, z0), (x0, y1, z0), (x1, y1, z0)],
+        [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)],
+    ]
+    for n, d in planes:
+        n = norm(n)
+        kept = []
+        cuts = []
+        for poly in polys:
+            part, cut = clip_polygon(poly, n, d)
+            if len(part) >= 3:
+                kept.append(part)
+            cuts.extend(cut)
+        if len(cuts) >= 3:
+            c = (sum(p[0] for p in cuts) / len(cuts), sum(p[1] for p in cuts) / len(cuts), sum(p[2] for p in cuts) / len(cuts))
+            ref = (0.0, 1.0, 0.0) if abs(n[1]) < 0.9 else (1.0, 0.0, 0.0)
+            u = norm(cross(ref, n))
+            v = cross(n, u)
+            ordered = sorted(cuts, key=lambda p: math.atan2(dot(sub(p, c), v), dot(sub(p, c), u)))
+            cap = []
+            for p in ordered:
+                if not cap or math.dist(p, cap[-1]) > 1e-4:
+                    cap.append(p)
+            if len(cap) >= 3 and math.dist(cap[0], cap[-1]) < 1e-4:
+                cap.pop()
+            if len(cap) >= 3:
+                kept.append(cap)
+        polys = kept
+    return polys
+
+
+def polygon_normal(poly):
+    n = (0.0, 0.0, 0.0)
+    for i in range(1, len(poly) - 1):
+        n = add(n, cross(sub(poly[i], poly[0]), sub(poly[i + 1], poly[0])))
+    return norm(n)
+
+
+def polygon_area(poly):
+    n = (0.0, 0.0, 0.0)
+    for i in range(1, len(poly) - 1):
+        n = add(n, cross(sub(poly[i], poly[0]), sub(poly[i + 1], poly[0])))
+    return 0.5 * math.sqrt(dot(n, n))
+
+
+def centroid(poly):
+    k = len(poly)
+    return (sum(p[0] for p in poly) / k, sum(p[1] for p in poly) / k, sum(p[2] for p in poly) / k)

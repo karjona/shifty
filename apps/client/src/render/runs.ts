@@ -15,6 +15,14 @@ export interface Outcrops {
   size: number;
 }
 
+/** Rock walls along the run's edges from `from` to `to`: faces about `height` m tall, `out` m beyond the riding limit. */
+export interface RockWalls {
+  from: number;
+  to: number;
+  height: number;
+  out: number;
+}
+
 export interface RunScenery {
   /** How thick the pines stand along the edges at `s` (1: the usual). */
   forest(s: number): number;
@@ -29,6 +37,7 @@ export interface RunScenery {
   /** The chairlift's top station (its line runs from here down past the lift's towers). */
   liftTop: { s: number; offset: number } | null;
   outcrops: Outcrops[];
+  walls: RockWalls[];
   /** A creek along the foot of the run's wall on `side`. */
   creek: { from: number; to: number; side: 1 | -1 } | null;
 }
@@ -41,7 +50,16 @@ const MOUNTAIN: RunScenery = {
   lodge: { s: 1040, out: 9, side: 1, size: 1 },
   lake: null,
   liftTop: null,
-  outcrops: [],
+  outcrops: [
+    // Round the summit, and on the open slopes below it.
+    { from: -60, to: 40, count: 7, near: 8, far: 50, size: 6 },
+    { from: 60, to: 640, count: 16, near: 8, far: 60, size: 6 },
+    // Over the cliff drop and along the final pitch.
+    { from: 1010, to: 1100, count: 8, near: 3, far: 26, size: 5 },
+    { from: 1400, to: 2000, count: 12, near: 8, far: 50, size: 5 },
+  ],
+  // The gully's sides.
+  walls: [{ from: 1112, to: 1372, height: 3.2, out: 1.5 }],
   creek: null,
 };
 
@@ -58,13 +76,18 @@ const GLADES: RunScenery = {
   lake: { s: 2010, offset: -78, along: 46, across: 30 },
   liftTop: { s: 26, offset: 30 },
   outcrops: [
-    // The ridge and the rock round the couloir.
-    { from: -40, to: 60, count: 18, near: 4, far: 40, size: 5 },
-    { from: 55, to: 175, count: 46, near: 0.5, far: 22, size: 6 },
+    // The ridge and the rock above the couloir.
+    { from: -40, to: 60, count: 12, near: 4, far: 40, size: 6 },
+    { from: 55, to: 175, count: 14, near: 9, far: 34, size: 7 },
     // The bowl's rim.
-    { from: 180, to: 600, count: 34, near: 10, far: 55, size: 7 },
-    // The creek gully's walls.
-    { from: 1215, to: 1480, count: 26, near: 0.5, far: 14, size: 3 },
+    { from: 180, to: 600, count: 22, near: 10, far: 55, size: 8 },
+    // Over the creek gully.
+    { from: 1215, to: 1480, count: 12, near: 5, far: 20, size: 4 },
+  ],
+  // The couloir, and the creek gully.
+  walls: [
+    { from: 58, to: 174, height: 7, out: 1.2 },
+    { from: 1218, to: 1478, height: 3.4, out: 1.5 },
   ],
   creek: { from: 1222, to: 1478, side: -1 },
 };

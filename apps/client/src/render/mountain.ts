@@ -40,22 +40,23 @@ import {
   vertexStage,
 } from "three/tsl";
 import { noise4 } from "./cel/noise.ts";
-import { FOLIAGE, LOOK, SNOW, cut0 } from "./cel/look.ts";
+import { FOLIAGE, LOOK, cut0 } from "./cel/look.ts";
 import { Precipitation } from "./cel/precip.ts";
 import { ConditionsLook } from "./look.ts";
 import { CarveTrails } from "./trails.ts";
 import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { peakRange } from "./scenery.ts";
-import { celify } from "./cel/material.ts";
+import { CelMaterial, celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
-import { creek, lake, lipProps, liftStation, outcrops, runAt, runPoint } from "./mountain-props.ts";
+import { creek, lake, lipProps, liftStation, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
 import { type Tree, forestMeshes, forestShade, plantForest } from "./mountain-forest.ts";
 import { MOUNTAIN } from "./mountain-look.ts";
+import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
 export interface RunPoint {
@@ -200,8 +201,10 @@ const SNOW_EVERYWHERE = -1000;
 /** The groomed snow reaches this far past the riding width (m). */
 const RUN_EDGE = 4;
 
-/** The shade the forest throws on a snow material (see `CelOptions.cast`). */
-const CAST = new WeakMap<THREE.Material, THREE.Node<"float">>();
+/** Snow shades to a cool violet-blue, as drawn. */
+const SNOW_SHADE = [0.6, 0.67, 1.0] as const;
+/** Faces off the run steeper than this (the normal's height) are bare rock. */
+const ROCK_FROM = 0.72;
 
 /** Deterministic noise in [0, 1). */
 function rng(seed: number): () => number {
@@ -264,8 +267,13 @@ const pick = (v: THREE.Node<"vec3">, k: number) => (k === 0 ? v.x : k === 1 ? v.
  * knuckles (`dye`).
  * Fine detail fades out where it would be smaller than a pixel.
  */
-function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
-  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
+function snowMaterial(ribbon: boolean): CelMaterial {
+  // Steep faces off the run are bare rock.
+  const steep = float(ROCK_FROM)
+    .sub(normalWorld.y)
+    .add(noise4(positionWorld.xz.mul(0.023)).z.mul(0.1))
+    .add(noise4(positionWorld.xz.mul(0.19)).w.mul(0.025));
+  const rock = ribbon ? cut0(steep).mul(float(1).sub(smoothstep(0.3, 0.6, attribute("run", "float")))) : cut0(steep);
   // How deep the snow lies (0 = bare ground, 1 = covered): on the run it is
   // groomed (patchy at its edges when the cover is thin); off it, down to the
   // snow line, deeper in hollows and thinner on steep faces.
@@ -297,7 +305,7 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     });
     return covered;
   })();
-  mat.colorNode = Fn(() => {
+  const colour = Fn(() => {
     const p = positionWorld;
     const near = smoothstep(90, 20, p.distance(cameraPosition));
     const drift = noise4(p.xz.mul(0.045)).x.mul(0.5).add(0.5);
@@ -380,10 +388,17 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     // Where it's off: the season's grass, in drifts of two tones.
     const ground = mix(LOOK.ground, LOOK.ground2, smoothstep(0.35, 0.65, drift.add(blotch.mul(0.3)).sub(0.15)));
     c = mix(ground, c, cover);
-    // Steep walls and cliffs show rock.
-    const rock = smoothstep(0.62, 0.45, normalWorld.y);
-    const rockColor = mix(vec3(0.33, 0.33, 0.36), vec3(0.45, 0.44, 0.45), drift);
-    c = mix(c, rockColor, rock.mul(0.85));
+    // Rock in its beds, with snow on the ledges where snow lies.
+    const beds = strata(p);
+    const face = mix(vec3(0.21, 0.19, 0.18), vec3(0.36, 0.32, 0.29), smoothstep(0.3, 0.62, normalWorld.y)).mul(
+      beds.tone,
+    );
+    const lined = mix(face, face.mul(vec3(0.5, 0.48, 0.55)), beds.line.mul(0.8));
+    const ledge = cut0(beds.up.sub(0.58))
+      .mul(cut0(hash(beds.bed.mul(5.3)).sub(0.3)))
+      .mul(cut0(noise4(p.xz.mul(0.13)).y.add(0.25)))
+      .mul(cover);
+    c = mix(c, mix(lined, vec3(0.9, 0.93, 0.99), ledge), rock);
     if (ribbon) {
       // Dye lines, painted on top of everything.
       const dye = smoothstep(0.35, 0.65, attribute("dye", "float"));
@@ -391,14 +406,15 @@ function snowMaterial(ribbon: boolean): THREE.MeshStandardNodeMaterial {
     }
     return c;
   })();
-  // Glitter: a few cells of snow catch the light close up (in the sun).
-  if (ribbon) CAST.set(mat, float(1).sub(cut0(attribute("tree", "float").sub(0.5))));
-  mat.emissiveNode = Fn(() => {
-    const cell = floor(positionWorld.mul(16));
-    const g = hash(cell.x.add(cell.y.mul(57)).add(cell.z.mul(131)));
-    const near = smoothstep(12, 3, positionWorld.distance(cameraPosition));
-    return vec3(1, 1, 1).mul(smoothstep(0.997, 1.0, g).mul(near).mul(0.35).mul(cover).mul(LOOK.shadow));
-  })();
+  const mat = new CelMaterial({
+    colorNode: colour,
+    shade: new THREE.Color(...SNOW_SHADE),
+    richness: 1.12,
+    crease: 0.4,
+    // The shade the forest throws across the run.
+    cast: ribbon ? float(1).sub(cut0(attribute("tree", "float").sub(0.5))) : undefined,
+  });
+  mat.shadeNode = mix(vec3(...SNOW_SHADE), vec3(...ROCK_SHADE), rock);
   return mat;
 }
 
@@ -558,7 +574,6 @@ export class Mountain implements Environment {
       open: this.clearings(),
     });
     this.buildSnow();
-    this.celify(this.group);
     this.trails.group.userData.noMerge = true;
     this.group.add(this.trails.group, this.powder.sprite, this.mist.sprite, this.precipitation.group);
     this.group.add(skyDome(), this.cumulus.mesh);
@@ -572,25 +587,13 @@ export class Mountain implements Environment {
     this.buildFences();
     this.buildGates();
     this.buildLift();
-    this.buildRocks();
+    this.buildRocks(models);
     this.buildLodge();
     this.buildProps();
     this.props.add(peakRange(run.path[0]!.y, run.path.at(-1)!.y, run.path));
-    this.celify(this.props);
+    celify(this.props);
     mergeStatic(this.props, { cell: 400 });
     this.group.add(this.props);
-  }
-
-  /** Snow shades to a cool violet-blue, as drawn (and takes the forest's shade); the rest takes the usual cel tones. */
-  private celify(root: THREE.Object3D): void {
-    celify(
-      root,
-      (m) => {
-        if (!m.colorNode) return {};
-        return { shade: new THREE.Color(0.6, 0.67, 1.0), richness: 1.12, crease: 0.4, cast: CAST.get(m) };
-      },
-      true,
-    );
   }
 
   get sunOffset(): THREE.Vector3 {
@@ -1107,37 +1110,12 @@ export class Mountain implements Environment {
     this.props.add(chairMesh);
   }
 
-  /** Rocks on the run (solid in the sim), with snow on top as deep as it lies. */
-  private buildRocks(): void {
-    const rock = flat(0x6c6a6e);
-    rock.userData.outdoor = FOLIAGE.none;
-    const snow = rock;
-    // Rocks poking through a thin cover: dark and jagged, bare ground round their foot.
-    const bare = flat(0x4a4038);
-    const ground = flat(0x6e5a3c);
-    for (const o of this.run.obstacles) {
-      if (o.kind !== "rock") continue;
-      if (o.cover) {
-        const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.05, 0), bare);
-        r.position.set(o.x, o.y + o.radius * 0.2, o.z);
-        r.scale.set(1, 0.6 + (o.height / Math.max(o.radius, 0.1)) * 0.2, 0.85);
-        r.rotation.y = o.x * 1.7 + o.z;
-        const skirt = new THREE.Mesh(new THREE.CircleGeometry(o.radius * 1.7, 7), ground);
-        skirt.rotation.x = -Math.PI / 2;
-        skirt.position.set(o.x, this.ground(o.x, o.z) + 0.03, o.z);
-        r.castShadow = true;
-        this.props.add(r, skirt);
-        continue;
-      }
-      const r = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 1.1, 0), rock);
-      r.position.set(o.x, o.y + o.radius * 0.35, o.z);
-      r.scale.y = 0.75;
-      const cap = new THREE.Mesh(new THREE.DodecahedronGeometry(o.radius * 0.8, 0), snow);
-      cap.position.set(o.x, o.y + o.radius * 0.75, o.z);
-      cap.scale.y = 0.35;
-      r.castShadow = true;
-      this.props.add(r, cap);
-    }
+  /** The run's rocks: the sim's own, the crags of its scenery and the faces under its rock lips. */
+  private buildRocks(models: Models): void {
+    const heights = (points: Float32Array) => this.terrain.heights(points);
+    for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
+    const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
+    if (patches) this.props.add(patches);
   }
 
   /** The run's lodge (on the mountain run, on the bench above the cliff drop). */
@@ -1177,13 +1155,10 @@ export class Mountain implements Environment {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     const ground = (x: number, z: number) => this.ground(x, z);
     const sc = this.scenery;
-    for (const o of outcrops(this.run, sc.outcrops, heights)) {
-      o.userData.noMerge = true;
-      this.props.add(o);
-    }
     if (sc.lake) this.props.add(lake(this.run, sc.lake, heights));
     if (sc.creek) this.props.add(creek(this.run, sc.creek, heights));
-    for (const o of lipProps(this.run, this.run.lips, ground)) this.props.add(o);
+    const logs = this.run.lips.filter((lip) => lip.kind === "log");
+    for (const o of lipProps(this.run, logs, ground)) this.props.add(o);
   }
 
   update(f: Frame): void {

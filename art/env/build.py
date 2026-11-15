@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import meshlib  # noqa: E402
+import rocks  # noqa: E402
 import trees  # noqa: E402
 
 OUT = os.path.normpath(os.path.join(HERE, "..", "..", "apps", "client", "public", "env", "snow.glb"))
@@ -23,7 +24,7 @@ OUT = os.path.normpath(os.path.join(HERE, "..", "..", "apps", "client", "public"
 def main():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     models = {}
-    for module in (trees,):
+    for module in (trees, rocks):
         models.update(module.build())
     for name, mesh in sorted(models.items()):
         meshlib.to_blender(name, mesh)

@@ -11,21 +11,18 @@ import {
   float,
   frontFacing,
   mix,
-  mrt,
-  output,
   positionGeometry,
   positionLocal,
   positionWorld,
   sin,
   uv,
   vec3,
-  vec4,
   vertexStage,
 } from "three/tsl";
 import { LOOK, cut0 } from "./cel/look.ts";
-import { CelMaterial, inkEdge, inkId, inkOnlyInPass } from "./cel/material.ts";
+import { CelMaterial, inkId } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { SCENERY_SNOW, clearOfFog, gustAt, snowLoad, windNow } from "./mountain-look.ts";
+import { SCENERY_SNOW, fadingInk, gustAt, snowLoad, windNow } from "./mountain-look.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
 
@@ -286,9 +283,7 @@ function treeMaterial(): CelMaterial {
     darkness: 0.75,
     id: inkId("forest"),
   });
-  // Its lines fade into the fog with it.
-  const id = inkId("forest");
-  inkOnlyInPass(m, mrt({ output, ink: vec4(0.7, 0, id, clearOfFog().mul(0.75)), edge: inkEdge(id, 1) }));
+  fadingInk(m, 0.7, 0, inkId("forest"), 0.75);
   // The wind: the whole tree leans with the gusts, and its boughs bob.
   m.positionNode = Fn(() => {
     const p = positionLocal;
@@ -341,6 +336,10 @@ export function forestMeshes(trees: Tree[], models: Models): THREE.InstancedMesh
   return out;
 }
 
+/** Trees are looked up by the squares (this wide, m) their shade can reach. */
+const SHADE_CELL = 24;
+const shadeCell = (i: number, j: number) => (i + 4096) * 8192 + (j + 4096);
+
 /** A tree's half width (m) at `t` of its height (0-1). */
 function profile(k: Kind, t: number): number {
   if (t < k.crownFrom) return 0.3;
@@ -363,9 +362,9 @@ export function forestShade(trees: Tree[], sun: THREE.Vector3, xyz: Float32Array
   const sx = -sun.x / flat;
   const sz = -sun.z / flat;
   const drop = sun.y / flat;
-  const CELL = 24;
+  const CELL = SHADE_CELL;
   const cells = new Map<number, Tree[]>();
-  const key = (i: number, j: number) => (i + 4096) * 8192 + (j + 4096);
+  const key = shadeCell;
   for (const t of trees) {
     const k = KINDS[t.kind]!;
     const reach = Math.min(SHADE_REACH, (k.height * t.scale * t.tall) / drop);

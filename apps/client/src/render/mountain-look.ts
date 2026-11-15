@@ -3,7 +3,8 @@
 // the wind as trees, flags and blown snow feel it (gusts travelling
 // downwind).
 import type * as THREE from "three/webgpu";
-import { clamp, float, max, positionView, sin, smoothstep, uniform, vec2 } from "three/tsl";
+import { clamp, float, max, mrt, output, positionView, sin, smoothstep, uniform, vec2, vec4 } from "three/tsl";
+import { inkEdge, inkOnlyInPass } from "./cel/material.ts";
 import { LOOK } from "./cel/look.ts";
 import { noise4 } from "./cel/noise.ts";
 
@@ -18,6 +19,18 @@ export const MOUNTAIN = {
 /** How clear of the fog a pixel is (1 = this side of it, 0 = lost in it): ink lines fade by it. */
 export function clearOfFog(): THREE.Node<"float"> {
   return smoothstep(MOUNTAIN.fogFar, MOUNTAIN.fogNear, positionView.z.negate()).pow(1.5);
+}
+
+/** Gives `m` ink lines that fade into the fog with it (weights as `inkNode` takes them). */
+export function fadingInk<M extends THREE.NodeMaterial>(
+  m: M,
+  silhouette: number,
+  crease: number,
+  id: number,
+  darkness: number,
+): M {
+  const ink = vec4(silhouette, crease, id, clearOfFog().mul(darkness));
+  return inkOnlyInPass(m, mrt({ output, ink, edge: inkEdge(id, 1) }));
 }
 
 /** The colour of snow lying on scenery (lit). */
