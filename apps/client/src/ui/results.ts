@@ -2,11 +2,13 @@
 // tower of the standings at the side fills in as the others finish, and
 // leaves the view to the race behind it. On the results, the scoreboard:
 // the race, and in a Tilt the points it gave and the standings so far
-// (who moved up or down). Plain DOM like the rest of the HUD, rebuilt only
+// (who moved up or down), with what comes next and when (the next race's
+// season and circuit). Plain DOM like the rest of the HUD, rebuilt only
 // when what it shows changes. Its accent follows the race's season.
 import "./results.css";
+import { circuit } from "@shifty/rider";
 import { messages } from "../i18n/index.ts";
-import type { Season } from "../game/conditions.ts";
+import { type Conditions, type Season, circuitName } from "../game/conditions.ts";
 import { PALETTE, setAccent } from "../game/seasons.ts";
 import { type GrandPrixView, type RaceView, type StandingView, formatTime, ordinal } from "./hud.ts";
 
@@ -41,6 +43,8 @@ export interface BoardInput {
   standings: () => StandingView[];
   riders: Map<number, RosterName>;
   gp: GrandPrixView | null;
+  /** The plan's next race, if it is known (a Tilt between races). */
+  next?: { course: number; conditions: Conditions } | null;
   /** A time trial: your run placed among the ghosts', the results up until a retry (no countdown). */
   trial?: TrialBoard;
 }
@@ -306,7 +310,7 @@ export class Scoreboard {
 
   private renderBoard(input: BoardInput, list: StandingView[], tilt: TiltRow[] | null): void {
     const { race, mySlot, riders } = input;
-    const key = JSON.stringify([list, tilt, mySlot, race.eventIndex, messages().results.title]);
+    const key = JSON.stringify([list, tilt, mySlot, race.eventIndex, input.next, messages().results.title]);
     if (key === this.boardKey) return;
     this.boardKey = key;
     const m = messages().results;
@@ -351,7 +355,26 @@ export class Scoreboard {
         `<span>${mine.finishTicks > 0 ? formatTime(mine.finishTicks, hz) : ""}</span></div>`
       : "";
     const raceLabel = race.eventCount > 1 ? `${m.title} · ${m.race(race.eventIndex + 1, race.eventCount)}` : m.title;
-    const next = race.eventCount <= 1 ? m.back : last ? m.podium : m.next;
+    const nextLabel = race.eventCount <= 1 ? m.back : last ? m.podium : m.next;
+    // Between races of a Tilt: the next one's season (in its colour) and circuit.
+    const upNext = !last && input.next ? input.next : null;
+    const upNextCircuit = upNext ? circuit(upNext.course) : undefined;
+    const upNextText = upNext
+      ? escapeHtml(
+          [
+            messages().seasons[upNext.conditions.season],
+            upNextCircuit && circuitName(upNext.course, upNextCircuit.sport),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        )
+      : "";
+    const next =
+      `<span class="board-next"><span>${nextLabel}</span>` +
+      (upNext
+        ? `<b class="board-upnext" style="--next: #${PALETTE[upNext.conditions.season].accent.toString(16).padStart(6, "0")}">${upNextText}</b>`
+        : "") +
+      `</span>`;
     const racePanel =
       `<section class="board-panel board-race" style="--n: ${cols.length}">` +
       `<header class="board-head"><div><span class="board-label">${raceLabel}</span>` +
@@ -359,9 +382,7 @@ export class Scoreboard {
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +
       cols.map(([label]) => `<span>${label}</span>`).join("") +
       `</div>${rows}` +
-      (tilt || input.trial
-        ? ""
-        : `<footer class="board-foot"><span>${next}</span><b class="board-left"></b></footer>`) +
+      (tilt || input.trial ? "" : `<footer class="board-foot">${next}<b class="board-left"></b></footer>`) +
       `</section>`;
     // Moves once there are earlier results to compare with.
     const moves = tilt?.some((r) => r.move !== null) ?? false;
@@ -384,7 +405,7 @@ export class Scoreboard {
             );
           })
           .join("") +
-        `<footer class="board-foot"><span>${next}</span><b class="board-left"></b></footer></section>`
+        `<footer class="board-foot">${next}<b class="board-left"></b></footer></section>`
       : "";
     this.board.innerHTML = racePanel + tiltPanel;
     this.countdown = this.board.querySelector(".board-left");

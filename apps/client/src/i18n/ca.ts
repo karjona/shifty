@@ -379,6 +379,49 @@ export const ca: Messages = {
       started: "aquest Tilt ja ha començat",
       over: "aquesta cursa ja s'ha acabat",
     },
+    leaving: {
+      tilt: "Vols deixar el Tilt?",
+      race: "Vols deixar la cursa?",
+      tiltOnline:
+        "Un bot ocupa el teu lloc la resta de l'any. Et quedes el que t'han pagat les curses que has acabat, però no el premi per acabar el Tilt.",
+      tiltSingle: "El teu any a Costa Nevada s'acaba aquí.",
+      raceOnline: "Un bot ocupa el teu lloc, i aquesta cursa no et pagarà res.",
+      raceSingle: "La cursa continua sense tu.",
+      stay: "Em quedo",
+      leave: "Surt",
+    },
+    trouble: {
+      full: { title: "Aquesta sala és plena", body: "En una sala hi corren quatre persones com a màxim." },
+      started: {
+        title: "Aquest Tilt ja ha començat",
+        body: "Ningú nou entra en un Tilt un cop ha començat la primera cursa.",
+      },
+      over: { title: "Aquesta cursa s'ha acabat", body: "S'ha acabat mentre hi arribaves." },
+      draining: {
+        title: "El servidor de curses s'està reiniciant",
+        body: "Està acabant les curses abans d'una actualització. Torna-ho a provar d'aquí a una estona.",
+      },
+      token: {
+        title: "No s'ha pogut entrar a la cursa",
+        body: "El teu bitllet no ha funcionat. Torna-ho a provar des del menú.",
+      },
+      kicked: {
+        title: "Has estat fora massa estona",
+        body: "La teva pantalla no ha donat senyals durant uns segons, i la cursa ha continuat sense tu.",
+      },
+      unreachable: {
+        title: "No s'ha pogut arribar al servidor de curses",
+        body: "Les curses necessiten UDP, i potser la teva xarxa el bloqueja. Prova-ho amb una altra xarxa.",
+      },
+      unsupported: {
+        title: "Aquest navegador no pot córrer en línia",
+        body: "Les curses necessiten WebTransport: fes servir un Chrome, Edge, Firefox o Safari recents.",
+      },
+      lost: {
+        title: "S'ha perdut el servidor de curses",
+        body: "La connexió s'ha tallat i la cursa continua sense tu.",
+      },
+    },
   },
   hud: {
     getReady: "PREPARATS",
@@ -443,7 +486,37 @@ export const ca: Messages = {
     final: "Final",
     next: "Propera cursa d'aquí a",
     podium: "Podi d'aquí a",
-    back: "Tornem d'aquí a",
+    back: "Continuem d'aquí a",
+  },
+  end: {
+    continue: "Continua",
+    tilt: "El Tilt",
+    timeTrial: "Contrarellotge",
+    points: (n: number) => `${n} pts.`,
+    champion: "Guanya el Tilt",
+    youChampion: "Guanyes el Tilt!",
+    standings: "Classificació final",
+    paid: "El que ha pagat",
+    waiting: "Esperant els resultats…",
+    late: "El que ha pagat encara no ha arribat. Arribarà als teus crèdits d'aquí a poc.",
+    pays: {
+      single: "Les curses d'un jugador no paguen crèdits.",
+      trial: "Les contrarellotges no paguen crèdits.",
+      alone: "Una sala privada només paga les curses amb dues persones o més.",
+      nothing: "Aquesta cursa no ha pagat res.",
+    },
+    rows: {
+      place: (place: string) => `${place} lloc`,
+      places: (n: number) => `Llocs · ${n} curses`,
+      style: "Estil",
+      bonus: "Tilt acabat",
+    },
+    credits: "Crèdits",
+    again: "Torna a jugar",
+    findRace: "Busca una altra cursa",
+    backToRoom: "Torna a la sala",
+    changeMode: "Canvia de mode",
+    mainMenu: "Menú principal",
   },
   podium: {
     card: "El Tilt",

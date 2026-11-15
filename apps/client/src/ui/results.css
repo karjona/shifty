@@ -359,3 +359,23 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* What comes next: the label, and between races of a Tilt the next race's season (in its colour) and circuit. */
+.board-next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.board-upnext {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--next, var(--ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

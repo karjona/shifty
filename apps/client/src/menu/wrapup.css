@@ -1,0 +1,315 @@
+/* What comes after a race (see screens/wrapup.tsx): a paper panel at the
+   side over the race on television (or the podium), and the same panel in
+   the middle when something went wrong. The scoreboard's type and rows:
+   your place in the season's accent, numbered rows, ink rules. */
+
+/* Under the panel the race runs on with nothing over it. */
+.race-screen.wrapped .race-hud {
+  display: none;
+}
+
+.end-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.end-layer .hints {
+  pointer-events: auto;
+}
+.end-panel {
+  position: absolute;
+  right: var(--margin-x);
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: 720px;
+  height: fit-content;
+  max-height: calc(100% - 2 * var(--margin-y));
+  margin: auto 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  background: var(--paper);
+  box-shadow: var(--lift);
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+  animation: rise 420ms var(--ease) both;
+}
+.end-panel > * {
+  flex-shrink: 0;
+}
+
+/* --- the top: what it was, and your place --- */
+
+.end-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 var(--pad);
+  padding: 28px 0 20px;
+  border-bottom: 2px solid var(--ink);
+}
+.end-what {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.end-what .board-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.end-title {
+  font-size: 64px;
+  line-height: 0.9;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.04em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.end-title.small {
+  font-size: var(--fs-head);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  white-space: normal;
+}
+.end-sub {
+  font-size: var(--fs-label);
+  font-weight: 560;
+  color: var(--ink-2);
+}
+.end-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: none;
+}
+.end-hero b {
+  padding: 0 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 72px;
+  line-height: 80px;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+.end-hero span {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 720;
+  font-stretch: 75%;
+  color: var(--ink-2);
+}
+
+/* --- blocks: the Tilt's standings, a time trial's run, what it paid --- */
+
+.end-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 var(--pad);
+  padding: 16px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.end-champion {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin: 0;
+  min-width: 0;
+}
+.end-champion .c-name {
+  font-size: 30px;
+  font-weight: 900;
+  font-stretch: 118%;
+  font-style: italic;
+}
+.end-rows .board-row,
+.end-panel .end-rows.board-row {
+  grid-template-columns: 56px 1fr 128px;
+  height: 48px;
+  margin: 0 calc(var(--pad) * -1);
+  padding: 0 var(--pad) 0 0;
+}
+.end-rows .c-total,
+.end-rows .c-time {
+  font-size: 28px;
+}
+.end-rows.trial .board-row.ghost .c-name {
+  font-style: italic;
+  font-weight: 500;
+  opacity: 0.75;
+}
+.end-pay {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.end-pay li {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  height: 52px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--fs-body);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 240ms var(--ease),
+    transform 240ms var(--ease);
+}
+.end-pay li.in {
+  opacity: 1;
+  transform: none;
+}
+.end-pay .num {
+  font-size: 16px;
+  font-weight: 650;
+  font-stretch: 75%;
+  color: var(--ink-3);
+}
+.end-pay b {
+  font-size: 32px;
+  font-weight: 820;
+  font-stretch: 75%;
+}
+.end-credits {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 8px 0 0;
+}
+.end-credits b {
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 900;
+  font-stretch: 75%;
+}
+.end-note {
+  margin: 16px var(--pad) 0;
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+.end-block .end-note {
+  margin: 0;
+}
+.end-note.waiting {
+  animation: end-waiting 1.2s ease-in-out infinite alternate;
+}
+@keyframes end-waiting {
+  to {
+    opacity: 0.45;
+  }
+}
+.end-error {
+  margin: 16px var(--pad) 0;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  color: var(--danger);
+}
+.end-body {
+  margin: 20px var(--pad) 0;
+  font-size: var(--fs-body);
+  line-height: 1.4;
+}
+
+/* --- what's next --- */
+
+.end-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px var(--pad) var(--pad);
+}
+
+/* --- when something went wrong: in the middle, over a dimmed race --- */
+
+.end-layer.trouble {
+  display: grid;
+  place-items: center;
+  background: rgb(24 16 8 / 0.5);
+  pointer-events: auto;
+  animation: fade 160ms ease both;
+}
+.end-layer.trouble .end-panel {
+  position: static;
+  width: 640px;
+  margin: 0;
+}
+
+/* --- the last results: Continue, in the corner --- */
+
+.race-menu-hint .race-continue {
+  padding: 10px 18px 10px 14px;
+  border-right: 1px solid var(--rule);
+  font-size: var(--fs-label);
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  outline: none;
+  animation: fade 300ms ease both;
+}
+.race-menu-hint .race-continue:focus {
+  --glyph-ink: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.race-menu-hint .race-continue:focus .glyph {
+  --glyph-ink: var(--accent);
+}
+.leave-confirm p {
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+/* --- compact: a phone on its side --- */
+
+:root[data-compact] .end-panel {
+  width: 600px;
+}
+:root[data-compact] .end-head {
+  padding: 16px 0 12px;
+}
+:root[data-compact] .end-title {
+  font-size: 44px;
+}
+:root[data-compact] .end-title.small {
+  font-size: 32px;
+}
+:root[data-compact] .end-hero b {
+  font-size: 48px;
+  line-height: 56px;
+}
+:root[data-compact] .end-hero span {
+  font-size: 24px;
+}
+:root[data-compact] .end-block {
+  padding: 10px 0;
+}
+:root[data-compact] .end-pay li {
+  height: 40px;
+}
+:root[data-compact] .end-credits b {
+  font-size: 32px;
+}
+:root[data-compact] .end-rows .board-row {
+  height: 40px;
+}
+:root[data-compact] .end-actions {
+  gap: 8px;
+  padding: 16px var(--pad) var(--pad);
+}
+:root[data-compact] .end-actions .btn {
+  min-height: 48px;
+}

@@ -37,6 +37,11 @@ const STILL = 0.8;
 /** With the results up, shots frame at least this much (m), the rider low in the picture under the scoreboard (share of the picture's height above its middle). */
 const RESULTS_FRAME = 12;
 const RESULTS_LOW = 0.36;
+/** How fast (per second) the picture moves aside for a panel, and back. */
+const ASIDE_RATE = 1.6;
+const UP = new THREE.Vector3(0, 1, 0);
+const ahead = new THREE.Vector3();
+const across = new THREE.Vector3();
 
 const RACING = 2;
 const RESULTS = 3;
@@ -93,6 +98,13 @@ export class Broadcast {
   };
   /** Dev: the camera held, by name (test shots). */
   pinned: string | null = null;
+  /**
+   * Where the rider sits across the picture, left of its middle, as a
+   * share of its width: a panel over the right of the screen leaves the
+   * rest to the race (0: in the middle). Eased in and out.
+   */
+  aside = 0;
+  private asideNow = 0;
 
   /** The course on screen, once it is built. `heights`: the ground at many points at once (the mountain's). */
   setCourse(course: CourseInfo, env: Environment, heights?: (points: Float32Array) => Float32Array): void {
@@ -227,6 +239,13 @@ export class Broadcast {
       this.look.y + Math.sin(w.t * 0.53 + 1.1) * sway + (w.results ? half * 2 * RESULTS_LOW : 0),
       this.look.z + Math.cos(w.t * 0.61) * sway,
     );
+    this.asideNow += (this.aside - this.asideNow) * (1 - Math.exp(-w.dt * ASIDE_RATE));
+    if (Math.abs(this.asideNow) > 1e-3) {
+      // Aim right of the rider, so the rider sits left in the picture.
+      ahead.subVectors(s.look, s.eye).normalize();
+      across.crossVectors(ahead, UP).normalize();
+      s.look.addScaledVector(across, half * 2 * (innerWidth / Math.max(1, innerHeight)) * this.asideNow);
+    }
     s.fov = this.fov;
     s.roll = a.roll;
     s.focus?.set(r.x, r.y, r.z);

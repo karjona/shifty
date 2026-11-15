@@ -18,6 +18,7 @@ import {
   playTimeTrial,
   roomExists,
   setPendingRace,
+  takeRequeue,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
 import { PlanPickers, seasonSports } from "../plan.tsx";
@@ -40,7 +41,8 @@ export function ModeSelect() {
   const [bots, setBots] = useState(3);
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [searching, setSearching] = useState(false);
+  // Play again from the end of a matchmaking race goes straight back into the queue.
+  const [searching, setSearching] = useState(() => mode === "matchmaking" && takeRequeue());
   const [tuning, setTuning] = useState(false);
   const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
@@ -75,7 +77,7 @@ export function ModeSelect() {
         await navigate({ to: "/race" });
       } else if (mode === "single") {
         const ticket = await playSingle(plan);
-        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } }, plan });
         await navigate({ to: "/race" });
       } else {
         const code = await createRoom(plan, bots);
