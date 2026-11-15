@@ -9,6 +9,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   Fn,
   If,
+  atan,
   attribute,
   cameraProjectionMatrix,
   clamp,
@@ -31,6 +32,10 @@ import {
 import { LOOK, cut0 } from "./look.ts";
 import { CelMaterial, SUN_DIR, inkId, inklessBasic } from "./material.ts";
 import { noise4 } from "./noise.ts";
+
+/** The sun's disc and the ring round it, as cosines of their angles from its centre (2.1° and 5°). */
+const SUN_DISC = Math.cos((2.1 * Math.PI) / 180);
+const SUN_RING = Math.cos((5 * Math.PI) / 180);
 
 /** Where the sky sits in the depth range (1 = the far plane): behind all else, but never clipped by it. */
 const SKY_DEPTH = 0.999999;
@@ -81,6 +86,11 @@ export function skyDome(): THREE.Mesh {
     c = mix(c, LOOK.glow, pow(side, 3).mul(low).mul(LOOK.dusk).mul(0.75));
     const sun = max(dot(d, SUN_DIR), float(0));
     c = mix(c, LOOK.glow, pow(sun, 24).mul(0.55).add(pow(sun, 4).mul(0.12)));
+    // The sun: a crisp disc, a ring of light round it.
+    const sw = max(fwidth(sun), float(1e-6));
+    const disc = smoothstep(float(SUN_DISC).sub(sw), float(SUN_DISC).add(sw), sun);
+    const ring = smoothstep(float(SUN_RING).sub(sw.mul(2)), float(SUN_RING).add(sw.mul(2)), sun).mul(0.35);
+    c = mix(c, mix(LOOK.glow, vec3(1), 0.75), max(disc, ring));
     // Where a ray through this pixel meets a flat ceiling of cloud.
     const plane = d.xz.div(max(d.y, float(0.05)));
     const drift = LOOK.wind.mul(LOOK.time.mul(0.0015));
@@ -100,6 +110,29 @@ export function skyDome(): THREE.Mesh {
       .mul(smoothstep(0.55, 0.35, y))
       .mul(LOOK.cirrus);
     c = mix(c, mix(c, vec3(1), 0.3), wisp);
+    // A band or two of soft flat clouds at mid height: large, pale, most of the sky left plain.
+    const puffSky = c.toVar();
+    If(LOOK.puffs.greaterThan(0.001), () => {
+      // (Drawn out across the wind.)
+      const pq = vec2(plane.x.mul(0.9), plane.y.mul(2.1)).add(drift.mul(5));
+      const cells = noise4(pq)
+        .x.mul(0.85)
+        .add(noise4(pq.mul(2.1)).y.mul(0.15));
+      // They gather where a slow field is high: a patch or two on a fair day, half the sky under cloud.
+      const field = noise4(plane.mul(0.13).add(drift.mul(2))).z;
+      const inField = field
+        .sub(float(0.5).sub(LOOK.puffs.mul(0.62)))
+        .min(0)
+        .mul(5);
+      const puff = cut0(cells.sub(0.18).add(inField))
+        .mul(smoothstep(0.1, 0.2, y))
+        .mul(smoothstep(0.5, 0.3, y));
+      const core = cut0(cells.sub(0.42).add(inField));
+      const pale = mix(puffSky, LOOK.cloud, 0.42);
+      const lit = mix(puffSky, LOOK.cloud, 0.78);
+      puffSky.assign(mix(puffSky, mix(pale, lit, core), puff.mul(LOOK.puffs.mul(0.4).add(0.6))));
+    });
+    c = puffSky;
     // The cloud deck: masses that close in with the weather, lighter at their edges, fading into the horizon
     // (worked out only under one).
     const sky = c.toVar();
@@ -111,8 +144,19 @@ export function skyDome(): THREE.Mesh {
         .add(noise4(q.mul(4.3)).z.mul(0.1));
       const edge = mass.sub(mix(float(0.62), float(-0.55), LOOK.overcast));
       const cloud = cut0(edge).mul(smoothstep(0.015, 0.14, y));
-      const deck = mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14)));
+      // Three tones: bright rims, the deck, and dark bellies hanging under it.
+      const belly = cut0(noise4(q.mul(2.6).add(7.3)).w.sub(0.22)).mul(cut0(edge.sub(0.3)));
+      const deck = mix(mix(LOOK.deck, LOOK.deckShade, cut0(edge.sub(0.14))), LOOK.deckShade.mul(0.8), belly.mul(0.8));
       sky.assign(mix(sky, deck, cloud));
+      // Veils of rain hanging under it toward the horizon: soft curtains here and there round the sky, faintly streaked.
+      const az = atan(d.z, d.x);
+      const sector = smoothstep(-0.05, 0.35, noise4(vec2(az.mul(1.6), 0.4).add(drift.mul(3))).x);
+      const streaks = noise4(vec2(az.mul(30).add(y.mul(14)), y.mul(1.5))).y;
+      const veil = sector
+        .mul(smoothstep(0.36, 0.14, y))
+        .mul(smoothstep(0, 0.05, y))
+        .mul(LOOK.veil);
+      sky.assign(mix(sky, LOOK.deckShade.mul(0.88), veil.mul(streaks.mul(0.1).add(0.45))));
     });
     c = sky;
     return c;

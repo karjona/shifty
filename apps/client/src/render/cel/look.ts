@@ -43,6 +43,9 @@ export const LOOK = {
   /** Cirrus wisps high up (0-1), and how far the wind streaks them (0-1). */
   cirrus: uniform(1),
   streaks: uniform(0),
+  /** Bands of soft flat cloud at mid height (0-1), and veils of rain under the deck (0-1). */
+  puffs: uniform(0.2),
+  veil: uniform(0),
   /** A cloud deck over the sky (0 = none, 1 = closed), lit and in shade. */
   overcast: uniform(0),
   deck: colour(0xd8dde4),

@@ -160,6 +160,22 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     });
     return rows;
   };
+  /** Every visible mesh: its triangles, name, instances, and whether it casts shadows (S) and is mirrored (R). */
+  const meshes = () => {
+    const rows: string[] = [];
+    world.scene.traverseVisible((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const g = o.geometry;
+      const n = g.index ? g.index.count : (g.attributes.position?.count ?? 0);
+      const count = o instanceof THREE.InstancedMesh ? o.count : 1;
+      const material: THREE.Material | THREE.Material[] = o.material;
+      const name = o.name || (Array.isArray(material) ? "" : material.name) || o.type;
+      rows.push(
+        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}`,
+      );
+    });
+    return rows;
+  };
   Object.assign(window, {
     __shiftyBench: {
       bench,
@@ -169,6 +185,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       scale: () => world.renderScale,
       scene,
       census,
+      meshes,
       /** Moves the sun to `(x, y, z)` from the point it shines on (held frames). */
       sun: (x: number, y: number, z: number) => {
         const sun = world.sunLight;

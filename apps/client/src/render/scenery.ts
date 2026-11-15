@@ -1,16 +1,26 @@
-// Costa Nevada backdrops. Summer: the coastal plain behind the town quay,
-// green hills and snow-capped peaks behind them, so the bay sits between
-// the sea and the ski slopes. Winter: the sierra's peaks all around the
-// run. Far and cheap: low-poly, flat-shaded; hills and peaks are tinted
-// toward the sky by hand (the scene fog would hide them), and more on a
-// hazy day. Everything here is out in the weather: in the season's
-// colours, snowed on above the snow line (see cel/look.ts).
+// Costa Nevada's distance, behind every circuit. On the coast: the plain
+// behind the shore (a patchwork of fields, pines and cypresses), foothills
+// rising in terraces with white villages on them, the sierra in three
+// ranges (wooded below, rock, snow down to the season's line), and far
+// headlands and islands out to sea. On the mountain: the sierra's peaks
+// all round the run. Far and cheap: each layer is one mesh, laid in as an
+// illustrator would, fading into the distance's colour by hand (the
+// scene's fog would hide it), and more on a hazy day. Everything here is
+// out in the weather: in the season's colours, snowed on above the snow
+// line (see cel/look.ts).
 import * as THREE from "three/webgpu";
-import { FOLIAGE, LOOK } from "./cel/look.ts";
-import { HAZE } from "./cel/material.ts";
-import { celPeak } from "./cel/terrain.ts";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { FOLIAGE, LOOK, cut0 } from "./cel/look.ts";
+import { CelMaterial, HAZE, UNREFLECTED, inkId } from "./cel/material.ts";
+import { noise4 } from "./cel/noise.ts";
+import { type PeakStyle, noise3, peakGeometry, peakMaterial } from "./cel/terrain.ts";
+import { GRASSY } from "./coast/rock.ts";
+import { Shape, box, place, random } from "./coast/shape.ts";
+import { Planting } from "./coast/trees.ts";
 import {
   Fn,
+  attribute,
+  cameraPosition,
   clamp,
   color,
   float,
@@ -33,54 +43,268 @@ export function hash(n: number): number {
   return x - Math.floor(x);
 }
 
-/** A ridged peak, snow-capped above `snowline` (0-1) and hazed toward the sky. */
-export function peak(
-  radius: number,
-  height: number,
-  seed: number,
-  snowline: number,
-  haze: number,
-  rock = 0x5f6f8a,
-  /** Extra haze at the foot of the peak (fading up), so it melts into the distance. */
-  footHaze = 0,
-) {
-  const m = celPeak(radius, height, seed, {
-    rock,
-    snow: 0xf7f9fd,
-    snowline,
-    haze: haze * 0.75,
-    footHaze: Math.max(footHaze, 0.35),
-  });
-  m.position.y = -20;
-  return m;
+/** How far scenery fades into the distance by how far it is from the camera: by hand, and more on a hazy day. */
+function distanceHaze(near: number, far: number, most: number): THREE.Node<"float"> {
+  const k = clamp(
+    cameraPosition
+      .distance(positionWorld)
+      .sub(near)
+      .div(far - near),
+    0,
+    1,
+  ).mul(most);
+  return k.add(LOOK.haze.mul(float(1).sub(k)).mul(0.7));
 }
 
-/** Round crowns of trees dotted over a hill: added to `out` (matrices and colours). */
-function hillTrees(
-  at: THREE.Vector3,
-  radius: number,
-  squash: number,
+/** A range of the sierra: peaks of these heights standing shoulder to shoulder along a line. */
+interface Range {
+  /** How far behind the coast it stands (m), and how far it wanders from that. */
+  back: number;
+  wander: number;
+  /** Its peaks' heights (m): least and most. */
+  heights: [number, number];
+  haze: number;
+  snowline: number;
+}
+
+const COAST_ROCK = 0x66728c;
+const COAST_FOREST = 0x4d6a66;
+
+/**
+ * The sierra behind a coast, as one mesh: ranges one behind another, the
+ * nearer lower and wooded, the far ones taller, paler and snowier. `side`
+ * is which way inland lies along z (1 or -1); it spans `width` m across.
+ */
+export function sierra(side: 1 | -1, ranges: readonly Range[], width: number, seed: number): THREE.Mesh {
+  const parts: THREE.BufferGeometry[] = [];
+  const r = random(seed);
+  ranges.forEach((range, k) => {
+    const style: PeakStyle = {
+      rock: COAST_ROCK,
+      snow: 0xf7f9fd,
+      snowline: range.snowline,
+      haze: range.haze,
+      footHaze: 0.4,
+      forest: COAST_FOREST,
+    };
+    let x = -width / 2;
+    let n = 0;
+    while (x < width / 2) {
+      // A high peak now and then among lower shoulders.
+      const high = n % 3 === 1 || r() < 0.25;
+      const [lo, hi] = range.heights;
+      const h = high ? lo + (hi - lo) * (0.55 + r() * 0.45) : lo * (0.6 + r() * 0.45);
+      const radius = h * (1.25 + r() * 0.7);
+      const geo = peakGeometry(radius, h, seed * 31 + k * 97 + n, style);
+      geo.translate(x + radius * 0.45, -24, side * (range.back + (r() - 0.5) * range.wander));
+      parts.push(geo);
+      x += radius * (0.62 + r() * 0.4);
+      n++;
+    }
+  });
+  const mesh = new THREE.Mesh(
+    mergeGeometries(parts),
+    peakMaterial({ rock: COAST_ROCK, snow: 0xf7f9fd, snowline: 0.5, haze: 0, footHaze: 0, forest: COAST_FOREST }),
+  );
+  for (const g of parts) g.dispose();
+  mesh.name = "sierra";
+  mesh.userData.noMerge = true;
+  return mesh;
+}
+
+/** The coast's sierra: three ranges. */
+export const COAST_SIERRA: Range[] = [
+  { back: 1500, wander: 160, heights: [150, 250], haze: 0.16, snowline: 0.74 },
+  { back: 2050, wander: 220, heights: [270, 430], haze: 0.3, snowline: 0.52 },
+  { back: 2750, wander: 260, heights: [380, 560], haze: 0.46, snowline: 0.4 },
+];
+
+let hillCel: CelMaterial | null = null;
+
+/** The foothills' material: each vertex's colour, terraces drawn round the slopes and groves dotted over them, fading with distance. */
+function hillMaterial(): CelMaterial {
+  if (hillCel) return hillCel;
+  const colour = Fn(() => {
+    const c = attribute<"vec3">("color", "vec3");
+    const p = positionWorld;
+    const wide = noise4(p.xz.mul(0.004));
+    const fine = noise4(p.xz.mul(0.023));
+    // Terraces: a darker line every few metres up the slope, where it is neither flat nor wooded.
+    const level = p.y.mul(0.11).add(wide.x.mul(0.7));
+    const w = fwidth(level).max(1e-4);
+    const terrace = smoothstep(float(0.14).add(w), float(0.14).sub(w), fract(level)).mul(smoothstep(8, 22, p.y));
+    const groves = cut0(fine.y.mul(0.6).add(wide.z.mul(0.55)).sub(0.12));
+    const woods = vec3(0.26, 0.4, 0.27);
+    return mix(mix(c, c.mul(0.84), terrace.mul(float(1).sub(groves))), woods, groves.mul(0.85));
+  });
+  hillCel = new CelMaterial({
+    colorNode: colour(),
+    fog: false,
+    outdoor: GRASSY,
+    haze: distanceHaze(350, 2300, 0.62),
+    threshold: 0.08,
+    shade: new THREE.Color(0.6, 0.66, 0.88),
+    richness: 1.15,
+    silhouette: 0.8,
+    crease: 0,
+    darkness: 0.45,
+    id: inkId("hills"),
+  });
+  hillCel.name = "hills";
+  return hillCel;
+}
+
+let farCel: CelMaterial | null = null;
+
+/** Painted things far off (villages, a ferry): each vertex its colour, fading with distance. */
+export function farMaterial(): CelMaterial {
+  farCel ??= new CelMaterial({
+    vertexColors: true,
+    fog: false,
+    haze: distanceHaze(350, 2300, 0.62),
+    crease: 0.3,
+    darkness: 0.5,
+    id: inkId("far"),
+  });
+  farCel.name = "far";
+  return farCel;
+}
+
+const FIELD = [0x9fb35e, 0xb9c06a, 0xcdb878, 0x8aa554, 0xa8b866];
+const OLIVE = new THREE.Color(0x7f9a5a);
+const WOODS = new THREE.Color(0x4f7a4a);
+const SCREE = new THREE.Color(0xa59c88);
+
+/**
+ * The foothills behind a coast: rolling ground rising from `from` m
+ * inland for `depth` m toward the sierra, in fields low down, olive
+ * terraces, then woods; white villages stand on its spurs.
+ */
+export function foothills(
+  side: 1 | -1,
+  from: number,
+  depth: number,
+  width: number,
+  top: number,
   seed: number,
-  out: { matrices: THREE.Matrix4[]; colours: THREE.Color[] },
-): void {
-  const count = 46;
-  const q = new THREE.Quaternion();
-  for (let i = 0; i < count; i++) {
-    const a = hash(seed * 97 + i) * Math.PI * 2;
-    const d = Math.sqrt(hash(seed * 53 + i * 7)) * 0.85;
-    const x = Math.cos(a) * d * radius;
-    const z = Math.sin(a) * d * radius;
-    const y = Math.sqrt(Math.max(0, 1 - d * d)) * radius * squash;
-    const s = 7 + hash(seed + i * 13) * 7;
-    out.matrices.push(
-      new THREE.Matrix4().compose(
-        new THREE.Vector3(at.x + x, y + s * 0.4, at.z + z),
-        q,
-        new THREE.Vector3(s, s * 1.1, s),
-      ),
-    );
-    out.colours.push(new THREE.Color(hash(i + seed) < 0.3 ? 0x3f6e32 : 0x335f2c));
+): THREE.Group {
+  const g = new THREE.Group();
+  const cell = 55;
+  const nx = Math.round(width / cell) + 1;
+  const nz = Math.round(depth / cell) + 1;
+  const pos = new Float32Array(nx * nz * 3);
+  const col = new Float32Array(nx * nz * 3);
+  const height = (x: number, d: number): number => {
+    const t = d / depth;
+    const rise = Math.pow(Math.min(1, Math.max(0, t)), 1.25);
+    // Spurs running down toward the shore, valleys between them.
+    const spur = 1 - Math.abs(noise3(x * 0.0021, 0.3, d * 0.0009, seed));
+    const roll = noise3(x * 0.006, 1.7, d * 0.006, seed + 3);
+    return Math.max(0, rise * top * (0.45 + 0.75 * spur * spur) + roll * 14 * Math.min(1, t * 4)) + 1;
+  };
+  const c = new THREE.Color();
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = -width / 2 + i * cell;
+      const d = j * cell;
+      const y = height(x, d);
+      const k = j * nx + i;
+      pos[k * 3] = x;
+      pos[k * 3 + 1] = y;
+      pos[k * 3 + 2] = side * (from + d);
+      const patch = hash(Math.floor(x / 160) * 7.3 + Math.floor(d / 120) * 3.1 + seed);
+      const slope = Math.abs(height(x + 30, d) - height(x - 30, d)) / 60 + Math.abs(height(x, d + 30) - y) / 30;
+      if (y > top * 0.72 && slope > 0.32) c.copy(SCREE);
+      else if (y > top * 0.38) c.copy(WOODS);
+      else if (y > 26) c.copy(OLIVE);
+      else c.setHex(FIELD[Math.floor(patch * FIELD.length)] ?? FIELD[0]!);
+      c.toArray(col, k * 3);
+    }
   }
+  const index: number[] = [];
+  for (let j = 0; j < nz - 1; j++)
+    for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i;
+      // (Wound so the hills face up whichever way inland lies.)
+      if (side > 0) index.push(a, a + nx, a + 1, a + 1, a + nx, a + nx + 1);
+      else index.push(a, a + 1, a + nx, a + 1, a + nx + 1, a + nx);
+    }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.setIndex(index);
+  geo.computeVertexNormals();
+  const hills = new THREE.Mesh(geo, hillMaterial());
+  hills.name = "hills";
+  hills.userData.noMerge = true;
+  g.add(hills);
+
+  // Villages: white houses under tiled roofs round a church tower, on spurs partway up.
+  const r = random(seed + 5);
+  const shape = new Shape();
+  const wall = new THREE.Color(0xf4efe4);
+  const roof = new THREE.Color(0xc8704a);
+  for (let v = 0; v < 5; v++) {
+    const x = -width * 0.42 + (v / 4) * width * 0.84 + (r() - 0.5) * 120;
+    const d = depth * (0.16 + r() * 0.3);
+    const houses = 12 + Math.floor(r() * 10);
+    for (let h = 0; h < houses; h++) {
+      const hx = x + (r() - 0.5) * 110;
+      const hd = d + (r() - 0.5) * 70;
+      const w = 9 + r() * 8;
+      const tall = 6 + r() * 6;
+      const y = height(hx, hd) - 2;
+      const turn = r() * 0.6;
+      shape.take(box(w, tall + 2, 8 + r() * 5), wall, place(hx, y, side * (from + hd), turn));
+      shape.take(box(w + 1.2, 1.8, 10 + r() * 4), roof, place(hx, y + tall + 2, side * (from + hd), turn));
+    }
+    const y = height(x, d);
+    shape.take(box(6, 26, 6), wall, place(x, y - 2, side * (from + d)));
+    shape.take(
+      new THREE.ConeGeometry(5, 7, 4).rotateY(Math.PI / 4).translate(0, 3.5, 0),
+      roof,
+      place(x, y + 24, side * (from + d)),
+      {
+        flat: true,
+      },
+    );
+  }
+  const villages = shape.mesh(farMaterial(), "none");
+  villages.layers.set(UNREFLECTED);
+  g.add(villages);
+  return g;
+}
+
+/** Far headlands and islands out to sea: low capes running out from the coast at either hand, islets on the horizon. */
+export function seaHorizon(side: 1 | -1, seed: number): THREE.Mesh {
+  const style: PeakStyle = { rock: 0x7a8296, snow: 0xf7f9fd, snowline: 2, haze: 0.5, footHaze: 0.25, forest: 0x5f7a70 };
+  const parts: THREE.BufferGeometry[] = [];
+  const r = random(seed);
+  const add = (x: number, z: number, radius: number, h: number) => {
+    const geo = peakGeometry(radius, h, Math.floor(r() * 900), style);
+    geo.scale(1.6, 1, 0.8);
+    geo.translate(x, -8, z);
+    parts.push(geo);
+  };
+  // The capes: each a string of hills stepping down into the sea.
+  for (const hand of [-1, 1]) {
+    for (let k = 0; k < 4; k++)
+      add(
+        hand * (2500 - k * 230),
+        -side * (150 + k * 420 + r() * 120),
+        320 - k * 40,
+        (150 - k * 28) * (0.8 + r() * 0.4),
+      );
+  }
+  // Islets out on the horizon.
+  add(-900 + r() * 400, -side * 3000, 180, 70);
+  add(1300 + r() * 300, -side * 3200, 260, 95);
+  add(1650, -side * 3250, 120, 40);
+  const mesh = new THREE.Mesh(mergeGeometries(parts), peakMaterial(style));
+  for (const g of parts) g.dispose();
+  mesh.name = "headlands";
+  mesh.userData.noMerge = true;
+  return mesh;
 }
 
 /** A colour as a shader constant. */
@@ -119,138 +343,55 @@ function fields(): THREE.Node<"vec3"> {
   })();
 }
 
-/** How far scenery at this distance behind the shore fades into the distance: by hand, and more on a hazy day. */
-function hazeBehind(from: number, span: number, most: number): THREE.Node<"float"> {
-  const k = clamp(positionWorld.z.sub(from).div(span), 0, most);
-  return k.add(LOOK.haze.mul(float(1).sub(k)).mul(0.7));
-}
-
-/** A material for scenery out in the weather. */
-function outdoor(
-  kind: number,
-  params: THREE.MeshStandardNodeMaterialParameters,
-  haze?: THREE.Node<"float">,
-): THREE.MeshStandardNodeMaterial {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 1, ...params });
-  m.userData.outdoor = kind;
-  if (haze) HAZE.set(m, haze);
-  return m;
-}
-
-/** Umbrella pines and cypresses in clumps on the coastal plain behind the town. */
+/** Stone pines and cypresses in clumps on the coastal plain behind the town. */
 function plainTrees(): THREE.Group {
-  const g = new THREE.Group();
-  const pineGeo = new THREE.IcosahedronGeometry(1, 1);
-  pineGeo.scale(1, 0.45, 1);
-  const cypressGeo = new THREE.ConeGeometry(0.5, 1, 8, 2);
-  cypressGeo.translate(0, 0.5, 0);
-  const haze = hazeBehind(170, 400, 0.45);
-  const evergreen = outdoor(FOLIAGE.evergreen, { color: 0xffffff }, haze);
-  const pines = new THREE.InstancedMesh(pineGeo, evergreen, 220);
-  const cypresses = new THREE.InstancedMesh(cypressGeo, evergreen, 160);
-  const trunks = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshStandardNodeMaterial({ color: 0x6b4a30, roughness: 1 }),
-    220,
-  );
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const c = new THREE.Color();
-  let np = 0;
-  let nc = 0;
-  for (let k = 0; k < 40; k++) {
+  const plants = new Planting();
+  for (let k = 0; k < 34; k++) {
     // Clumps along the plain, thinning toward the hills.
     const cx = -1100 + hash(k * 3.1) * 2200;
-    const cz = 175 + hash(k * 7.7) * 150;
-    const n = 4 + Math.floor(hash(k + 0.5) * 9);
+    const cz = 178 + hash(k * 7.7) * 150;
+    // (The town stands on its quay there.)
+    if (Math.abs(cx) < 196 && cz < 200) continue;
+    const n = 3 + Math.floor(hash(k + 0.5) * 6);
     for (let i = 0; i < n; i++) {
-      const x = cx + (hash(k * 31 + i) - 0.5) * 40;
-      const z = cz + (hash(k * 17 + i * 3) - 0.5) * 30;
-      if (hash(k * 5 + i) < 0.55 && np < 220) {
-        const s = 5 + hash(k + i * 11) * 4;
-        const h = 6 + hash(k * 2 + i) * 4;
-        m.compose(new THREE.Vector3(x, 0.8 + h, z), q, new THREE.Vector3(s, s, s));
-        pines.setMatrixAt(np, m);
-        pines.setColorAt(np, c.setHex(0x3f7034));
-        m.compose(new THREE.Vector3(x, 0.8 + h / 2, z), q, new THREE.Vector3(0.5, h, 0.5));
-        trunks.setMatrixAt(np, m);
-        trunks.setColorAt(np, c.setHex(0xffffff));
-        np++;
-      } else if (nc < 160) {
-        const h = 9 + hash(k * 9 + i) * 6;
-        m.compose(new THREE.Vector3(x, 0.8, z), q, new THREE.Vector3(2.2, h, 2.2));
-        cypresses.setMatrixAt(nc, m);
-        cypresses.setColorAt(nc, c.setHex(0x2c5530));
-        nc++;
-      }
+      const x = cx + (hash(k * 31 + i) - 0.5) * 44;
+      const z = cz + (hash(k * 17 + i * 3) - 0.5) * 32;
+      if (hash(k * 5 + i) < 0.6) plants.add("pineFar", x, 0.6, z, 9 + hash(k * 2 + i) * 5, 0.85 + hash(k + i) * 0.25);
+      else plants.add("cypress", x, 0.6, z, 10 + hash(k * 9 + i) * 6, 0.9);
     }
   }
-  pines.count = np;
-  trunks.count = np;
-  cypresses.count = nc;
-  for (const mesh of [pines, cypresses, trunks]) {
-    mesh.castShadow = true;
-    g.add(mesh);
-  }
-  return g;
+  return plants.build(true);
 }
 
+/** The bay's backdrop: the plain the town stands on, the foothills and the sierra behind it, headlands out to sea. */
 export function buildScenery(): THREE.Group {
   const g = new THREE.Group();
-
-  // North shore: the coastal plain the town stands on (its beach runs off
-  // past the turns), then low hills. The hills are hazed by hand, not by
-  // the scene fog (fogged, they would turn sky-coloured and hide the peaks).
-  const sand = outdoor(FOLIAGE.grass, { color: 0xe8d6a8, flatShading: true });
+  g.userData.noMerge = true;
+  // North shore: the coastal plain (its beach runs off past the turns).
+  const sand = new THREE.MeshStandardNodeMaterial({ color: 0xe8d6a8, roughness: 1, flatShading: true });
+  sand.userData.outdoor = FOLIAGE.grass;
   sand.userData.colorNode = fields();
-  const plain = new THREE.Mesh(new THREE.BoxGeometry(2400, 4, 240), sand);
-  plain.position.set(0, -1.2, 240);
+  HAZE.set(sand, distanceHaze(300, 1400, 0.4));
+  const plain = new THREE.Mesh(new THREE.BoxGeometry(2600, 4, 260), sand);
+  plain.position.set(0, -1.2, 250);
   plain.receiveShadow = true;
   g.add(plain);
   g.add(plainTrees());
-  const hills = float(0.4).add(LOOK.haze.mul(0.45));
-  const green = outdoor(FOLIAGE.grass, { color: 0x5f8a46, flatShading: true, fog: false }, hills);
-  const trees = { matrices: [] as THREE.Matrix4[], colours: [] as THREE.Color[] };
-  for (let i = 0; i < 18; i++) {
-    const r = 70 + hash(i) * 90;
-    const hill = new THREE.Mesh(new THREE.SphereGeometry(r, 9, 5, 0, Math.PI * 2, 0, Math.PI / 2), green);
-    hill.scale.y = 0.12 + hash(i + 50) * 0.12;
-    hill.position.set(-1150 + i * 135 + hash(i + 9) * 60, 0, 380 + hash(i + 3) * 90);
-    g.add(hill);
-    hillTrees(hill.position, r, hill.scale.y, i, trees);
-  }
-  const crowns = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(1, 1),
-    outdoor(FOLIAGE.leaf, { color: 0xffffff, fog: false }, float(0.35).add(LOOK.haze.mul(0.5))),
-    trees.matrices.length,
-  );
-  trees.matrices.forEach((m, i) => {
-    crowns.setMatrixAt(i, m);
-    crowns.setColorAt(i, trees.colours[i]!);
-  });
-  crowns.computeBoundingSphere();
-  g.add(crowns);
-
-  // The sierra behind: two ranges, the far one taller and hazier.
-  for (let i = 0; i < 18; i++) {
-    const far = i % 2 === 1;
-    const h = (far ? 300 : 170) + hash(i + 100) * (far ? 160 : 90);
-    const p = peak(h * (1.1 + hash(i + 7) * 0.5), h, i + 1, far ? 0.5 : 0.62, far ? 0.45 : 0.25);
-    p.position.x = -2200 + i * 260 + hash(i + 21) * 140;
-    p.position.z = (far ? 2400 : 1500) + hash(i + 33) * 250;
-    g.add(p);
-  }
+  g.add(foothills(1, 360, 1150, 3400, 210, 11));
+  g.add(sierra(1, COAST_SIERRA, 5200, 3));
+  g.add(seaHorizon(1, 21));
   return g;
 }
 
 const WINTER_ROCK = 0x56607e;
 
 /**
- * Winter: high peaks all around the run, beyond the fog. `top` and
- * `bottom` are the run's heights at its ends; `path` is its centre line.
+ * Winter: high peaks all around the run, beyond the fog, as one mesh.
+ * `top` and `bottom` are the run's heights at its ends; `path` is its
+ * centre line.
  */
-export function peakRange(top: number, bottom: number, path: { x: number; z: number }[]): THREE.Group {
-  const g = new THREE.Group();
+export function peakRange(top: number, bottom: number, path: { x: number; z: number }[]): THREE.Mesh {
+  const parts: THREE.BufferGeometry[] = [];
   let minZ = Infinity;
   let maxZ = -Infinity;
   let cx = 0;
@@ -260,6 +401,26 @@ export function peakRange(top: number, bottom: number, path: { x: number; z: num
     cx += p.x / path.length;
   }
   const along = maxZ - minZ;
+  const add = (
+    radius: number,
+    h: number,
+    seed: number,
+    snowline: number,
+    haze: number,
+    x: number,
+    y: number,
+    z: number,
+  ) => {
+    const geo = peakGeometry(radius, h, seed, {
+      rock: WINTER_ROCK,
+      snow: 0xf7f9fd,
+      snowline,
+      haze: haze * 0.75,
+      footHaze: 0.9,
+    });
+    geo.translate(x, y, z);
+    parts.push(geo);
+  };
   for (let i = 0; i < 26; i++) {
     const side = i % 2 === 0 ? 1 : -1;
     const t = Math.floor(i / 2) / 12;
@@ -267,27 +428,41 @@ export function peakRange(top: number, bottom: number, path: { x: number; z: num
     // The mountain rises behind the start: peaks there stand higher.
     const base = top + (bottom - top) * Math.min(1, Math.max(0, (z - minZ) / along));
     const h = 220 + hash(i + 200) * 180 + (1 - t) * 140;
-    const p = peak(h * (1.0 + hash(i + 70) * 0.5), h, i + 40, 0.55, 0.55 + t * 0.15, WINTER_ROCK, 0.9);
-    p.position.set(cx + side * (1300 + hash(i + 90) * 700), base + h / 2 - 60, z);
-    g.add(p);
+    add(
+      h * (1.0 + hash(i + 70) * 0.5),
+      h,
+      i + 40,
+      0.55,
+      0.55 + t * 0.15,
+      cx + side * (1300 + hash(i + 90) * 700),
+      base + h / 2 - 60,
+      z,
+    );
   }
   // Across the valley below the finish: the range you see riding down.
   for (let i = 0; i < 12; i++) {
     const h = 380 + hash(i + 400) * 300;
-    const p = peak(h * (1.1 + hash(i + 410) * 0.5), h, i + 120, 0.55, 0.6 + hash(i + 420) * 0.15, WINTER_ROCK, 0.9);
-    p.position.set(
+    add(
+      h * (1.1 + hash(i + 410) * 0.5),
+      h,
+      i + 120,
+      0.55,
+      0.6 + hash(i + 420) * 0.15,
       cx + (i - 5.5) * 420 + hash(i + 430) * 200,
       bottom - 160 + h / 2,
       maxZ + 2200 + hash(i + 440) * 1200,
     );
-    g.add(p);
   }
   // The summit ridge behind the start.
   for (let i = 0; i < 6; i++) {
     const h = 420 + hash(i + 300) * 200;
-    const p = peak(h * 1.3, h, i + 80, 0.4, 0.5, WINTER_ROCK, 0.9);
-    p.position.set(cx + (i - 2.5) * 520, top + h / 2 - 80, minZ - 1300 - hash(i + 5) * 500);
-    g.add(p);
+    add(h * 1.3, h, i + 80, 0.4, 0.5, cx + (i - 2.5) * 520, top + h / 2 - 80, minZ - 1300 - hash(i + 5) * 500);
   }
-  return g;
+  const mesh = new THREE.Mesh(
+    mergeGeometries(parts),
+    peakMaterial({ rock: WINTER_ROCK, snow: 0xf7f9fd, snowline: 0.5, haze: 0, footHaze: 0 }),
+  );
+  for (const g of parts) g.dispose();
+  mesh.name = "peaks";
+  return mesh;
 }

@@ -4,7 +4,7 @@
 // on camera boats off the point and off the stacks, a helicopter high and
 // wide, and a drone. They all follow your rider.
 import * as THREE from "three/webgpu";
-import { CoastGround, LIFEGUARD, MOLE_TOP, onBeach, watchtowerSpot } from "../render/cape.ts";
+import { CoastGround, LIFEGUARD, MOLE_TOP, cameraBoats, onBeach, watchtowerSpot } from "../render/cape.ts";
 import { chevronSpots } from "../render/chevrons.ts";
 import type { CourseData } from "../render/course.ts";
 import { landDistance } from "../render/land.ts";
@@ -43,13 +43,6 @@ function solid(course: CourseData, ground: CoastGround): (x: number, z: number) 
   };
 }
 
-/** The centre line at `s`, `offset` m to its right. */
-function along(course: CourseData, s: number, offset: number): { x: number; z: number } {
-  const step = course.path.length > 1 ? course.path[1]!.s : 2;
-  const p = course.path[Math.round(s / step) % course.path.length] ?? course.path[0]!;
-  return { x: p.x - Math.cos(p.yaw) * offset, z: p.z + Math.sin(p.yaw) * offset };
-}
-
 export function capeRigs(course: CourseData, env: Environment): Rig[] {
   const ground = new CoastGround(course.land);
   const solidAt = solid(course, ground);
@@ -83,18 +76,6 @@ export function capeRigs(course: CourseData, env: Environment): Rig[] {
   }
 
   // Camera boats outside the limit: off the point's sweeper, and off the stacks.
-  const out = course.outerLimit + 16;
-  const boat = (name: string, s: number) => {
-    const p = along(course, s, -out);
-    if (course.land.some((l) => landDistance(l, p.x, p.z) < 6)) return;
-    rigs.push(spot(name, v(p.x, BOAT_EYE, p.z), solidAt, env, true));
-  };
-  // Halfway round the widest right-hander (the point), and round the bend off the stacks.
-  const rights = course.path.filter((p) => p.curve > 1e-4);
-  const widest = Math.min(...rights.map((p) => p.curve));
-  const sweep = rights.filter((p) => Math.abs(p.curve - widest) < 1e-5);
-  const middle = sweep[Math.floor(sweep.length / 2)];
-  if (middle) boat("boat-point", middle.s);
-  boat("boat-stacks", course.length * 0.73);
+  for (const b of cameraBoats(course)) rigs.push(spot(b.name, v(b.x, BOAT_EYE, b.z), solidAt, env, true));
   return rigs;
 }
