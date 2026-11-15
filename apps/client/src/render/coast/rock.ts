@@ -1,13 +1,13 @@
 // Cel rock: stone drawn in big planes. One material for every rock, cliff
 // and stretch of bare ground on the coast (each vertex carries its colour):
 // beds of strata a couple of metres thick in two tones with a dark seam,
-// a wet band along the water line, and, out in the weather, grass in the
+// cracks running down the faces, a wet band along the water line, and, out in the weather, grass in the
 // season's colour and snow on what faces up. The shapes: quarried blocks
 // and boulders (convex, a dozen planes each), crags built in tiers, and
 // cliffs swept along a shore with a notch at the water, ledges and a rim.
 import * as THREE from "three/webgpu";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
-import { Fn, float, fract, fwidth, mix, normalWorld, positionWorld, sin, smoothstep, vec3 } from "three/tsl";
+import { Fn, dot, float, fract, fwidth, mix, normalWorld, positionWorld, sin, smoothstep, vec2, vec3 } from "three/tsl";
 import { FOLIAGE } from "../cel/look.ts";
 import { CelMaterial, inkId } from "../cel/material.ts";
 import { noise4 } from "../cel/noise.ts";
@@ -57,7 +57,13 @@ export function rockMaterial(): CelMaterial {
     const beds = mix(vec3(1), vec3(1.0, 0.9, 0.78), rust.mul(0.6)).mul(
       float(1).sub(band.mul(0.15).add(seam.mul(0.34))),
     );
-    const k = mix(vec3(1), beds, face);
+    // Cracks: fine dark lines down a face, breaking where they cross from bed to bed.
+    const run = dot(p.xz, vec2(normalWorld.z.negate(), normalWorld.x));
+    const strip = s.floor();
+    const split = noise4(vec2(run.mul(0.46).add(strip.mul(3.7)), p.y.mul(0.055).add(strip.mul(1.3)))).x.sub(0.06);
+    const cw = fwidth(split).max(1e-4);
+    const crack = smoothstep(cw.mul(1.3), cw.mul(0.3), split.abs());
+    const k = mix(vec3(1), beds.mul(float(1).sub(crack.mul(0.3))), face);
     // Wet and dark where the swell reaches, under a pale line of salt.
     const line = float(0.75).add(n.y.mul(0.45));
     const lw = fwidth(p.y).max(1e-4);
@@ -190,6 +196,120 @@ export interface CliffStyle {
   tiers: number;
   /** The ground's height where the top's inland edge lies (the cliff's own rim height if left out). */
   ground?: (x: number, z: number) => number;
+  /** How many of its long planes the sea has hollowed at the water line (0-1): notches, and a cave now and then. */
+  hollows?: number;
+  /** How far inside the land a point is (m), so a cave is cut only where there is rock to hold it. */
+  inside?: (x: number, z: number) => number;
+}
+
+/** Inside a hollow in the rock: its depths, and the water lying in it. */
+const HOLLOW_DEEP = new THREE.Color(0x22232f);
+const HOLLOW_WATER = new THREE.Color(0x14303c);
+
+const scratch = { a: new THREE.Vector3(), b: new THREE.Vector3(), n: new THREE.Vector3() };
+
+/** A triangle through three points, wound to face `toward` (a direction). */
+function facing(shape: Shape, p: THREE.Vector3, q: THREE.Vector3, w: THREE.Vector3, toward: THREE.Vector3, paint: Paint): void {
+  scratch.a.subVectors(q, p);
+  scratch.b.subVectors(w, p);
+  scratch.n.crossVectors(scratch.a, scratch.b);
+  if (scratch.n.dot(toward) >= 0) shape.tri(p, q, w, paint);
+  else shape.tri(p, w, q, paint);
+}
+
+/** The mouth of a hollow in a plane of rock, as (along the plane, up it), each 0-1: a cave's, and a notch's. */
+const CAVE_MOUTH: [number, number][] = [
+  [0.1, 0],
+  [0.07, 0.3],
+  [0.2, 0.52],
+  [0.42, 0.64],
+  [0.68, 0.58],
+  [0.88, 0.36],
+  [0.92, 0],
+];
+const NOTCH_MOUTH: [number, number][] = [
+  [0.05, 0],
+  [0.08, 0.5],
+  [0.24, 0.84],
+  [0.5, 0.94],
+  [0.72, 0.8],
+  [0.93, 0.56],
+  [0.96, 0],
+];
+
+/**
+ * A hollow in a plane of rock whose corners are `a1`, `b1` at the water
+ * and `a3`, `b3` above (`a2`, `b2`: where the rock stands proud between
+ * them, if it does): the plane with an arched mouth cut in it (`mouth`,
+ * turned the other way round if `flip`), and a tunnel `depth` m into the
+ * rock, toward `-out`, darker the deeper it goes.
+ */
+function addHollow(
+  shape: Shape,
+  a: readonly [THREE.Vector3, THREE.Vector3 | null, THREE.Vector3],
+  b: readonly [THREE.Vector3, THREE.Vector3 | null, THREE.Vector3],
+  out: THREE.Vector3,
+  depth: number,
+  tone: THREE.Color,
+  outline: readonly [number, number][],
+  flip: boolean,
+  r: () => number,
+): void {
+  const [a1, a2, a3] = a;
+  const [b1, b2, b3] = b;
+  const at = (u: number, v: number) =>
+    a1
+      .clone()
+      .lerp(b1, u)
+      .lerp(a3.clone().lerp(b3, u), v);
+  const last = outline.length - 1;
+  const mouth = outline.map((_, k) => {
+    const [u, v] = flip ? [1 - outline[last - k]![0], outline[last - k]![1]] : outline[k]!;
+    return at(u + (r() - 0.5) * 0.05, k === 0 || k === last ? 0 : v + (r() - 0.5) * 0.07);
+  });
+  const [l0, l1, l2] = [at(0, 0), at(0, 0.5), at(0, 1)];
+  const [r0, r1, r2] = [at(1, 0), at(1, 0.5), at(1, 1)];
+  const top = at(0.5, 1);
+  const m = (k: number) => mouth[k]!;
+  // The plane round the mouth.
+  for (const [p, q, w] of [
+    [l0, m(0), m(1)],
+    [l0, m(1), l1],
+    [l1, m(1), m(2)],
+    [l1, m(2), l2],
+    [l2, m(2), m(3)],
+    [l2, m(3), top],
+    [top, m(3), r2],
+    [r2, m(3), m(4)],
+    [r2, m(4), r1],
+    [r1, m(4), m(5)],
+    [r1, m(5), r0],
+    [r0, m(5), m(6)],
+  ] as const)
+    facing(shape, p, q, w, out, tone);
+  // (Its neighbours stand proud at the water: the gap at either end is closed.)
+  const along = new THREE.Vector3().subVectors(b1, a1);
+  if (a2) facing(shape, a1, a2, a3, along, tone);
+  if (b2) facing(shape, b1, b2, b3, along.clone().negate(), tone);
+  // The tunnel: walls from the mouth in, darkening, to a back wall; dark water on its floor.
+  const inner = mouth.map((p) => p.clone().addScaledVector(out, -depth));
+  const axis = at(0.5, 0.3).addScaledVector(out, -depth / 2);
+  const c = new THREE.Color();
+  const mid = new THREE.Vector3();
+  const far = out.clone().multiplyScalar(-1);
+  const lit = tone.clone().multiplyScalar(0.5);
+  const deep: Paint = (p) => c.copy(far.dot(mid.subVectors(p, m(3))) > depth * 0.5 ? HOLLOW_DEEP : lit);
+  const inward = new THREE.Vector3();
+  for (let k = 0; k < last; k++) {
+    inward.subVectors(axis, mid.addVectors(m(k), m(k + 1)).multiplyScalar(0.5));
+    facing(shape, m(k), m(k + 1), inner[k + 1]!, inward.clone(), deep);
+    facing(shape, m(k), inner[k + 1]!, inner[k]!, inward.clone(), deep);
+  }
+  for (let k = 1; k < last; k++) facing(shape, inner[0]!, inner[k]!, inner[k + 1]!, out, HOLLOW_DEEP);
+  const up = new THREE.Vector3(0, 1, 0);
+  const floor = [m(0), m(last), inner[last]!, inner[0]!].map((p) => p.clone().setY(-0.35));
+  facing(shape, floor[0]!, floor[1]!, floor[2]!, up, HOLLOW_WATER);
+  facing(shape, floor[0]!, floor[2]!, floor[3]!, up, HOLLOW_WATER);
 }
 
 export const CLIFF: CliffStyle = {
@@ -326,6 +446,7 @@ export function sweepCliff(
   if (shore.length < 2) return [];
   const plan = stations(shore, closed, style, seed);
   const r = random(seed + 17);
+  const hollowed = random(seed + 29);
   const rows = plan.map((st) => {
     const rings = profile(st, style);
     const row = rings.map(([out, y], j) => {
@@ -359,7 +480,27 @@ export function sweepCliff(
       const map = [0, 1, 2, 3, 3, 4, 4, 5];
       return row[Math.min(row.length - 1, map[j] ?? j)]!;
     };
+    // A long plane the sea has got into: a notch along its foot, or a cave.
+    let hollow: "none" | "notch" | "cave" = "none";
+    const out = new THREE.Vector3(here.nx + next.nx, 0, here.nz + next.nz).normalize();
+    const depth = 1.5 + hollowed() * 0.9;
+    const reach = 4.5 + hollowed() * 3.5;
+    const roll = hollowed();
+    if (style.hollows && a.length === b.length && a[1]!.distanceTo(b[1]!) > 3.6 && Math.min(here.height, next.height) > 6) {
+      const mx = (a[1]!.x + b[1]!.x) / 2;
+      const mz = (a[1]!.z + b[1]!.z) / 2;
+      const inside = (d: number) => style.inside?.(mx - out.x * d, mz - out.z * d) ?? d;
+      const tiered = a.length > 6 && a[3]!.y > 5 && b[3]!.y > 5;
+      if (roll < style.hollows * 0.16 && tiered && inside(reach + 2) > reach * 0.8) hollow = "cave";
+      else if (roll < style.hollows && inside(depth + 1) > depth * 0.6) hollow = "notch";
+    }
+    const flip = hollowed() < 0.5;
+    if (hollow === "notch")
+      addHollow(shape, [a[1]!, null, a[2]!], [b[1]!, null, b[2]!], out, depth, tone, NOTCH_MOUTH, flip, hollowed);
+    if (hollow === "cave")
+      addHollow(shape, [a[1]!, a[2]!, a[3]!], [b[1]!, b[2]!, b[3]!], out, reach, tone, CAVE_MOUTH, flip, hollowed);
     for (let j = 0; j < rings - 1; j++) {
+      if ((hollow === "notch" && j === 1) || (hollow === "cave" && (j === 1 || j === 2))) continue;
       const a0 = ring(a, j);
       const a1 = ring(a, j + 1);
       const b0 = ring(b, j);
@@ -403,62 +544,86 @@ export function roundShore(
   return out;
 }
 
+/** Guano on the rocks the gulls keep to. */
+const GUANO = new THREE.Color(0xf3efe2);
+
 /**
  * A sea stack: a pillar of rock on the circle of `radius` round `(x, z)`,
- * `height` tall, in tiers with ledges, a waist the sea has cut and a cap
- * that leans.
+ * `height` tall. Buttresses and chimneys run up it from a waist the sea
+ * has cut, a ledge or two break its faces, it leans, and its summit is
+ * white with guano under a tuft of scrub.
  */
 export function addStack(shape: Shape, x: number, z: number, radius: number, height: number, seed: number): void {
   const r = random(seed);
-  const sides = 7 + Math.floor(r() * 2);
+  const sides = 10 + Math.floor(r() * 3);
   const turn = r() * Math.PI * 2;
   const lean = r() * Math.PI * 2;
-  const angles = Array.from({ length: sides }, (_, i) => turn + ((i + (r() - 0.5) * 0.45) / sides) * Math.PI * 2);
-  // Tiers from the sea bed up: (radius as a multiple, height, how far it has leant).
-  const cover = 1 / Math.cos(Math.PI / sides);
-  const tiers: [number, number][] = [
-    [cover * 1.12, -4],
-    [cover * 1.0, 0.1],
-    [cover * 1.06, 2.2],
-  ];
-  let k = 1.0;
-  let y = 2.2;
-  while (y < height - 4) {
-    const rise = 3.2 + r() * 3.4;
-    y = Math.min(height - 2.2, y + rise);
-    // A face up to a ledge, then the next tier set back (or, once, standing out over the one below).
-    tiers.push([cover * k * (0.97 + r() * 0.08), y]);
-    k *= r() < 0.22 ? 1.07 : 0.8 + r() * 0.12;
-    tiers.push([cover * k, y + 0.3]);
+  const angles = Array.from({ length: sides }, (_, i) => turn + ((i + (r() - 0.5) * 0.5) / sides) * Math.PI * 2);
+  // Round the plan: buttresses standing out, chimneys cut in between some of them.
+  const rib: number[] = [];
+  for (let i = 0; i < sides; i++) {
+    const chimney = i % 3 === 1 || (i % 3 === 2 && r() < 0.3);
+    rib.push(chimney ? 0.7 + r() * 0.12 : 1.0 + r() * 0.14);
   }
-  tiers.push([cover * k * 0.92, height - 0.6], [cover * k * 0.45, height + r() * 0.8]);
-  const jitter = angles.map(() => 0.9 + r() * 0.2);
-  const rings = tiers.map(([m, ty], t) => {
-    const off = Math.max(0, ty) / height;
+  // (A polygon of n sides covers a circle 1 / cos(π / n) smaller than its corners' circle.)
+  const cover = 1 / Math.cos(Math.PI / sides);
+  // Up the stack: (height, radius as a multiple, how far the chimneys are cut in).
+  const rows: [number, number, number][] = [
+    [-4, 1.14, 0],
+    [0.1, 1.0, 0],
+    [0.95, 0.94, 0],
+    [2.3, 1.07, 0.25],
+  ];
+  let k = 1.02;
+  let y = 2.3;
+  const shaft = height - 3.2;
+  while (y < shaft - 2.5) {
+    y = Math.min(shaft, y + 3.4 + r() * 3.2);
+    const t = y / height;
+    // A face up to a ledge, then the rock set back above it; the stack narrows toward its top.
+    rows.push([y, k * (0.98 + r() * 0.06), 1]);
+    if (r() < 0.3) {
+      k *= 0.88 + r() * 0.06;
+      rows.push([y + 0.35, k, 1]);
+    } else k *= 1 - 0.1 * t;
+  }
+  rows.push([height - 1.6, k * 0.88, 0.8], [height - 0.2, k * 0.6, 0.5]);
+  const rings = rows.map(([ry, m, cut], t) => {
+    const off = Math.max(0, ry) / height;
+    // (The whole stack leans, and each tier sits a little off the one below.)
+    const sx = Math.cos(lean) * off * off * radius * 0.55 + (t > 3 ? (r() - 0.5) * radius * 0.08 : 0);
+    const sz = Math.sin(lean) * off * off * radius * 0.55 + (t > 3 ? (r() - 0.5) * radius * 0.08 : 0);
     return angles.map((a, i) => {
-      const wob = t < 3 ? 1 : jitter[i]! * (0.94 + r() * 0.12);
-      const rad = radius * m * wob;
-      return new THREE.Vector3(
-        x + Math.cos(a) * rad + Math.cos(lean) * off * off * radius * 0.5,
-        ty + (t > 2 && t < tiers.length - 1 ? (r() - 0.5) * 0.5 + Math.cos(a - lean) * radius * 0.16 : 0),
-        z + Math.sin(a) * rad + Math.sin(lean) * off * off * radius * 0.5,
-      );
+      const rad = radius * cover * m * (1 + cut * (rib[i]! - 1)) * (t > 2 ? 0.96 + r() * 0.08 : 1);
+      const dip = t > 3 && t < rows.length - 1 ? (r() - 0.5) * 0.5 + Math.cos(a - lean) * radius * 0.14 : 0;
+      return new THREE.Vector3(x + Math.cos(a) * rad + sx, ry + dip, z + Math.sin(a) * rad + sz);
     });
   });
+  // Guano runs down from the summit, further on some faces than others.
+  const white = angles.map(() => rows.length - 3 - (r() < 0.45 ? 1 : 0) - (r() < 0.15 ? 1 : 0));
   const c = new THREE.Color();
   for (let i = 0; i < sides; i++) {
-    const tone = LIMESTONE[Math.floor(r() * LIMESTONE.length)] ?? LIMESTONE[0]!;
-    const paint: Paint = (_p, n) => c.copy(n.y > 0.72 ? LIMESTONE_TOP : tone);
     const j = (i + 1) % sides;
+    const deep = rib[i]! < 0.9 || rib[j]! < 0.9;
+    const tone = LIMESTONE[deep ? 2 : Math.floor(r() * 2)] ?? LIMESTONE[0]!;
     for (let t = 0; t < rings.length - 1; t++) {
+      const streaked = t >= Math.min(white[i]!, white[j]!) && t > 3;
+      const ledge = r() < 0.3 ? SCRUB : LIMESTONE_TOP;
+      const paint: Paint = (_p, n) =>
+        c.copy(streaked ? (n.y > 0.3 ? GUANO : tone).clone().lerp(GUANO, 0.55) : n.y > 0.72 ? ledge : tone);
       // (Angles run counter-clockwise seen from above: outward faces go up the near side first.)
       shape.tri(rings[t]![i]!, rings[t + 1]![i]!, rings[t]![j]!, paint);
       shape.tri(rings[t]![j]!, rings[t + 1]![i]!, rings[t + 1]![j]!, paint);
     }
   }
-  // The cap: scrub on top.
+  // The summit: a white cap, scrub at its middle.
   const top = rings[rings.length - 1]!;
   const mid = top.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / sides);
-  mid.y += 0.5;
-  for (let i = 0; i < sides; i++) shape.tri(top[i]!, mid, top[(i + 1) % sides]!, SCRUB);
+  const crown = top.map((p) => p.clone().lerp(mid, 0.55).setY(mid.y + 0.45));
+  mid.y += 0.7;
+  for (let i = 0; i < sides; i++) {
+    const j = (i + 1) % sides;
+    shape.quad(top[i]!, crown[i]!, crown[j]!, top[j]!, GUANO);
+    shape.tri(crown[i]!, mid, crown[j]!, SCRUB);
+  }
 }

@@ -71,10 +71,12 @@ export const MOLE_TOP = 2.6;
 const HEADLAND_TOP = 22;
 const POINT_TOP = 32;
 const COAST_CLIFF = 18;
-const ARCH_RIM = 21;
+const ARCH_RIM = 29;
 /** The arch's opening: where its underside springs from the legs, and its crown (m over the water). */
-const ARCH_SPRING = 9;
-const ARCH_CROWN = 16;
+const ARCH_SPRING = 10;
+const ARCH_CROWN = 22;
+/** The top of the arch's span (m), for what it hides. */
+export const ARCH_TOP = ARCH_RIM + 6;
 /** A cliff's top is drawn by the cliff this far in from the shore (m); the ground's own mesh starts there. */
 const CLIFF_TOP = 6;
 
@@ -367,6 +369,8 @@ function addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[])
         out: [-0.6, 0.9],
         flange: CLIFF_TOP + 3,
         ground: (x, z) => ground.height(x, z) - 0.3,
+        hollows: 0.24,
+        inside: (x, z) => -ground.cliffs(x, z),
       });
       // Boulders at the foot, where the shore meets the water.
       for (let i = 0; i < run.points.length; i += 3) {
@@ -419,38 +423,44 @@ function addArch(shape: Shape, legs: LandData[]): void {
   const rings: THREE.Vector3[][] = [];
   const from = open0 - 7;
   const to = open1 + 7;
-  const steps = 11;
+  const steps = 15;
   for (let i = 0; i <= steps; i++) {
     const z = from + ((to - from) * i) / steps;
     const t = Math.abs(z - mid) / half;
-    const under = t < 1 ? ARCH_CROWN - (ARCH_CROWN - ARCH_SPRING) * Math.pow(t, 2.2) : ARCH_SPRING - (t - 1) * 16;
-    const top = ARCH_RIM + 2.2 + 1.8 * Math.cos(Math.min(1.5, t) * 1.05) + (r() - 0.5) * 1.2;
+    // The vault: ribs of harder rock hang a little lower across it.
+    const rib = i % 3 === 1 ? 0.9 : 0;
+    const under =
+      t < 1 ? ARCH_CROWN - (ARCH_CROWN - ARCH_SPRING) * Math.pow(t, 2.2) - rib * (1 - t) : ARCH_SPRING - (t - 1) * 16;
+    const top = ARCH_RIM + 2.6 + 2.4 * Math.cos(Math.min(1.5, t) * 1.05) + (r() - 0.5) * 1.6;
     const wide = Math.min(reach - 0.6, reach * (0.7 + 0.22 * t * t));
     const left = wide * (0.92 + r() * 0.16);
     const right = wide * (0.92 + r() * 0.16);
-    const lip = 0.3 + r() * 0.9;
-    const belly = (r() - 0.5) * 0.8;
-    // Round the span, seen from the south: underside, east flank, top, west flank.
+    const lip = 0.4 + r() * 1.3;
+    const belly = (r() - 0.5) * 1.1;
+    const brow = 3.2 + r() * 1.6;
+    // Round the span, seen from the south: the vault (higher along its middle), east flank, top, west flank.
     rings.push(
       [
-        [-left * 0.5, under + belly],
-        [right * 0.5, under - belly],
-        [right, under + 2.4 + r()],
-        [right + lip, top - 3.6 - r()],
+        [-left * 0.55, under + belly],
+        [(r() - 0.5) * left * 0.2, under + 1.1 + r() * 0.7],
+        [right * 0.55, under - belly],
+        [right, under + brow],
+        [right + lip, top - 4.4 - r()],
         [right * 0.68, top],
         [-left * 0.68, top + (r() - 0.5)],
-        [-left - lip, top - 3.6 - r()],
-        [-left, under + 2.4 + r()],
+        [-left - lip, top - 4.4 - r()],
+        [-left, under + brow],
       ].map(([x, y]) => new THREE.Vector3(cx + x!, y, z)),
     );
   }
   const c = new THREE.Color();
+  const count = rings[0]!.length;
   for (let i = 0; i < steps; i++) {
     const p = rings[i]!;
     const q = rings[i + 1]!;
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < count; k++) {
       const tone = LIMESTONE[Math.floor(r() * LIMESTONE.length)] ?? LIMESTONE[0]!;
-      const k1 = (k + 1) % 8;
+      const k1 = (k + 1) % count;
       const paint = (_p: THREE.Vector3, n: THREE.Vector3) => c.copy(n.y > 0.72 ? DRY_GRASS : tone);
       shape.tri(p[k]!, p[k1]!, q[k]!, paint);
       shape.tri(q[k]!, p[k1]!, q[k1]!, paint);
