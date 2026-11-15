@@ -1,0 +1,917 @@
+/* The menus on a phone held sideways (scale.ts marks the root `data-compact`
+   and draws #root at PHONE_ZOOM, 0.6: every length here is canvas pixels,
+   0.6 of a CSS pixel; 76 is a finger's 45.6). The page can be as short as
+   270 CSS pixels (Safari's bars take a third of the screen), so a screen is
+   one line of header (the wordmark or the screen's title, its tabs, your
+   card and credits) over one panel at a time: rows that scroll inside it,
+   with a shadow at the edge while there's more, and the screen's actions in
+   a rail down the panel's right side, under the right thumb. Your rider
+   stands on the left where there's room. Nothing sits under the Dynamic
+   Island or the home indicator (--safe-*, from scale.ts). */
+
+:root[data-compact] {
+  --fs-label: 20px;
+  --fs-body: 24px;
+  --fs-nav: 27px;
+  --fs-head: 34px;
+  --fs-title: 40px;
+  --fs-display: 84px;
+
+  --row: 76px;
+  --tap: 76px;
+  --pad: 24px;
+  --gap: 14px;
+  --bleed: 0px;
+  --margin-y: 12px;
+  --edge-l: max(var(--safe-left, 0px), 28px);
+  --edge-r: max(var(--safe-right, 0px), 28px);
+  --edge-b: max(var(--safe-bottom, 0px), 14px);
+  --margin-x: var(--edge-l);
+  --head: 76px;
+  --body-top: calc(var(--margin-y) + var(--head) + var(--gap));
+  --rail: 248px;
+  --col-r: 640px;
+}
+
+:root[data-compact] #root:not(:has(.podium-screen)),
+:root[data-compact] #loading {
+  zoom: var(--menu-zoom);
+}
+
+/* --- screens: the header line, then the body down to the bottom edge --- */
+
+:root[data-compact] .screen {
+  gap: var(--gap);
+  padding: var(--margin-y) var(--edge-r) 0 var(--edge-l);
+}
+:root[data-compact] .home,
+:root[data-compact] .mode-body,
+:root[data-compact] .creator,
+:root[data-compact] .shop,
+:root[data-compact] .main-menu .home,
+:root[data-compact] .settings {
+  position: absolute;
+  top: var(--body-top);
+  bottom: var(--edge-b);
+  left: var(--edge-l);
+  right: var(--edge-r);
+}
+
+/* Rows and buttons are a finger tall. */
+:root[data-compact] .btn {
+  min-height: var(--tap);
+  padding: 0 24px;
+  gap: 10px;
+  font-size: 22px;
+}
+:root[data-compact] .btn .icon {
+  width: 26px;
+  height: 26px;
+}
+:root[data-compact] .picker,
+:root[data-compact] .stat-row,
+:root[data-compact] .creator-rows .picker {
+  min-height: var(--row);
+  gap: 12px;
+}
+:root[data-compact] .picker-label {
+  font-size: var(--fs-nav);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+:root[data-compact] .picker-value {
+  flex: none;
+  margin-right: -14px;
+}
+:root[data-compact] .picker-value b {
+  min-width: 0;
+}
+
+/* --- the header: one line --- */
+
+:root[data-compact] .topbar {
+  min-height: var(--head);
+  height: var(--head);
+}
+:root[data-compact] .topbar > .topbar-logo {
+  margin-top: 10px;
+}
+:root[data-compact] .wordmark,
+:root[data-compact] .wordmark.small {
+  height: 56px;
+}
+:root[data-compact] .wordmark .deg {
+  font-size: 34px;
+}
+:root[data-compact] .wordmark .axis {
+  width: 9px;
+  height: 56px;
+  margin: 0 12px 0 13px;
+}
+:root[data-compact] .wordmark .name {
+  font-size: 38px;
+}
+:root[data-compact] .account {
+  height: var(--head);
+  gap: 20px;
+  padding: 0 20px 0 10px;
+}
+:root[data-compact] .account .credits {
+  padding-left: 20px;
+  font-size: 36px;
+}
+:root[data-compact] .social-card {
+  min-width: 0;
+  gap: 12px;
+}
+:root[data-compact] .social-card .avatar {
+  width: 52px;
+  height: 52px;
+  font-size: 28px;
+}
+:root[data-compact] .social-card .who {
+  max-width: 300px;
+}
+:root[data-compact] .social-card .who b {
+  font-size: 25px;
+  line-height: 28px;
+}
+:root[data-compact] .social-card .who span {
+  font-size: 17px;
+  line-height: 22px;
+}
+:root[data-compact] .social-card:focus {
+  outline-offset: 4px;
+}
+/* A narrow phone keeps the card to its avatar and the credits. */
+@media (max-width: 760px) {
+  :root[data-compact] .account .who {
+    display: none;
+  }
+}
+
+/* A screen's title, on paper, one line (the kicker and the line under it go). */
+:root[data-compact] .title-panel {
+  flex-direction: row;
+  align-items: center;
+  max-width: none;
+  height: var(--head);
+  padding: 0 28px;
+}
+:root[data-compact] .title-panel .label,
+:root[data-compact] .title-panel .muted {
+  display: none;
+}
+:root[data-compact] .title-panel .screen-title {
+  font-size: var(--fs-head);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Back is a button at the start of the header (the mouse's and a finger's way back). */
+:root[data-compact] .hints {
+  top: var(--margin-y);
+  left: var(--edge-l);
+  bottom: auto;
+  height: var(--head);
+  z-index: 3;
+}
+:root[data-compact][data-input="touch"] .hints > .hint,
+:root[data-compact][data-input="mouse"] .hints > .hint {
+  width: var(--head);
+  padding: 0;
+  justify-content: center;
+  font-size: 0;
+}
+:root[data-compact] .hint svg {
+  width: 34px;
+  height: 34px;
+}
+:root[data-compact][data-input="touch"] .screen:has(.hints > .hint) .topbar,
+:root[data-compact][data-input="mouse"] .screen:has(.hints > .hint) .topbar {
+  padding-left: calc(var(--head) + var(--gap));
+}
+/* A controller's or a keyboard's hints don't fit a phone's header. */
+:root[data-compact][data-input="gamepad"] .hints,
+:root[data-compact][data-input="keyboard"] .hints {
+  display: none;
+}
+
+/* --- the main menu: Play and the tabs where the wordmark was --- */
+
+:root[data-compact] .main-menu .topbar-logo {
+  display: none;
+}
+:root[data-compact] .menu-tabs {
+  position: absolute;
+  top: var(--margin-y);
+  left: var(--edge-l);
+  height: var(--head);
+  padding: 0 8px 0 0;
+  gap: 0;
+}
+:root[data-compact] .tabbar > .glyph {
+  display: none;
+}
+:root[data-compact] .tab {
+  height: var(--head);
+  padding: 0 18px;
+  font-size: 25px;
+}
+:root[data-compact] .tab.on::after {
+  left: 18px;
+  right: 18px;
+  height: 5px;
+}
+:root[data-compact] .tabbar .play-button {
+  margin: 0 6px 0 0;
+  padding: 0 26px;
+  font-size: 27px;
+}
+
+/* Home: the rider and the season's word on the left, the banner and news on the right. */
+:root[data-compact] .home {
+  grid-template-columns: 1fr var(--col-r);
+  gap: var(--gap);
+}
+:root[data-compact] .home-right {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -24px;
+  padding: 0 24px 24px;
+  scrollbar-width: none;
+}
+:root[data-compact] .home-right > * {
+  flex-shrink: 0;
+}
+:root[data-compact] .season-word {
+  margin: 0 0 8px -4px;
+}
+:root[data-compact] .hero-head {
+  height: 52px;
+}
+:root[data-compact] .hero-block {
+  min-height: 0;
+  gap: 8px;
+  padding: 18px var(--pad) 22px;
+}
+:root[data-compact] .hero-block b {
+  font-size: var(--fs-title);
+}
+:root[data-compact] .hero-image {
+  height: 150px;
+}
+:root[data-compact] .news {
+  padding: 14px var(--pad) 4px;
+}
+:root[data-compact] .news-item time {
+  width: 96px;
+}
+:root[data-compact] .missions {
+  height: var(--row);
+}
+
+/* Collection: the slots scroll; save, the creator and the shop stand in the rail. */
+:root[data-compact] .main-menu:has(.wardrobe) {
+  --col-r: 860px;
+}
+:root[data-compact] .wardrobe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0 var(--pad);
+  height: 100%;
+  padding: 8px var(--pad) 16px;
+}
+:root[data-compact] .wardrobe .panel-title {
+  display: none;
+}
+:root[data-compact] .wardrobe > .picker {
+  grid-column: 1;
+  grid-row: 1;
+}
+:root[data-compact] .wardrobe-rows {
+  grid-column: 1;
+  grid-row: 2;
+}
+:root[data-compact] .wardrobe > .row {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  margin: 0;
+}
+
+/* Settings: the panels in two columns, scrolling. */
+:root[data-compact] .settings {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -24px;
+  padding: 0 24px 24px;
+  scrollbar-width: none;
+}
+:root[data-compact] .settings .panel {
+  gap: 8px;
+  padding: 18px var(--pad) 14px;
+}
+:root[data-compact] .settings .panel-title {
+  margin-bottom: 2px;
+}
+
+/* --- the rail: a screen's or a panel's buttons down its right side, the main one at the bottom --- */
+
+:root[data-compact] .wardrobe > .row,
+:root[data-compact] .creator-side > .actions,
+:root[data-compact] .mode-side > .actions,
+:root[data-compact] .modal-actions {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 12px;
+}
+:root[data-compact] .wardrobe > .row .btn,
+:root[data-compact] .creator-side > .actions .btn,
+:root[data-compact] .mode-side > .actions .btn,
+:root[data-compact] .modal-actions .btn {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 8px 16px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.1;
+  font-size: 21px;
+}
+/* The main action comes last, nearest the thumb. */
+:root[data-compact] .wardrobe > .row .btn-primary {
+  order: 2;
+}
+:root[data-compact] .mode-side > .actions .btn-ghost {
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 2px var(--ink),
+    var(--lift);
+}
+:root[data-compact] .mode-side > .actions .btn-ghost:focus {
+  box-shadow: var(--lift);
+}
+:root[data-compact] .creator-side > .actions .btn-primary,
+:root[data-compact] .mode-side > .actions .btn-primary {
+  flex: none;
+  min-height: 108px;
+  font-size: 27px;
+}
+
+/* --- the creator, the mode select, the room and the shop: the rider on the left, a panel and its rail --- */
+
+:root[data-compact] .creator,
+:root[data-compact] .mode-body {
+  grid-template-columns: minmax(0, 1fr) var(--col-r);
+  gap: var(--gap);
+}
+:root[data-compact] .creator-side,
+:root[data-compact] .mode-side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  grid-template-rows: minmax(0, 1fr);
+  gap: var(--gap);
+}
+:root[data-compact] .creator {
+  --col-r: 860px;
+}
+:root[data-compact] .creator-panel {
+  padding: 0 var(--pad);
+}
+:root[data-compact] .creator-rows,
+:root[data-compact] .wardrobe-rows,
+:root[data-compact] .shop-items {
+  margin: 0 calc(var(--pad) * -1);
+  padding: 0 var(--pad);
+  background: none;
+  overscroll-behavior: contain;
+}
+
+/* The mode select: the four modes, the picked one's panel, and Play. */
+:root[data-compact] .mode-body {
+  --col-r: 1000px;
+}
+:root[data-compact] .mode-select .mode-side {
+  grid-template-columns: 300px minmax(0, 1fr) var(--rail);
+}
+:root[data-compact] .mode-tabs {
+  justify-content: flex-start;
+  padding: 0 20px;
+}
+:root[data-compact] .mode-tabs .tab {
+  height: var(--row);
+  font-size: 26px;
+  line-height: 1.05;
+  white-space: normal;
+  text-align: left;
+}
+:root[data-compact] .mode-tabs .tab > span:first-child {
+  display: flex;
+  align-items: center;
+  padding-right: 24px;
+}
+:root[data-compact] .mode-tabs .tab > span:first-child::before {
+  flex: none;
+  width: 38px;
+}
+:root[data-compact] .mode-tabs .tab.on::after {
+  left: auto;
+  right: 0;
+  width: 11px;
+  height: 11px;
+  margin-top: -6px;
+}
+:root[data-compact] .mode-tabs .tab .badge {
+  display: none;
+}
+:root[data-compact] .mode-panel {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  gap: 10px;
+  padding: 16px var(--pad) 12px;
+}
+:root[data-compact] .mode-panel > p:first-of-type:not(.room-code) {
+  font-size: 22px;
+  line-height: 1.3;
+}
+:root[data-compact] .mode-panel .panel-title {
+  display: none;
+}
+:root[data-compact] .mode-panel .btn {
+  align-self: stretch;
+}
+/* Joining a friend's room comes before making one. */
+:root[data-compact] .mode-panel > p:first-of-type ~ .btn {
+  order: -1;
+}
+:root[data-compact] .mode-panel > p:first-of-type {
+  order: -2;
+}
+:root[data-compact] .races ol {
+  margin: 0;
+}
+:root[data-compact] .races li {
+  min-height: 48px;
+  padding-top: 8px;
+}
+:root[data-compact] .races li b {
+  width: 120px;
+  font-size: 24px;
+}
+:root[data-compact] .party-add {
+  display: none;
+}
+
+/* The room: its code, who's in, the host's settings; leave and start in the rail. */
+:root[data-compact] .room .mode-body {
+  --col-r: 860px;
+}
+:root[data-compact] .room-code {
+  font-size: 64px;
+  letter-spacing: 0.14em;
+}
+:root[data-compact] .members li {
+  font-size: var(--fs-body);
+}
+:root[data-compact] .badge,
+:root[data-compact] .soon-badge {
+  height: 32px;
+  padding: 0 10px 0 12px;
+  font-size: 17px;
+}
+
+/* The time trial: the board scrolls with the panel; its rows toggle ghosts. */
+:root[data-compact] .trial-panel {
+  gap: 8px;
+}
+:root[data-compact] .trial-best b {
+  font-size: 34px;
+}
+:root[data-compact] .trial-row {
+  min-height: var(--row);
+}
+
+/* The pro shop: season and slot side by side over the items. */
+:root[data-compact] .shop {
+  justify-content: flex-end;
+}
+:root[data-compact] .shop-panel {
+  width: 780px;
+  max-height: none;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0 var(--pad);
+  padding: 4px var(--pad) 12px;
+}
+:root[data-compact] .shop-panel > .picker {
+  min-width: 0;
+}
+:root[data-compact] .shop-panel > .picker .picker-label {
+  display: none;
+}
+:root[data-compact] .shop-panel > .picker .picker-value {
+  flex: 1;
+  justify-content: space-between;
+  margin: 0 -14px;
+}
+:root[data-compact] .shop-items {
+  grid-column: 1 / -1;
+}
+:root[data-compact] .shop-item {
+  min-height: var(--row);
+}
+/* The item on your rider: a finger's next tap buys it. */
+:root[data-input="touch"] .shop-item.trying {
+  color: var(--on-accent);
+  border-bottom-color: transparent;
+}
+:root[data-input="touch"] .shop-item.trying::before {
+  opacity: 1;
+}
+:root[data-input="touch"] .shop-item.trying .shop-name .muted,
+:root[data-input="touch"] .shop-item.trying .shop-price {
+  color: inherit;
+}
+:root[data-compact] .shop-name b {
+  font-size: 25px;
+  line-height: 28px;
+}
+
+/* --- lists that scroll: a soft shadow at an edge while there's more past it --- */
+
+:root[data-compact] .creator-rows,
+:root[data-compact] .wardrobe-rows,
+:root[data-compact] .shop-items,
+:root[data-compact] .mode-panel,
+:root[data-compact] .modal-body,
+:root[data-compact] .login-card,
+:root[data-compact] .info-card {
+  background:
+    linear-gradient(var(--paper) 40%, rgb(243 237 225 / 0)) center top / 100% 36px no-repeat local,
+    linear-gradient(rgb(243 237 225 / 0), var(--paper) 60%) center bottom / 100% 36px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, rgb(29 27 23 / 0.2), rgb(29 27 23 / 0)) center top / 100% 16px no-repeat
+      scroll,
+    radial-gradient(farthest-side at 50% 100%, rgb(29 27 23 / 0.2), rgb(29 27 23 / 0)) center bottom / 100% 16px
+      no-repeat scroll,
+    var(--paper);
+}
+
+/* --- pickers and stats: a finger has no hover, so their arrows always show --- */
+
+:root[data-compact][data-input="touch"] .picker-value button,
+:root[data-compact][data-input="touch"] .stat-value button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.55;
+  width: 56px;
+  height: var(--row);
+  font-size: 22px;
+}
+:root[data-compact][data-input="touch"] .picker:focus .picker-value button,
+:root[data-compact][data-input="touch"] .stat-row:focus .stat-value button {
+  opacity: 1;
+}
+:root[data-compact][data-input="touch"] .picker-value b {
+  justify-content: center;
+}
+
+/* --- dialogs: the whole height, their body scrolls, their buttons in a rail --- */
+
+:root[data-compact] .modal-backdrop {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  padding: var(--margin-y) var(--edge-r) var(--edge-b) var(--edge-l);
+}
+:root[data-compact] .modal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px var(--pad);
+  width: 100%;
+  max-width: 1180px;
+  max-height: 100%;
+  overflow: hidden;
+  padding: 18px 28px 20px;
+}
+:root[data-compact] .modal:not(:has(.modal-actions)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+:root[data-compact] .modal h2 {
+  grid-column: 1 / -1;
+  font-size: var(--fs-head);
+  padding-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root[data-compact] .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  gap: 8px;
+  margin: 0 -28px 0 -28px;
+  padding: 0 28px;
+}
+:root[data-compact] .modal-actions {
+  margin: 0;
+}
+:root[data-compact] .modal-body .stat-row {
+  min-height: var(--row);
+}
+:root[data-compact] .modal-body .stat-label .muted {
+  font-size: 19px;
+  line-height: 1.2;
+}
+:root[data-compact] .pips i {
+  width: 12px;
+  height: 24px;
+}
+:root[data-compact] .card-preview {
+  padding: 8px 0;
+}
+:root[data-compact] .searching {
+  gap: 18px;
+}
+
+/* --- login, handle, about: the wordmark and the language over the card --- */
+
+:root[data-compact] .login .screen-top {
+  height: var(--head);
+}
+:root[data-compact] .language {
+  height: var(--head);
+  gap: 10px;
+  padding: 0 20px;
+}
+:root[data-compact] .language .picker {
+  min-width: 300px;
+  min-height: var(--head);
+}
+:root[data-compact] .login-main {
+  position: absolute;
+  top: var(--body-top);
+  bottom: var(--edge-b);
+  right: var(--edge-r);
+  width: 800px;
+  max-width: calc(100% - var(--edge-l) - var(--edge-r));
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+:root[data-compact] .login-card,
+:root[data-compact] .info-card {
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  gap: 14px;
+  padding: 18px 32px 20px;
+}
+:root[data-compact] .login-card .panel-title,
+:root[data-compact] .info-card .panel-title {
+  flex: none;
+  font-size: var(--fs-head);
+  padding-bottom: 10px;
+}
+:root[data-compact] .login-card > *,
+:root[data-compact] .info-card > * {
+  flex: none;
+}
+:root[data-compact] .login-card p,
+:root[data-compact] .info-card p {
+  font-size: 23px;
+  line-height: 1.3;
+}
+/* A field and its button on one line. */
+:root[data-compact] .login-card form.stack,
+:root[data-compact] .modal form.stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-auto-flow: row dense;
+  gap: 8px 12px;
+}
+:root[data-compact] .login-card form.stack > *,
+:root[data-compact] .modal form.stack > * {
+  grid-column: 1 / -1;
+}
+:root[data-compact] .login-card form.stack > .field,
+:root[data-compact] .modal form.stack > .field {
+  display: contents;
+}
+:root[data-compact] .login-card form.stack > .field > *,
+:root[data-compact] .modal form.stack > .field > * {
+  grid-column: 1 / -1;
+}
+:root[data-compact] .login-card form.stack > .field > input,
+:root[data-compact] .modal form.stack > .field > input {
+  grid-column: 1;
+}
+:root[data-compact] .login-card form.stack > .btn[type="submit"] {
+  grid-column: 2;
+  width: auto;
+}
+:root[data-compact] .field input {
+  height: var(--tap);
+  font-size: 28px;
+}
+:root[data-compact] input.code-input {
+  height: var(--tap);
+  font-size: 44px;
+  font-weight: 760;
+  font-stretch: 75%;
+  letter-spacing: 0.3em;
+}
+/* The email needs a keyboard: said for a controller, not for a finger. */
+:root[data-compact][data-input="touch"] .login-card input[type="email"] ~ .field-hint {
+  display: none;
+}
+:root[data-compact] .login-card .field-label {
+  margin-bottom: -2px;
+}
+:root[data-compact] .or {
+  font-size: 18px;
+}
+:root[data-compact] .consent {
+  font-size: 19px;
+}
+:root[data-compact] .footer {
+  position: absolute;
+  left: var(--edge-l);
+  bottom: var(--edge-b);
+  padding: 0 4px;
+  font-size: 21px;
+}
+:root[data-compact] .footer a {
+  display: inline-flex;
+  align-items: center;
+  height: var(--tap);
+  padding: 0 14px;
+}
+/* The card has the right; the links keep to the left of it. */
+@media (max-width: 760px) {
+  :root[data-compact] .footer {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 0;
+  }
+}
+
+/* --- toasts and the loading sign: the bottom left, over the scene, clear of the panels' buttons --- */
+
+:root[data-compact] .toasts {
+  left: var(--edge-l);
+  bottom: calc(var(--edge-b) + 52px);
+  transform: none;
+  align-items: flex-start;
+  max-width: 46%;
+}
+:root[data-compact] .toast {
+  min-height: 60px;
+  padding: 10px 22px;
+  font-size: 22px;
+  line-height: 1.25;
+}
+:root[data-compact] #loading {
+  left: var(--edge-l);
+  right: auto;
+  bottom: var(--edge-b);
+  height: 40px;
+  font-size: 17px;
+}
+/* Signed out the footer has that corner: the sign stands over it. */
+:root[data-compact] #root:has(.footer) ~ #loading,
+:root[data-compact] body:has(.footer) #loading {
+  bottom: calc(var(--edge-b) + var(--tap) + 8px);
+}
+
+/* --- the race's menus (the HUD has its own canvas) --- */
+
+:root[data-compact] .race-menu {
+  justify-items: end;
+  padding: var(--margin-y) var(--edge-r) var(--edge-b) var(--edge-l);
+}
+:root[data-compact] .race-menu .panel {
+  width: 640px;
+  max-height: 100%;
+  overflow-y: auto;
+  gap: 12px;
+  padding: 20px 28px;
+}
+:root[data-compact] .race-menu .panel-title {
+  font-size: var(--fs-head);
+  padding-bottom: 10px;
+  margin-bottom: 0;
+}
+:root[data-compact] .race-menu-hint {
+  top: var(--margin-y);
+  right: var(--edge-r);
+}
+:root[data-compact] .race-menu-hint button {
+  min-height: var(--tap);
+}
+:root[data-compact] .race-menu-hint .race-menu-button {
+  min-width: var(--tap);
+}
+:root[data-compact] .race-help {
+  left: var(--edge-l);
+  top: auto;
+  bottom: var(--edge-b);
+  max-width: 640px;
+  padding: 16px 22px;
+  font-size: 21px;
+  line-height: 1.3;
+}
+:root[data-compact] .trial-actions {
+  bottom: var(--edge-b);
+}
+:root[data-compact] .trial-actions .btn {
+  min-width: 240px;
+  min-height: var(--tap);
+}
+
+/* --- typing (typing.ts): the field, what's typed and its button in a bar at
+   the top of what the keyboard leaves in sight; the rest dims behind --- */
+
+:root[data-compact][data-typing] #root .typing-host {
+  position: fixed;
+  z-index: 90;
+  top: var(--vv-top, 0px);
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-auto-flow: row;
+  align-items: center;
+  gap: 2px 20px;
+  width: auto;
+  margin: 0;
+  padding: 8px var(--edge-r) 8px var(--edge-l);
+  background: var(--paper);
+  box-shadow:
+    0 0 0 2000px rgb(24 16 8 / 0.55),
+    0 2px 0 var(--ink);
+  animation: none;
+  transform: none;
+}
+:root[data-compact][data-typing] #root :has(.typing-host) {
+  animation-fill-mode: none;
+}
+:root[data-compact][data-typing] #root form.typing-host > :not(.field, [type="submit"], .row:has([type="submit"])) {
+  display: none;
+}
+:root[data-compact][data-typing] #root .typing-host > .field,
+:root[data-compact][data-typing] #root .typing-host > .row {
+  display: contents;
+}
+:root[data-compact][data-typing] #root .typing-host > .row > :not([type="submit"]) {
+  display: none;
+}
+:root[data-compact][data-typing] #root .typing-host .field-label {
+  grid-row: 1;
+  grid-column: 1;
+  max-width: 260px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:root[data-compact][data-typing] #root .typing-host input {
+  grid-row: 1;
+  grid-column: 2;
+  height: var(--tap);
+  font-size: 30px;
+}
+:root[data-compact][data-typing] #root .typing-host input.code-input {
+  font-size: 44px;
+}
+:root[data-compact][data-typing] #root .typing-host [type="submit"] {
+  grid-row: 1;
+  grid-column: 3;
+  width: auto;
+  min-height: var(--tap);
+}
+:root[data-compact][data-typing] #root .typing-host .field-hint,
+:root[data-compact][data-typing] #root .typing-host .field-error {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  display: block;
+  font-size: 19px;
+}
+:root[data-compact][data-typing] #root .typing-host .field-hint {
+  display: none;
+}
