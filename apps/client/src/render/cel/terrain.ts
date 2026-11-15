@@ -96,7 +96,7 @@ export function peakGeometry(radius: number, height: number, seed: number, s: Pe
   const lean = new THREE.Vector2(noise3(seed, 0, 0, 5) * radius * 0.22, noise3(0, seed, 0, 6) * radius * 0.22);
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    const t = v.y / height;
+    const t = Math.max(0, v.y / height);
     const a = Math.atan2(v.z, v.x);
     const r = Math.hypot(v.x, v.z);
     let crest = 0;

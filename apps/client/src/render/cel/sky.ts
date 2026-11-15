@@ -97,21 +97,21 @@ export function skyDome(): THREE.Mesh {
     // Where a ray through this pixel meets a flat ceiling of cloud.
     const plane = d.xz.div(max(d.y, float(0.05)));
     const drift = LOOK.wind.mul(LOOK.time.mul(0.0015));
-    // High wisps of cirrus: soft, thin and faint, all drawn out along one line; the wind combs them into
-    // mares' tails with an edge.
-    const along = plane.x.mul(WISP.x).add(plane.y.mul(WISP.y));
-    const across = plane.y.mul(WISP.x).sub(plane.x.mul(WISP.y));
-    const fibres = noise4(vec2(along.mul(0.95), across.mul(8.5)).add(drift));
-    const strand = fibres.x.mul(0.7).add(noise4(vec2(along.mul(2.1), across.mul(17)).add(drift.mul(2))).y.mul(0.3));
+    // High cirrus: on a fair day a few soft tufts, faint and far apart; the wind draws them out along one
+    // line into mares' tails with an edge.
+    const along = plane.x.mul(WISP.x).add(plane.y.mul(WISP.y)).mul(mix(float(2.4), float(0.7), LOOK.streaks));
+    const across = plane.y.mul(WISP.x).sub(plane.x.mul(WISP.y)).mul(mix(float(5.2), float(8.5), LOOK.streaks));
+    const fibres = noise4(vec2(along, across).add(drift));
+    const strand = fibres.x.mul(0.7).add(noise4(vec2(along, across).mul(2.3).add(drift.mul(2))).y.mul(0.3));
     // (They gather in a few drifts and leave most of the sky plain.)
-    const gather = noise4(vec2(along.mul(0.22), across.mul(0.6)).add(drift).add(4.7)).z;
-    const drifts = smoothstep(float(0.16).sub(LOOK.streaks.mul(0.28)), float(0.48).sub(LOOK.streaks.mul(0.23)), gather);
-    const wisp = smoothstep(float(0.06).add(LOOK.streaks.mul(0.05)), float(0.44).sub(LOOK.streaks.mul(0.29)), strand)
+    const gather = noise4(plane.mul(0.24).add(drift).add(4.7)).z;
+    const drifts = smoothstep(float(0.18).sub(LOOK.streaks.mul(0.3)), float(0.5).sub(LOOK.streaks.mul(0.25)), gather);
+    const wisp = smoothstep(float(0.02).add(LOOK.streaks.mul(0.09)), float(0.5).sub(LOOK.streaks.mul(0.35)), strand)
       .mul(drifts)
-      .mul(smoothstep(0.24, 0.36, y))
-      .mul(smoothstep(0.62, 0.44, y))
+      .mul(smoothstep(0.26, 0.4, y))
+      .mul(smoothstep(0.66, 0.48, y))
       .mul(LOOK.cirrus);
-    c = mix(c, mix(c, vec3(1), float(0.5).add(LOOK.streaks.mul(0.25))), wisp.mul(float(0.2).add(LOOK.streaks.mul(0.35))));
+    c = mix(c, vec3(1), wisp.mul(float(0.13).add(LOOK.streaks.mul(0.3))));
     // A band or two of soft flat clouds at mid height: large, pale, most of the sky left plain.
     const puffSky = c.toVar();
     If(LOOK.puffs.greaterThan(0.001), () => {
@@ -156,7 +156,7 @@ export function skyDome(): THREE.Mesh {
       // Four tones: lit flanks with a bright edge where they turn, thin rims, the deck, and dark bellies under it.
       const turn = flank.mul(float(1).sub(cut0(relief.sub(0.105))));
       const rim = float(1).sub(cut0(edge.sub(0.035)));
-      const lit = mix(LOOK.deck, LOOK.horizon.max(LOOK.deck), turn.mul(0.6));
+      const lit = mix(LOOK.deck, max(LOOK.horizon.rgb, LOOK.deck.rgb), turn.mul(0.6));
       const body = mix(LOOK.deckShade, lit, max(flank, rim));
       sky.assign(mix(sky, mix(body, LOOK.deckShade.mul(0.74), belly), cloud));
       const az = atan(d.z, d.x);

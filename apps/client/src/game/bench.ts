@@ -160,7 +160,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
     });
     return rows;
   };
-  /** Every visible mesh: its triangles, name, instances, and whether it casts shadows (S) and is mirrored (R). */
+  /** Every visible mesh: its triangles, name, instances, whether it casts shadows (S) and is mirrored (R), and whether its bounds are broken (NaN). */
   const meshes = () => {
     const rows: string[] = [];
     world.scene.traverseVisible((o) => {
@@ -171,7 +171,7 @@ export function installBench(world: World, pause: (on: boolean) => void): void {
       const material: THREE.Material | THREE.Material[] = o.material;
       const name = o.name || (Array.isArray(material) ? "" : material.name) || o.type;
       rows.push(
-        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}`,
+        `${Math.round((n / 3) * count)} ${name}${count > 1 ? ` x${count}` : ""}${o.castShadow ? " S" : ""}${o.layers.mask & 1 ? " R" : ""}${Number.isNaN(g.boundingSphere?.radius) ? " NaN" : ""}`,
       );
     });
     return rows;
