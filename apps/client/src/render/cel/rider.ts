@@ -171,7 +171,7 @@ export class CelTintMaterial extends CelMaterial {
       threshold: face ? -0.3 : kind === "look" ? -0.08 : 0.02,
       spec: glossy ? 0.55 : kind === "look" && !face ? 0.06 : 0,
       specSize: glossy ? 0.035 : 0.1,
-      rim: face ? 0 : kind === "look" ? 0.3 : kind === "hair" ? 0.15 : 0.6,
+      rim: face || kind === "hair" ? 0 : kind === "look" ? 0.3 : 0.6,
       // The shell draws the outline; the ink pass adds lines where pieces meet, and sharp folds.
       silhouette: 0,
       crease: 0.7,

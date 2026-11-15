@@ -104,11 +104,12 @@ class Mesh:
         return f
 
     def finish(self):
-        # A shell open at the bottom: every face looks away from the head's middle (the game culls back faces).
-        flip = [f for f in self.bm.faces
-                if f.normal_update() or f.normal.dot(f.calc_center_median() - Vector(self.centre)) < 0]
-        if flip:
-            bmesh.ops.reverse_faces(self.bm, faces=flip)
+        # A shell open at the bottom, its faces all wound one way: outward, away from the head's middle (the game
+        # culls back faces), the undersides of overhanging locks included.
+        self.bm.normal_update()
+        middle = Vector(self.centre)
+        if sum(f.normal.dot(f.calc_center_median() - middle) * f.calc_area() for f in self.bm.faces) < 0:
+            bmesh.ops.reverse_faces(self.bm, faces=self.bm.faces)
         me = bpy.data.meshes.new(self.name)
         self.bm.to_mesh(me)
         self.bm.free()
@@ -365,10 +366,49 @@ def helmet(head, under_cap=False, cols=80, rows=None, under_beanie=False, cut=SP
     return obj
 
 
+# What a texel of sculpted hair is (the mesh's `part`, which the painter reads): the shell over the scalp, a lock
+# (its texture across then along it) or a curl (its texture spreading from its top).
+PART_SHELL, PART_LOCK, PART_CURL = 0, 1, 2
+# Where a sculpted style's texture keeps its shell, and its locks or curls: one cell each of a grid (columns,
+# rows) over the rest.
+SHELL_BOX = (0.0, 0.0, 1.0, 0.26)
+LOCK_BOX = (0.0, 0.28, 1.0, 1.0)
+LOCK_GRID = (11, 3)
+CURL_GRID = (10, 5)
+
+
+def cell(grid, k, gap=0.012):
+    """The `k`th cell (u0, v0, u1, v1) of a grid over LOCK_BOX, less a gap all round."""
+    cols, rows = grid
+    u0, v0, u1, v1 = LOCK_BOX
+    w, h = (u1 - u0) / cols, (v1 - v0) / rows
+    i, j = k % cols, (k // cols) % rows
+    return (u0 + w * i + gap, v0 + h * j + gap, u0 + w * (i + 1) - gap, v0 + h * (j + 1) - gap)
+
+
+def _swirls(u, v):
+    """A hooked stroke on every curl's cell (0-1 where it is drawn): most of a turn of a spiral out from near the
+    curl's top, each cell's turned its own way."""
+    cols, rows = CURL_GRID
+    u0, v0, u1, v1 = LOCK_BOX
+    x = (u - u0) / (u1 - u0) * cols
+    y = (v - v0) / (v1 - v0) * rows
+    k = np.floor(x) + cols * np.floor(y)
+    x, y = (x % 1.0) * 2 - 1, (y % 1.0) * 2 - 1
+    rho = np.hypot(x, y)
+    turn = (k * 0.618034) % 1.0
+    hand = np.where(k % 2 == 0, 1.0, -1.0)
+    # Along the stroke 0-1 as the spiral winds out from 0.18 to 0.62 of the way to the curl's edge.
+    along = (hand * np.arctan2(y, x) / (2 * np.pi) + turn) % 1.0
+    centre = 0.18 + 0.52 * along
+    width = 0.04 * np.sin(np.pi * np.clip(along / 0.85, 0, 1)) ** 0.6
+    return smoothstep(width, width * 0.5, np.abs(rho - centre)) * (along < 0.85)
+
+
 def paint_hair(maps):
     """Hair colour (mask B): flat, as cel hair is drawn, a little darker at the roots and in the valleys between
     locks, with a few clean dark lines where locks part (the game draws them as ink) and a lighter band over the
-    top."""
+    top. Sculpted locks stay clean, and each curl gets one hooked stroke."""
     inside = maps["inside"]
     ao = np.clip(maps["ao"], 0, 1)
     L = maps["light"]
@@ -387,6 +427,10 @@ def paint_hair(maps):
     g = g * (0.55 + 0.45 * ao)
     up = np.clip(maps["nrm"][..., 2], 0, 1)
     g = g + 0.07 * smoothstep(0.45, 0.8, up) * ao
+    sculpted = maps.get("part")
+    if sculpted is not None:
+        partings = np.where(sculpted == PART_SHELL, partings, 0.0)
+        partings = np.maximum(partings, np.where(sculpted == PART_CURL, _swirls(u, v), 0.0))
     g = g * (1 - 0.7 * partings)
     detail = np.repeat(g[..., None], 3, axis=2)
     mask = np.zeros_like(detail)
