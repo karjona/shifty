@@ -203,6 +203,8 @@ const CLEAR_FAR = 4000;
 /** The forest is cut back this far either side of the chairlift's line (m), from this far past its end towers. */
 const LIFT_SWATHE = 8;
 const LIFT_REACH = 270;
+/** No trees stand within this of the middle of the grid (m). */
+const START_YARD = 34;
 /** Trees are drawn out to this far (m), fog allowing. */
 const FOREST_FAR = 1300;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
@@ -1036,6 +1038,9 @@ export class Mountain implements Environment {
       const dz = ((last.z - first.z) / length) * LIFT_REACH;
       line.push({ x: first.x - dx, z: first.z - dz }, ...towers, { x: last.x + dx, z: last.z + dz });
     }
+    // Round the grid, where the intro's camera circles the riders.
+    const grid = runPoint(this.run, this.run.startS - 8);
+    yards.push({ x: grid.x, z: grid.z, turn: 0, r: START_YARD });
     const built = (x: number, z: number) => {
       for (const y of yards) if ((x - y.x) ** 2 + (z - y.z) ** 2 < y.r * y.r) return true;
       for (let i = 0; i < line.length - 1; i++) {

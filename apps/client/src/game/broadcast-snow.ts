@@ -118,8 +118,8 @@ export function snowRigs(
     holds: (w, r) => w.still(r.slot) < 1.6 && near(along.of(r)),
   };
 
-  // Under the arch, a long lens up the final pitch.
-  const pitchEye = on(finish - 6, -(run.finish.limit + 2), 5);
+  // By the arch, inside the fence and its flags, a long lens up the final pitch.
+  const pitchEye = on(finish - 6, -(run.finish.limit - 1.5), 4);
   const pitch: Rig = {
     name: "pitch",
     minShot: 3,
@@ -237,7 +237,7 @@ export function snowRigs(
       // On the edge of the run, inside its fence and clear of the trees (and of its own pines).
       for (let tries = 0; tries < 4; tries++) {
         const i = Math.max(0, Math.min(run.path.length - 1, Math.round((sideS - run.path[0]!.s) / 4)));
-        sideEye.copy(on(sideS, sideOf * (run.path[i]!.limit - 0.5), 2.2));
+        sideEye.copy(on(sideS, sideOf * (run.path[i]!.limit - 2.5), 2.2));
         if (!run.obstacles.some((o) => Math.hypot(o.x - sideEye.x, o.z - sideEye.z) < o.radius + 4)) break;
         sideS += 10;
       }

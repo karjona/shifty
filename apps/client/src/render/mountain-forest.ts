@@ -126,6 +126,8 @@ const CHUNK_POINTS = 28;
 const FAR_CELL = 320;
 /** A stretch of the near forest further than this from the camera (m) is drawn as its trees from far off. */
 const DETAIL_FAR = 170;
+/** A tree's longest boughs end at least this far beyond the riding limit (m). */
+const EDGE_ROOM = 1.2;
 /** A tree's shade is thrown no further than this (m). */
 const SHADE_REACH = 70;
 
@@ -255,7 +257,9 @@ export function plantForest(site: ForestSite): Tree[] {
   for (const s of spots) {
     const near = nearest(run, s.x, s.z);
     const out = near.dist - near.limit;
-    if (!s.solid && (out < 2 || site.open(s.x, s.z))) continue;
+    // Its boughs stay off the riding width.
+    const clear = EDGE_ROOM + (s.kind < NEAR.length ? KINDS[s.kind]!.reach * s.scale : 2);
+    if (!s.solid && (out < clear || site.open(s.x, s.z))) continue;
     const gx = Math.floor(s.x / CELL);
     const gz = Math.floor(s.z / CELL);
     const room = KINDS[s.kind]!.spacing * s.scale;
