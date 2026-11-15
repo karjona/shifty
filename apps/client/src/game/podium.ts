@@ -73,7 +73,7 @@ const ART_WAIT_MS = 8000;
 const EYE_FROM = new THREE.Vector3(-0.7, 0.5, 3.1);
 const EYE_TO = new THREE.Vector3(0.6, 1.25, 7.2);
 const LOOK_FROM = new THREE.Vector3(-0.1, 2.3, 0);
-const LOOK_TO = new THREE.Vector3(1.25, 1.75, 0);
+const LOOK_TO = new THREE.Vector3(0.8, 1.75, 0);
 const FOV_FROM = 40;
 const FOV_TO = 47;
 

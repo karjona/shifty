@@ -146,10 +146,8 @@ def _head(lk):
         parts.append(lathe([(0.132, 0.088), (0.126, 0.12)], 10, lk["top"]))
     if lk["shades"]:
         parts.append(box(0.19, 0.04, 0.03, INK).at(0, -0.005, 0.098))
-    else:
-        for x in (-0.042, 0.042):
-            parts.append(kit.quad((x - 0.012, -0.027, 0.109), (x + 0.012, -0.027, 0.109), (x + 0.012, 0.003, 0.111), (x - 0.012, 0.003, 0.111), INK))
-    return parts
+    # A smaller head than the skull above was drawn to: scenery people are slight, and have no faces.
+    return kit.xf(parts, S(0.86))
 
 
 def _prop(name):
