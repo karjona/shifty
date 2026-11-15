@@ -65,7 +65,11 @@ const MOUNTAIN: RunScenery = {
     { from: 1400, to: 2000, count: 12, near: 8, far: 50, size: 5 },
   ],
   // The gully's sides.
-  walls: [{ from: 1112, to: 1372, height: 3.2, out: 1.5 }],
+  // Either side of the cliff drop, and the gully's sides.
+  walls: [
+    { from: 1044, to: 1102, height: 9, out: 1.5 },
+    { from: 1112, to: 1372, height: 3.6, out: 1.5 },
+  ],
   creek: null,
 };
 
@@ -94,8 +98,8 @@ const GLADES: RunScenery = {
   ],
   // The couloir, and the creek gully.
   walls: [
-    { from: 58, to: 174, height: 7, out: 1.2 },
-    { from: 1218, to: 1478, height: 3.4, out: 1.5 },
+    { from: 52, to: 178, height: 10, out: 1.2 },
+    { from: 1218, to: 1478, height: 3.8, out: 1.5 },
   ],
   creek: { from: 1222, to: 1478, side: -1 },
 };

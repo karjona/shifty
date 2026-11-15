@@ -29,7 +29,7 @@ import { LOOK } from "./cel/look.ts";
 import { CelMaterial, inkId } from "./cel/material.ts";
 import { noise4 } from "./cel/noise.ts";
 import type { Models } from "./env/models.ts";
-import { fadingInk, scenerySnow, snowLoad, snowShade } from "./mountain-look.ts";
+import { fadingInk, scenerySnow, shadeKept, snowLoad, snowShade } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
@@ -100,7 +100,7 @@ export function rockMaterial(): CelMaterial {
   });
   fadingInk(m, 1, 0.8, inkId("rock"), 0.9);
   // (A cap shades as the snow round it does.)
-  m.shadeNode = mix(vec3(...ROCK_SHADE), snowShade(), masks.y);
+  m.shadeNode = mix(vec3(...ROCK_SHADE).mul(shadeKept()), snowShade(), masks.y);
   // Without snow a cap sinks into its rock.
   m.positionNode = Fn(() => {
     const p = positionLocal;
@@ -148,7 +148,6 @@ const SHAPES: Record<string, { half: number; deep: number; height: number }> = {
 const BOULDERS = ["boulder_a", "boulder_b", "boulder_c"];
 const SHARDS = ["shard_a", "shard_b"];
 const CRAGS = ["crag_a", "crag_b", "crag_c", "wall_a", "wall_c"];
-const WALLS = ["wall_a", "wall_b", "wall_c"];
 
 /**
  * Every rock of a run: the sim's rocks (as big as
@@ -216,31 +215,6 @@ export function rockMeshes(
         sink: 0.25 * s,
         tall: 0.85 + rand() * 0.4,
       });
-    }
-  }
-  for (const w of scenery.walls) {
-    for (const side of [-1, 1]) {
-      let at = w.from + rand() * 3;
-      while (at < w.to) {
-        const model = WALLS[Math.floor(rand() * WALLS.length)]!;
-        const shape = SHAPES[model]!;
-        // Lower where the walls begin and end.
-        const ends = Math.min(1, (at - w.from + 6) / 24, (w.to - at + 6) / 24);
-        const s = ((w.height * (0.75 + rand() * 0.5)) / shape.height) * (0.55 + 0.45 * ends);
-        const p = runPoint(run, at);
-        const where = runAt(run, at, side * (p.limit + w.out + shape.deep * s));
-        spots.push({
-          x: where.x,
-          z: where.z,
-          model,
-          s,
-          // Its front to the run.
-          turn: Math.atan2(side * Math.cos(p.yaw), -side * Math.sin(p.yaw)) + (rand() - 0.5) * 0.3,
-          sink: 0.3,
-          tall: 1,
-        });
-        at += shape.half * 2 * s * (0.62 + rand() * 0.2);
-      }
     }
   }
   for (const lip of run.lips) {

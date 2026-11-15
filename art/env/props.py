@@ -30,6 +30,10 @@ TROUSERS = srgb(0x3A3F4C)
 BOOT = srgb(0x2A2A30)
 ORANGE = srgb(0xE8612C)
 TINT = (1.0, 1.0, 1.0)
+LAMP = srgb(0xFFF1D0)
+AMBER = srgb(0xFFB02E)
+TOP_DECK = srgb(0x8A7458)
+CAT_RED = srgb(0xC8322A)
 
 
 def cap_on(m, lo, hi, thick=0.25):
@@ -182,35 +186,56 @@ def spectator(seed, raised, hat=True, skin=SKIN):
 
 
 def chair(riders=0):
-    """A two-seat chair hanging from its grip (the origin, on the cable): a hanger, a bench with a back, a bar; `riders` on it."""
+    """A chair hanging from its grip (the origin, on the cable): a hanger
+    cranked back over a wide bench, a tall padded back and a hood over it in
+    the game's colour, a footrest; `riders` on it, a board or skis hanging
+    from their boots."""
     m = Mesh()
-    # The grip and the hanger: down, then out behind the seat.
-    m.box((-0.12, -0.12, -0.25), (0.12, 0.1, 0.25), STEEL_DARK, faces="xXyYzZ")
-    m.box((-0.05, -1.5, -0.05), (0.05, -0.1, 0.05), STEEL, faces="xXzZ")
-    m.box((-0.05, -1.55, -0.45), (0.05, -1.45, 0.05), STEEL, faces="xXyYzZ")
-    m.box((-0.05, -2.75, -0.5), (0.05, -1.5, -0.4), STEEL, faces="xXzZ")
-    # The bench, its back, and the frame under it.
-    m.box((-0.85, -2.85, -0.45), (0.85, -2.75, 0.2), SEAT, faces="xXyYzZ")
-    m.box((-0.85, -2.75, -0.5), (0.85, -2.15, -0.42), SEAT, faces="xXyYzZ")
-    for x in (-0.87, 0.87):
-        m.box((x - 0.03, -2.9, -0.5), (x + 0.03, -2.1, -0.44), STEEL, faces="xXyYzZ")
-        m.box((x - 0.03, -2.6, -0.45), (x + 0.03, -2.54, 0.45), STEEL, faces="xXyYzZ")
-        m.box((x - 0.03, -3.35, 0.4), (x + 0.03, -2.54, 0.46), STEEL, faces="xXzZ")
-    m.box((-0.87, -3.38, 0.36), (0.87, -3.32, 0.62), STEEL, faces="xXyYzZ")
-    m.box((-0.87, -2.6, 0.42), (0.87, -2.54, 0.48), STEEL, faces="xXyYzZ")
-    cap_on(m, (-0.85, -2.75, -0.5), (0.85, -2.15, -0.42), 0.1)
+    # The grip and the hanger: down, back behind the seat, down to the bench.
+    m.box((-0.14, -0.14, -0.3), (0.14, 0.12, 0.3), STEEL_DARK, faces="xXyYzZ")
+    m.box((-0.07, -1.3, -0.07), (0.07, -0.1, 0.07), STEEL, faces="xXzZ")
+    m.box((-0.07, -1.4, -0.75), (0.07, -1.26, 0.07), STEEL, faces="xXyYzZ")
+    m.box((-0.07, -2.3, -0.78), (0.07, -1.3, -0.64), STEEL, faces="xXzZ")
+    # The bench and its back.
+    m.box((-1.15, -3.0, -0.6), (1.15, -2.86, 0.3), SEAT, faces="xXyYzZ")
+    n0 = len(m.pos)
+    m.box((-1.15, -2.86, -0.7), (1.15, -2.05, -0.58), TINT, faces="xXyYzZ")
+    # The hood: a canopy over the riders' heads, in the game's colour.
+    hood = [(-1.2, -2.05, -0.72), (1.2, -2.05, -0.72), (1.2, -1.62, -0.3), (-1.2, -1.62, -0.3)]
+    m.quad(*hood, TINT, (0.0, 0.0), (0.0, 0.7, -0.7))
+    m.quad(*hood[::-1], scale(TINT, 0.7), (0.0, 0.0), (0.0, -0.7, 0.7))
+    front = [(-1.2, -1.62, -0.3), (1.2, -1.62, -0.3), (1.2, -1.7, 0.35), (-1.2, -1.7, 0.35)]
+    m.quad(*front, TINT, (0.0, 0.0), (0.0, 1.0, 0.1))
+    m.quad(*front[::-1], scale(TINT, 0.7), (0.0, 0.0), (0.0, -1.0, -0.1))
+    for i in range(n0, len(m.pos)):
+        m.alpha[i] = 0.0
+    # The frame: side arms, and the footrest hanging in front.
+    for x in (-1.17, 1.17):
+        m.box((x - 0.04, -3.05, -0.7), (x + 0.04, -1.62, -0.62), STEEL, faces="xXyYzZ")
+        m.box((x - 0.04, -2.62, -0.62), (x + 0.04, -2.54, 0.55), STEEL, faces="xXyYzZ")
+        m.box((x - 0.04, -3.6, 0.5), (x + 0.04, -2.54, 0.58), STEEL, faces="xXzZ")
+    m.box((-1.17, -3.64, 0.42), (1.17, -3.56, 0.78), STEEL, faces="xXyYzZ")
+    m.box((-1.17, -2.62, 0.5), (1.17, -2.54, 0.58), STEEL, faces="xXyYzZ")
     if riders:
-        jackets = [srgb(0xD8452E), srgb(0x2E7FBF), srgb(0xE8B62C)]
-        boards = [srgb(0x3FAE6A), srgb(0xE86A2C)]
+        jackets = [srgb(0xD8452E), srgb(0x2E7FBF), srgb(0xE8B62C), srgb(0x3FAE6A)]
+        gear = [srgb(0x3FAE6A), srgb(0xE86A2C), srgb(0xD8D2C4)]
         for k in range(riders):
             part = Mesh()
-            figure(part, (0.0, 0.0, 0.0), TINT, seated=True, skin=SKIN if k else SKIN_DARK, board=boards[k % 2])
+            figure(part, (0.0, 0.0, 0.0), TINT, seated=True, skin=SKIN if k % 2 else SKIN_DARK)
             for i in range(len(part.pos)):
                 if part.alpha[i] < 0.5:
-                    part.col[i] = jackets[k % 3] if part.col[i][0] > 0.9 else scale(jackets[(k + 1) % 3], 0.9)
+                    part.col[i] = jackets[k % 4] if part.col[i][0] > 0.9 else scale(jackets[(k + 1) % 4], 0.9)
                     part.alpha[i] = 1.0
                 part.uv[i] = (0.0, 0.0)
-            m.merge(part, at=(-0.42 + k * 0.84, -3.25, -0.3))
+            x = (k - (riders - 1) / 2) * 0.72
+            m.merge(part, at=(x, -3.42, -0.42))
+            if k % 2 == 0:
+                # A board across both boots.
+                m.box((x - 0.7, -3.52, 0.02), (x + 0.7, -3.47, 0.34), gear[k % 3], faces="xXyYzZ")
+            else:
+                # Skis, tips up.
+                for dx in (-0.12, 0.12):
+                    m.box((x + dx - 0.05, -3.52, -0.5), (x + dx + 0.05, -3.48, 1.1), gear[k % 3], faces="xXyYzZ")
     return m
 
 
@@ -235,12 +260,161 @@ def truss(m, a, b, wide, col, bays):
             m.box((x - t, a[1] - h, a[2] - h), (x + t, a[1] + h, a[2] + h), col, faces="xXzZ")
 
 
+def floodlight(m, at, aim=(0.0, -0.5, 1.0)):
+    """A floodlight head: a dark box with a lit face (glass) looking along `aim`."""
+    x, y, z = at
+    m.box((x - 0.28, y - 0.2, z - 0.14), (x + 0.28, y + 0.2, z + 0.14), RUBBER, faces="xXyYz")
+    m.quad((x - 0.24, y - 0.16, z + 0.145), (x + 0.24, y - 0.16, z + 0.145), (x + 0.24, y + 0.16, z + 0.145), (x - 0.24, y + 0.16, z + 0.145), LAMP, (0.0, 0.0), (0, 0, 1), alpha=0.0)
+
+
 def gantry_leg(clear=5.6):
-    """A leg of the finish gantry: a lattice mast on a weighted foot."""
+    """A leg of the finish gantry: a lattice mast on a weighted foot, floodlights on its head."""
     m = Mesh()
     m.box((-0.7, -1.5, -0.7), (0.7, 0.35, 0.7), CONCRETE, faces="xXzZY")
     cap_on(m, (-0.7, -1.5, -0.7), (0.7, 0.35, 0.7), 0.2)
     truss(m, (0.0, 0.35, 0.0), (0.0, clear + 1.0, 0.0), 0.5, STEEL, 8)
+    floodlight(m, (0.0, clear + 1.35, 0.3))
+    back = Mesh()
+    floodlight(back, (0.0, clear + 1.35, 0.3))
+    m.merge(back, turn=math.pi)
+    return m
+
+
+def lamp_post(height=6.5):
+    """A floodlight mast for the finish area: a slim pole on a foot, a crossbar with two heads."""
+    m = Mesh()
+    m.box((-0.3, -1.0, -0.3), (0.3, 0.2, 0.3), CONCRETE, faces="xXzZY")
+    m.tube([((0, 0.2, 0), 0.09, STEEL_DARK), ((0, height, 0), 0.06, STEEL)], STEEL, 6)
+    m.box((-0.8, height - 0.06, -0.06), (0.8, height + 0.06, 0.06), STEEL_DARK, faces="xXyYzZ")
+    for x in (-0.55, 0.55):
+        floodlight(m, (x, height + 0.26, 0.1))
+    return m
+
+
+def grandstand(width=12.0, tiers=5):
+    """A grandstand: tiers of benches on a steel frame, a rail along its front and sides, a back wall in the game's colour. Its front to +z."""
+    m = Mesh()
+    rise, run = 0.45, 0.85
+    hw = width / 2
+    for k in range(tiers):
+        y, z = 0.5 + k * rise, -k * run
+        m.box((-hw, y - 0.08, z - run), (hw, y, z), TOP_DECK, faces="xXyYzZ")
+        m.box((-hw, y, z - run + 0.1), (hw, y + 0.3, z - run + 0.42), SEAT, faces="xXyYzZ")
+    top = 0.5 + tiers * rise
+    back = -tiers * run
+    # The frame under it, and the legs down into the slope.
+    for x in (-hw + 0.1, -hw / 3, hw / 3, hw - 0.1):
+        m.box((x - 0.06, -3.0, back - 0.06), (x + 0.06, top + 1.6, back + 0.06), STEEL, faces="xXzZ")
+        m.box((x - 0.06, -3.0, -0.12), (x + 0.06, 0.5, 0.0), STEEL, faces="xXzZ")
+    # The back wall and the side screens.
+    wall = [(-hw, top - 0.2, back), (hw, top - 0.2, back), (hw, top + 1.6, back), (-hw, top + 1.6, back)]
+    n0 = len(m.pos)
+    m.quad(*wall, TINT, (0.0, 0.0), (0, 0, 1))
+    m.quad(*wall[::-1], TINT, (0.0, 0.0), (0, 0, -1))
+    for i in range(n0, len(m.pos)):
+        m.alpha[i] = 0.0
+    for x in (-hw, hw):
+        side = [(x, 0.5, 0.0), (x, top, back), (x, top + 1.1, back), (x, 1.5, 0.0)]
+        m.quad(*side, WHITE, (0.0, 0.0), (1 if x > 0 else -1, 0, 0))
+        m.quad(*side[::-1], WHITE, (0.0, 0.0), (-1 if x > 0 else 1, 0, 0))
+    m.box((-hw, 1.4, 0.0), (hw, 1.48, 0.06), STEEL, faces="xXyYzZ")
+    cap_on(m, (-hw, top + 1.5, back - 0.05), (hw, top + 1.6, back + 0.05), 0.12)
+    return m
+
+
+def timing_board():
+    """The timing board: a dark panel of lit figures on two posts, a band in the game's colour over it."""
+    m = Mesh()
+    for x in (-2.2, 2.2):
+        m.box((x - 0.12, -1.5, -0.12), (x + 0.12, 5.9, 0.12), STEEL_DARK, faces="xXzZ")
+    m.box((-2.8, 3.0, -0.14), (2.8, 5.6, 0.14), RUBBER, faces="xXyYzZ")
+    n0 = len(m.pos)
+    m.box((-2.8, 5.6, -0.16), (2.8, 6.2, 0.16), TINT, faces="xXyYzZ")
+    for i in range(n0, len(m.pos)):
+        m.alpha[i] = 0.0
+    cap_on(m, (-2.8, 5.6, -0.16), (2.8, 6.2, 0.16), 0.14)
+    # Rows of figures: a place, a name, a time.
+    r = rng(5)
+    for row in range(5):
+        y = 5.2 - row * 0.48
+        cells = [(-2.55, 0.22), (-2.15, 1.5 + r.random() * 0.8), (1.0, 1.45)]
+        for x, w in cells:
+            for front in (1, -1):
+                quad = [(x, y - 0.14, 0.145 * front), (x + w, y - 0.14, 0.145 * front), (x + w, y + 0.14, 0.145 * front), (x, y + 0.14, 0.145 * front)]
+                m.quad(*(quad if front > 0 else quad[::-1]), AMBER if row else LAMP, (0.0, 0.0), (0, 0, front))
+    return m
+
+
+def snowcat():
+    """A snowcat: wide tracks, a red body with a glazed cab, a blade in front and a tiller behind. Its front to +z."""
+    m = Mesh()
+    for x in (-1.75, 1.75):
+        # A track: a long flat loop, raked at both ends.
+        lo, hi = (x - 0.55, 0.0, -2.4), (x + 0.55, 0.75, 2.4)
+        m.box((lo[0], 0.0, -1.9), (hi[0], 0.75, 1.9), RUBBER, faces="xXyY")
+        for end in (1, -1):
+            z0, z1 = end * 1.9, end * 2.5
+            quad = [(lo[0], 0.0, z0), (hi[0], 0.0, z0), (hi[0], 0.45, z1), (lo[0], 0.45, z1)]
+            m.quad(*quad, RUBBER, (0.0, 0.0), (0, -0.5, end))
+            quad = [(lo[0], 0.75, z0), (hi[0], 0.75, z0), (hi[0], 0.45, z1), (lo[0], 0.45, z1)]
+            m.quad(*quad, RUBBER, (0.0, 0.0), (0, 0.5, end))
+            for sx in (lo[0], hi[0]):
+                m.tri((sx, 0.0, z0), (sx, 0.75, z0), (sx, 0.45, z1), RUBBER, (0.0, 0.0), (1 if sx > x else -1, 0, 0))
+    # The body between and over the tracks, and the cab on it.
+    m.box((-1.25, 0.45, -2.2), (1.25, 1.25, 2.1), CAT_RED, faces="xXyYzZ")
+    m.box((-1.1, 1.25, -0.3), (1.1, 2.55, 1.7), CAT_RED, faces="xXzZ")
+    m.box((-1.18, 2.55, -0.38), (1.18, 2.68, 1.78), WHITE, faces="xXyYzZ")
+    cap_on(m, (-1.18, 2.55, -0.38), (1.18, 2.68, 1.78), 0.18)
+    cap_on(m, (-1.25, 0.45, -2.2), (1.25, 1.25, -0.3), 0.14)
+    glass = [
+        ((-0.95, 1.55, 1.71), (0.95, 1.55, 1.71), (0.95, 2.4, 1.71), (-0.95, 2.4, 1.71), (0, 0, 1)),
+        ((1.11, 1.55, 1.5), (1.11, 1.55, -0.1), (1.11, 2.4, -0.1), (1.11, 2.4, 1.5), (1, 0, 0)),
+        ((-1.11, 1.55, -0.1), (-1.11, 1.55, 1.5), (-1.11, 2.4, 1.5), (-1.11, 2.4, -0.1), (-1, 0, 0)),
+    ]
+    for a, b, c, d, n in glass:
+        m.quad(a, b, c, d, GLASS, (0.0, 0.0), n, alpha=0.0)
+    for x in (-0.8, 0.8):
+        floodlight(m, (x, 2.9, 1.5))
+    # The blade, on its arms.
+    for x in (-1.0, 1.0):
+        m.box((x - 0.08, 0.5, 2.1), (x + 0.08, 0.66, 3.2), STEEL_DARK, faces="xXyYzZ")
+    blade = [(-2.5, 0.05, 3.3), (2.5, 0.05, 3.3), (2.5, 1.15, 3.05), (-2.5, 1.15, 3.05)]
+    m.quad(*blade, STEEL, (0.0, 0.0), (0, 0.2, 1))
+    m.quad(*blade[::-1], STEEL_DARK, (0.0, 0.0), (0, -0.2, -1))
+    # The tiller behind, under its cover.
+    m.box((-2.4, 0.1, -3.4), (2.4, 0.6, -2.5), CAT_RED, faces="xXyYzZ")
+    m.box((-0.1, 0.5, -2.5), (0.1, 0.7, -2.2), STEEL_DARK, faces="xXyYzZ")
+    return m
+
+
+def drape():
+    """A cloth hung by its top edge (y = 0), 1 m wide and 1 m long, in the game's colour: it sways more the further down it hangs."""
+    m = Mesh()
+    rows = 4
+    for k in range(rows):
+        y0, y1 = -k / rows, -(k + 1) / rows
+        for front in (1, -1):
+            quad = [(-0.5, y1, 0.0), (0.5, y1, 0.0), (0.5, y0, 0.0), (-0.5, y0, 0.0)]
+            uvs = [(-y1 * 0.6, 0.0), (-y1 * 0.6, 0.0), (-y0 * 0.6, 0.0), (-y0 * 0.6, 0.0)]
+            m.quad(*(quad if front > 0 else quad[::-1]), TINT, uvs if front > 0 else uvs[::-1], (0, 0, front), alpha=0.0)
+    return m
+
+
+def boarder(seed, skis=False):
+    """Someone standing with their board upright beside them (or their skis and poles), watching."""
+    m = Mesh()
+    figure(m, (0.0, 0.0, 0.0), TINT, 0.0, skin=SKIN if seed % 2 else SKIN_DARK)
+    r = rng(seed)
+    col = [srgb(0x3FAE6A), srgb(0xE86A2C), srgb(0x2E7FBF), srgb(0xE8B62C)][seed % 4]
+    if skis:
+        for dx in (0.42, 0.52):
+            m.box((dx - 0.04, 0.0, -0.02), (dx + 0.04, 1.75, 0.02), col, (0.0, 0.0), faces="xXyYzZ")
+        m.box((-0.44, 0.0, 0.1), (-0.42, 1.2, 0.12), RUBBER, (0.0, 0.0), faces="xXzZ")
+    else:
+        m.box((0.4, 0.0, -0.03), (0.68, 1.5, 0.03), col, (0.0, 0.0), faces="xXyYzZ")
+        m.box((0.42, 0.45, 0.03), (0.66, 0.6, 0.07), RUBBER, (0.0, 0.0), faces="xXyYZ")
+        m.box((0.42, 0.95, 0.03), (0.66, 1.1, 0.07), RUBBER, (0.0, 0.0), faces="xXyYZ")
+    _ = r
     return m
 
 
@@ -317,7 +491,16 @@ def build():
         "lift_station": station(),
         "chair": chair(0),
         "chair_riders": chair(2),
+        "chair_four": chair(3),
         "gantry_leg": gantry_leg(),
+        "lamp_post": lamp_post(),
+        "grandstand": grandstand(),
+        "timing_board": timing_board(),
+        "snowcat": snowcat(),
+        "drape": drape(),
+        "boarder_a": boarder(1),
+        "boarder_b": boarder(2, skis=True),
+        "boarder_c": boarder(3),
         "truss_bay": truss_bay(),
         "gate": gate(),
         "feather": feather(),

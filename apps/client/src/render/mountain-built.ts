@@ -8,12 +8,16 @@ import * as THREE from "three/webgpu";
 import {
   Fn,
   attribute,
+  cameraPosition,
+  cameraProjectionMatrix,
+  cameraViewMatrix,
   float,
   floor,
   hash,
   mix,
   modelWorldMatrix,
   normalLocal,
+  positionGeometry,
   positionLocal,
   positionWorld,
   sin,
@@ -23,9 +27,9 @@ import {
   vec4,
 } from "three/tsl";
 import { LOOK, cut0 } from "./cel/look.ts";
-import { CelMaterial, inkId } from "./cel/material.ts";
+import { CelMaterial, UNREFLECTED, inkId, inkNode, inkOnlyInPass } from "./cel/material.ts";
 import type { Models } from "./env/models.ts";
-import { fadingInk, gustAt, scenerySnow, snowLoad, snowShade, windNow } from "./mountain-look.ts";
+import { MOUNTAIN, fadingInk, gustAt, scenerySnow, shadeKept, snowLoad, snowShade, windNow } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import type { GateData, RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
@@ -82,11 +86,11 @@ export function buildingPlan(run: RunData, scenery: RunScenery): Building[] {
     s: lodge.s,
     offset: (at.limit + lodge.out + 8) * lodge.side,
     faces: "run",
-    scale: lodge.size > 1 ? 1 : 0.8,
-    yard: 15,
+    scale: lodge.size > 1 ? 1.2 : 0.9,
+    yard: 16,
   });
   if (scenery.village) {
-    const side = (model: string, s: number, out: number, right: boolean, scale = 1): Building => ({
+    const side = (model: string, s: number, out: number, right: boolean, scale = 1.25): Building => ({
       model,
       s,
       offset: (runPoint(run, s).limit + out) * (right ? 1 : -1),
@@ -95,27 +99,29 @@ export function buildingPlan(run: RunData, scenery: RunScenery): Building[] {
       yard: model === "hotel" ? 15 : 10,
     });
     plan.push(
-      side("chalet_a", finish - 62, 19, true),
-      side("hotel", finish + 22, 24, true),
-      side("inn", finish + 78, 19, true),
-      side("chalet_c", finish - 20, 44, true, 1.1),
-      side("chalet_b", finish + 60, 46, true),
-      side("chalet_b", finish - 48, 18, false),
-      side("church", finish + 30, 27, false),
-      side("chalet_a", finish + 84, 17, false),
-      side("inn", finish - 2, 46, false),
-      side("chalet_c", finish + 64, 44, false),
+      // Along the finish straight, their fronts to it: the hotel and the church tower over the rest.
+      side("chalet_a", finish - 66, 16, true),
+      side("hotel", finish + 26, 21, true, 1.3),
+      side("inn", finish + 76, 17, true),
+      side("chalet_b", finish - 62, 16, false),
+      side("church", finish + 34, 24, false, 1.5),
+      side("chalet_a", finish + 82, 15, false),
+      // Behind them, up the bank.
+      side("chalet_c", finish - 24, 42, true, 1.3),
+      side("chalet_b", finish + 64, 46, true, 1.3),
+      side("inn", finish - 8, 44, false, 1.3),
+      side("chalet_c", finish + 72, 42, false, 1.3),
       // Across the end of the outrun, looking up the run.
-      { model: "chalet_c", s: end + 62, offset: -27, faces: "up", scale: 1.1, yard: 10 },
-      { model: "inn", s: end + 70, offset: 2, faces: "up", scale: 1.1, yard: 12 },
-      { model: "chalet_a", s: end + 60, offset: 30, faces: "up", scale: 1, yard: 10 },
+      { model: "chalet_c", s: end + 50, offset: -30, faces: "up", scale: 1.4, yard: 12 },
+      { model: "inn", s: end + 58, offset: 2, faces: "up", scale: 1.4, yard: 14 },
+      { model: "chalet_a", s: end + 50, offset: 34, faces: "up", scale: 1.4, yard: 12 },
     );
   } else {
     // By the lodge: a couple of chalets up the bank.
     plan.push(
-      { model: "chalet_a", s: lodge.s - 44, offset: (limit + 34) * lodge.side, faces: "run", scale: 1, yard: 10 },
-      { model: "chalet_c", s: lodge.s + 46, offset: (limit + 30) * lodge.side, faces: "run", scale: 1, yard: 10 },
-      { model: "chalet_b", s: end + 66, offset: 8, faces: "up", scale: 1, yard: 10 },
+      { model: "chalet_a", s: lodge.s - 44, offset: (limit + 30) * lodge.side, faces: "run", scale: 1.25, yard: 11 },
+      { model: "chalet_c", s: lodge.s + 46, offset: (limit + 26) * lodge.side, faces: "run", scale: 1.25, yard: 11 },
+      { model: "chalet_b", s: end + 56, offset: 8, faces: "up", scale: 1.4, yard: 12 },
     );
   }
   return plan;
@@ -165,7 +171,7 @@ export function builtMaterial(): CelMaterial {
   });
   fadingInk(m, 1, 0.6, inkId("built"), 0.85);
   // (Snow on a roof shades as the snow round it does.)
-  m.shadeNode = mix(vec3(0.6, 0.6, 0.86), snowShade(), masks.y);
+  m.shadeNode = mix(vec3(0.6, 0.6, 0.86).mul(shadeKept()), snowShade(), masks.y);
   m.positionNode = Fn(() => {
     const p = positionLocal;
     return p.sub(
@@ -259,7 +265,12 @@ function crowdMaterial(): CelMaterial {
     const beat = sin(t.mul(9).add(who.mul(11)));
     const bounce = beat.abs().mul(0.09).mul(cheer).mul(masks.y);
     const pump = beat.mul(0.07).mul(cheer.mul(0.7).add(0.3)).mul(masks.x);
-    return p.add(vec3(0, bounce.add(pump), 0));
+    // And a wave runs along the fence now and then: up on their toes, arms higher, as it passes.
+    const passing = sin(t.mul(2.4).sub(p.x.add(p.z).mul(0.16)))
+      .max(0)
+      .pow(6);
+    const wave = passing.mul(smoothstep(0.3, 0.6, sin(t.mul(0.23)))).mul(masks.y.mul(0.2).add(masks.x.mul(0.22)));
+    return p.add(vec3(0, bounce.add(pump).add(wave), 0));
   })();
   people = m;
   return m;
@@ -284,6 +295,8 @@ interface Tinted {
   turn: number;
   scale: number;
   tint: number;
+  /** Its width, height and depth against the model's (on top of `scale`). */
+  size?: [number, number, number];
 }
 
 /** A text band: `text` on a colour, checkered along its edges or not. */
@@ -350,33 +363,33 @@ export class Built {
     lengths: number[];
   } | null = null;
   private random = rng(909);
+  private accent = 0xd4262f;
+  /** Where lamps shine (world): they glow as the light goes. */
+  readonly lamps: THREE.Vector3[] = [];
   private scratch = { m: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3() };
 
+  /** `accent`: the season's colour, for the gantries' cloth. */
   constructor(
     run: RunData,
     scenery: RunScenery,
     plan: Building[],
     models: Models,
     ground: (x: number, z: number) => number,
+    accent: number,
   ) {
     this.run = run;
     this.models = models;
     this.ground = ground;
+    this.accent = accent;
     for (const b of plan) this.building(b);
     this.lift(scenery);
-    this.gantry(run.startGate, bandTexture("23.4° SHIFTY · COSTA NEVADA", "#1f3b6e", "#ffffff", false), 12);
-    this.gantry(run.finish, bandTexture("FINISH", "#f4f4f0", "#111111", true), 18);
+    this.gantry(run.startGate, bandTexture("23.4° SHIFTY · COSTA NEVADA", "#1f3b6e", "#ffffff", false), 16);
+    this.gantry(run.finish, bandTexture("FINISH", "#f4f4f0", "#111111", true), 28);
     this.gates();
     this.finishArea(scenery);
     this.instances(this.tinted, clothMaterial(), true);
     this.instances(this.crowd, crowdMaterial(), true);
-  }
-
-  /** How far (x, z) is beyond the riding limit (m; negative on the run). */
-  private clearOfRun(x: number, z: number): number {
-    let best = Infinity;
-    for (const p of this.run.path) best = Math.min(best, Math.hypot(p.x - x, p.z - z) - p.limit);
-    return best;
+    this.glows();
   }
 
   /** Lowest ground under a `w` by `d` footprint at (x, z), turned by `turn`. */
@@ -439,7 +452,7 @@ export class Built {
   private spectator(x: number, y: number, z: number, turn: number): void {
     const r = this.random();
     this.crowd.push({
-      model: r < 0.45 ? "spectator_a" : r < 0.75 ? "spectator_c" : "spectator_b",
+      model: CROWD[Math.floor(r * CROWD.length)]!,
       x,
       y,
       z,
@@ -474,7 +487,8 @@ export class Built {
       const mesh = new THREE.InstancedMesh(geometry, material, group.length);
       group.forEach((t, i) => {
         q.setFromAxisAngle(up, t.turn);
-        mesh.setMatrixAt(i, m.compose(at.set(t.x, t.y, t.z), q, size.setScalar(t.scale)));
+        const [sx, sy, sz] = t.size ?? [1, 1, 1];
+        mesh.setMatrixAt(i, m.compose(at.set(t.x, t.y, t.z), q, size.set(sx, sy, sz).multiplyScalar(t.scale)));
         colour.setHex(t.tint);
         tints.set([colour.r, colour.g, colour.b], i * 3);
       });
@@ -496,23 +510,7 @@ export class Built {
     const yaw = Math.atan2(down.x, down.z);
     for (const t of towers) this.place("lift_tower", t.x, t.y, t.z, yaw, t.height / 14);
     // The top station (where the run's scenery has it, or up the line) and the bottom one.
-    // (Along the line, at the first place well clear of the riding width.)
-    const along = (from: THREE.Vector3, way: number) => {
-      let best = { x: from.x + down.x * way * 110, z: from.z + down.z * way * 110 };
-      let room = -Infinity;
-      for (let d = 70; d <= 260; d += 10) {
-        const at = { x: from.x + down.x * way * d, z: from.z + down.z * way * d };
-        const clear = this.clearOfRun(at.x, at.z);
-        if (clear > room) {
-          room = clear;
-          best = at;
-        }
-        if (clear > STATION_ROOM) break;
-      }
-      return best;
-    };
-    const topAt = scenery.liftTop ? runAt(this.run, scenery.liftTop.s, scenery.liftTop.offset) : along(first, -1);
-    const bottomAt = along(last, 1);
+    const [topAt, bottomAt] = liftEnds(this.run, scenery)!;
     const ends: THREE.Vector3[] = [];
     for (const [at, toward] of [
       [topAt, first],
@@ -554,8 +552,8 @@ export class Built {
     const empty = this.models.get("chair");
     const full = this.models.get("chair_riders");
     if (!empty || !full) return;
-    const mesh = new THREE.InstancedMesh(empty, builtMaterial(), each * 2);
-    const riders = new THREE.InstancedMesh(full, builtMaterial(), each);
+    const mesh = liveried(empty, each * 2, 0);
+    const riders = liveried(full, each, 2);
     for (const o of [mesh, riders]) {
       o.castShadow = true;
       o.frustumCulled = false;
@@ -607,25 +605,41 @@ export class Built {
     c.riders.instanceMatrix.needsUpdate = true;
   }
 
-  /** A gantry across the run at a gate: a leg either side, a lattice beam, and a banner hung from it. */
+  /** A gantry across the run at a gate: a leg either side with floodlights, a lattice beam, a banner hung from it, and cloth in the season's colour either side of the banner and down the legs. */
   private gantry(g: GateData, banner: THREE.Texture, wide: number): void {
-    const half = g.limit + 1.6;
+    const half = g.limit + 1.8;
     const rx = Math.cos(g.yaw);
     const rz = -Math.sin(g.yaw);
     const feet = [-1, 1].map((side) => {
       const x = g.x + rx * half * side;
       const z = g.z + rz * half * side;
-      return { x, z, y: this.ground(x, z) };
+      return { x, z, y: this.ground(x, z), side };
     });
-    const top = Math.max(feet[0]!.y, feet[1]!.y, g.y) + 6.3;
-    for (const f of feet) this.place("gantry_leg", f.x, f.y, f.z, g.yaw, (top - f.y + 0.3) / 6.6);
+    const top = Math.max(feet[0]!.y, feet[1]!.y, g.y) + 7.2;
+    for (const f of feet) {
+      const tall = (top - f.y + 0.4) / 6.6;
+      const leg = this.place("gantry_leg", f.x, f.y, f.z, g.yaw, 1);
+      leg?.scale.set(1.7, tall, 1.7);
+      this.lamps.push(new THREE.Vector3(f.x, f.y + 6.95 * tall, f.z));
+      // A long cloth down the leg's inner side, facing up the run and down it.
+      this.tinted.push({
+        model: "drape",
+        x: f.x - rx * 1.5 * f.side,
+        y: top - 0.9,
+        z: f.z - rz * 1.5 * f.side,
+        turn: g.yaw,
+        scale: 1,
+        tint: this.accent,
+        size: [1.5, 4.6, 1],
+      });
+    }
     const bay = this.models.get("truss_bay");
     if (bay) {
-      const count = Math.ceil(half * 2);
+      const count = Math.ceil(half);
       const beam = new THREE.InstancedMesh(bay, builtMaterial(), count);
       const m = new THREE.Matrix4();
       const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), g.yaw);
-      const one = new THREE.Vector3((half * 2) / count, 1, 1);
+      const one = new THREE.Vector3((half * 2) / count, 2, 2);
       for (let k = 0; k < count; k++) {
         const along = -half + (k * half * 2) / count;
         beam.setMatrixAt(k, m.compose(new THREE.Vector3(g.x + rx * along, top, g.z + rz * along), q, one));
@@ -636,15 +650,69 @@ export class Built {
       this.group.add(beam);
     }
     // The banner reads from up the run and from below it.
+    const deep = wide / 8;
     const printed = fadingInk(new CelMaterial({ map: banner }), 0.6, 0, 0, 0.8);
     for (const back of [0, 1]) {
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(wide, wide / 8), printed);
-      const out = back ? 0.03 : -0.03;
-      sign.position.set(g.x + Math.sin(g.yaw) * out, top - 0.4 - wide / 16, g.z + Math.cos(g.yaw) * out);
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(wide, deep), printed);
+      const out = back ? 0.04 : -0.04;
+      sign.position.set(g.x + Math.sin(g.yaw) * out, top - 0.7 - deep / 2, g.z + Math.cos(g.yaw) * out);
       sign.rotation.y = g.yaw + (back ? 0 : Math.PI);
       sign.castShadow = true;
       this.group.add(sign);
     }
+    // Either side of it, the season's colour, hung from the beam.
+    const room = half - 2.6 - wide / 2;
+    if (room > 2) {
+      for (const side of [-1, 1]) {
+        const along = (wide / 2 + 0.4 + room / 2) * side;
+        this.tinted.push({
+          model: "drape",
+          x: g.x + rx * along,
+          y: top - 0.7,
+          z: g.z + rz * along,
+          turn: g.yaw,
+          scale: 1,
+          tint: this.accent,
+          size: [room, deep * 0.8, 1],
+        });
+      }
+    }
+  }
+
+  /** The lamps' glow: a warm disc at each, facing the camera, coming up as the light goes. */
+  private glows(): void {
+    if (this.lamps.length === 0) return;
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const at = new Float32Array(this.lamps.length * 3);
+    this.lamps.forEach((p, i) => at.set([p.x, p.y, p.z], i * 3));
+    geometry.setAttribute("lamp", new THREE.InstancedBufferAttribute(at, 3));
+    const m = new THREE.MeshBasicNodeMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    });
+    const centre = attribute<"vec3">("lamp", "vec3");
+    // A disc a few metres across, turned to the camera.
+    m.vertexNode = cameraProjectionMatrix.mul(
+      cameraViewMatrix.mul(vec4(centre, 1)).add(vec4(positionGeometry.xy.mul(GLOW_SIZE), 0, 0)),
+    );
+    const dark = LOOK.dusk.max(LOOK.overcast.mul(0.75));
+    const r = uv().sub(0.5).length().mul(2);
+    const reach = smoothstep(MOUNTAIN.fogFar, MOUNTAIN.fogNear, centre.distance(cameraPosition));
+    m.colorNode = vec3(1.0, 0.72, 0.36);
+    m.opacityNode = smoothstep(1, 0.1, r)
+      .pow(2)
+      .mul(smoothstep(0.2, 0.7, dark))
+      .mul(reach)
+      .mul(0.75);
+    inkOnlyInPass(m, inkNode(0, 0, 0, 0));
+    const mesh = new THREE.InstancedMesh(geometry, m, this.lamps.length);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    mesh.layers.set(UNREFLECTED);
+    mesh.userData.noMerge = true;
+    this.group.add(mesh);
   }
 
   /** Checkpoints: a pair of gate panels either side of the run, red then blue down the mountain. */
@@ -716,10 +784,10 @@ export class Built {
           ),
         );
         faces.push(face);
-        // The crowd behind the board, two deep in places.
-        for (let row = 0; row < 2; row++) {
-          if (this.random() < (scenery.village ? 0.42 : 0.6) + row * 0.25) continue;
-          const at = runAt(run, s + (this.random() - 0.5) * 2.4, offset + side * (1.1 + row * 0.9));
+        // The crowd behind the board, three deep in places.
+        for (let row = 0; row < 3; row++) {
+          if (this.random() < (scenery.village ? 0.12 : 0.4) + row * 0.24) continue;
+          const at = runAt(run, s + (this.random() - 0.5) * 2.4, offset + side * (1.1 + row * 0.85));
           const inward = Math.atan2(side * Math.cos(at.yaw), -side * Math.sin(at.yaw));
           this.spectator(
             at.x,
@@ -734,8 +802,77 @@ export class Built {
     const sheet = new THREE.Mesh(mergeFaces(faces), new CelMaterial({ map: marks, crease: 0, silhouette: 0 }));
     sheet.userData.noMerge = true;
     this.group.add(sheet);
+    // Either side of the last metres before the line: a grandstand, full.
+    for (const side of [-1, 1]) {
+      const s = finish - 17;
+      const at = runAt(run, s, (runPoint(run, s).limit + 5.2) * side);
+      const turn = inward(at, side);
+      const seats = { model: "grandstand", x: at.x, y: this.footing(at.x, at.z, turn, 6, 2) + 0.2, z: at.z, turn };
+      this.tinted.push({ ...seats, scale: 1.15, tint: brand(side > 0 ? 0 : 3) });
+      const seat = new THREE.Matrix4().compose(
+        new THREE.Vector3(seats.x, seats.y, seats.z),
+        new THREE.Quaternion().setFromAxisAngle(UP, turn),
+        new THREE.Vector3(1.15, 1.15, 1.15),
+      );
+      for (let tier = 0; tier < 5; tier++) {
+        for (let place = 0; place < 14; place++) {
+          if (this.random() < 0.18) continue;
+          const p = new THREE.Vector3(
+            -5.6 + place * 0.86 + (this.random() - 0.5) * 0.3,
+            0.5 + tier * 0.45,
+            -tier * 0.85 - 0.25,
+          );
+          p.applyMatrix4(seat);
+          this.spectator(p.x, p.y, p.z, turn + (this.random() - 0.5) * 0.5);
+        }
+      }
+    }
+    // The timing board by the line, snowcats parked beyond the crowd, and floodlights along the fences.
+    // (Up the run from the line: what stands tall beyond it would stand between the cameras and the finishers.)
+    const board = runAt(run, finish - 36, -(runPoint(run, finish - 36).limit + 5.5));
+    this.tinted.push({
+      model: "timing_board",
+      x: board.x,
+      y: this.ground(board.x, board.z),
+      z: board.z,
+      turn: inward(board, -1) - 0.5,
+      scale: 1.3,
+      tint: this.accent,
+    });
+    for (const [s, out, side, yaw] of [
+      [finish - 44, 9, 1, 0.25],
+      [finish - 58, 9.5, -1, Math.PI - 0.3],
+      [run.startS - 14, 9, -1, 0.5],
+    ] as const) {
+      const at = runAt(run, s, (runPoint(run, s).limit + out) * side);
+      this.place("snowcat", at.x, this.footing(at.x, at.z, at.yaw + yaw, 2.4, 3.2) + 0.25, at.z, at.yaw + yaw, 1.05);
+    }
+    for (let s = finish - 66; s <= end; s += 26) {
+      for (const side of [-1, 1]) {
+        const at = runAt(run, s, (runPoint(run, s).limit + 4.1) * side);
+        const y = this.ground(at.x, at.z);
+        this.place("lamp_post", at.x, y, at.z, inward(at, side), 1);
+        this.lamps.push(new THREE.Vector3(at.x, y + 6.8, at.z));
+      }
+    }
   }
 }
+
+/** Who stands in the crowd: mostly onlookers, some with their board or skis. */
+const CROWD = [
+  "spectator_a",
+  "spectator_a",
+  "spectator_a",
+  "spectator_c",
+  "spectator_c",
+  "spectator_b",
+  "spectator_b",
+  "boarder_a",
+  "boarder_b",
+  "boarder_c",
+];
+/** A lamp's glow is this wide (m). */
+const GLOW_SIZE = 5;
 
 /** A brand's colour, by its place in `BRANDS` (they come round again). */
 const brand = (k: number) => new THREE.Color(BRANDS[k % BRANDS.length]![1]).getHex();
@@ -745,8 +882,74 @@ const ONE = new THREE.Vector3(1, 1, 1);
 /** What puts an instance out of sight. */
 const HIDDEN = new THREE.Matrix4().makeScale(0, 0, 0);
 
+/** How far (x, z) is beyond a run's riding limit (m; negative on the run). */
+function clearOfRun(run: RunData, x: number, z: number): number {
+  let best = Infinity;
+  for (const p of run.path) best = Math.min(best, Math.hypot(p.x - x, p.z - z) - p.limit);
+  return best;
+}
+
+/**
+ * Where a run's chairlift ends: its top and its bottom station (null with
+ * no lift). The top is where the run's scenery has it; otherwise a station
+ * stands off the end of the line, turned aside if the line runs on down
+ * the run: the nearest place clear of the riding width that the chairs can
+ * come down to without crossing it low.
+ */
+export function liftEnds(
+  run: RunData,
+  scenery: RunScenery,
+): [{ x: number; z: number }, { x: number; z: number }] | null {
+  const towers = run.obstacles.filter((o) => o.kind === "tower");
+  if (towers.length < 2) return null;
+  const first = towers[0]!;
+  const last = towers.at(-1)!;
+  const length = Math.hypot(last.x - first.x, last.z - first.z);
+  const down = { x: (last.x - first.x) / length, z: (last.z - first.z) / length };
+  const station = (from: { x: number; z: number }, way: number) => {
+    let best = { x: from.x + down.x * way * 110, z: from.z + down.z * way * 110 };
+    let least = Infinity;
+    for (const bend of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]) {
+      const dx = (down.x * Math.cos(bend) + down.z * Math.sin(bend)) * way;
+      const dz = (down.z * Math.cos(bend) - down.x * Math.sin(bend)) * way;
+      for (let d = 40; d <= 260; d += 10) {
+        const cost = Math.abs(bend) * 150 + d;
+        if (cost >= least || clearOfRun(run, from.x + dx * d, from.z + dz * d) < STATION_ROOM) continue;
+        // (Over the last of the span the chairs hang within reach of the snow.)
+        let low = true;
+        for (let k = 0.45; k <= 1 && low; k += 0.05)
+          low = clearOfRun(run, from.x + dx * d * k, from.z + dz * d * k) > 2;
+        if (!low) continue;
+        least = cost;
+        best = { x: from.x + dx * d, z: from.z + dz * d };
+      }
+    }
+    return best;
+  };
+  const top = scenery.liftTop ? runAt(run, scenery.liftTop.s, scenery.liftTop.offset) : station(first, -1);
+  return [top, station(last, 1)];
+}
+
 /** A lift station stands at least this far beyond the riding limit (m). */
 const STATION_ROOM = 14;
+/** `count` chairs of a model, each in a brand's colours (the brands in turn from `from`): its own copy of the geometry, with the tints. */
+function liveried(source: THREE.BufferGeometry, count: number, from: number): THREE.InstancedMesh {
+  const geometry = new THREE.BufferGeometry();
+  for (const [name, a] of Object.entries(source.attributes)) geometry.setAttribute(name, a);
+  geometry.setIndex(source.index);
+  const tints = new Float32Array(count * 3);
+  const colour = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    colour.setHex(brand(from + i));
+    tints.set([colour.r, colour.g, colour.b], i * 3);
+  }
+  geometry.setAttribute("tint", new THREE.InstancedBufferAttribute(tints, 3));
+  return new THREE.InstancedMesh(geometry, clothMaterial(), count);
+}
+
+/** The heading that faces the run from `side` of it (1: its right). */
+const inward = (at: { yaw: number }, side: number) => Math.atan2(side * Math.cos(at.yaw), -side * Math.sin(at.yaw));
+
 /** Chairs hang this far apart along the cable (m), and travel this fast (m/s). */
 const CHAIR_GAP = 15;
 const CHAIR_SPEED = 2.4;

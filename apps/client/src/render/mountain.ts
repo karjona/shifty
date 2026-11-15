@@ -54,16 +54,19 @@ import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
 import { CelMaterial, celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
+import { PALETTE } from "../game/seasons.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
 import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
 import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
-import { type Building, Built, buildingAt, buildingPlan } from "./mountain-built.ts";
-import { farLandscape } from "./mountain-far.ts";
+import { type Building, Built, buildingAt, buildingPlan, liftEnds } from "./mountain-built.ts";
+import { farLandscape, landscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
 import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
+import { alpineRanges } from "./mountain-ranges.ts";
+import { rockWalls } from "./mountain-walls.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
 
@@ -200,9 +203,10 @@ const FOG_NEAR = 45;
 const FOG_FAR = 330;
 const CLEAR_NEAR = 80;
 const CLEAR_FAR = 4000;
-/** The forest is cut back this far either side of the chairlift's line (m), from this far past its end towers. */
+/** The forest is cut back this far either side of the chairlift's line (m). */
 const LIFT_SWATHE = 8;
-const LIFT_REACH = 270;
+/** No trees stand within this of the middle of the grid (m). */
+const START_YARD = 34;
 /** Trees are drawn out to this far (m), fog allowing. */
 const FOREST_FAR = 1300;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
@@ -373,13 +377,21 @@ function snowMaterial(ribbon: boolean): CelMaterial {
         const polish = smoothstep(0.2, 0.7, noise4(vec2(s.mul(0.05), o.mul(0.35))).y)
           .mul(0.5)
           .add(0.5);
-        sc.assign(mix(sc, sc.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94)), snow.w));
+        const hard = sc.mul(vec3(0.9, 0.95, 1.04)).mul(polish.mul(0.08).add(0.94));
+        // Sheets of blue ice where the snow has been scraped off, long down the run, their edges cut clean.
+        const sheet = noise4(vec2(s.mul(0.03), o.mul(0.22))).w.add(noise4(vec2(s.mul(0.11), o.mul(0.6))).x.mul(0.35));
+        const iced = mix(hard, vec3(0.66, 0.8, 0.96), cut0(sheet.sub(0.3)).mul(0.6));
+        // (A glint along each sheet's upper edge.)
+        const glint = cut0(sheet.sub(0.3))
+          .sub(cut0(sheet.sub(0.36)))
+          .mul(LOOK.shadow);
+        sc.assign(mix(sc, mix(iced, vec3(1), glint.mul(0.7)), snow.w));
       });
       // A thin cover is scratchy: grass and earth showing through in specks.
       If(LOOK.runSnow.x.greaterThan(0.001), () => {
         const thinHere = clamp(float(0.45).sub(snow.x).div(0.3), 0, 1);
         // Bare earth in small patches where it is thinnest (grass stands in them: see `grassTufts`).
-        const where = noise4(p.xz.mul(1.3)).x.sub(float(0.86).sub(thinHere.mul(0.4)));
+        const where = noise4(p.xz.mul(2.1)).x.sub(float(0.86).sub(thinHere.mul(0.24)));
         const earth = cut0(where)
           .mul(smoothstep(0.05, 0.3, thinHere))
           .mul(near);
@@ -387,7 +399,12 @@ function snowMaterial(ribbon: boolean): CelMaterial {
       });
       If(LOOK.runSnow.y.greaterThan(0.001), () => {
         const dirt = smoothstep(0.35, 0.8, noise4(p.xz.mul(0.6)).z).mul(0.12);
-        sc.assign(mix(sc, sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2))), snow.z));
+        const slush = sc.mul(vec3(0.74, 0.74, 0.76).sub(dirt)).mul(float(1).sub(tracked.mul(0.2)));
+        // Wet hollows where the melt stands: darker and bluer, in soft-cornered patches, and mounds pushed up between them.
+        const lie = noise4(vec2(s.mul(0.09), o.mul(0.3))).y.add(noise4(p.xz.mul(0.55)).w.mul(0.3));
+        const wet = mix(slush, vec3(0.56, 0.62, 0.7), cut0(lie.sub(0.34)).mul(0.3));
+        const heaped = mix(wet, vec3(0.86, 0.87, 0.9), cut0(lie.negate().sub(0.38)).mul(0.3));
+        sc.assign(mix(sc, heaped, snow.z));
       });
       c = mix(sc, mix(sc, vec3(0.92, 0.95, 1.0), 0.5), snow.y.mul(float(1).sub(tracked.mul(0.5))).mul(0.6));
       // Snow blown along the run in a wind: pale streaks snaking downwind.
@@ -409,9 +426,16 @@ function snowMaterial(ribbon: boolean): CelMaterial {
       // Faces rising toward the rider and hollows in shade, the rest a touch brighter.
       const shade = attribute("shade", "float");
       c = c.mul(float(1).sub(max(shade, 0).mul(0.38)).add(max(shade.negate(), 0).mul(0.08)));
+      // The crest of a lip or a roller catches the sun: a warm rim along it.
+      const crest = smoothstep(0.45, 0.95, shade.negate()).mul(LOOK.shadow);
+      c = mix(c, vec3(1.0, 0.985, 0.93), crest.mul(0.55));
     }
     // Rain greys the snow.
     c = c.mul(float(1).sub(LOOK.wet.mul(0.1)));
+    // Under a closed sky the groomed run stays a touch lighter than the snow round it (cooler and darker).
+    const dull = LOOK.overcast.max(float(1).sub(LOOK.shadow)).mul(0.5);
+    const beside = ribbon ? float(1).sub(smoothstep(0.2, 0.9, attribute("run", "float"))) : float(1);
+    c = c.mul(mix(vec3(1), vec3(0.8, 0.84, 0.92), beside.mul(dull)));
     // Where it's off: the season's grass, in drifts of two tones.
     const ground = mix(LOOK.ground, LOOK.ground2, smoothstep(0.35, 0.65, drift.add(blotch.mul(0.3)).sub(0.15)));
     c = mix(ground, c, cover);
@@ -593,7 +617,14 @@ export class Mountain implements Environment {
     this.buildFences();
     this.buildRocks(models);
     this.buildProps();
-    this.built = new Built(run, this.scenery, this.buildings, models, (x, z) => this.ground(x, z));
+    this.built = new Built(
+      run,
+      this.scenery,
+      this.buildings,
+      models,
+      (x, z) => this.ground(x, z),
+      PALETTE[this.conditions.season].accent,
+    );
     this.props.add(this.built.group);
     // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
     const plain = new Set<THREE.Mesh>();
@@ -618,14 +649,14 @@ export class Mountain implements Environment {
     this.life = new MountainLife(this.trees, this.built.chimneys, flocks);
     this.props.add(this.life.group);
     const { x0, z0, nx, nz } = this.grid;
-    this.props.add(
-      farLandscape({
-        run,
-        heights: (points) => this.terrain.heights(points),
-        around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
-        ridgeStart: this.scenery.ridgeStart,
-      }),
-    );
+    const site = {
+      run,
+      heights: (points: Float32Array) => this.terrain.heights(points),
+      around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
+      ridgeStart: this.scenery.ridgeStart,
+    };
+    const land = landscape(site);
+    this.props.add(farLandscape(site, land), alpineRanges(site, land));
     this.group.add(this.props);
   }
 
@@ -1027,15 +1058,12 @@ export class Mountain implements Environment {
     const finish = this.run.finishS;
     // Under the chairlift: a swathe cut through the forest along its line, from station to station.
     const towers = this.run.obstacles.filter((o) => o.kind === "tower");
-    const line: { x: number; z: number }[] = [];
-    if (towers.length >= 2) {
-      const first = towers[0]!;
-      const last = towers.at(-1)!;
-      const length = Math.hypot(last.x - first.x, last.z - first.z);
-      const dx = ((last.x - first.x) / length) * LIFT_REACH;
-      const dz = ((last.z - first.z) / length) * LIFT_REACH;
-      line.push({ x: first.x - dx, z: first.z - dz }, ...towers, { x: last.x + dx, z: last.z + dz });
-    }
+    const ends = liftEnds(this.run, this.scenery);
+    const line: { x: number; z: number }[] = ends ? [ends[0], ...towers, ends[1]] : [];
+    for (const end of ends ?? []) yards.push({ x: end.x, z: end.z, turn: 0, r: 12 });
+    // Round the grid, where the intro's camera circles the riders.
+    const grid = runPoint(this.run, this.run.startS - 8);
+    yards.push({ x: grid.x, z: grid.z, turn: 0, r: START_YARD });
     const built = (x: number, z: number) => {
       for (const y of yards) if ((x - y.x) ** 2 + (z - y.z) ** 2 < y.r * y.r) return true;
       for (let i = 0; i < line.length - 1; i++) {
@@ -1047,9 +1075,9 @@ export class Mountain implements Environment {
         if ((x - a.x - dx * t) ** 2 + (z - a.z - dz * t) ** 2 < LIFT_SWATHE * LIFT_SWATHE) return true;
       }
       // The crowd's side of the fences, from the last pitch to the end of the outrun.
-      for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 20; i--) {
+      for (let i = path.length - 1; i >= 0 && path[i]!.s > finish - 72; i--) {
         const p = path[i]!;
-        if ((x - p.x) ** 2 + (z - p.z) ** 2 < (p.limit + 7) ** 2) return true;
+        if ((x - p.x) ** 2 + (z - p.z) ** 2 < (p.limit + 12) ** 2) return true;
       }
       return false;
     };
@@ -1135,6 +1163,7 @@ export class Mountain implements Environment {
   private buildRocks(models: Models): void {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
+    for (const mesh of rockWalls(this.run, this.scenery.walls, heights)) this.props.add(mesh);
     const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
     if (patches) this.props.add(patches);
   }

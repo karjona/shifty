@@ -41,7 +41,19 @@ export function clearOfFog(): THREE.Node<"float"> {
  * be out of.
  */
 export function snowShade(): THREE.Node<"vec3"> {
-  return mix(vec3(0.8, 0.84, 0.96), vec3(0.6, 0.67, 1.0), LOOK.shadow.mul(0.65).add(0.35));
+  return mix(vec3(0.8, 0.84, 0.96), vec3(0.6, 0.67, 1.0), LOOK.shadow.mul(0.65).add(0.35)).mul(shadeKept());
+}
+
+/** A colour's lightness. */
+const light = (c: typeof LOOK.lit) => c.r.mul(0.3).add(c.g.mul(0.59)).add(c.b.mul(0.11));
+
+/**
+ * What a shade tone on the mountain is multiplied by so shade stays darker
+ * than light whatever the weather's light is (under a storm the look's
+ * shade light is the brighter of the two): 1 on a clear day.
+ */
+export function shadeKept(): THREE.Node<"float"> {
+  return light(LOOK.lit).div(light(LOOK.shade).max(0.01)).mul(0.92).clamp(0.5, 1);
 }
 
 /** Gives `m` ink lines that fade into the fog with it (weights as `inkNode` takes them). */

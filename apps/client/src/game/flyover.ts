@@ -25,6 +25,9 @@ const HANDOVER = 1.3;
 /** The camera keeps at least this high above the ground or the water (m). */
 const CLEARANCE = 1.5;
 
+/** Where the orbit of a run's grid begins (rad): beside the riders, a little behind, clear of the start gantry. */
+const GRID_SIDE = 1.75;
+
 const smooth = (x: number) => {
   const t = Math.min(1, Math.max(0, x));
   return t * t * (3 - 2 * t);
@@ -55,17 +58,24 @@ interface Grid {
 }
 
 /**
- * Round the grid from in front of it (angle 0, along the riders' heading) to
- * behind and above it (π), coming closer, looking at the riders.
+ * Round the grid from `from` (an angle: 0 in front of it, along the riders'
+ * heading; π/2 at their side) to behind and above it (π), coming closer,
+ * looking at the riders.
  */
-function round(seconds: number, grid: Grid, ground: (x: number, z: number) => number, chaseFov: number): Shot {
+function round(
+  seconds: number,
+  grid: Grid,
+  ground: (x: number, z: number) => number,
+  chaseFov: number,
+  from = 0.45,
+): Shot {
   const fx = Math.sin(grid.yaw);
   const fz = Math.cos(grid.yaw);
   return {
     seconds,
     at(u, pose) {
       const k = glide(u);
-      const a = lerp(0.45, Math.PI, k);
+      const a = lerp(from, Math.PI, k);
       const r = lerp(24, 16, k);
       // Forward, and the riders' right (-fz, fx), scaled round the circle.
       const x = grid.centre.x + (fx * Math.cos(a) - fz * Math.sin(a)) * r;
@@ -192,17 +202,19 @@ function mountainShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: 
       { eye: on(-34, -20, 7), look: on(60, 6, 0), fov: 50 },
       { eye: on(-22, -16, 24), look: on(200, 4, 0), fov: 50 },
     ),
+    // Down the run over the S-turns, the chairlift crossing below.
     dolly(
       1.5,
-      { eye: on(540, -34, 16), look: on(660, 6, 0), fov: 50 },
-      { eye: on(600, -30, 13), look: on(720, 4, 0), fov: 50 },
+      { eye: on(500, 0, 24), look: on(640, 0, 0), fov: 50 },
+      { eye: on(570, 0, 19), look: on(700, 0, 0), fov: 50 },
     ),
     dolly(
       1.5,
-      { eye: on(gully, -8, 22), look: on(gully + 90, 4, 0), fov: 50 },
-      { eye: on(gully + 45, -6, 18), look: on(gully + 140, 4, 0), fov: 50 },
+      { eye: on(gully, -2, 22), look: on(gully + 90, 2, 0), fov: 50 },
+      { eye: on(gully + 45, -1, 17), look: on(gully + 140, 2, 0), fov: 50 },
     ),
-    round(2.0, grid, ground, env.camera.fov),
+    // (From the riders' side: the start gantry stands across the run in front of them.)
+    round(2.0, grid, ground, env.camera.fov, GRID_SIDE),
   ];
 }
 
@@ -237,7 +249,7 @@ function gladesShots(run: Extract<CourseInfo, { sport: "snow" }>["run"], env: En
       { eye: on(990, 2, 3.2), look: on(1045, 0, 0.5), fov: 54 },
       { eye: on(1018, 2, 2.6), look: on(1075, 0, 1), fov: 54 },
     ),
-    round(2.0, grid, ground, env.camera.fov),
+    round(2.0, grid, ground, env.camera.fov, GRID_SIDE),
   ];
 }
 
