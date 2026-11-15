@@ -46,7 +46,6 @@ import { ConditionsLook } from "./look.ts";
 import { CarveTrails } from "./trails.ts";
 import { mergeStatic } from "./merge.ts";
 import { BoarderModel } from "./boarder.ts";
-import { peakRange } from "./scenery.ts";
 import { CelMaterial, celify } from "./cel/material.ts";
 import { type Conditions, homeConditions } from "../game/conditions.ts";
 import { Cumulus, skyDome } from "./cel/sky.ts";
@@ -54,7 +53,8 @@ import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, liftStation, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
-import { type Tree, forestMeshes, forestShade, plantForest } from "./mountain-forest.ts";
+import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
+import { farLandscape } from "./mountain-far.ts";
 import { MOUNTAIN } from "./mountain-look.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
@@ -187,8 +187,13 @@ const GRID_SINK = 0.3;
 /** Coarse vertices this close to the run hide under the ribbon. */
 const GRID_HIDE = RIBBON_HALF - GRID_STEP;
 const ROWS_PER_CHUNK = 96;
-/** Pine cells further than this from the camera (m) are lost in the fog. */
-const FOREST_FAR = 520;
+/** The fog's range as the conditions' look works it out (m), and how far a clear day sees on the mountain. */
+const FOG_NEAR = 45;
+const FOG_FAR = 330;
+const CLEAR_NEAR = 80;
+const CLEAR_FAR = 4000;
+/** Trees are drawn out to this far (m), fog allowing. */
+const FOREST_FAR = 1300;
 /** Curvature along the run (1/m) sharper than this, at a crest, gets a dye line (lips, knuckles, the cliff). */
 const DYE_BREAK = 0.16;
 /** How far back up the approach from the crest the dye reaches (m). */
@@ -523,7 +528,7 @@ export class Mountain implements Environment {
     fadeIn: 5,
   });
   private trails = new CarveTrails();
-  private forest: THREE.InstancedMesh[] = [];
+  private forest: Forest | null = null;
   private trees: Tree[] = [];
   /** What stands on the mountain (built once its models are in). */
   private props = new THREE.Group();
@@ -550,8 +555,8 @@ export class Mountain implements Environment {
       // Noon's sun stands down the run (+z), and stays ahead of the riders through the day.
       south: [-30, 60],
       swing: 0.55,
-      fogNear: 45,
-      fogFar: 330,
+      fogNear: FOG_NEAR,
+      fogFar: FOG_FAR,
       fogTint: [1.026, 0.91, 0.92],
       snowLine: { summer: top + 600, fall: top - drop * 0.08, winter: bottom - 3000, spring: bottom + drop * 0.6 },
       mountain: true,
@@ -590,9 +595,17 @@ export class Mountain implements Environment {
     this.buildRocks(models);
     this.buildLodge();
     this.buildProps();
-    this.props.add(peakRange(run.path[0]!.y, run.path.at(-1)!.y, run.path));
     celify(this.props);
     mergeStatic(this.props, { cell: 400 });
+    const { x0, z0, nx, nz } = this.grid;
+    this.props.add(
+      farLandscape({
+        run,
+        heights: (points) => this.terrain.heights(points),
+        around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
+        ridgeStart: this.scenery.ridgeStart,
+      }),
+    );
     this.group.add(this.props);
   }
 
@@ -602,7 +615,7 @@ export class Mountain implements Environment {
 
   light(scene: THREE.Scene, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight): void {
     // (One fog for the mountain: a new one would rebuild every shader that draws in it.)
-    this.fog ??= new THREE.Fog(0xc9d4e4, 45, 330);
+    this.fog ??= new THREE.Fog(0xc9d4e4, CLEAR_NEAR, CLEAR_FAR);
     scene.fog = this.fog;
     scene.background = this.background;
     hemi.intensity = 1.9;
@@ -610,7 +623,20 @@ export class Mountain implements Environment {
     this.sun = sun;
     this.hemi = hemi;
     this.look.apply(0, 0, this.run.path[0]!.y, null, this.fog, this.background, sun, hemi);
+    this.openFog(this.fog);
     LOOK.runSnow.value.copy(this.runSnow);
+  }
+
+  /**
+   * Opens the fog the conditions set out to the mountain's range: a clear
+   * day sees most of the way down the run, and bad weather closes in as it did.
+   */
+  private openFog(fog: THREE.Fog): void {
+    const weather = fog.far / FOG_FAR;
+    fog.far = CLEAR_FAR * weather ** 4.1;
+    fog.near = fog.near * (CLEAR_NEAR / FOG_NEAR) * weather ** 1.3;
+    MOUNTAIN.fogNear.value = fog.near;
+    MOUNTAIN.fogFar.value = fog.far;
   }
 
   ground(x: number, z: number): number {
@@ -892,8 +918,8 @@ export class Mountain implements Environment {
 
   /** The forest, in its batches. */
   private buildForest(models: Models): void {
-    this.forest = forestMeshes(this.trees, models);
-    for (const mesh of this.forest) this.props.add(mesh);
+    this.forest = new Forest(this.trees, models);
+    this.props.add(this.forest.group);
   }
 
   /** Whether a point is in open ground: round the lodge, and from the run's edge across its lake. */
@@ -1163,19 +1189,15 @@ export class Mountain implements Environment {
 
   update(f: Frame): void {
     const ground = (x: number, z: number) => this.roughGround(x, z);
-    for (const cell of this.forest) {
-      const sphere = cell.boundingSphere!;
-      cell.visible = sphere.center.distanceTo(f.eye) - sphere.radius < FOREST_FAR;
+    if (this.fog) {
+      this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
+      this.openFog(this.fog);
+      this.forest?.update(f.eye, Math.min(this.fog.far + 40, FOREST_FAR));
     }
-    if (this.fog) this.look.apply(f.turn, f.t, f.eye.y, f.weather, this.fog, this.background, this.sun, this.hemi);
     LOOK.runSnow.value.copy(this.runSnow);
     this.cumulus.update(this.look.cover, this.look.tower);
     this.precipitation.update(this.look.rain, this.look.snow);
     MOUNTAIN.snowing.value = this.look.snow;
-    if (this.fog) {
-      MOUNTAIN.fogNear.value = this.fog.near;
-      MOUNTAIN.fogFar.value = this.fog.far;
-    }
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);
     this.trails.update(f.riders, f.t);
     this.powder.update(ground, f.dt);

@@ -26,6 +26,8 @@ export interface RockWalls {
 export interface RunScenery {
   /** How thick the pines stand along the edges at `s` (1: the usual). */
   forest(s: number): number;
+  /** The start stands on a ridge, the ground falling away behind it (else the mountain climbs on to its summit). */
+  ridgeStart: boolean;
   /** Pines grow only below this height (m); the mountain above is bare. */
   treeLine: number;
   /** Red netting along the edges at `s` (a run `half` wide there). */
@@ -45,6 +47,7 @@ export interface RunScenery {
 /** The mountain run: pines thickest through the S-turns and the gully, a lodge above the cliff drop. */
 const MOUNTAIN: RunScenery = {
   forest: (s) => (s > 700 && s < 1000 ? 2.2 : s > 1100 && s < 1380 ? 1.4 : 1),
+  ridgeStart: false,
   treeLine: Infinity,
   fenced: (s, half, finishS) => half > 10 && s > 50 && s < finishS + 30,
   lodge: { s: 1040, out: 9, side: 1, size: 1 },
@@ -70,6 +73,7 @@ const MOUNTAIN: RunScenery = {
  */
 const GLADES: RunScenery = {
   forest: (s) => (s < 560 ? 0.1 : s < 640 ? 0.8 : s < 1210 ? 3.2 : s < 1480 ? 1.7 : s < 1880 ? 1.2 : 0.6),
+  ridgeStart: true,
   treeLine: 300,
   fenced: (s, half, finishS) => half > 12 && ((s > 190 && s < 560) || (s > 1600 && s < finishS + 30)),
   lodge: { s: 2010, out: 18, side: 1, size: 1.5 },

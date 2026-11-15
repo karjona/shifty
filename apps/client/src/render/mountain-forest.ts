@@ -11,7 +11,6 @@ import {
   float,
   frontFacing,
   mix,
-  positionGeometry,
   positionLocal,
   positionWorld,
   sin,
@@ -29,6 +28,8 @@ import type { RunScenery } from "./runs.ts";
 /** A kind of tree: its model, and its shape as the forest is planted and its shade is thrown. */
 interface Kind {
   model: string;
+  /** The same tree from far off (itself, if left out). */
+  lod?: string;
   /** Height and the reach of its longest boughs (m). */
   height: number;
   reach: number;
@@ -42,12 +43,66 @@ interface Kind {
 }
 
 const NEAR: Kind[] = [
-  { model: "fir_tall", height: 16, reach: 3.3, crownFrom: 0.18, round: false, spacing: 3.4, weight: 3 },
-  { model: "fir_broad", height: 12.5, reach: 3.7, crownFrom: 0.18, round: false, spacing: 3.6, weight: 3 },
-  { model: "fir_old", height: 18, reach: 3.2, crownFrom: 0.23, round: false, spacing: 3.4, weight: 1.1 },
-  { model: "pine_scots", height: 13.5, reach: 3.6, crownFrom: 0.55, round: true, spacing: 3.6, weight: 0.7 },
-  { model: "fir_young", height: 4.2, reach: 1.45, crownFrom: 0.08, round: false, spacing: 1.9, weight: 1.5 },
-  { model: "fir_small", height: 2.6, reach: 0.95, crownFrom: 0.1, round: false, spacing: 1.4, weight: 1.1 },
+  {
+    model: "fir_tall",
+    lod: "fir_tall_lod",
+    height: 16,
+    reach: 3.3,
+    crownFrom: 0.18,
+    round: false,
+    spacing: 3.4,
+    weight: 3,
+  },
+  {
+    model: "fir_broad",
+    lod: "fir_broad_lod",
+    height: 12.5,
+    reach: 3.7,
+    crownFrom: 0.18,
+    round: false,
+    spacing: 3.6,
+    weight: 3,
+  },
+  {
+    model: "fir_old",
+    lod: "fir_old_lod",
+    height: 18,
+    reach: 3.2,
+    crownFrom: 0.23,
+    round: false,
+    spacing: 3.4,
+    weight: 1.1,
+  },
+  {
+    model: "pine_scots",
+    lod: "pine_scots_lod",
+    height: 13.5,
+    reach: 3.6,
+    crownFrom: 0.55,
+    round: true,
+    spacing: 3.6,
+    weight: 0.7,
+  },
+  {
+    model: "fir_young",
+    lod: "fir_young_lod",
+    height: 4.2,
+    reach: 1.45,
+    crownFrom: 0.08,
+    round: false,
+    spacing: 1.9,
+    weight: 1.5,
+  },
+  {
+    model: "fir_small",
+    lod: "fir_small_lod",
+    height: 2.6,
+    reach: 0.95,
+    crownFrom: 0.1,
+    round: false,
+    spacing: 1.4,
+    weight: 1.1,
+  },
   { model: "snag", height: 9.4, reach: 0.3, crownFrom: 1, round: false, spacing: 2, weight: 0.22 },
 ];
 const FAR: Kind[] = [
@@ -65,7 +120,9 @@ const NEAR_RANGE = 30;
 const FOREST_REACH = 86;
 /** The near forest is batched by stretches of the run this long (path points), the far one in squares this wide (m). */
 const CHUNK_POINTS = 28;
-const FAR_CELL = 176;
+const FAR_CELL = 320;
+/** A stretch of the near forest further than this from the camera (m) is drawn as its trees from far off. */
+const DETAIL_FAR = 230;
 /** A tree's shade is thrown no further than this (m). */
 const SHADE_REACH = 70;
 
@@ -257,7 +314,8 @@ function treeMaterial(): CelMaterial {
   if (shared) return shared;
   const masks = uv();
   const colour = Fn(() => {
-    const base = attribute<"vec4">("color", "vec4").rgb;
+    const root = attribute<"vec4">("color", "vec4").rgb;
+    const base = root.mul(root);
     // The season's needles (a little darker in the cold), worked out per vertex.
     const light = dot(base, vec3(0.3, 0.59, 0.11))
       .div(0.15)
@@ -289,7 +347,7 @@ function treeMaterial(): CelMaterial {
     const p = positionLocal;
     const { speed, dir } = windNow();
     const gust = gustAt(p.xz);
-    const h = positionGeometry.y.max(0);
+    const h = attribute<"vec4">("color", "vec4").a.mul(HEIGHT_UNIT);
     const lean = h.mul(0.06).pow(2).mul(speed.mul(0.028).add(0.02)).mul(gust.mul(0.8).add(0.2));
     const along = masks.x;
     const beat = sin(LOOK.time.mul(2.6).add(p.x.mul(1.7)).add(p.z.mul(1.3)).add(h.mul(0.9)));
@@ -303,37 +361,111 @@ function treeMaterial(): CelMaterial {
   return m;
 }
 
-/** The forest's batches: one per kind of tree in each stretch of the run (or square of the mountain). */
-export function forestMeshes(trees: Tree[], models: Models): THREE.InstancedMesh[] {
-  const batches = new Map<string, Tree[]>();
-  for (const t of trees) {
-    const key = `${t.chunk} ${t.kind}`;
-    let batch = batches.get(key);
-    if (!batch) batches.set(key, (batch = []));
-    batch.push(t);
+/** A vertex's height up its tree rides in its colour's alpha, in these units (m). */
+const HEIGHT_UNIT = 24;
+
+/** The trees of one batch as one mesh, each a copy of its kind's model (or of its far-off one). */
+function merged(trees: Tree[], models: Models, far: boolean): THREE.BufferGeometry | null {
+  let vertices = 0;
+  let indices = 0;
+  const parts: { tree: Tree; g: THREE.BufferGeometry }[] = [];
+  for (const tree of trees) {
+    const kind = KINDS[tree.kind]!;
+    const g = models.get(far ? (kind.lod ?? kind.model) : kind.model);
+    if (!g?.index) continue;
+    parts.push({ tree, g });
+    vertices += g.attributes.position!.count;
+    indices += g.index.count;
   }
-  const material = treeMaterial();
-  const out: THREE.InstancedMesh[] = [];
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-  const at = new THREE.Vector3();
-  const size = new THREE.Vector3();
-  for (const batch of batches.values()) {
-    const kind = batch[0]!.kind;
-    const geometry = models.get(KINDS[kind]!.model);
-    if (!geometry) continue;
-    const mesh = new THREE.InstancedMesh(geometry, material, batch.length);
-    batch.forEach((t, i) => {
-      q.setFromAxisAngle(up, t.turn);
-      mesh.setMatrixAt(i, m.compose(at.set(t.x, t.y, t.z), q, size.set(t.scale, t.scale * t.tall, t.scale)));
-    });
-    mesh.computeBoundingSphere();
-    mesh.castShadow = kind < NEAR.length;
-    mesh.userData.noMerge = true;
-    out.push(mesh);
+  if (vertices === 0) return null;
+  const pos = new Float32Array(vertices * 3);
+  const nor = new Float32Array(vertices * 3);
+  const col = new Uint8Array(vertices * 4);
+  const masks = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let v = 0;
+  let k = 0;
+  for (const { tree, g } of parts) {
+    const p = g.attributes.position!;
+    const n = g.attributes.normal!;
+    const c = g.attributes.color!;
+    const m = g.attributes.uv!;
+    const cs = Math.cos(tree.turn);
+    const sn = Math.sin(tree.turn);
+    const s = tree.scale;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      const y = p.getY(i);
+      const z = p.getZ(i);
+      const o = (v + i) * 3;
+      pos[o] = tree.x + (x * cs + z * sn) * s;
+      pos[o + 1] = tree.y + y * s * tree.tall;
+      pos[o + 2] = tree.z + (z * cs - x * sn) * s;
+      nor[o] = n.getX(i) * cs + n.getZ(i) * sn;
+      nor[o + 1] = n.getY(i);
+      nor[o + 2] = n.getZ(i) * cs - n.getX(i) * sn;
+      const q = (v + i) * 4;
+      // (Square roots: the shader squares them, so dark greens keep their steps.)
+      col[q] = Math.round(Math.sqrt(c.getX(i)) * 255);
+      col[q + 1] = Math.round(Math.sqrt(c.getY(i)) * 255);
+      col[q + 2] = Math.round(Math.sqrt(c.getZ(i)) * 255);
+      col[q + 3] = Math.round(Math.min(1, Math.max(0, (y * s * tree.tall) / HEIGHT_UNIT)) * 255);
+      masks[(v + i) * 2] = m.getX(i);
+      masks[(v + i) * 2 + 1] = m.getY(i);
+    }
+    const src = g.index!;
+    for (let i = 0; i < src.count; i++) index[k + i] = v + src.getX(i);
+    v += p.count;
+    k += src.count;
   }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  out.setAttribute("color", new THREE.BufferAttribute(col, 4, true));
+  out.setAttribute("uv", new THREE.BufferAttribute(masks, 2));
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  out.computeBoundingSphere();
   return out;
+}
+
+/** The forest as it is drawn: a mesh per stretch of the run (in detail close by, simpler from far off) and per square of the mountain. */
+export class Forest {
+  readonly group = new THREE.Group();
+  private batches: { centre: THREE.Vector3; radius: number; detail: THREE.Mesh | null; far: THREE.Mesh }[] = [];
+
+  constructor(trees: Tree[], models: Models) {
+    this.group.userData.noMerge = true;
+    const chunks = new Map<string, Tree[]>();
+    for (const t of trees) {
+      let chunk = chunks.get(t.chunk);
+      if (!chunk) chunks.set(t.chunk, (chunk = []));
+      chunk.push(t);
+    }
+    const material = treeMaterial();
+    for (const [name, chunk] of chunks) {
+      const near = name.startsWith("near");
+      const lod = merged(chunk, models, true);
+      if (!lod) continue;
+      const far = new THREE.Mesh(lod, material);
+      const fine = near ? merged(chunk, models, false) : null;
+      const detail = fine ? new THREE.Mesh(fine, material) : null;
+      if (detail) detail.castShadow = true;
+      const sphere = (fine ?? lod).boundingSphere!;
+      this.batches.push({ centre: sphere.center, radius: sphere.radius, detail, far });
+      this.group.add(far);
+      if (detail) this.group.add(detail);
+    }
+  }
+
+  /** Shows each batch as the camera at `eye` needs it: nothing past `reach` m, detail close by. */
+  update(eye: THREE.Vector3, reach: number): void {
+    for (const b of this.batches) {
+      const d = b.centre.distanceTo(eye) - b.radius;
+      const close = b.detail !== null && d < DETAIL_FAR;
+      if (b.detail) b.detail.visible = close;
+      b.far.visible = !close && d < reach;
+    }
+  }
 }
 
 /** Trees are looked up by the squares (this wide, m) their shade can reach. */

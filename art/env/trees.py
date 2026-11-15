@@ -349,6 +349,13 @@ def build():
         "fir_small": young(43, 2.6, *silver),
         "pine_scots": pine(53, 13.5, srgb(0x4D7B45)),
         "snag": snag(61, 8.5),
+        # The same trees from far off.
+        "fir_tall_lod": far_fir(12, 16.0, 3.4, 6, *silver),
+        "fir_broad_lod": far_fir(24, 12.5, 3.8, 5, *spruce),
+        "fir_old_lod": far_fir(38, 18.0, 3.2, 6, *olive),
+        "fir_young_lod": far_fir(42, 4.2, 1.6, 3, *fresh, points=5),
+        "fir_small_lod": far_fir(44, 2.6, 1.0, 3, *silver, points=5),
+        "pine_scots_lod": far_pine(54, 13.5, srgb(0x4D7B45)),
         "far_fir_a": far_fir(71, 14.0, 3.0, 5, *silver),
         "far_fir_b": far_fir(73, 11.0, 3.4, 4, *spruce),
         "far_fir_c": far_fir(79, 17.0, 2.8, 6, *olive),
