@@ -24,6 +24,9 @@ export interface Piece {
   mask: THREE.Texture;
   /** The paint without its baked light, where the art has one (the face). */
   flat: THREE.Texture | null;
+  /** The face: how its texture runs across the eyes, as (du/dx, dv/dx, du/dz, dv/dz) per metre to the rider's
+   * left (x) and up (z). */
+  gaze: readonly [number, number, number, number] | null;
   /** The body's skin: its drawn anatomy (ink lines, shapes of shade). Its `detail` and `mask` are blank. */
   lines: THREE.Texture | null;
   finish: Finish;
@@ -74,6 +77,14 @@ function finishOf(v: unknown): Finish {
 
 function hidesOf(v: unknown): number {
   return Array.isArray(v) ? v.reduce((m: number, r: unknown) => (typeof r === "number" ? m | (1 << r) : m), 0) : 0;
+}
+
+function gazeOf(v: unknown): Piece["gaze"] {
+  if (!Array.isArray(v) || v.length !== 4) return null;
+  const [a, b, c, d]: unknown[] = v;
+  return typeof a === "number" && typeof b === "number" && typeof c === "number" && typeof d === "number"
+    ? [a, b, c, d]
+    : null;
 }
 
 function tintsOf(v: unknown): TintSource {
@@ -165,6 +176,7 @@ export function loadModel(body: BodyKind, model: string): Promise<ModelAsset> {
             mask,
             flat,
             lines,
+            gaze: gazeOf(Reflect.get(m.userData, "gaze")),
             finish: finishOf(finish),
             tints: tintsOf(tints),
             hides: hidesOf(hides),

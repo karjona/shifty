@@ -379,6 +379,7 @@ def build_body(o, log, fig, bake_it=True):
     overlays.update({f"beard.{k}": mhface.beard(baked["face"], head_tex, k) for k in range(1, BEARDS[fig.name])})
     features = mhface.features(baked["face"], offsets, normals, head_tex)
     features["lids"] = mhface.lids(baked["face"])
+    parts["face"]["gaze"] = mhface.gaze_axes(baked["face"])
     flat = None
     for name, maps in baked.items():
         if name == "face":

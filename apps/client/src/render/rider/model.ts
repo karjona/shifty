@@ -94,7 +94,7 @@ const SHAPES = ["eyes", "nose", "mouth"] as const;
 
 /** What a look wears over its face: its eyes', nose's and mouth's paint (the first nose and mouth have none), its
  * brows and beard. */
-async function overlaysFor(look: Look): Promise<FaceOverlays> {
+async function overlaysFor(look: Look, gaze: FaceOverlays["gaze"]): Promise<FaceOverlays> {
   const [lids, brows, beard, ...features] = await Promise.all([
     loadOverlay(look.body, "lids"),
     loadOverlay(look.body, `brows.${look.brows}`),
@@ -108,6 +108,7 @@ async function overlaysFor(look: Look): Promise<FaceOverlays> {
     beard: beard ?? NO_OVERLAY,
     features: features.filter((f): f is THREE.Texture => f !== null),
     lids: lids ?? NO_OVERLAY,
+    gaze,
   };
 }
 
@@ -184,11 +185,11 @@ export class RiderFigure {
       (async () => {
         const look = { ...appearance.look, body: await artBody(appearance.look) };
         const items = await worn(look, appearance.outfits[sport], sport);
-        const [overlays, ...assets] = await Promise.all([
-          overlaysFor(look),
+        const assets = await Promise.all([
           loadModel(look.body, "body"),
           ...items.map((i) => loadModel(look.body, i.model)),
         ]);
+        const overlays = await overlaysFor(look, assets[0].pieces.find((p) => p.name === "face")?.gaze ?? null);
         if (version !== this.version) return;
         const built = this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
         if (!built) return;

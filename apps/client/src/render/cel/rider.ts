@@ -31,6 +31,8 @@ import {
   smoothstep,
   texture,
   uniform,
+  uv,
+  vec2,
   vec3,
   vec4,
 } from "three/tsl";
@@ -78,14 +80,18 @@ export interface FaceOverlays {
   features: readonly THREE.Texture[];
   /** Where a closing eyelid passes (art/rider/mhface.py): in red how far up an eye's opening a texel is, from
    * `LID_LOW` at the lower lid to `LID_HIGH` at the upper and on to 1 over the upper lash line; in green what
-   * the lid covers once shut. */
+   * the lid covers once shut; in blue the opening itself. */
   lids: THREE.Texture;
+  /** How the face's texture runs across the eyes (see `Piece.gaze`), if the art says. */
+  gaze: readonly [number, number, number, number] | null;
 }
 
 /** What a face does besides hold still. */
 export interface FaceState {
   /** How far the eyes are closed, 0-1. */
   blink: number;
+  /** Where the eyes look: how far the irises sit to the rider's left and up from straight ahead (m). */
+  gaze?: readonly [number, number];
 }
 
 /** How the overlays paint (tint factors, as the art paints them: art/rider/mhface.py). */
@@ -129,6 +135,7 @@ export class CelTintMaterial extends CelMaterial {
   private accent = uniform(new THREE.Color());
   private hidden = uniform(0);
   private blink = uniform(0);
+  private gaze = uniform(new THREE.Vector2());
   /** A wetsuit over the skin: the body regions it covers, those of them in its panels' colour, and its colours. */
   private suit = uniform(0);
   private suitPanels = uniform(0);
@@ -202,8 +209,15 @@ export class CelTintMaterial extends CelMaterial {
     };
     const none = vec3(0, 0, 0);
     let shapeShade: THREE.Node<"float"> = float(0);
-    for (const t of overlays?.features ?? []) {
-      const o = texture(t).rgb;
+    // The eyes turn by sliding their paint inside the opening (the first of the features is the eyes').
+    const axes = overlays?.gaze;
+    const lids = overlays ? texture(overlays.lids) : null;
+    const eyeUv =
+      axes && lids
+        ? uv().sub(vec2(axes[0], axes[1]).mul(this.gaze.x).add(vec2(axes[2], axes[3]).mul(this.gaze.y)).mul(lids.b))
+        : uv();
+    for (const [k, t] of (overlays?.features ?? []).entries()) {
+      const o = texture(t, k === 0 ? eyeUv : uv()).rgb;
       const iris = crisp(clamp(o.z.mul(2), 0, 1));
       over(iris, vec3(0, 1, 0), vec3(IRIS_TONE));
       // (From a softer level, so the shade line runs in clean shapes; the art stores "no change" as 128.)
@@ -216,10 +230,9 @@ export class CelTintMaterial extends CelMaterial {
       over(crisp(o.x), none, vec3(INK_TONE));
       over(crisp(clamp(o.z.mul(2).sub(1), 0, 1)), none, vec3(GLINT_TONE));
     }
-    if (overlays) {
+    if (lids) {
       // A blink: the upper lid comes down over the eye in the skin's colour, its lashes on its edge. Closed,
       // the eye is one line along the lower lid.
-      const lids = texture(overlays.lids);
       const lid = lids.r;
       const edge = mix(float(1.05), float(LID_LOW * 0.5), this.blink);
       const soft = clamp(fwidth(lid), 0.01, 0.2);
@@ -290,6 +303,7 @@ export class CelTintMaterial extends CelMaterial {
   /** Sets what the face is doing (a face's material only). */
   setFace(face: FaceState): void {
     this.blink.value = face.blink;
+    this.gaze.value.set(face.gaze?.[0] ?? 0, face.gaze?.[1] ?? 0);
   }
 
   /** Puts a wetsuit over body `regions` (a set, one bit each; 0 for none), `panels` of them in `panel`'s colour. */

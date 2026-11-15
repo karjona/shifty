@@ -2,6 +2,7 @@
 // weight on one leg, shifting to the other now and then, breathing, looking
 // about; a hand on the hip; and the character-select stance, arms crossed.
 import * as THREE from "three/webgpu";
+import type { FaceState } from "../cel/rider.ts";
 import type { Pose, Reach, Step } from "./rig.ts";
 import { BONE, type Body } from "./skeleton.ts";
 
@@ -44,6 +45,22 @@ function blinkShape(dt: number): number {
 function hash(n: number): number {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return s - Math.floor(s);
+}
+
+/** The furthest an iris slides from straight ahead (m). */
+const EYES_TURN = 0.0016;
+
+/** How far the irises turn with the head's wander (m): a little ahead of it, as eyes lead a glance. */
+function eyesAt(t: number): [number, number] {
+  const ahead = gazeAt(t + 0.35);
+  return [
+    Math.max(-EYES_TURN, Math.min(EYES_TURN, ahead.yaw * 0.008)),
+    Math.max(-EYES_TURN / 2, Math.min(EYES_TURN / 2, -ahead.pitch * 0.012)),
+  ];
+}
+/** What a face does standing about at time `t` (s): it blinks, and its eyes wander with the head. */
+function faceAt(t: number): FaceState {
+  return { blink: blinkAt(t), gaze: eyesAt(t) };
 }
 
 /** An arm hanging at ease from its shoulder: `ease` (0-1) how far it swings forward and bends. */
@@ -95,7 +112,7 @@ export function idlePose(a: Body, t: number): Pose {
     head: euler(0.01, gaze.yaw * 0.55, w * 0.022),
     arms,
     legs,
-    face: { blink: blinkAt(t) },
+    face: faceAt(t),
   };
 }
 
@@ -159,6 +176,6 @@ export function crossedPose(a: Body, t: number): Pose {
     neck: euler(0.02, 0.06 + gaze.yaw * 0.25, 0.02),
     head: euler(0.0, 0.12 + gaze.yaw * 0.3, 0.07),
     arms,
-    face: { blink: blinkAt(t) },
+    face: faceAt(t),
   };
 }

@@ -211,7 +211,8 @@ def lids(maps):
     """Where a closing eyelid passes, for a blink, as (h, w, 3): in red how far up the eye's opening a texel
     is, from `LID_LOW` at the lower lid to `LID_HIGH` at the upper and on to 1 across the upper lash line (which
     the lid takes down with it), carried on a little past the eye so it has no edge of its own there; in green
-    what the lid covers once shut (the opening and that lash line)."""
+    what the lid covers once shut (the opening and that lash line); in blue the opening itself, where the eye
+    shows and its iris can move."""
     msk = maps["inside"]
     ids = _ids(maps)
     eye = (maps["part"] == ids.get("eye", -1)) & msk
@@ -246,7 +247,31 @@ def lids(maps):
             for d in (-1, 1):
                 near = np.maximum(near, np.roll(height, d, axis=axis))
         height = np.where(height > 0, height, near)
-    return np.stack([height, cover, np.zeros_like(height)], axis=2)
+    return np.stack([height, cover, eye.astype(np.float64)], axis=2)
+
+
+def gaze_axes(maps):
+    """How the face's texture runs across the eyes: how far its coordinates (u to the right, v down the image, 0-1)
+    move per metre to the rider's left and per metre up, as (du/dx, dv/dx, du/dz, dv/dz). The game slides the
+    irises along these to turn the eyes."""
+    msk = maps["inside"]
+    eye = (maps["part"] == _ids(maps).get("eye", -1)) & msk
+    lp = maps.get("low_pos", maps["pos"])
+    rows, cols = np.nonzero(eye)
+    size = msk.shape[0]
+    fits = []
+    for side in (1, -1):
+        sel = np.sign(lp[rows, cols, 0]) == side
+        if sel.sum() < 16:
+            continue
+        a = np.stack([lp[rows[sel], cols[sel], 0], lp[rows[sel], cols[sel], 2], np.ones(sel.sum())], axis=1)
+        uv = np.stack([cols[sel], rows[sel]], axis=1) / size
+        fit, *_ = np.linalg.lstsq(a, uv, rcond=None)
+        fits.append(fit[:2])
+    if not fits:
+        return [0.0, 0.0, 0.0, 0.0]
+    m = np.mean(fits, axis=0)
+    return [float(m[0, 0]), float(m[0, 1]), float(m[1, 0]), float(m[1, 1])]
 
 
 # How dark the overlays paint in the hair's colour (a tint factor: 0.5 is the colour itself). The game

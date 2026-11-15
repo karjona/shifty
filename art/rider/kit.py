@@ -152,14 +152,15 @@ def to_armhole(theta, z):
     return side + a / r * half, zc + b / r * bz
 
 
-# The scoop of the neck at the front: its lowest point, and how far round it reaches (degrees).
-NECK_LOW, NECK_HALF = 1.432, 58
+# The scoop of the neck at the front, cut low enough to show the collarbones: its lowest point, how far round it
+# reaches (degrees), and how square its bottom is.
+NECK_LOW, NECK_HALF, NECK_CURVE = 1.392, 58, 2.4
 
 
 def neckline(theta):
     """The vest's top edge at the front and back (z), by angle from the front."""
     a = abs(_sdeg(theta, 0))
-    front = NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7
+    front = NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** NECK_CURVE
     return min(front, VEST_TOP + 0.01) if a < NECK_HALF else VEST_TOP + 0.01
 
 
@@ -254,7 +255,7 @@ def _edges_dist(pos, z_hem=VEST_BOTTOM):
     r = np.hypot(x, y)
     d = np.abs(z - z_hem)
     a = np.abs((th + 180) % 360 - 180)
-    nl = np.where(a < NECK_HALF, np.minimum(NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** 1.7, VEST_TOP),
+    nl = np.where(a < NECK_HALF, np.minimum(NECK_LOW + (VEST_TOP - NECK_LOW) * (a / NECK_HALF) ** NECK_CURVE, VEST_TOP),
                   VEST_TOP)
     d = np.minimum(d, np.abs(z - nl))
     zc, bz, half = ARMHOLE
