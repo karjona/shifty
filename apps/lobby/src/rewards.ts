@@ -73,6 +73,8 @@ export async function pay(db: Db, list: Payout[]): Promise<number> {
   return paid;
 }
 
+const PAID_REASONS: readonly Payout["reason"][] = ["race", "style", "grand_prix"];
+
 /** What a match paid a player so far, as the ledger has it. */
 export interface MatchPay {
   /** `room` or `matchmaking`. */
@@ -108,7 +110,7 @@ export async function matchPay(db: Db, matchId: string, userId: string): Promise
   ]);
   const paid = rows.flatMap((r) => {
     const event = Number(r.ref.slice(prefix.length).split(":")[1]);
-    const reason = r.reason === "race" || r.reason === "style" || r.reason === "grand_prix" ? r.reason : null;
+    const reason = PAID_REASONS.find((x) => x === r.reason);
     return reason && Number.isInteger(event) ? [{ event, reason, delta: r.delta }] : [];
   });
   return {
