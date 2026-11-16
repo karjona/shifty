@@ -323,12 +323,15 @@ export interface MatchPay {
   paid: { event: number; reason: "race" | "style" | "grand_prix"; delta: number }[];
   /** Your credits now. */
   credits: number;
+  /** Your best place on the circuit asked about, before this match (null: none). */
+  bestBefore: number | null;
 }
 
-/** What a match you raced (its room id) paid you; null if the lobby doesn't know it. */
-export async function fetchMatchPay(match: string): Promise<MatchPay | null> {
+/** What a match you raced (its room id) paid you, and your best on `course` before it; null if the lobby doesn't know it. */
+export async function fetchMatchPay(match: string, course = -1): Promise<MatchPay | null> {
   try {
-    const o = await call(`/api/me/matches/${encodeURIComponent(match)}`);
+    const q = course >= 0 ? `?course=${course}` : "";
+    const o = await call(`/api/me/matches/${encodeURIComponent(match)}${q}`);
     const reasons = ["race", "style", "grand_prix"] as const;
     return {
       reported: Array.isArray(o.reported)
@@ -339,6 +342,7 @@ export async function fetchMatchPay(match: string): Promise<MatchPay | null> {
         return reason ? [{ event: num(p, "event"), reason, delta: num(p, "delta") }] : [];
       }),
       credits: num(o, "credits"),
+      bestBefore: typeof o.bestBefore === "number" ? o.bestBefore : null,
     };
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;

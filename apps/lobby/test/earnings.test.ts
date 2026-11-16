@@ -72,7 +72,7 @@ void test("a Tilt in matchmaking shows each race's pay and the bonus as they com
   const id = "m_tilt";
   await makeMatch(id, "matchmaking", "gp", ["ana", "bea"]);
   const empty = await matchPay(handle.db, id, "ana");
-  assert.deepEqual(empty, { mode: "matchmaking", reported: [], paid: [], credits: 100 });
+  assert.deepEqual(empty, { mode: "matchmaking", reported: [], paid: [], credits: 100, bestBefore: null });
 
   await storeReport(handle.db, report(id, 0, 2, [entry("ana", 2, 300), entry("bea", 1)]));
   const first = await matchPay(handle.db, id, "ana");
@@ -104,7 +104,23 @@ void test("a private room raced alone is reported but pays nothing; strangers se
   const id = "m_alone";
   await makeMatch(id, "room", "race", ["cai"]);
   await storeReport(handle.db, report(id, 0, 1, [entry("cai", 1, 900), entry(null, 2)]));
-  assert.deepEqual(await matchPay(handle.db, id, "cai"), { mode: "room", reported: [0], paid: [], credits: 0 });
+  assert.deepEqual(await matchPay(handle.db, id, "cai"), {
+    mode: "room",
+    reported: [0],
+    paid: [],
+    credits: 0,
+    bestBefore: null,
+  });
   assert.equal(await matchPay(handle.db, id, "ana"), null);
   assert.equal(await matchPay(handle.db, "m_nothing", "cai"), null);
+});
+
+void test("your best place on a circuit counts the matches before this one", async () => {
+  await makePlayer("dan");
+  await makeMatch("m_first", "room", "race", ["dan"]);
+  await makeMatch("m_second", "room", "race", ["dan"]);
+  await storeReport(handle.db, report("m_first", 0, 1, [entry("dan", 4), entry(null, 1)]));
+  await storeReport(handle.db, report("m_second", 0, 1, [entry("dan", 2), entry(null, 1)]));
+  assert.equal((await matchPay(handle.db, "m_second", "dan", 0))?.bestBefore, 4);
+  assert.equal((await matchPay(handle.db, "m_second", "dan", 1))?.bestBefore, null);
 });

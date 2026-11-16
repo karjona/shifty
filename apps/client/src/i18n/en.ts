@@ -493,6 +493,16 @@ export const en = {
     /** Your place in the Tilt, beside it: its points. */
     points: (n: number) => `${n} pts`,
     standings: "Final standings",
+    /** A line for a result worth calling out (nothing for an ordinary one). */
+    verdicts: {
+      win: "Race won",
+      podium: "On the podium",
+      tiltWin: "You win the Tilt",
+      tiltPodium: "On the Tilt's podium",
+      record: "New record",
+      personalBest: "New personal best",
+      best: (circuit: string) => `Your best finish on ${circuit}`,
+    },
     paid: "What it paid",
     waiting: "Waiting for the results…",
     late: "What it paid hasn't come through yet. It will reach your credits shortly.",

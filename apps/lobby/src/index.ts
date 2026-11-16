@@ -198,12 +198,14 @@ app.get("/api/me/earnings", async (c) => {
   return c.json({ earnings: await recentEarnings(c.var.db, p.user.id) });
 });
 
-/** What a match you raced in paid you, race by race, and your credits now. */
+/** What a match you raced in paid you, race by race, your credits now, and your best on `?course` before it. */
 app.get("/api/me/matches/:id", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   const id = c.req.param("id");
-  const pay = /^m_[A-Za-z0-9]{1,40}$/u.test(id) ? await matchPay(c.var.db, id, p.user.id) : null;
+  const course = Number(c.req.query("course"));
+  const known = Number.isInteger(course) && course >= 0 && course < 256 ? course : undefined;
+  const pay = /^m_[A-Za-z0-9]{1,40}$/u.test(id) ? await matchPay(c.var.db, id, p.user.id, known) : null;
   if (!pay) return c.json({ error: "no_match" }, 404);
   return c.json(pay);
 });

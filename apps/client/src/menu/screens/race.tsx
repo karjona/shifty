@@ -198,6 +198,7 @@ function RaceRun({
         hz: run.hz,
         ghosts: run.ghosts,
         callout: run.callout,
+        beat: run.beat,
         name: run.name,
       });
     }, TRIAL_PANEL_MS);

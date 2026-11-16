@@ -11,6 +11,7 @@ import { messages } from "../i18n/index.ts";
 import { type Conditions, type Season, circuitName, clockTime, timeOfDay } from "../game/conditions.ts";
 import { PALETTE, setAccent } from "../game/seasons.ts";
 import { type GrandPrixView, type RaceView, type StandingView, formatTime, ordinal } from "./hud.ts";
+import { laurelSvg } from "./laurel.ts";
 
 /** Tilt points by finishing place. Riders who haven't finished get last place's. */
 export const TILT_POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
@@ -375,10 +376,16 @@ export class Scoreboard {
       })
       .join("");
     const mine = list.find((s) => s.slot === mySlot);
+    // 1st to 3rd stand on the podium's base, the winner crowned, and the result is called out.
+    const rank = mine && mine.finishTicks > 0 && mine.place <= 3 ? mine.place : 0;
     const hero = mine
-      ? `<div class="board-mine"><b>${mine.finishTicks > 0 ? ordinal(mine.place) : m.dnf}</b>` +
+      ? `<div class="board-mine${rank > 0 ? ` ranked rank-${rank}` : ""}">` +
+        `<b>${rank === 1 ? laurelSvg() : ""}${mine.finishTicks > 0 ? ordinal(mine.place) : m.dnf}</b>` +
         `<span>${mine.finishTicks > 0 ? formatTime(mine.finishTicks, hz) : ""}</span></div>`
       : "";
+    const v = messages().end.verdicts;
+    const verdict =
+      rank > 0 ? `<p class="board-verdict${rank === 1 ? " win" : ""}">${rank === 1 ? v.win : v.podium}</p>` : "";
     const raceLabel = race.eventCount > 1 ? `${m.title} · ${m.race(race.eventIndex + 1, race.eventCount)}` : m.title;
     const nextLabel = race.eventCount <= 1 ? m.back : last ? m.podium : m.next;
     // Between races of a Tilt: the next one's season (in its colour) and circuit.
@@ -402,6 +409,7 @@ export class Scoreboard {
       `</span>`;
     const racePanel =
       `<section class="board-panel board-race" style="--n: ${cols.length}">` +
+      verdict +
       `<header class="board-head"><div><span class="board-label">${raceLabel}</span>` +
       `<b class="board-title circuit">${title}</b><span class="board-sub">${sub}</span></div>${hero}</header>` +
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +

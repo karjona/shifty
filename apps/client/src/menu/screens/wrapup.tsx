@@ -8,11 +8,12 @@
 import "../wrapup.css";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { audio } from "../../audio/index.ts";
+import { playCue } from "../../audio/end.ts";
 import type { Season } from "../../game/conditions.ts";
 import type { RaceEnd, Trouble } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { formatTime, ordinal } from "../../ui/hud.ts";
+import { LAUREL_BOX, LAUREL_LEAVES, LEAF_PATH, laurelStems, leafTransform } from "../../ui/laurel.ts";
 import { circuitTitle, conditionsLine } from "../../ui/results.ts";
 import { type MatchPay, type Mode, fetchMatchPay, meQuery } from "../api.ts";
 import { useAction, useAutoFocus } from "../hooks.ts";
@@ -38,6 +39,8 @@ export interface TrialSummary {
   ghosts: { label: string; ticks: number }[];
   /** "New record", "New personal best", or null. */
   callout: string | null;
+  /** What the run beat: 2 the record, 1 your best, 0 nothing. */
+  beat: number;
   name: string;
 }
 
@@ -77,10 +80,20 @@ function payRows(
   return { rows, total: rows.reduce((s, r) => s + r.delta, 0) };
 }
 
-/** What the race paid, polled from the lobby until its last race is in (or it is late). */
-function usePay(mode: Mode, match: string | null, races: number, place: number): Pay {
+/**
+ * What the race paid, polled from the lobby until its last race is in (or it
+ * is late), and your best place on `course` before this match (null: none).
+ */
+function usePay(
+  mode: Mode,
+  match: string | null,
+  races: number,
+  place: number,
+  course: number,
+): { pay: Pay; bestBefore: number | null } {
   const t = useT();
   const queryClient = useQueryClient();
+  const [bestBefore, setBestBefore] = useState<number | null>(null);
   const [pay, setPay] = useState<Pay>(() =>
     mode === "single"
       ? { state: "none", note: t.end.pays.single }
@@ -94,10 +107,11 @@ function usePay(mode: Mode, match: string | null, races: number, place: number):
     const since = performance.now();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const ask = async () => {
-      const got = await fetchMatchPay(match).catch(() => null);
+      const got = await fetchMatchPay(match, course).catch(() => null);
       if (!live) return;
       const complete = got !== null && got.reported.includes(races - 1);
       if (got && complete) {
+        setBestBefore(got.bestBefore);
         const { rows, total } = payRows(got, races, place, t);
         queryClient.setQueryData(meQuery.queryKey, (m) =>
           m?.rider ? { ...m, rider: { ...m.rider, credits: got.credits } } : m,
@@ -120,8 +134,8 @@ function usePay(mode: Mode, match: string | null, races: number, place: number):
       live = false;
       if (timer) clearTimeout(timer);
     };
-  }, [mode, match, races, place, queryClient, t]);
-  return pay;
+  }, [mode, match, races, place, course, queryClient, t]);
+  return { pay, bestBefore };
 }
 
 /** Rows coming in one by one, then the credits rolling from `before` to `after`, with a tick and a chime. */
@@ -142,7 +156,7 @@ function useCountUp(pay: Pay): { shown: number; credits: number | null } {
       if (due > rows) {
         rows = due;
         setShown(due);
-        audio.play("uiMove", 0.7);
+        playCue("tally");
       }
       if (t >= rollAt) {
         const k = Math.min(1, (t - rollAt) / ROLL_MS);
@@ -150,10 +164,10 @@ function useCountUp(pay: Pay): { shown: number; credits: number | null } {
         setCredits(Math.round(pay.before + (pay.after - pay.before) * eased));
         if (k < 1 && now - lastTick > 70) {
           lastTick = now;
-          audio.play("uiMove", 0.35, 0, 1.5);
+          playCue("tally", 0.5);
         }
         if (k >= 1) {
-          audio.play("checkpoint", 0.8);
+          playCue("payout");
           return;
         }
       } else setCredits(pay.before);
@@ -185,6 +199,7 @@ function Head({
   callout,
   hero,
   heroSub,
+  rank = 0,
 }: {
   kicker: string;
   title: string;
@@ -193,6 +208,8 @@ function Head({
   callout?: string | null;
   hero: string;
   heroSub?: string;
+  /** 1 to 3: the place stands on the podium's base, the first crowned with laurel. */
+  rank?: number;
 }) {
   return (
     <header className="end-head">
@@ -202,11 +219,33 @@ function Head({
         {sub && <span className="end-sub">{sub}</span>}
         {callout && <p className="board-callout">{callout}</p>}
       </div>
-      <div className="end-hero">
-        <b>{hero}</b>
+      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : ""}`}>
+        <b>
+          {rank === 1 && <Laurel />}
+          {hero}
+        </b>
         {heroSub && <span>{heroSub}</span>}
       </div>
     </header>
+  );
+}
+
+/** The laurel round a winner's place (see ui/laurel.ts). */
+function Laurel() {
+  return (
+    <svg
+      className="laurel"
+      viewBox={`0 0 ${LAUREL_BOX.width} ${LAUREL_BOX.height}`}
+      aria-hidden="true"
+      fill="currentColor"
+    >
+      {laurelStems().map((d) => (
+        <path key={d} d={d} fill="none" stroke="currentColor" strokeWidth="2.4" />
+      ))}
+      {LAUREL_LEAVES.map((l) => (
+        <path key={leafTransform(l)} d={LEAF_PATH} transform={leafTransform(l)} />
+      ))}
+    </svg>
   );
 }
 
@@ -223,6 +262,7 @@ function RaceHead({ end }: { end: RaceEnd }) {
         title={t.end.tilt}
         hero={me ? ordinal(i + 1) : t.results.dnf}
         heroSub={me ? t.end.points(me.points) : undefined}
+        rank={me ? i + 1 : 0}
       />
     );
   }
@@ -233,6 +273,7 @@ function RaceHead({ end }: { end: RaceEnd }) {
       sub={conditionsLine(end.conditions)}
       hero={end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : t.results.dnf}
       heroSub={end.finishTicks > 0 ? formatTime(end.finishTicks, end.tickHz) : undefined}
+      rank={end.finishTicks > 0 ? end.place : 0}
     />
   );
 }
@@ -380,19 +421,25 @@ export function WrapUp({
   const t = useT();
   const end = summary.kind === "race" ? summary.end : null;
   const races = end?.eventCount ?? 1;
-  const pay = usePay(mode, match, races, end?.place ?? 0);
+  const { pay, bestBefore } = usePay(mode, match, races, end?.place ?? 0, end?.course ?? -1);
   const trial = summary.kind === "trial" ? summary.trial : null;
+  const verdict = verdictOf(summary, bestBefore, t);
+  const won = verdict?.win ?? false;
+  useEffect(() => {
+    if (won) playCue("win");
+  }, [won]);
   return (
     <div className="end-layer" data-nav-scope="">
       <section className={`end-panel${end?.podium ? " tilt" : ""}`} aria-label={t.end.continue}>
+        {verdict && <p className={`end-verdict${verdict.win ? " win" : ""}`}>{verdict.text}</p>}
         {end && <RaceHead end={end} />}
         {trial && (
           <Head
             kicker={t.trial.title}
             title={circuitTitle(trial.course)}
             sub={t.seasons[trial.season]}
-            callout={trial.callout}
             hero={trial.ticks > 0 ? formatTime(trial.ticks, trial.hz) : t.results.dnf}
+            rank={trial.beat === 2 ? 1 : 0}
           />
         )}
         {end?.podium && <TiltStandings end={end} />}
@@ -404,6 +451,34 @@ export function WrapUp({
       <EndHints actions={actions} back={back} />
     </div>
   );
+}
+
+/**
+ * The line a result is called out with: a race won or a podium place, the
+ * Tilt won or its podium, a time trial's new record or best, your best
+ * finish on a circuit (the lobby's records); null for an ordinary result.
+ * `win`: it is a first place.
+ */
+function verdictOf(
+  summary: Summary,
+  bestBefore: number | null,
+  t: ReturnType<typeof useT>,
+): { text: string; win: boolean } | null {
+  const v = t.end.verdicts;
+  if (summary.kind === "trial") {
+    const beat = summary.trial.beat;
+    return beat === 2 ? { text: v.record, win: true } : beat === 1 ? { text: v.personalBest, win: false } : null;
+  }
+  const end = summary.end;
+  if (end.podium) {
+    const i = end.podium.riders.findIndex((r) => r.me);
+    return i === 0 ? { text: v.tiltWin, win: true } : i > 0 && i < 3 ? { text: v.tiltPodium, win: false } : null;
+  }
+  if (end.finishTicks <= 0 || end.place <= 0) return null;
+  if (end.place === 1) return { text: v.win, win: true };
+  if (end.place <= 3) return { text: v.podium, win: false };
+  if (bestBefore !== null && end.place < bestBefore) return { text: v.best(circuitTitle(end.course)), win: false };
+  return null;
 }
 
 /** Something went wrong: what, in words, and the way out (focused). */

@@ -386,6 +386,7 @@ export class RaceSession implements Stage {
     hz: number;
     ghosts: { label: string; ticks: number }[];
     callout: string | null;
+    beat: number;
     name: string;
   } | null {
     const client = this.client;
@@ -393,7 +394,14 @@ export class RaceSession implements Stage {
     const mine = parseStandings(client.standingsJson()).find((s) => s.slot === client.slot());
     const hz = this.readRace().tickHz;
     const name = this.riders.get(client.slot())?.name ?? "";
-    return { ticks: mine?.finishTicks ?? 0, hz, ghosts: this.trialRaced, callout: this.trialCallout, name };
+    return {
+      ticks: mine?.finishTicks ?? 0,
+      hz,
+      ghosts: this.trialRaced,
+      callout: this.trialCallout,
+      beat: this.trialBeat,
+      name,
+    };
   }
 
   /** The ghosts' splits, for the HUD. */
