@@ -175,6 +175,8 @@ export interface RaceState {
   trouble: Trouble | null;
   /** Nothing has come from the race server for a moment: the race goes on from prediction, the HUD's clock held. */
   stalled: boolean;
+  /** This race's course is on screen, nothing covering it (a season card). */
+  onShow: boolean;
 }
 
 /** `sim::Phase`: the countdown, the race, the results. */
@@ -313,6 +315,7 @@ export class RaceSession implements Stage {
     plan: [],
     trouble: null,
     stalled: false,
+    onShow: false,
   };
   /** The player moved on from the last race's results before they ran out. */
   private moveOn = false;
@@ -852,6 +855,7 @@ export class RaceSession implements Stage {
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
+    this.state.onShow = onShow;
     const hud = !this.covered && !RaceIntro.active(race.phase);
     this.showHud(hud);
     const watching = onAir(race, this.sport);

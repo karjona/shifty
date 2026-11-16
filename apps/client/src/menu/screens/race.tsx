@@ -31,13 +31,14 @@ import {
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { MenuIcon } from "../icons.tsx";
 import { nav, pointing } from "../nav.ts";
-import { touchSettings } from "../../touch/device.ts";
 import { Button, Glyph } from "../ui.tsx";
+import { RaceControls } from "./controls.tsx";
 import { PodiumScreen } from "./podium.tsx";
 import { type EndAction, TroublePanel, type TrialSummary, WrapUp, useTroubleText } from "./wrapup.tsx";
 import { VERSION } from "../../version.ts";
 
 /** `sim::Phase`. */
+const GRID = 0;
 const COUNTDOWN = 1;
 const RACING = 2;
 const RESULTS = 3;
@@ -70,7 +71,9 @@ interface View {
   racePhase: number;
   sport: "jetski" | "snow";
   watching: boolean;
-  touch: boolean;
+  device: "keyboard" | "gamepad" | "touch";
+  /** This race's course is on screen, nothing covering it. */
+  onShow: boolean;
   finalResults: boolean;
   eventIndex: number;
   eventCount: number;
@@ -173,7 +176,8 @@ function RaceRun({
               racePhase: st.racePhase,
               sport: st.sport,
               watching: st.watching,
-              touch: st.device === "touch",
+              device: st.device,
+              onShow: st.onShow,
               finalResults: st.finalResults,
               eventIndex: st.eventIndex,
               eventCount: st.eventCount,
@@ -391,8 +395,9 @@ function RaceRun({
   return (
     <div className={`screen race-screen${endShown || trialShown ? " wrapped" : ""}`}>
       <div ref={hudRef} className="race-hud" />
-      {view && trouble === null && !endShown && !trialShown && (BEFORE_COUNTDOWN.has(view.racePhase) || menu) && (
-        <Help view={view} inMenu={menu} />
+      {/* The controls while the grid waits (the title card has the left; not over a season card or the intro). */}
+      {view && trouble === null && !menu && view.racePhase === GRID && view.onShow && (
+        <RaceControls sport={view.sport} device={view.device} className="waiting" />
       )}
       {!menu && trouble === null && !endShown && !trialShown && (
         <div className="race-menu-hint">
@@ -426,7 +431,8 @@ function RaceRun({
         </div>
       )}
       {menu && !confirm && (
-        <div className="race-menu" data-nav-scope="">
+        <div className="race-menu with-controls" data-nav-scope="">
+          {view && <RaceControls sport={view.sport} device={view.device} />}
           <div className="panel">
             <h2 className="panel-title">{t.race.menu}</h2>
             <Button kind="primary" glyph="back" onClick={() => setMenu(false)} autoFocus>
@@ -463,22 +469,6 @@ function RaceRun({
       {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} rejoin={race?.rejoin === true} />}
       {endShown && end && wrapUp({ kind: "race", end })}
       {trialShown && trialPanel && wrapUp({ kind: "trial", trial: trialPanel })}
-    </div>
-  );
-}
-
-/** The controls, while the race waits to start and in the race menu. */
-function Help({ view, inMenu }: { view: View; inMenu: boolean }) {
-  const t = useT();
-  const lines = view.touch
-    ? t.race.helpTouch[view.sport === "jetski" && touchSettings().gas === "hold" ? "jetskiHold" : view.sport]
-    : t.race.help[view.sport];
-  return (
-    <div className={`race-help ${inMenu ? "in-menu" : ""}`}>
-      <b>{t.race.controls}</b>
-      {lines.map((line) => (
-        <span key={line}>{line}</span>
-      ))}
     </div>
   );
 }

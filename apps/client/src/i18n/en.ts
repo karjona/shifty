@@ -340,19 +340,28 @@ export const en = {
     /** Nothing has come from the race server for a moment. */
     waiting: "Waiting for the race server…",
     controls: "Controls",
+    /** Keys as printed on them. */
+    keys: { space: "Space", shift: "Shift" },
     help: {
-      jetski: [
-        "Stick: steer and lean (pull back on a crest to fly) · RT throttle · LT brake",
-        "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!",
-        "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt",
-        "Pass red buoys on your right, green ones on your left.",
-      ],
-      snow: [
-        "Stick: steer · up (or RT) tuck · down (or LT) sit back and brake",
-        "Hold A to load a jump, let go at the lip · in the air: X + stick spins and flips, B grabs",
-        "Keyboard: WASD steer, tuck, brake · Space jump · J / Shift spin · K / E grab",
-        "Land flat on the board, along the slope, and let go of the grab first!",
-      ],
+      jetski: {
+        steer: "Steer and lean: pull back on a crest to fly",
+        gas: "Throttle · brake",
+        spin: "In the air: spin and flip",
+        roll: "In the air: barrel roll",
+        stunt: "A stunt (the direction picks it); let go in time to land",
+        tip: "Pass red buoys on your right, green ones on your left.",
+        keySteer: "Steer",
+        keyLean: "Lean: pull back on a crest to fly",
+      },
+      snow: {
+        steer: "Steer · up to tuck · down to sit back and brake",
+        jump: "Hold to load a jump, let go at the lip",
+        spin: "In the air: spin and flip",
+        grab: "Grab (the direction picks it)",
+        tip: "Land flat on the board, along the slope, and let go of the grab first!",
+        keySteer: "Steer",
+        keyTuck: "Tuck · sit back and brake",
+      },
     },
     /** The touch screen's buttons. */
     touch: { trick: "Trick", roll: "Roll", stunt: "Stunt", jump: "Jump", grab: "Grab", gas: "Gas", brake: "Brake" },

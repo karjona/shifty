@@ -337,19 +337,28 @@ export const ca: Messages = {
     joining: "Entrant a la cursa…",
     waiting: "Esperant el servidor de curses…",
     controls: "Controls",
+    /** Keys as printed on them. */
+    keys: { space: "Espai", shift: "Maj" },
     help: {
-      jetski: [
-        "Estic: girar i inclinar-te (estira enrere en una cresta per volar) · RT accelerar · LT frenar",
-        "A l'aire: A + estic girs i tombarelles, X + estic tonell, B + estic una acrobàcia. Deixa-la anar a temps per aterrar!",
-        "Teclat: WASD conduir · fletxes girar i inclinar-te · Espai girs · Maj tonell · E acrobàcies",
-        "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
-      ],
-      snow: [
-        "Estic: girar · amunt (o RT) ajupir-te · avall (o LT) tirar-te enrere i frenar",
-        "Mantén A per carregar el salt i deixa'l anar a la vora · a l'aire: X + estic girs i tombarelles, B grabs",
-        "Teclat: WASD girar, ajupir-te, frenar · Espai saltar · J / Maj girs · K / E grab",
-        "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
-      ],
+      jetski: {
+        steer: "Girar i inclinar-te: estira enrere en una cresta per volar",
+        gas: "Accelerar · frenar",
+        spin: "A l'aire: girs i tombarelles",
+        roll: "A l'aire: tonell",
+        stunt: "Una acrobàcia (la direcció la tria); deixa-la anar a temps per aterrar",
+        tip: "Passa les boies vermelles per la dreta i les verdes per l'esquerra.",
+        keySteer: "Girar",
+        keyLean: "Inclinar-te: estira enrere en una cresta per volar",
+      },
+      snow: {
+        steer: "Girar · amunt ajupir-te · avall tirar-te enrere i frenar",
+        jump: "Mantén per carregar el salt i deixa'l anar a la vora",
+        spin: "A l'aire: girs i tombarelles",
+        grab: "Grab (la direcció el tria)",
+        tip: "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
+        keySteer: "Girar",
+        keyTuck: "Ajupir-te · tirar-te enrere i frenar",
+      },
     },
     /** The touch screen's buttons. */
     touch: { trick: "Truc", roll: "Tonell", stunt: "Acrobàcia", jump: "Salt", grab: "Grab", gas: "Gas", brake: "Fre" },
