@@ -17,8 +17,9 @@ pub fn ghost_stride() -> usize {
     GHOST_STRIDE
 }
 
-/// A recording's header as JSON (`course`, `season`, `finishTicks`,
-/// `frameTicks`, `splits`, `look`), or an empty string if it doesn't decode.
+/// A recording's header as JSON (`course`, `season`, `revision`,
+/// `finishTicks`: the lap's time, `frameTicks`, `splits`, `look`), or an
+/// empty string if it doesn't decode.
 #[wasm_bindgen(js_name = ghostHeader)]
 pub fn ghost_header(bytes: &[u8]) -> String {
     Ghost::decode(bytes).map_or_else(
@@ -27,6 +28,7 @@ pub fn ghost_header(bytes: &[u8]) -> String {
             json!({
                 "course": g.course,
                 "season": g.season,
+                "revision": g.revision,
                 "finishTicks": g.finish_ticks,
                 "frameTicks": protocol::ghost::FRAME_TICKS,
                 "splits": g.splits,

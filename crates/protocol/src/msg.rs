@@ -16,7 +16,7 @@
 use sim::input::Input;
 use sim::math::Vec3;
 use sim::quant;
-use sim::race::{Phase, Progress, Race};
+use sim::race::{Laps, Phase, Progress, Race};
 use sim::world::Rider;
 use sim::{Conditions, CourseId, MAX_RIDERS, SurfaceKind};
 
@@ -229,7 +229,7 @@ pub struct Welcome {
     /// Server tick when the welcome was sent.
     pub server_tick: u32,
     pub echo_client_time: u16,
-    /// A time trial: one rider, the results stay up until a retry.
+    /// A time trial session: one rider, laps without end (`sim::World::trial`).
     pub trial: bool,
 }
 
@@ -259,6 +259,20 @@ pub enum EventBody {
     Standings {
         points: Vec<(u8, u16)>,
     },
+    /// A time trial session was closed by the room (its results are up).
+    SessionOver {
+        reason: SessionEnd,
+    },
+}
+
+/// Why the room closed a time trial session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SessionEnd {
+    /// Nothing from the player's controls for a while.
+    Idle = 1,
+    /// The session ran its longest.
+    Hour = 2,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -308,6 +322,10 @@ const FLAG_GROUNDED: u8 = 1;
 const FLAG_RACING: u8 = 2;
 /// Disqualified: the race ticks when follow (`Progress::disqualified_ticks`).
 const FLAG_DISQUALIFIED: u8 = 4;
+/// A time trial's laps follow (`Progress::laps`).
+const FLAG_LAPS: u8 = 8;
+/// The last lap of a time trial was void.
+const FLAG_LAST_VOID: u8 = 16;
 
 fn write_input(w: &mut Writer, i: &Input) {
     w.i8(i.steer);
@@ -339,6 +357,13 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     if p.disqualified() {
         flags |= FLAG_DISQUALIFIED;
     }
+    let laps = p.laps != Laps::default();
+    if laps {
+        flags |= FLAG_LAPS;
+    }
+    if p.laps.last_void {
+        flags |= FLAG_LAST_VOID;
+    }
     w.u8(flags);
     w.i32(quant::pos_to_wire(r.pos.x));
     w.i32(quant::pos_to_wire(r.pos.y));
@@ -369,6 +394,12 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.u32(p.finish_ticks);
     if p.disqualified() {
         w.u32(p.disqualified_ticks);
+    }
+    if laps {
+        w.u32(p.laps.start);
+        w.u8(p.laps.done);
+        w.u32(p.laps.best);
+        w.u32(p.laps.last);
     }
 }
 
@@ -412,6 +443,7 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
         points: r.u16()?,
         finish_ticks: r.u32()?,
         disqualified_ticks: 0,
+        laps: Laps::default(),
     };
     let race = Progress {
         disqualified_ticks: if flags & FLAG_DISQUALIFIED != 0 {
@@ -423,6 +455,22 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
             0
         },
         ..race
+    };
+    let race = if flags & FLAG_LAPS != 0 {
+        Progress {
+            laps: Laps {
+                start: r.u32()?,
+                done: r.u8()?,
+                best: r.u32()?,
+                last: r.u32()?,
+                last_void: flags & FLAG_LAST_VOID != 0,
+            },
+            ..race
+        }
+    } else if flags & FLAG_LAST_VOID != 0 {
+        return Err(DecodeError::Invalid("laps"));
+    } else {
+        race
     };
     Ok(RiderState {
         slot,
@@ -504,6 +552,10 @@ fn write_event(w: &mut Writer, e: &Event) {
             w.u8(2);
             w.u8(*slot);
         }
+        EventBody::SessionOver { reason } => {
+            w.u8(4);
+            w.u8(*reason as u8);
+        }
         EventBody::Standings { points } => {
             w.u8(3);
             let n = points.len().min(MAX_RIDERS);
@@ -571,6 +623,13 @@ fn read_event(r: &mut Reader<'_>) -> Result<Event, DecodeError> {
             }
             EventBody::Standings { points }
         }
+        4 => EventBody::SessionOver {
+            reason: match r.u8()? {
+                1 => SessionEnd::Idle,
+                2 => SessionEnd::Hour,
+                _ => return Err(DecodeError::Invalid("session end")),
+            },
+        },
         _ => return Err(DecodeError::Invalid("event kind")),
     };
     Ok(Event { id, body })

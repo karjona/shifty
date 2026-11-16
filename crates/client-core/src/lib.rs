@@ -21,7 +21,7 @@
 
 use protocol::{
     ClientMsg, Event, EventBody, InputPacket, MAX_INPUTS_PER_PACKET, PROTOCOL_VERSION,
-    RejectReason, RiderKind, ServerMsg, Snapshot,
+    RejectReason, RiderKind, ServerMsg, SessionEnd, Snapshot,
 };
 use sim::bot::bot_input;
 use sim::math::{Vec3, angle_diff, wrap_angle};
@@ -124,7 +124,8 @@ impl HudEvent {
         let same_kind = match (self.kind, o.kind) {
             (EventKind::Buoy { buoy: a, .. }, EventKind::Buoy { buoy: b, .. }) => a == b,
             (EventKind::Checkpoint { index: a }, EventKind::Checkpoint { index: b }) => a == b,
-            (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
+            (EventKind::Lap { lap: a }, EventKind::Lap { lap: b })
+            | (EventKind::LapTime { lap: a, .. }, EventKind::LapTime { lap: b, .. }) => a == b,
             (EventKind::Finish { .. }, EventKind::Finish { .. })
             | (EventKind::Disqualified { .. }, EventKind::Disqualified { .. })
             | (EventKind::Trick { .. }, EventKind::Trick { .. })
@@ -188,6 +189,10 @@ pub struct Client {
     retries: u8,
     /// The room is a time trial (from the welcome).
     trial: bool,
+    /// A time trial session is over: why the room closed it, if it did.
+    session_over: Option<SessionEnd>,
+    /// This screen left its time trial session: the race runs on here alone.
+    left: bool,
     roster: [Option<RosterEntry>; MAX_RIDERS],
     roster_version: u32,
     render_offset: [Vec3; MAX_RIDERS],
@@ -231,6 +236,8 @@ impl Client {
             ready: 0,
             retries: 0,
             trial: false,
+            session_over: None,
+            left: false,
             roster: Default::default(),
             roster_version: 0,
             render_offset: [Vec3::ZERO; MAX_RIDERS],
@@ -316,9 +323,25 @@ impl Client {
         self.trial
     }
 
+    /// Why the room closed this time trial session, if it did.
+    pub fn session_over(&self) -> Option<SessionEnd> {
+        self.session_over
+    }
+
+    /// Leaves a time trial session on purpose: says goodbye, and the race
+    /// runs on here alone, on its results (the session over).
+    pub fn leave_session(&mut self) {
+        if !self.trial || self.left {
+            return;
+        }
+        self.bye();
+        self.left = true;
+        self.world.end_session();
+    }
+
     /// The race on now keeps its results up until the room ends them: a
-    /// time trial (until a retry), or the last race of the room's plan. The
-    /// server holds the same races' results.
+    /// time trial session's, or the last race of the room's plan. The server
+    /// holds the same races' results.
     fn holds_results(&self) -> bool {
         self.trial || self.event_index.saturating_add(1) >= self.event_count
     }
@@ -443,7 +466,7 @@ impl Client {
                 break;
             }
         }
-        if steps > 0 {
+        if steps > 0 && !self.left {
             self.send_inputs(now_ms);
         }
 
@@ -539,6 +562,8 @@ impl Client {
                 );
                 self.trial = w.trial;
                 self.world.hold_results = self.holds_results();
+                self.world.disqualify = !self.trial;
+                self.world.trial = self.trial;
                 self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
@@ -551,7 +576,7 @@ impl Client {
                 self.phase = Phase::Rejected(reason);
             }
             ServerMsg::Snapshot(s) => {
-                if self.phase != Phase::Joined {
+                if self.phase != Phase::Joined || self.left {
                     return;
                 }
                 self.stats.last_snapshot_bytes = bytes.len() as u32;
@@ -604,6 +629,7 @@ impl Client {
                     }
                     self.gp_version = self.gp_version.wrapping_add(1);
                 }
+                EventBody::SessionOver { reason } => self.session_over = Some(reason),
             }
             self.next_event_id = self.next_event_id.wrapping_add(1);
             self.roster_version = self.roster_version.wrapping_add(1);
@@ -690,6 +716,7 @@ impl Client {
         let mut world = self.base.clone();
         world.hold_results = self.holds_results();
         world.disqualify = !self.trial;
+        world.trial = self.trial;
         world.tick = s.tick;
         world.race = s.race;
         world.riders = riders;

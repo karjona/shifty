@@ -151,7 +151,7 @@ impl JoinClaims {
 
     /// The races a room made from these claims runs, in order: its plan
     /// drawn (at most `MAX_EVENTS`, the bay in its home conditions if
-    /// empty), a time trial's one race in clear, steady weather.
+    /// empty), a time trial's one race in steady weather.
     pub fn room_plan(&self) -> Vec<sim::conditions::Event> {
         let mut plan = self.events();
         plan.truncate(MAX_EVENTS);
@@ -161,8 +161,7 @@ impl JoinClaims {
         if self.trial {
             plan.truncate(1);
             let c = &mut plan[0].conditions;
-            c.weather = Weather::Clear;
-            c.turns = Weather::Clear;
+            c.turns = c.weather;
         }
         plan
     }
@@ -583,18 +582,27 @@ mod tests {
         assert_eq!(plan, c.events());
         assert_eq!(plan.len(), 2);
         assert_eq!(plan[1].course, sim::CourseId::Mountain);
-        // A time trial: its one race, in clear, steady weather.
+        // A time trial: its one race, in the weather picked, steady.
         let trial = JoinClaims {
             trial: true,
-            races: vec![c.races[1]],
+            races: vec![RaceClaims {
+                weather: Some(Weather::Snow as u8),
+                turns: Some(Weather::Clear as u8),
+                time: Some(60),
+                ..c.races[1]
+            }],
             ..c.clone()
         };
         let [race] = &trial.room_plan()[..] else {
             panic!("one race")
         };
         assert_eq!(
-            (race.conditions.weather, race.conditions.turns),
-            (Weather::Clear, Weather::Clear)
+            (
+                race.conditions.weather,
+                race.conditions.turns,
+                race.conditions.time
+            ),
+            (Weather::Snow, Weather::Snow, 60)
         );
         // Nothing asked for: the bay. Nothing readable: nothing.
         let none = JoinClaims {
