@@ -1,24 +1,29 @@
-// Time trials: tickets for a run alone, the runs race servers report, each
-// player's best per course and season with its ghost, and the boards.
+// Time trials: tickets for a session alone, the laps race servers report,
+// each player's best lap per course and season with its ghost, and the
+// boards. A circuit's revision (`@shifty/rider`'s circuits, the sim's
+// `Course::revision`) names what a time on it means: laps of another
+// revision are refused, and bests of an older one rank nowhere (the next
+// lap replaces them, whatever its time).
 //
-// A ghost (version 1) is the server's recording of a run. Integers are
+// A ghost (version 2) is the server's recording of a lap. Integers are
 // little-endian:
 //
-//   0   u8   version (1)
+//   0   u8   version (2)
 //   1   u8   course
 //   2   u8   season
-//   3   u8   frame_ticks (2: a frame every 2 sim ticks)
-//   4   u32  finish_ticks (race ticks at the finish, > 0)
-//   8   u16  frames (ceil(finish_ticks / frame_ticks) + 1)
-//   10  u8   n, the split count (1-64)
-//   11  n × u32 split ticks (non-decreasing, the last at the finish)
+//   3   u8   revision
+//   4   u8   frame_ticks (2: a frame every 2 sim ticks)
+//   5   u32  finish_ticks (the lap's time in ticks, > 0)
+//   9   u16  frames (ceil(finish_ticks / frame_ticks) + 1)
+//   11  u8   n, the split count (1-64)
+//   12  n × u32 split ticks (non-decreasing, the last at the lap's end)
 //       u8   look_len (0-64), then the rider's appearance bytes
 //       `frames` frames: a varint mask (< 2^16), then one varint per set
 //       bit (a zigzag-coded i32 residual)
 //
 // Varints are LEB128. The frames end the blob exactly. The lobby only walks
 // them to check the count; clients decode the values.
-import { SEASONS, SPORT_SEASONS, circuit } from "@shifty/rider";
+import { SEASONS, SPORT_SEASONS, circuit, cleanSpec } from "@shifty/rider";
 import { and, asc, count, eq, lt, or, sql } from "drizzle-orm";
 import { openDb, type Db } from "./db/client.ts";
 import { player, timeTrialBest, timeTrialRun } from "./db/schema.ts";
@@ -29,7 +34,7 @@ import { type Racer, pickServer } from "./matches.ts";
 import { type RiderClaims, loadRiderClaims } from "./riders.ts";
 import { type JoinTicket, b64urlDecode, b64urlEncode, mintTicket, planSeed, roomId } from "./tickets.ts";
 
-export const GHOST_VERSION = 1;
+export const GHOST_VERSION = 2;
 /** Sim ticks per ghost frame (the sim runs at 60 Hz). */
 export const FRAME_TICKS = 2;
 export const TICKS_PER_SECOND = 60;
@@ -38,8 +43,8 @@ const MAX_SPLITS = 64;
 const MAX_LOOK = 64;
 /** Highest course id a time trial may name. */
 export const MAX_COURSE = 31;
-/** `sim::Weather::Clear`: time trials are ridden in clear, steady weather. */
-const CLEAR = 0;
+/** `sim::Weather::Clear`: boards take laps ridden in clear weather only; any other is practice. */
+export const CLEAR = 0;
 /** How many rows a board shows. */
 export const BOARD_TOP = 10;
 
@@ -67,6 +72,23 @@ function reportedTrial(v: { course?: unknown; season?: unknown }): Trial | null 
   return course === null || season === null ? null : { course, season };
 }
 
+/** A circuit's revision now (null: no such circuit). */
+export const revisionOf = (course: number): number | null => circuit(course)?.revision ?? null;
+
+/** A time trial to ride: its circuit and season, the weather (clear unless the season brings what's picked) and maybe the time of day. */
+export interface TrialPlay extends Trial {
+  weather: number;
+  time?: number;
+}
+
+/** A time trial to ride, from a request: null if its circuit and season don't go together. */
+export function parseTrialPlay(v: { course?: unknown; season?: unknown; weather?: unknown; time?: unknown }): TrialPlay | null {
+  const trial = parseTrial(v);
+  if (!trial) return null;
+  const spec = cleanSpec({ ...trial, weather: v.weather, time: v.time });
+  return { ...trial, weather: spec.weather ?? CLEAR, ...(spec.time === undefined ? {} : { time: spec.time }) };
+}
+
 const queryNumber = (s: string | undefined) => (s !== undefined && /^\d{1,2}$/u.test(s) ? Number(s) : null);
 
 /** A course and season from query strings (`?course=0&season=2`). */
@@ -74,8 +96,8 @@ export function trialQuery(course: string | undefined, season: string | undefine
   return parseTrial({ course: queryNumber(course), season: queryNumber(season) });
 }
 
-/** A time trial: the player alone on a race server, every run reported back. */
-export async function startTimeTrial(env: Env, racer: Racer, course: number, season: number): Promise<JoinTicket> {
+/** A time trial session: the player alone on a race server, in steady weather, the laps that rank reported back. */
+export async function startTimeTrial(env: Env, racer: Racer, play: TrialPlay): Promise<JoinTicket> {
   const server = await pickServer(env);
   const { db, close } = openDb(databaseUrl(env));
   let rider: RiderClaims | undefined;
@@ -89,7 +111,7 @@ export async function startTimeTrial(env: Env, racer: Racer, course: number, sea
     room: roomId("t"),
     pid: racer.userId,
     name: racer.handle,
-    plan: { tilt: false, race: { course, season, weather: CLEAR, turns: CLEAR } },
+    plan: { tilt: false, race: { ...play, turns: play.weather } },
     seed: planSeed(),
     bots: 0,
     rider,
@@ -98,16 +120,20 @@ export async function startTimeTrial(env: Env, racer: Racer, course: number, sea
   });
 }
 
-/** A finished run, as a race server reports it. */
+/** A lap, as a race server reports it. */
 export interface RunReport {
   /** The reporting race server's public address. */
   server: string;
   room: string;
-  /** The attempt in that room, from 1. */
+  /** The lap in that room, from 1. */
   run: number;
   pid: string;
   course: number;
   season: number;
+  /** The circuit's revision it was ridden on. */
+  revision: number;
+  /** `sim::Weather` it was ridden in. */
+  weather: number;
   timeMs: number;
   /** The ghost, base64url without padding. */
   ghost: string;
@@ -119,11 +145,22 @@ export function parseRun(v: unknown): RunReport | null {
   const run = int(v.run, 1, 65_535);
   const trial = reportedTrial(v);
   const timeMs = int(v.timeMs, 1, 3_600_000);
+  const revision = int(v.revision, 0, 255);
+  const weather = int(v.weather, 0, 6);
   if (typeof v.server !== "string" || !/^[\w.[\]:-]{1,255}$/u.test(v.server)) return null;
   if (typeof v.room !== "string" || !/^[\w-]{1,64}$/u.test(v.room)) return null;
   if (typeof v.pid !== "string" || v.pid.length === 0 || v.pid.length > 255) return null;
   if (typeof v.ghost !== "string" || run === null || trial === null || timeMs === null) return null;
-  return { server: v.server, room: v.room, run, pid: v.pid, ...trial, timeMs, ghost: v.ghost };
+  if (revision === null || weather === null) return null;
+  return { server: v.server, room: v.room, run, pid: v.pid, ...trial, revision, weather, timeMs, ghost: v.ghost };
+}
+
+/** Why a checked lap can't rank (`circuit`, `revision`, `practice`), or null if it can. */
+export function unranked(run: Pick<RunReport, "course" | "revision" | "weather">): string | null {
+  const now = revisionOf(run.course);
+  if (now === null) return "circuit";
+  if (run.revision !== now) return "revision";
+  return run.weather === CLEAR ? null : "practice";
 }
 
 /** The ghost's bytes from base64url without padding, or null if it isn't that (or is too big). */
@@ -179,28 +216,30 @@ function walkFrames(bytes: Uint8Array, at: number, frames: number): number | nul
 }
 
 /**
- * Checks a ghost against the run it records: what it says, or an error code
- * (`too_big`, `short`, `version`, `course`, `season`, `frame_ticks`,
- * `finish`, `time`, `frames`, `splits`, `look`, `frame`, `trailing`).
+ * Checks a ghost against the lap it records: what it says, or an error code
+ * (`too_big`, `short`, `version`, `course`, `season`, `revision`,
+ * `frame_ticks`, `finish`, `time`, `frames`, `splits`, `look`, `frame`,
+ * `trailing`).
  */
 export function checkGhost(
   bytes: Uint8Array,
-  run: Pick<RunReport, "course" | "season" | "timeMs">,
+  run: Pick<RunReport, "course" | "season" | "revision" | "timeMs">,
 ): GhostInfo | string {
   if (bytes.length > GHOST_MAX_BYTES) return "too_big";
-  const head = 11;
+  const head = 12;
   if (bytes.length < head) return "short";
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes[0] !== GHOST_VERSION) return "version";
   if (bytes[1] !== run.course) return "course";
   if (bytes[2] !== run.season) return "season";
-  if (bytes[3] !== FRAME_TICKS) return "frame_ticks";
-  const finishTicks = view.getUint32(4, true);
+  if (bytes[3] !== run.revision) return "revision";
+  if (bytes[4] !== FRAME_TICKS) return "frame_ticks";
+  const finishTicks = view.getUint32(5, true);
   if (finishTicks === 0) return "finish";
   if (run.timeMs !== Math.floor((finishTicks * 1000) / TICKS_PER_SECOND)) return "time";
-  const frames = view.getUint16(8, true);
+  const frames = view.getUint16(9, true);
   if (frames !== Math.ceil(finishTicks / FRAME_TICKS) + 1) return "frames";
-  const n = view.getUint8(10);
+  const n = view.getUint8(11);
   if (n < 1 || n > MAX_SPLITS) return "splits";
   let at = head;
   if (bytes.length < at + n * 4 + 1) return "short";
@@ -229,9 +268,10 @@ export const isGhostId = (s: string) => /^[\w-]{22}$/u.test(s);
 export type StoreRunResult = { stored: false } | { stored: true; best: boolean };
 
 /**
- * Keeps a checked run (once per room and attempt) and makes it the player's
- * best for its course and season if it is strictly faster. Runs of unknown
- * players are dropped.
+ * Keeps a checked lap that can rank (once per room and lap) and makes it the
+ * player's best for its course and season if it is strictly faster, or if
+ * their best is of an older revision of the circuit. Laps of unknown players
+ * are dropped.
  */
 export async function storeRun(db: Db, run: RunReport, ghost: Uint8Array<ArrayBuffer>): Promise<StoreRunResult> {
   const [known] = await db.select({ userId: player.userId }).from(player).where(eq(player.userId, run.pid)).limit(1);
@@ -245,6 +285,7 @@ export async function storeRun(db: Db, run: RunReport, ghost: Uint8Array<ArrayBu
         userId: run.pid,
         course: run.course,
         season: run.season,
+        revision: run.revision,
         timeMs: run.timeMs,
       })
       .onConflictDoNothing({ target: [timeTrialRun.room, timeTrialRun.run] })
@@ -257,6 +298,7 @@ export async function storeRun(db: Db, run: RunReport, ghost: Uint8Array<ArrayBu
         userId: run.pid,
         course: run.course,
         season: run.season,
+        revision: run.revision,
         timeMs: run.timeMs,
         ghost,
       })
@@ -264,11 +306,12 @@ export async function storeRun(db: Db, run: RunReport, ghost: Uint8Array<ArrayBu
         target: [timeTrialBest.userId, timeTrialBest.course, timeTrialBest.season],
         set: {
           id: sql`excluded.id`,
+          revision: sql`excluded.revision`,
           timeMs: sql`excluded.time_ms`,
           ghost: sql`excluded.ghost`,
           setAt: sql`excluded.set_at`,
         },
-        setWhere: sql`${timeTrialBest.timeMs} > excluded.time_ms`,
+        setWhere: sql`${timeTrialBest.revision} <> excluded.revision or ${timeTrialBest.timeMs} > excluded.time_ms`,
       })
       .returning({ id: timeTrialBest.id });
     return { stored: true, best: best !== undefined } as const;
@@ -342,7 +385,13 @@ export function shapeBoard(
   };
 }
 
-const onBoard = ({ course, season }: Trial) => and(eq(timeTrialBest.course, course), eq(timeTrialBest.season, season));
+/** The bests on a course and season's board: those of the circuit's revision now. */
+const onBoard = ({ course, season }: Trial) =>
+  and(
+    eq(timeTrialBest.course, course),
+    eq(timeTrialBest.season, season),
+    eq(timeTrialBest.revision, revisionOf(course) ?? -1),
+  );
 
 const entryColumns = {
   userId: timeTrialBest.userId,
@@ -353,7 +402,7 @@ const entryColumns = {
   ghost: timeTrialBest.id,
 };
 
-/** The board of a course and season, as the signed-in player sees it. */
+/** The board of a course and season (best laps on the circuit as it is now), as the signed-in player sees it. */
 export async function loadBoard(db: Db, trial: Trial, userId: string): Promise<Board> {
   const [best, totals, own] = await Promise.all([
     db
