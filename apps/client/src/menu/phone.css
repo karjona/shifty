@@ -28,6 +28,8 @@
   --edge-b: max(var(--safe-bottom, 0px), 14px);
   --margin-x: var(--edge-l);
   --head: 76px;
+  /* The race info's strip: your place's figure under its label. */
+  --strip: 98px;
   --body-top: calc(var(--margin-y) + var(--head) + var(--gap));
   --rail: 248px;
   --col-r: 640px;
@@ -981,7 +983,7 @@
 }
 /* The verdict of a disqualification: high in the middle, over the scene above the rider. */
 :root[data-compact] #verdict {
-  top: calc(var(--safe-top) + var(--margin-y) + var(--head) + var(--gap));
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + var(--gap));
 }
 :root[data-compact] #verdict b {
   padding: 0 32px;
@@ -1055,7 +1057,7 @@
   line-height: 70px;
 }
 :root[data-compact] #popups {
-  top: calc(var(--safe-top) + var(--margin-y) + var(--head) + 6px);
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 6px);
   gap: 6px;
 }
 /* Two at a time: more would come down over the rider. */
@@ -1239,6 +1241,10 @@
 
 /* --- the race's end on a phone --- */
 
+/* The race info goes while the tower has its place. */
+:root[data-compact] :has(> .board > .board-tower:not([hidden])) > #race-info {
+  display: none;
+}
 /* The standings tower while the others finish: top left, under where the race info was. */
 :root[data-compact] .board-tower {
   --cols: 44px 1fr 120px;

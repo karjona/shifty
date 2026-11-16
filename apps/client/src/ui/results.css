@@ -120,6 +120,11 @@
   background: #b8321f;
   color: #f6f1e7;
 }
+/* Disqualified, your place reads so in red (on the panel after the race too). */
+.board-mine.dq b,
+.end-hero.dq b {
+  background: #b8321f;
+}
 /* Your row: the accent fills it, the text turns to paper. */
 .board-row.me {
   background: var(--accent);
@@ -127,7 +132,10 @@
   color: var(--on-accent);
 }
 .board-row.me > *,
-.board-row.me .c-time .still {
+.board-row.me .c-time .still,
+.board-row.me.out .c-place,
+.board-row.me.out .c-name,
+.board-row.me.out .c-time {
   color: inherit;
 }
 .board-row.fresh::after {

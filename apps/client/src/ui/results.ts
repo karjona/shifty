@@ -385,7 +385,7 @@ export class Scoreboard {
     // 1st to 3rd stand on the podium's base, the winner crowned, and the result is called out.
     const rank = mine && mine.finishTicks > 0 && mine.place <= 3 ? mine.place : 0;
     const hero = mine
-      ? `<div class="board-mine${rank > 0 ? ` ranked rank-${rank}` : ""}">` +
+      ? `<div class="board-mine${rank > 0 ? ` ranked rank-${rank}` : mine.disqualifiedTicks > 0 ? " dq" : ""}">` +
         `<b>${rank === 1 ? laurelSvg() : ""}${mine.finishTicks > 0 ? ordinal(mine.place) : mine.disqualifiedTicks > 0 ? m.dsq : m.dnf}</b>` +
         `<span>${mine.finishTicks > 0 ? formatTime(mine.finishTicks, hz) : ""}</span></div>`
       : "";

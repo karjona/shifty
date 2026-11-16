@@ -311,18 +311,17 @@ export class Hud {
 
   /**
    * The misses that count toward a disqualification, against how many
-   * disqualify: quiet with none, more urgent as they add up, and the
-   * verdict once you're out (nothing where misses never disqualify).
+   * disqualify: quiet with none, more urgent as they add up (nothing
+   * where misses never disqualify, or once your race is over: the clock
+   * then reads your time, or the disqualification).
    */
   private missCell(race: RaceView): string {
-    if (race.maxMisses <= 0) return "";
+    if (race.maxMisses <= 0 || race.finishTicks > 0 || race.disqualifiedTicks > 0) return "";
     const m = messages().hud;
     const label = race.looped ? m.labels.missedBuoys : m.labels.missedGates;
-    const out = race.disqualifiedTicks > 0;
     const left = race.maxMisses - race.misses;
-    const level = out ? "out" : race.misses === 0 ? "none" : left <= 1 ? "last" : left <= 2 ? "warn" : "some";
-    const value = out ? messages().results.dsq : `${race.misses}<small>/${race.maxMisses}</small>`;
-    return `<div class="hud-miss ${level}"><span>${label}</span> ${value}</div>`;
+    const level = race.misses === 0 ? "none" : left <= 1 ? "last" : left <= 2 ? "warn" : "some";
+    return `<div class="hud-miss ${level}"><span>${label}</span> <b>${race.misses}<small>/${race.maxMisses}</small></b></div>`;
   }
 
   update(race: RaceView, speedKmh: number, gp: GrandPrixView | null = null): void {

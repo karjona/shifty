@@ -208,6 +208,7 @@ function Head({
   hero,
   heroSub,
   rank = 0,
+  out = false,
 }: {
   kicker: string;
   title: string;
@@ -218,6 +219,8 @@ function Head({
   heroSub?: string;
   /** 1 to 3: the place stands on the podium's base, the first crowned with laurel. */
   rank?: number;
+  /** Disqualified: the place reads so in red. */
+  out?: boolean;
 }) {
   return (
     <header className="end-head">
@@ -227,7 +230,7 @@ function Head({
         {sub && <span className="end-sub">{sub}</span>}
         {callout && <p className="board-callout">{callout}</p>}
       </div>
-      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : ""}`}>
+      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : out ? " dq" : ""}`}>
         <b>
           {rank === 1 && <Laurel />}
           {hero}
@@ -292,6 +295,7 @@ function RaceHead({ end }: { end: RaceEnd }) {
             : undefined
       }
       rank={end.finishTicks > 0 ? end.place : 0}
+      out={end.disqualified}
     />
   );
 }

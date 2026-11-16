@@ -263,7 +263,10 @@ html {
   background: #1d1b17;
 }
 /* The misses that count toward a disqualification: quiet with none, the
-   accent's bar as they add up, red with the last one before you're out. */
+   a red bar with two left, red with the last one before you're out. */
+#race-info .hud-miss b {
+  font-weight: inherit;
+}
 #race-info .hud-miss small {
   font-size: 0.6em;
   color: #5f5a51;
@@ -274,14 +277,12 @@ html {
 #race-info .hud-miss.warn {
   box-shadow: inset 0 -6px 0 #b8321f;
 }
-#race-info .hud-miss.last,
-#race-info .hud-miss.out {
+#race-info .hud-miss.last {
   background: #b8321f;
   color: #f6f1e7;
 }
 #race-info .hud-miss.last span,
-#race-info .hud-miss.last small,
-#race-info .hud-miss.out span {
+#race-info .hud-miss.last small {
   color: inherit;
   opacity: 0.85;
 }
