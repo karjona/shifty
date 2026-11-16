@@ -170,6 +170,11 @@ export class Wait {
     return this.closedAt !== null;
   }
 
+  /** Drops the steps it planned that haven't begun: someone else (a card) does them. */
+  handOver(): void {
+    this.plan = this.plan.filter((step) => this.jobs.some((j) => j.step === step));
+  }
+
   /** Renames it (a course becomes known): the steps still to come are weighed as that one's. */
   rename(name: string): void {
     this.name = name;
@@ -466,6 +471,8 @@ export function holdLoading(label: (() => string) | null = null, after = 0): () 
 export function cardWait(name: string, plan: Step[], el: HTMLElement): Wait {
   const wait = new Wait(name, plan);
   cards.push(wait);
+  // (Under the boot screen, a race being joined on a reload: the card has the course's load from here.)
+  if (booting) bootWait.handOver();
   // What the sign was waiting on, the card waits on from here.
   const sign = signWait;
   if (sign && !sign.closed) {
