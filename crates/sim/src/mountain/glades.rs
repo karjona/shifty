@@ -1,15 +1,18 @@
 //! The glades: a ~2 km run from the ridge at the top of the second chairlift
 //! down to the lodge by the lake. A flat start on the ridge, a short steep
-//! couloir between rocks to drop in, a wide bowl with wind lips and a spine,
-//! pine glades (tight turns, trees close, rollers, side hits, a log and a
-//! rock lip), a winding creek gully, a step-down, and a last pitch to the
-//! finish by the lake.
+//! couloir between rock walls to drop in (10 m wide), a bowl whose banks
+//! rise, with wind lips and a spine, pine glades (13 m between the trees,
+//! tight turns, pines in the run, rollers, side hits, a log and a rock lip),
+//! a winding creek gully between rock walls, a step-down, and a last pitch
+//! fenced with netting to the finish by the lake.
 
 use super::{
-    Feature, LipKind, Piece, Run, Valley, Width, pine, rock, slope, tower, turn, valley, w,
+    Edge, EdgeKind, Feature, GateDef, LipKind, Piece, Run, Valley, Width, edge, gate, pine, rock,
+    slope, tower, turn, valley, w,
 };
 use crate::course::{Course, Line, Sport};
 use crate::surface::SeaState;
+use EdgeKind::{Bank, Netting, Rock, Trees};
 
 const fn lip(s: f32, offset: f32, half_width: f32, height: f32, kind: LipKind) -> Feature {
     let (ramp, fall) = match kind {
@@ -74,20 +77,22 @@ const PIECES: &[Piece] = &[
 ];
 
 const WIDTH: &[Width] = &[
-    w(0.0, 12.0, 6.0),
-    w(56.0, 12.0, 6.0),
-    w(70.0, 7.5, 7.5),
-    w(140.0, 7.5, 7.5),
-    w(190.0, 26.0, 8.0),
-    w(560.0, 26.0, 8.0),
-    w(625.0, 12.0, 8.0),
-    w(1190.0, 11.0, 8.0),
-    w(1220.0, 8.0, 9.0),
-    w(1470.0, 8.0, 9.0),
-    w(1500.0, 14.0, 8.0),
-    w(1620.0, 18.0, 10.0),
-    w(1900.0, 22.0, 10.0),
-    w(2000.0, 30.0, 10.0),
+    w(0.0, 8.0, 6.0),
+    w(56.0, 8.0, 6.0),
+    w(66.0, 4.75, 2.5),
+    w(140.0, 4.75, 2.5),
+    w(185.0, 11.5, 8.0),
+    w(545.0, 11.5, 8.0),
+    w(600.0, 7.0, 6.0),
+    w(640.0, 6.5, 5.0),
+    w(1190.0, 6.5, 5.0),
+    w(1215.0, 5.0, 2.5),
+    w(1470.0, 5.0, 2.5),
+    w(1500.0, 7.0, 6.0),
+    w(1600.0, 8.0, 7.0),
+    w(1900.0, 9.0, 8.0),
+    w(1960.0, 12.0, 10.0),
+    w(2010.0, 16.0, 10.0),
 ];
 
 const SLOPE: &[super::Slope] = &[
@@ -157,31 +162,31 @@ const FEATURES: &[Feature] = &[
     Feature::Bowl {
         s: 215.0,
         length: 330.0,
-        depth: 5.0,
+        depth: 2.5,
         ease: 40.0,
     },
-    lip(262.0, -11.0, 6.0, 1.3, LipKind::Wind),
-    lip(318.0, 10.0, 7.0, 1.5, LipKind::Wind),
+    lip(262.0, -6.0, 4.0, 1.3, LipKind::Wind),
+    lip(318.0, 6.0, 4.0, 1.5, LipKind::Wind),
     Feature::Spine {
         s: 368.0,
         length: 70.0,
         ease: 25.0,
-        offset: -2.0,
-        half_width: 8.0,
-        height: 2.6,
+        offset: 0.0,
+        half_width: 4.5,
+        height: 2.4,
     },
-    lip(522.0, 0.0, 9.0, 1.6, LipKind::Wind),
+    lip(522.0, 0.0, 7.0, 1.6, LipKind::Wind),
     // The glades: side hits, rollers, a log and a rock lip.
-    lip(752.0, -7.0, 2.5, 1.0, LipKind::Rock),
+    lip(752.0, -4.0, 2.5, 1.0, LipKind::Rock),
     Feature::Rollers {
         s: 884.0,
         count: 2,
         length: 16.0,
         height: 0.6,
     },
-    lip(1030.0, 1.0, 7.0, 0.9, LipKind::Log),
-    lip(1140.0, 6.5, 2.5, 1.0, LipKind::Rock),
-    lip(1168.0, -3.0, 4.0, 1.1, LipKind::Rock),
+    lip(1030.0, 0.0, 6.5, 0.9, LipKind::Log),
+    lip(1140.0, 4.0, 2.5, 1.0, LipKind::Rock),
+    lip(1168.0, -3.0, 3.0, 1.1, LipKind::Rock),
     // The creek gully.
     Feature::Gully {
         s: 1245.0,
@@ -196,53 +201,78 @@ const FEATURES: &[Feature] = &[
         length: 18.0,
         height: 0.8,
     },
-    lip(1800.0, -10.0, 4.0, 1.3, LipKind::Wind),
-    lip(1846.0, 9.0, 4.0, 1.3, LipKind::Wind),
+    lip(1800.0, -5.0, 3.0, 1.3, LipKind::Wind),
+    lip(1846.0, 5.0, 3.0, 1.3, LipKind::Wind),
 ];
 
 const CHECKPOINTS: &[f32] = &[240.0, 480.0, 720.0, 960.0, 1200.0, 1450.0, 1700.0];
 
 const OBSTACLES: &[super::ObstacleDef] = &[
-    // Rocks at the couloir's sides.
-    rock(96.0, -7.0, 1.3),
-    rock(121.0, 6.8, 1.1),
     // The second chairlift, up the side of the bowl.
-    tower(250.0, 21.0),
-    tower(340.0, 20.0),
-    tower(430.0, 21.0),
-    tower(520.0, 20.0),
-    // Rocks at the bowl's edges.
-    rock(292.0, -23.0, 1.6),
-    rock(470.0, 24.0, 1.4),
+    tower(250.0, 10.4),
+    tower(340.0, 10.4),
+    tower(430.0, 10.4),
+    tower(520.0, 10.4),
+    // Rocks at the bowl's edge.
+    rock(292.0, -10.2, 1.2),
     // The glades: pines close on both sides of every turn, and in the
     // middle of the straights.
-    pine(676.0, -9.0),
-    pine(700.0, -11.0),
-    pine(716.0, 9.0),
-    pine(740.0, -12.5),
-    pine(772.0, 3.0),
-    pine(800.0, -11.5),
-    pine(826.0, 11.0),
-    pine(862.0, 10.0),
-    pine(874.0, -11.0),
-    pine(898.0, -10.0),
-    pine(920.0, 5.0),
-    pine(942.0, 9.0),
-    pine(988.0, -10.0),
-    pine(996.0, 11.0),
-    pine(1014.0, -9.0),
-    pine(1052.0, -5.5),
-    pine(1066.0, 6.0),
-    pine(1090.0, 9.0),
-    pine(1112.0, -11.0),
-    pine(1150.0, -9.0),
+    pine(676.0, -5.0),
+    pine(718.0, 5.0),
+    pine(772.0, 1.0),
+    pine(798.0, -5.3),
+    pine(826.0, 5.0),
+    pine(874.0, -5.0),
+    pine(922.0, 2.5),
+    pine(942.0, 5.0),
+    pine(996.0, 5.0),
+    pine(1012.0, -5.0),
+    pine(1052.0, -2.5),
+    pine(1066.0, 3.0),
+    pine(1088.0, 5.2),
+    pine(1112.0, -5.0),
+    pine(1152.0, -4.5),
     // Boulders by the creek.
-    rock(1300.0, 6.4, 1.0),
-    rock(1392.0, 6.0, 1.2),
+    rock(1300.0, 3.0, 0.8),
+    rock(1392.0, -2.8, 0.9),
     // The last pitch.
-    rock(1660.0, -16.0, 1.5),
-    pine(1760.0, 16.5),
-    rock(1880.0, 18.0, 1.3),
+    rock(1660.0, -6.5, 1.1),
+    pine(1760.0, 7.0),
+    rock(1880.0, 7.6, 1.0),
+];
+
+const EDGES: &[Edge] = &[
+    edge(0.0, Bank, Bank),
+    edge(60.0, Rock, Rock),
+    edge(150.0, Bank, Bank),
+    edge(580.0, Trees, Trees),
+    edge(1208.0, Rock, Rock),
+    edge(1482.0, Trees, Trees),
+    edge(1600.0, Netting, Netting),
+];
+
+const GATES: &[GateDef] = &[
+    // The bowl: either side of the wind lips and round the spine.
+    gate(210.0, -3.0, 8.0),
+    gate(295.0, 5.5, 7.0),
+    gate(395.0, -7.5, 7.0),
+    gate(455.0, -7.5, 7.0),
+    gate(618.0, -1.0, 8.0),
+    // The glades: on the fast line between the trees.
+    gate(700.0, 2.0, 7.0),
+    gate(812.0, -1.5, 7.0),
+    gate(900.0, 1.5, 7.0),
+    gate(990.0, -2.0, 7.0),
+    gate(1100.0, 2.0, 7.0),
+    // The creek gully.
+    gate(1230.0, -1.0, 7.0),
+    gate(1335.0, -0.5, 7.0),
+    gate(1430.0, 1.0, 7.0),
+    gate(1500.0, 0.0, 8.0),
+    // The last pitch.
+    gate(1640.0, 3.0, 8.0),
+    gate(1685.0, -3.0, 8.0),
+    gate(1928.0, 1.5, 8.0),
 ];
 
 /// The glades' line down the mountain.
@@ -257,6 +287,9 @@ pub static GLADES_RUN: Run = Run::new(
     CHECKPOINTS,
     1950.0,
     OBSTACLES,
+    EDGES,
+    GATES,
+    &[],
     0x61_ADE5,
 );
 

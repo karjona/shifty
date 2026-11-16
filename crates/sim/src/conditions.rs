@@ -502,10 +502,25 @@ const ROCK_GAP: (f32, f32) = (55.0, 105.0);
 /// another obstacle (m, beyond both radii).
 const ROCK_CLEAR_GATE: f32 = 25.0;
 const ROCK_CLEAR_OBSTACLE: f32 = 6.0;
+/// Nor within this far along the run (m) of an obstacle in the same line.
+const ROCK_CLEAR_LINE: f32 = 25.0;
 /// Rocks stand inside this fraction of the run's half width, and leave at
 /// least this much room (m) to the run's edge.
 const ROCK_SPREAD: f32 = 0.65;
-const ROCK_ROOM: f32 = 5.0;
+const ROCK_ROOM: f32 = 2.0;
+/// No rocks in the way into a run's gate: from this far before it (m) to
+/// `ROCK_GATE_AFTER` past it, within `ROCK_GATE_SIDE` m of its poles.
+const ROCK_GATE_BEFORE: f32 = 25.0;
+const ROCK_GATE_AFTER: f32 = 15.0;
+const ROCK_GATE_SIDE: f32 = 1.5;
+
+/// Whether a rock at `(s, offset)` stands in the way into one of a run's gates.
+fn in_a_gate(run: &Run, s: f32, offset: f32, radius: f32) -> bool {
+    run.gates.iter().any(|g| {
+        (g.s - ROCK_GATE_BEFORE..g.s + ROCK_GATE_AFTER).contains(&s)
+            && (offset - g.offset).abs() < g.span * 0.5 + ROCK_GATE_SIDE + radius
+    })
+}
 
 /// The rocks a thin cover leaves poking through on a course's run, placed
 /// once per run (none on the water). Fall only: see `World::cover_rocks`.
@@ -528,9 +543,10 @@ fn place_rocks(run: &Run, start_s: f32) -> Vec<Rock> {
         .into_iter()
         .chain(run.checkpoints.iter().copied())
         .collect();
-    let mut s = start_s + 80.0;
+    let mut s = start_s + 120.0;
     while s < run.finish_s - 50.0 {
-        let half = run.width_at(s).half.min(run.limit(s) - ROCK_ROOM).max(0.0);
+        let edge = run.limit_on(s, false).min(run.limit_on(s, true));
+        let half = run.width_at(s).half.min(edge - ROCK_ROOM).max(0.0);
         let offset = rng.range(-ROCK_SPREAD, ROCK_SPREAD) * half;
         let radius = rng.range(0.5, 0.85);
         let height = rng.range(0.35, 0.6);
@@ -542,8 +558,12 @@ fn place_rocks(run: &Run, start_s: f32) -> Vec<Rock> {
             let (dx, dz) = (o.x - x, o.z - z);
             let clear = o.radius + radius + ROCK_CLEAR_OBSTACLE;
             dx * dx + dz * dz < clear * clear
+        }) || run.obstacles.iter().any(|o| {
+            // Never one in line with a trunk or a tower just down the run.
+            (o.s - s).abs() < ROCK_CLEAR_LINE
+                && (o.offset - offset).abs() < o.radius + radius + ROCK_CLEAR_OBSTACLE * 0.5
         });
-        if near_gate || on_feature || crowded {
+        if near_gate || on_feature || crowded || in_a_gate(run, s, offset, radius) {
             s += 10.0;
             continue;
         }
@@ -1193,7 +1213,8 @@ mod tests {
             assert!(rocks.len() >= 8, "{course:?}: {} rocks", rocks.len());
             assert_eq!(rocks, cover_rocks(course));
             for k in rocks {
-                assert!(k.offset.abs() + k.obstacle.radius < run.limit(k.s) - 3.0);
+                assert!(k.offset.abs() + k.obstacle.radius < run.limit(k.s) - ROCK_ROOM * 0.5);
+                assert!(!in_a_gate(run, k.s, k.offset, k.obstacle.radius));
                 assert!((k.s - c.start_s).abs() > ROCK_CLEAR_GATE);
                 assert!(
                     run.checkpoints
