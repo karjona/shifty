@@ -120,6 +120,12 @@ async function requireHandle({ context }: { context: Ctx }) {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/** The login, started afresh when it is sent somewhere with a new reason (the session ended). */
+function LoginScreen() {
+  const { error } = loginRoute.useSearch();
+  return <Login key={error ?? ""} />;
+}
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
@@ -129,7 +135,7 @@ const loginRoute = createRoute({
     if (me) throw redirect({ to: me.player ? (me.rider?.appearance ? "/" : "/rider") : "/welcome" });
     await context.queryClient.ensureQueryData(inviteQuery);
   },
-  component: Login,
+  component: LoginScreen,
 });
 
 /** An invite link: redeems the code for this browser, then the login screen takes over. */
@@ -238,21 +244,35 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, ref
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPendingMinMs: 0 });
 
-/** The session ended under the menus (it expired, or you logged out elsewhere): back to the login, saying so. */
-function sessionEnded(): void {
-  if (!queryClient.getQueryData(meQuery.queryKey)) return;
+/**
+ * The session ended under the menus (it expired, or you logged out
+ * elsewhere): back to the login, saying so. A race runs on its ticket and
+ * keeps its own screens (results, trouble), so the menus wait until you
+ * leave it.
+ */
+let ended = false;
+const inRace = () => router.state.location.pathname === "/race";
+function endSession(): void {
+  if (inRace()) {
+    ended = true;
+    return;
+  }
+  ended = false;
   queryClient.setQueryData(meQuery.queryKey, null);
   void router.navigate({ to: "/login", search: { error: "session" } });
 }
-onSessionEnded(sessionEnded);
+onSessionEnded(() => {
+  if (queryClient.getQueryData(meQuery.queryKey)) endSession();
+});
+router.subscribe("onResolved", () => {
+  if (ended && !inRace()) endSession();
+});
 // A fresh look at the account (the tab coming back) that finds nobody signed in.
 let signedInBefore = false;
 queryClient.getQueryCache().subscribe((e) => {
   if (e.type !== "updated" || e.query.queryKey[0] !== meQuery.queryKey[0] || e.action.type !== "success") return;
   const now = e.query.state.data != null;
-  if (!now && signedInBefore && e.action.manual !== true) {
-    void router.navigate({ to: "/login", search: { error: "session" } });
-  }
+  if (!now && signedInBefore && e.action.manual !== true) endSession();
   signedInBefore = now;
 });
 
