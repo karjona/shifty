@@ -21,7 +21,7 @@ import { noise4 } from "./cel/noise.ts";
 import { type CircuitLook, sunOver } from "./look.ts";
 import { noise3 } from "./cel/terrain.ts";
 import { type BeachSite, addBeach } from "./coast/beach.ts";
-import { type Berth, Fleet, Roamer, ferry, yacht } from "./coast/boats.ts";
+import { type Berth, Fleet, Roamer, ferry, mooredBerths, yacht } from "./coast/boats.ts";
 import { townMaterial } from "./coast/facades.ts";
 import { Grounding, sunlight } from "./coast/grounding.ts";
 import { type Lantern, buildBeaconRock, buildMole, flashLanterns } from "./coast/harbour.ts";
@@ -565,36 +565,9 @@ export function cameraBoats(course: CourseData): { name: string; x: number; z: n
   return spots;
 }
 
-/** The cape's boats: moored in the harbour along the town's quay and in the lee of the mole, and the television's. */
-function berths(course: CourseData, town: LandData | undefined, mole: LandData | undefined): Berth[] {
-  const r = rng(23);
-  const spots: Berth[] = [];
-  const seed = () => Math.floor(r() * 1000);
-  if (town && mole) {
-    // Stern to the quay's face toward the harbour (+x), from the harbour's head to the mole.
-    const face = town.ax + town.radius;
-    for (let z = -112; z < mole.az - mole.radius - 6; z += 4.2 + r() * 3.4) {
-      if (r() < 0.15) continue;
-      const big = r() < 0.16;
-      spots.push({
-        x: face + (big ? 7.4 : 3.6) + r() * 0.5,
-        z: z + (big ? 3 : 0),
-        yaw: Math.PI / 2 + (r() - 0.5) * 0.12,
-        kind: big ? "trawler" : r() < 0.2 ? "inflatable" : "llaut",
-        seed: seed(),
-      });
-      if (big) z += 6;
-    }
-    // Alongside, inside the mole.
-    for (let x = mole.ax + 6; x < mole.bx - 6; x += 8 + r() * 3)
-      spots.push({
-        x,
-        z: mole.az - mole.radius - 1.9,
-        yaw: Math.PI / 2 + (r() < 0.5 ? Math.PI : 0),
-        kind: "llaut",
-        seed: seed(),
-      });
-  }
+/** The cape's boats: those the course has moored in the harbour, and the television's. */
+function berths(course: CourseData): Berth[] {
+  const spots = mooredBerths(course);
   for (const b of cameraBoats(course)) spots.push({ x: b.x, z: b.z, yaw: b.yaw, kind: "camera", seed: 1 });
   return spots;
 }
@@ -754,7 +727,7 @@ export class CapeScenery implements WaterScenery {
       this.group.add(mole.group);
     }
     yield;
-    this.fleet = new Fleet(berths(course, town, harbourMole));
+    this.fleet = new Fleet(berths(course));
     this.group.add(this.fleet.mesh);
     yield;
     // Sails out past the point.
