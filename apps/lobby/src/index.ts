@@ -23,7 +23,7 @@ import {
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
 import { devMailbox } from "./mail.ts";
-import { NoRaceServer, startSingle } from "./matches.ts";
+import { NoRaceServer, liveMatch, startSingle } from "./matches.ts";
 import { claimHandle, getPlayer, isCard, isTitle, setCard, view } from "./players.ts";
 import { parseReport, storeReport } from "./results.ts";
 import { matchPay } from "./rewards.ts";
@@ -196,6 +196,18 @@ app.get("/api/me/earnings", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   return c.json({ earnings: await recentEarnings(c.var.db, p.user.id) });
+});
+
+/** The matchmaking race you are still in, if any, with a ticket back into it. */
+app.get("/api/me/live", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const servers = await c.env.SERVERS.get(c.env.SERVERS.idFromName("all")).live();
+  const live = await liveMatch(c.var.db, c.env.LOBBY_SIGNING_KEY, servers, {
+    userId: p.user.id,
+    handle: p.player.handle,
+  });
+  return live ? c.json(live) : c.json({ error: "none" }, 404);
 });
 
 /** What a match you raced in paid you, race by race, your credits now, and your best on `?course` before it. */

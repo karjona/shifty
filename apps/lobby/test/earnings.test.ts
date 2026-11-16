@@ -1,6 +1,7 @@
-// What a match paid each of its players, as the end of a race shows it: on
-// a throwaway database (made from the dev or CI Postgres, dropped
-// afterwards), from race reports stored the way race servers send them.
+// A match as its players see it: what it paid them, as the end of a race
+// shows it, and a way back into it while it runs. On a throwaway database
+// (made from the dev or CI Postgres, dropped afterwards), from race reports
+// stored the way race servers send them.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -12,7 +13,9 @@ import { ensureDatabase } from "../../../scripts/dev-db.ts";
 import { type DbHandle, openDb } from "../src/db/client.ts";
 import { match, matchPlayer, player, user } from "../src/db/schema.ts";
 import { type ResultReport, storeReport } from "../src/results.ts";
+import { liveMatch } from "../src/matches.ts";
 import { GRAND_PRIX_BONUS, PLACE_CREDITS, matchPay } from "../src/rewards.ts";
+import { b64urlDecode, b64urlEncode } from "../src/tickets.ts";
 
 const testDb = `shifty_test_${randomBytes(4).toString("hex")}`;
 let adminUrl = "";
@@ -123,4 +126,37 @@ void test("your best place on a circuit counts the matches before this one", asy
   await storeReport(handle.db, report("m_second", 0, 1, [entry("dan", 2), entry(null, 1)]));
   assert.equal((await matchPay(handle.db, "m_second", "dan", 0))?.bestBefore, 4);
   assert.equal((await matchPay(handle.db, "m_second", "dan", 1))?.bestBefore, null);
+});
+
+void test("a matchmaking race under way offers its players a ticket back, until its plan is over", async () => {
+  await makePlayer("eva");
+  await makePlayer("fei");
+  await makePlayer("gus");
+  const id = "m_live";
+  await makeMatch(id, "matchmaking", "gp", ["eva", "fei"]);
+  const key = b64urlEncode(new Uint8Array(32).fill(3));
+  const server = {
+    addr: "localhost:4433",
+    region: "dev",
+    version: "0.15.0",
+    certHashes: ["aGFzaA"],
+    rooms: 1,
+    humans: 2,
+    draining: false,
+  };
+  const live = await liveMatch(handle.db, key, [server], { userId: "eva", handle: "Eva#0001" });
+  assert.equal(live?.match, id);
+  assert.equal(live?.ticket.room, id);
+  assert.deepEqual(live?.ticket.certHashes, ["aGFzaA"]);
+  const payload = live?.ticket.token.split(".")[0] ?? "";
+  const claims: unknown = JSON.parse(new TextDecoder().decode(b64urlDecode(payload)));
+  assert.ok(typeof claims === "object" && claims !== null);
+  assert.equal(Reflect.get(claims, "rejoin"), true);
+  assert.equal(Reflect.get(claims, "humans"), 2);
+  assert.equal(Reflect.get(claims, "tilt"), true);
+  // Not for strangers, not once its server is gone, not once it is over.
+  assert.equal(await liveMatch(handle.db, key, [server], { userId: "gus", handle: "Gus#0001" }), null);
+  assert.equal(await liveMatch(handle.db, key, [], { userId: "eva", handle: "Eva#0001" }), null);
+  await storeReport(handle.db, report(id, 3, 4, [entry("eva", 1), entry("fei", 2)]));
+  assert.equal(await liveMatch(handle.db, key, [server], { userId: "eva", handle: "Eva#0001" }), null);
 });
