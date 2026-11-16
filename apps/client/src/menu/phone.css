@@ -403,42 +403,76 @@
   overscroll-behavior: contain;
 }
 
-/* The mode select: the four modes, the picked one's panel, and Play. */
+/* The mode select: the four modes are tabs in the header (where the title
+   was), and the picked one's panel and Play keep to the right: the club's
+   camera stands your rider left of the middle. */
 :root[data-compact] .mode-body {
-  --col-r: 1040px;
+  --col-r: 860px;
 }
-:root[data-compact] .mode-select .mode-side {
-  grid-template-columns: 330px minmax(0, 1fr) var(--rail);
+:root[data-compact] .mode-select .title-panel {
+  display: none;
 }
-:root[data-compact] .mode-tabs {
-  justify-content: flex-start;
-  padding: 0 20px;
-}
-:root[data-compact] .mode-tabs .tab {
-  height: var(--row);
-  font-size: 24px;
-  line-height: 1.05;
-  white-space: normal;
-  text-align: left;
-}
-:root[data-compact] .mode-tabs .tab > span:first-child {
-  display: flex;
+:root[data-compact] .mode-select .mode-tabs {
+  position: absolute;
+  z-index: 2;
+  top: calc(-1 * (var(--head) + var(--gap)));
+  left: calc(var(--head) + var(--gap));
+  flex-direction: row;
   align-items: center;
-  padding-right: 24px;
+  align-self: auto;
+  height: var(--head);
+  padding: 0 6px;
+  gap: 0;
 }
-:root[data-compact] .mode-tabs .tab > span:first-child::before {
-  flex: none;
-  width: 34px;
+:root[data-compact] .mode-select .mode-tabs .tab {
+  height: var(--head);
+  padding: 0 14px;
+  border-bottom: 0;
+  color: rgb(29 27 23 / 0.56);
+  font-size: 22px;
+  font-weight: 680;
+  font-stretch: 108%;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
-:root[data-compact] .mode-tabs .tab.on::after {
-  left: auto;
-  right: 0;
-  width: 11px;
-  height: 11px;
-  margin-top: -6px;
+:root[data-compact] .mode-select .mode-tabs .tab.on {
+  color: var(--ink);
+}
+:root[data-compact] .mode-select .mode-tabs .tab:focus {
+  color: var(--on-accent);
+}
+:root[data-compact] .mode-select .mode-tabs .tab::before {
+  inset: 0;
+  box-shadow: none;
+}
+:root[data-compact] .mode-select .mode-tabs .tab > span:first-child::before {
+  display: none;
+}
+:root[data-compact] .mode-select .mode-tabs .tab.on::after {
+  top: auto;
+  left: 14px;
+  right: 14px;
+  bottom: 0;
+  width: auto;
+  height: 5px;
+  margin: 0;
+  border: 0;
+  background: currentColor;
+  transform: none;
 }
 :root[data-compact] .mode-tabs .tab .badge {
   display: none;
+}
+@media (max-width: 760px) {
+  :root[data-compact] .mode-select .mode-tabs .tab {
+    padding: 0 9px;
+    font-size: 20px;
+  }
+  :root[data-compact] .mode-select .mode-tabs .tab.on::after {
+    left: 9px;
+    right: 9px;
+  }
 }
 :root[data-compact] .mode-panel {
   min-height: 0;
@@ -516,7 +550,7 @@
   justify-content: flex-end;
 }
 :root[data-compact] .shop-panel {
-  width: 780px;
+  width: 680px;
   max-height: none;
   height: 100%;
   display: grid;
