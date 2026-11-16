@@ -36,6 +36,7 @@ import {
   vec2,
   vec3,
 } from "three/tsl";
+import type { Steps } from "./slices.ts";
 
 /** Deterministic noise in [0, 1) for placing scenery. */
 export function hash(n: number): number {
@@ -75,10 +76,10 @@ const COAST_FOREST = 0x4d6a66;
  * nearer lower and wooded, the far ones taller, paler and snowier. `side`
  * is which way inland lies along z (1 or -1); it spans `width` m across.
  */
-export function sierra(side: 1 | -1, ranges: readonly Range[], width: number, seed: number): THREE.Mesh {
+export function* sierra(side: 1 | -1, ranges: readonly Range[], width: number, seed: number): Steps<THREE.Mesh> {
   const parts: THREE.BufferGeometry[] = [];
   const r = random(seed);
-  ranges.forEach((range, k) => {
+  for (const [k, range] of ranges.entries()) {
     const style: PeakStyle = {
       rock: COAST_ROCK,
       snow: 0xf7f9fd,
@@ -100,8 +101,10 @@ export function sierra(side: 1 | -1, ranges: readonly Range[], width: number, se
       parts.push(geo);
       x += radius * (0.62 + r() * 0.4);
       n++;
+      if (n % 4 === 0) yield;
     }
-  });
+  }
+  yield;
   const mesh = new THREE.Mesh(
     mergeGeometries(parts),
     peakMaterial({ rock: COAST_ROCK, snow: 0xf7f9fd, snowline: 0.5, haze: 0, footHaze: 0, forest: COAST_FOREST }),
@@ -366,8 +369,9 @@ function plainTrees(): THREE.Group {
   return plants.build(true);
 }
 
-/** The bay's backdrop: the plain the town stands on, the foothills and the sierra behind it, headlands out to sea. */
-export function buildScenery(): THREE.Group {
+/** The bay's backdrop: the plain the town stands on, the foothills and the sierra behind it, headlands out to sea,
+ * built a piece at a time (see slices.ts). */
+export function* buildScenery(): Steps<THREE.Group> {
   const g = new THREE.Group();
   g.userData.noMerge = true;
   // North shore: the coastal plain (its beach runs off past the turns).
@@ -380,8 +384,11 @@ export function buildScenery(): THREE.Group {
   plain.receiveShadow = true;
   g.add(plain);
   g.add(plainTrees());
+  yield;
   g.add(foothills(1, 360, 1150, 3400, 210, 11));
-  g.add(sierra(1, COAST_SIERRA, 5200, 3));
+  yield;
+  g.add(yield* sierra(1, COAST_SIERRA, 5200, 3));
+  yield;
   g.add(seaHorizon(1, 21));
   return g;
 }

@@ -28,7 +28,7 @@ import {
   limbGeometry,
   outlineOf,
 } from "../cel/rider.ts";
-import { whileLoading } from "../../loading.ts";
+import { type Wait, begin, waitNow } from "../../loading.ts";
 import { warmUp } from "../warm.ts";
 import { type Pose, Rig } from "./rig.ts";
 import { type Body, bodyFromRest } from "./skeleton.ts";
@@ -94,33 +94,32 @@ const SHAPES = ["eyes", "nose", "mouth"] as const;
 
 /** What a look wears over its face: its eyes', nose's and mouth's paint (the first nose and mouth have none), its
  * brows and beard. */
-async function overlaysFor(look: Look, gaze: FaceOverlays["gaze"]): Promise<FaceOverlays> {
+async function overlaysFor(look: Look, wait: Wait | null): Promise<Omit<FaceOverlays, "gaze">> {
   const [lids, brows, beard, ...features] = await Promise.all([
-    loadOverlay(look.body, "lids"),
-    loadOverlay(look.body, `brows.${look.brows}`),
-    look.facialHair > 0 ? loadOverlay(look.body, `beard.${look.facialHair}`) : Promise.resolve(null),
-    loadOverlay(look.body, `eyes.${look.eyes}`),
-    look.nose > 0 ? loadOverlay(look.body, `nose.${look.nose}`) : Promise.resolve(null),
-    look.mouth > 0 ? loadOverlay(look.body, `mouth.${look.mouth}`) : Promise.resolve(null),
+    loadOverlay(look.body, "lids", wait),
+    loadOverlay(look.body, `brows.${look.brows}`, wait),
+    look.facialHair > 0 ? loadOverlay(look.body, `beard.${look.facialHair}`, wait) : Promise.resolve(null),
+    loadOverlay(look.body, `eyes.${look.eyes}`, wait),
+    look.nose > 0 ? loadOverlay(look.body, `nose.${look.nose}`, wait) : Promise.resolve(null),
+    look.mouth > 0 ? loadOverlay(look.body, `mouth.${look.mouth}`, wait) : Promise.resolve(null),
   ]);
   return {
     brows: brows ?? NO_OVERLAY,
     beard: beard ?? NO_OVERLAY,
     features: features.filter((f): f is THREE.Texture => f !== null),
     lids: lids ?? NO_OVERLAY,
-    gaze,
   };
 }
 
 /** The body whose art draws a look: its own, or the male art until a body's art is built. */
-async function artBody(look: Look): Promise<Look["body"]> {
-  return (await builtModels(look.body)).has("body") ? look.body : "male";
+function artBody(look: Look): Look["body"] {
+  return builtModels(look.body).has("body") ? look.body : "male";
 }
 
 /** What a rider wears: their hair (as it sits under any hat), then each item, for the models the art has.
  * A required slot whose model isn't built yet shows the starter model there, in the item's colours. */
-async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
-  const built = await builtModels(look.body);
+function worn(look: Look, kit: Kit, sport: Sport): Worn[] {
+  const built = builtModels(look.body);
   const starters = defaultOutfits(look.body);
   const items = SLOTS[sport].flatMap((slot) => {
     const id = kit[slot];
@@ -136,6 +135,15 @@ async function worn(look: Look, kit: Kit, sport: Sport): Promise<Worn[]> {
     ? [{ model: style, colours: null, pieces: [hat ? HAIR_UNDER[hat.model]! : "free"] }]
     : [];
   return [...hair, ...items];
+}
+
+/** Fetches what a look wears for a sport ahead, in the background: a figure dressed in it later comes at once. */
+export function prefetchLook(appearance: Appearance, sport: Sport): void {
+  const look = { ...appearance.look, body: artBody(appearance.look) };
+  void loadModel(look.body, "body", null).catch(() => null);
+  for (const w of worn(look, appearance.outfits[sport], sport))
+    void loadModel(look.body, w.model, null, w.pieces ?? null).catch(() => null);
+  void overlaysFor(look, null).catch(() => null);
 }
 
 export class RiderFigure {
@@ -181,24 +189,29 @@ export class RiderFigure {
     }
     this.key = key;
     const version = ++this.version;
-    void whileLoading(
-      (async () => {
-        const look = { ...appearance.look, body: await artBody(appearance.look) };
-        const items = await worn(look, appearance.outfits[sport], sport);
-        const assets = await Promise.all([
-          loadModel(look.body, "body"),
-          ...items.map((i) => loadModel(look.body, i.model)),
-        ]);
-        const overlays = await overlaysFor(look, assets[0].pieces.find((p) => p.name === "face")?.gaze ?? null);
-        if (version !== this.version) return;
-        const built = this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
-        if (!built) return;
-        // Its shaders compile before it shows; the last look stays on until then.
-        await warmUp(built.group);
-        if (version === this.version) this.commit(built);
-        else built.dispose();
-      })(),
-    );
+    const wait = waitNow();
+    const dressing = (async () => {
+      const look = { ...appearance.look, body: artBody(appearance.look) };
+      const items = worn(look, appearance.outfits[sport], sport);
+      const [assets, faces] = await Promise.all([
+        Promise.all([
+          loadModel(look.body, "body", wait),
+          ...items.map((i) => loadModel(look.body, i.model, wait, i.pieces ?? null)),
+        ]),
+        overlaysFor(look, wait),
+      ]);
+      if (version !== this.version) return;
+      const overlays = { ...faces, gaze: assets[0].pieces.find((p) => p.name === "face")?.gaze ?? null };
+      const building = begin("scene", wait);
+      const built = this.build(look, assets, [{ model: "body", colours: null }, ...items], overlays);
+      building.end();
+      if (!built) return;
+      // Its shaders compile before it shows; the last look stays on until then.
+      await warmUp(built.group, wait);
+      if (version === this.version) this.commit(built);
+      else built.dispose();
+    })();
+    void (wait ? wait.during(dressing) : dressing);
   }
 
   /** Poses the rig (kept for when the art arrives, if it hasn't yet). */

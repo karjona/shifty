@@ -359,3 +359,103 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* What comes next: the label, and between races of a Tilt the next race's season (in its colour) and circuit. */
+.board-next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.board-upnext {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--next, var(--ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The heading: the circuit (on two lines if it must), and its conditions under it. */
+.board-title.circuit {
+  font-size: 56px;
+  line-height: 0.92;
+  white-space: normal;
+}
+.board-sub {
+  font-size: var(--fs-label);
+  font-weight: 560;
+  color: var(--ink-2);
+}
+/* The Tilt's narrower panel: its heading in the circuit's size, its label tighter, so they hold in every language. */
+.board-tilt .board-title {
+  font-size: 56px;
+}
+.board-tilt .board-head .board-label {
+  font-size: 17px;
+  letter-spacing: 0.12em;
+}
+
+/* --- a result worth calling out: a line over the panel, and 1st to 3rd
+   standing on the podium's base (the four seasons' stripe), the winner
+   crowned with laurel. Shared by the scoreboard and the panel after a
+   race (screens/wrapup.tsx). --- */
+
+.board-verdict,
+.end-verdict {
+  margin: 0;
+  padding: 12px var(--pad);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  animation: axis-wipe 700ms 280ms var(--ease) both;
+}
+.board-verdict.win,
+.end-verdict.win {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.board-mine.ranked,
+.end-hero.ranked {
+  gap: 18px;
+}
+.board-mine.ranked b,
+.end-hero.ranked b {
+  position: relative;
+  animation: place-stamp 420ms 220ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+.board-mine.ranked b::after,
+.end-hero.ranked b::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 6px;
+  background: linear-gradient(90deg, #2b3fd0 0 25%, #c24a1c 25% 50%, #d4262f 50% 75%, #24804a 75%);
+}
+.laurel {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 46%;
+  width: calc(100% + 52px);
+  height: calc(100% + 30px);
+  transform: translate(-50%, -50%);
+  color: #e3ad3c;
+  pointer-events: none;
+}
+@keyframes place-stamp {
+  from {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}

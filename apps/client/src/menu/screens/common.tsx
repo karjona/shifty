@@ -8,6 +8,7 @@ import { ApiError, claimHandle, meQuery, type Player, saveCard } from "../api.ts
 import { GlobeIcon } from "../icons.tsx";
 import { toast } from "../toast.tsx";
 import { Button, Credits, Modal, Picker, SocialCard, TextField, Wordmark } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 
 export function LanguagePicker() {
   const t = useT();
@@ -106,6 +107,7 @@ function CardEditor({ player, onClose }: { player: Player; onClose: () => void }
   const [name, setName] = useState(player.name);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const locale = useLocale();
   const preview: Player = { ...player, title, card };
 

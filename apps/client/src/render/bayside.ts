@@ -11,6 +11,7 @@ import { random } from "./coast/shape.ts";
 import { Train } from "./coast/train.ts";
 import type { CourseData } from "./course.ts";
 import { buildScenery, farMaterial } from "./scenery.ts";
+import type { Steps } from "./slices.ts";
 
 /** The bay's boats at their berths. */
 function berths(course: CourseData): Berth[] {
@@ -69,15 +70,24 @@ export class BaySide implements WaterScenery {
   readonly group = new THREE.Group();
   readonly gulls = new THREE.Vector3(40, 0, 40);
   readonly inland = null;
-  private fleet: Fleet;
-  private roamers: Roamer[];
+  private fleet!: Fleet;
+  private roamers: Roamer[] = [];
   /** The train on the plain behind the town, at the foot of the hills. */
   private train = new Train(-1050, 1050, 2.2, 346);
+  private course: CourseData;
 
+  /** It is built by `build` (see slices.ts). */
   constructor(course: CourseData) {
-    this.group.add(buildScenery(), this.train.group);
-    this.fleet = new Fleet(berths(course));
+    this.course = course;
+  }
+
+  /** Builds it, a piece at a time. */
+  *build(): Steps {
+    this.group.add(yield* buildScenery(), this.train.group);
+    yield;
+    this.fleet = new Fleet(berths(this.course));
     this.group.add(this.fleet.mesh);
+    yield;
     const hull = boatMaterial();
     const sails: [number, number][] = [
       [-760, -430],

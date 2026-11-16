@@ -12,7 +12,7 @@
 import * as THREE from "three/webgpu";
 import { Fn, attribute, cameraWorldMatrix, float, max, positionLocal, sin, vec3, vec4 } from "three/tsl";
 import { type Colourway, defaultOutfits, item } from "@shifty/rider";
-import { quietly } from "../loading.ts";
+import { quietly, waitNow } from "../loading.ts";
 import { LOOK } from "./cel/look.ts";
 import { UNREFLECTED, inklessBasic } from "./cel/material.ts";
 import { EnvLook } from "./env/materials.ts";
@@ -229,7 +229,8 @@ export class ClubArt {
     // (Hidden, but compiled with the rest: see `World.compile`.)
     this.near.visible = false;
     this.near.userData.weather = true;
-    this.ready = loadEnv("club", split)
+    const wait = waitNow();
+    this.ready = loadEnv("club", wait, split)
       .then(async (model) => {
         const art = this.assemble(model);
         // The lettering is set once, and every club draws it.
@@ -243,7 +244,7 @@ export class ClubArt {
           art.add(letters);
         }
         share(art);
-        await warmUp(art);
+        await warmUp(art, wait);
         this.group.add(art);
         this.apply();
       })

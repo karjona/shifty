@@ -8,10 +8,11 @@ import { useEffect, useState } from "react";
 import { setMenuRider, showMenuRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
-import { useRiderShot } from "../hooks.ts";
-import { hexColour, itemLabel } from "../items.ts";
+import { useRiderShot, useScrollEdges } from "../hooks.ts";
+import { hexColour, itemLabel, sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Panel, Picker } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 
 /** Items you own for a sport's slot that fit your body. */
 export function choices(sport: Sport, slot: Slot, a: Appearance, owned: Set<string>): string[] {
@@ -30,7 +31,9 @@ export function Wardrobe() {
   const [sport, setSport] = useState<Sport>("summer");
   const [a, setA] = useState<Appearance | null>(rider?.appearance ?? null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const space = useRiderShot("body");
+  const edges = useScrollEdges();
   useEffect(() => {
     if (a) setMenuRider(a, sport);
   }, [a, sport]);
@@ -70,13 +73,8 @@ export function Wardrobe() {
       </div>
       <div className="home-right">
         <Panel title={t.wardrobe.title} className="wardrobe">
-          <Picker
-            label={t.wardrobe.season}
-            value={sport}
-            onChange={setSport}
-            options={(["summer", "winter"] as const).map((s) => ({ value: s, label: t.seasons[s] }))}
-          />
-          <div className="wardrobe-rows">
+          <Picker label={t.wardrobe.sport} value={sport} onChange={setSport} options={sportOptions(t)} />
+          <div className="wardrobe-rows" ref={edges}>
             {SLOTS[sport].map((slot) => {
               const ids = choices(sport, slot, a, rider.owned);
               const optional = !REQUIRED[sport].includes(slot);

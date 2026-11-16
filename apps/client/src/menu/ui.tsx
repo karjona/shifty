@@ -7,12 +7,14 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useLayoutEffect,
   useRef,
+  useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { labelOf, useT } from "../i18n/index.ts";
 import type { Player } from "./api.ts";
-import { useAction, useAutoFocus, useDevice } from "./hooks.ts";
+import { useAction, useAutoFocus, useDevice, useScrollEdges } from "./hooks.ts";
 import { type GlyphAction, KeyGlyph, PadGlyph } from "./glyphs.tsx";
 import { ChevronLeft } from "./icons.tsx";
 import { nav, pointing } from "./nav.ts";
@@ -78,11 +80,20 @@ export function TabBar<T extends string>({
     0,
     tabs.findIndex((t) => t.id === value),
   );
-  const step = (d: number) => onChange(tabs[(i + d + tabs.length) % tabs.length]!.id);
+  const bar = useRef<HTMLDivElement>(null);
+  // With the focus on a tab, it follows the shoulder buttons to the tab they pick.
+  const step = (d: number) => {
+    const next = tabs[(i + d + tabs.length) % tabs.length]!.id;
+    onChange(next);
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.getAttribute("role") === "tab" && bar.current?.contains(active)) {
+      bar.current.querySelector<HTMLElement>(`[data-tab="${next}"]`)?.focus({ preventScroll: true });
+    }
+  };
   useAction("prev", () => step(-1));
   useAction("next", () => step(1));
   return (
-    <div className={`tabbar ${className}`} role="tablist">
+    <div ref={bar} className={`tabbar ${className}`} role="tablist">
       <Glyph action="prev" />
       {lead}
       {tabs.map((t) => (
@@ -91,6 +102,7 @@ export function TabBar<T extends string>({
           type="button"
           role="tab"
           data-nav=""
+          data-tab={t.id}
           aria-selected={t.id === value}
           aria-label={iconsOnly ? t.label : undefined}
           title={iconsOnly ? t.label : undefined}
@@ -109,15 +121,18 @@ export function TabBar<T extends string>({
 
 export function Panel({
   title,
+  label,
   children,
   className = "",
 }: {
   title?: ReactNode;
+  /** The panel's name for screen readers, when it shows no title. */
+  label?: string;
   children: ReactNode;
   className?: string;
 }) {
   return (
-    <section className={`panel ${className}`}>
+    <section className={`panel ${className}`} aria-label={label}>
       {title && <h2 className="panel-title">{title}</h2>}
       {children}
     </section>
@@ -144,6 +159,7 @@ export function Picker<T extends string | number>({
   /** Stepping past the last option comes round to the first (false: it stops at either end). */
   wrap?: boolean;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const i = Math.max(
     0,
@@ -186,7 +202,7 @@ export function Picker<T extends string | number>({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="previous"
+          aria-label={t.common.previous}
           onClick={(e) => {
             e.stopPropagation();
             step(-1);
@@ -201,7 +217,7 @@ export function Picker<T extends string | number>({
         <button
           type="button"
           tabIndex={-1}
-          aria-label="next"
+          aria-label={t.common.next}
           onClick={(e) => {
             e.stopPropagation();
             step(1);
@@ -214,19 +230,42 @@ export function Picker<T extends string | number>({
   );
 }
 
+/**
+ * A labelled text input. With `autoFocus` it takes the focus when it
+ * appears (before the pointer can hover anything new into focus), so you
+ * can type at once.
+ */
 export function TextField({
   label,
   hint,
   error,
   autoFocus,
+  className = "",
   ...input
 }: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string | null }) {
   const id = useId();
+  const ref = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => {
+    if (autoFocus) ref.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
   return (
-    <label className="field" htmlFor={id}>
+    <label className={`field ${className}`} htmlFor={id}>
       <span className="field-label">{label}</span>
-      <input id={id} data-nav="" data-nav-autofocus={autoFocus ? "" : undefined} {...input} />
-      {error ? <span className="field-error">{error}</span> : hint ? <span className="field-hint">{hint}</span> : null}
+      <input
+        ref={ref}
+        id={id}
+        data-nav=""
+        data-nav-autofocus={autoFocus ? "" : undefined}
+        aria-invalid={error ? true : undefined}
+        {...input}
+      />
+      {error ? (
+        <span className="field-error" role="alert">
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="field-hint">{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -245,12 +284,23 @@ export function Modal({
 }) {
   useAction("back", onClose);
   useAutoFocus();
+  const edges = useScrollEdges();
+  // Closing gives the focus back to what had it when the dialog opened.
+  const [opener] = useState(() => document.activeElement);
+  useEffect(
+    () => () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true });
+    },
+    [opener],
+  );
   // On the page's root: animated screens would otherwise hold it in place.
   return createPortal(
     <div className="modal-backdrop" data-nav-scope="" onClick={onClose}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <h2>{title}</h2>
-        <div className="modal-body">{children}</div>
+        <div className="modal-body" data-nav-scroll="" ref={edges}>
+          {children}
+        </div>
         {actions && <div className="modal-actions">{actions}</div>}
       </div>
     </div>,
@@ -266,6 +316,18 @@ export function Wordmark({ small = false }: { small?: boolean }) {
       <span className="axis" aria-hidden="true" />
       <span className="name">SHIFTY</span>
     </div>
+  );
+}
+
+/** A handle, `Name#1234`: the number set lighter, a long name in narrower type. */
+export function Handle({ handle, className = "" }: { handle: string; className?: string }) {
+  const at = handle.lastIndexOf("#");
+  const name = at < 0 ? handle : handle.slice(0, at);
+  return (
+    <span className={`handle ${name.length > 12 ? "long" : ""} ${className}`}>
+      {name}
+      {at >= 0 && <i>{handle.slice(at)}</i>}
+    </span>
   );
 }
 
@@ -285,7 +347,7 @@ export function SocialCard({ player, onClick }: { player: Player; onClick?: () =
         {player.name.slice(0, 1).toUpperCase()}
       </span>
       <span className="who">
-        <b>
+        <b className={player.name.length > 12 ? "long" : undefined}>
           {player.name}
           <i>#{String(player.tag).padStart(4, "0")}</i>
         </b>

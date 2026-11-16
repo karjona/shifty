@@ -236,6 +236,15 @@ html {
 #race-info span {
   line-height: 20px;
 }
+#race-info .hud-clock {
+  font-weight: inherit;
+}
+/* The HUD's own icons: drawn in ink, sized to the type they stand with. */
+.hud-icon {
+  flex: none;
+  width: 0.8em;
+  height: 0.8em;
+}
 #race-info .split {
   flex-basis: 100%;
   flex-direction: row;
@@ -282,9 +291,11 @@ html {
     transform: translateX(-50%) scale(1.05);
   }
 }
+/* Popups sit under the race info (and a split under it) and above the
+   rider's head, on the HUD's canvas (a vh would scale with its zoom). */
 #popups {
   position: fixed;
-  top: 34vh;
+  top: 236px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

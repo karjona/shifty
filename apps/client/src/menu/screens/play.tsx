@@ -2,15 +2,16 @@
 // rooms and matchmaking (online). Your rider stands on the terrace; party
 // members will join you there.
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { type FormEvent, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
-import { CIRCUITS, type PlanRequest, SEASONS, TILT, circuit } from "@shifty/rider";
+import { CIRCUITS, type PlanRequest, SEASONS, circuit } from "@shifty/rider";
 import {
   ApiError,
   createRoom,
+  liveRaceQuery,
   lobbySocket,
   meQuery,
   type Mode,
@@ -18,8 +19,10 @@ import {
   playTimeTrial,
   roomExists,
   setPendingRace,
+  takeRequeue,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
+import { type Picks, keepPicks, lastPicks } from "../picks.ts";
 import { PlanPickers, seasonSports } from "../plan.tsx";
 import { useLoading } from "../busy.tsx";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
@@ -35,15 +38,25 @@ export function ModeSelect() {
   useBackdrop("club");
   const t = useT();
   const navigate = useNavigate();
-  const { mode = "single" } = route.useSearch();
-  const [plan, setPlan] = useState<PlanRequest>(TILT);
-  const [bots, setBots] = useState(3);
+  const search = route.useSearch();
+  const [picks, setPicks] = useState(lastPicks);
+  const mode = search.mode ?? picks.mode;
+  const plan = mode === "room" ? picks.room : picks.single;
+  const bots = picks.bots;
+  const keep = (change: Partial<Picks>) => setPicks(keepPicks(change));
+  const setPlan = (p: PlanRequest) => keep(mode === "room" ? { room: p } : { single: p });
+  const setBots = (n: number) => keep({ bots: n });
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [searching, setSearching] = useState(false);
+  // Play again from the end of a matchmaking race goes straight back into the queue.
+  const [searching, setSearching] = useState(() => mode === "matchmaking" && takeRequeue());
   const [tuning, setTuning] = useState(false);
   const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
+  const pickTrial = useCallback((c: TrialChoice) => {
+    setTrial(c);
+    keepPicks({ trial: { course: c.course, season: SEASONS[c.season] ?? "summer" } });
+  }, []);
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
   useEffect(() => setClubRiders(1), []);
@@ -55,6 +68,10 @@ export function ModeSelect() {
   useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
   const setMode = (m: Mode) => void navigate({ to: "/play", search: { mode: m }, replace: true });
+  // The mode on show is the one to come back to (a race's way back names it).
+  useEffect(() => {
+    if (mode !== lastPicks().mode) keepPicks({ mode });
+  }, [mode]);
 
   const fail = (e: unknown) => {
     toast(e instanceof ApiError && e.code === "no_server" ? t.common.noServer : t.common.error, "error");
@@ -72,11 +89,11 @@ export function ModeSelect() {
       if (mode === "trial" && trial?.race) {
         const ticket = await playTimeTrial(trial.course, trial.season);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
-        await navigate({ to: "/race" });
+        await navigate({ to: "/race", replace: true });
       } else if (mode === "single") {
         const ticket = await playSingle(plan);
-        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
-        await navigate({ to: "/race" });
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } }, plan });
+        await navigate({ to: "/race", replace: true });
       } else {
         const code = await createRoom(plan, bots);
         await navigate({ to: "/room/$code", params: { code } });
@@ -101,6 +118,7 @@ export function ModeSelect() {
           </Button>
         </div>
         <div className="mode-side">
+          <LiveRace />
           <TabBar
             className="mode-tabs"
             value={mode}
@@ -113,10 +131,10 @@ export function ModeSelect() {
             ]}
           />
           {mode === "trial" ? (
-            <TrialPanel title={t.play.modes.trial} onChange={setTrial} />
+            <TrialPanel label={t.play.modes.trial} initial={picks.trial} onChange={pickTrial} />
           ) : (
-            <Panel key={mode} className="mode-panel" title={t.play.modes[mode]}>
-              <p>{t.play.about[mode]}</p>
+            <Panel key={mode} className="mode-panel" label={t.play.modes[mode]}>
+              <p className="mode-about">{t.play.about[mode]}</p>
               {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
               {mode === "room" && (
                 <>
@@ -171,6 +189,26 @@ export function ModeSelect() {
   );
 }
 
+/** A matchmaking race you are still in (you closed its tab): back into it. */
+function LiveRace() {
+  const t = useT();
+  const navigate = useNavigate();
+  const { data: live } = useQuery(liveRaceQuery);
+  if (!live) return null;
+  const rejoin = () => {
+    setPendingRace({ ticket: live.ticket, back: { to: "/play", search: { mode: "matchmaking" } }, rejoin: true });
+    void navigate({ to: "/race", replace: true });
+  };
+  return (
+    <div className="panel live-race">
+      <b>{t.play.liveRace}</b>
+      <Button kind="primary" onClick={rejoin} autoFocus>
+        {t.room.rejoin}
+      </Button>
+    </div>
+  );
+}
+
 /** The sport the club's terrace dresses your rider for: a race on the snow, or the water. */
 function clubSport(plan: PlanRequest): "summer" | "winter" {
   if (plan.tilt || plan.race.course === undefined) return "summer";
@@ -188,7 +226,7 @@ function Races({ tilt }: { tilt: boolean }) {
       <p className="muted">{t.play.eventAbout.gp}</p>
       <ol>
         {seasons.map((s, i) => (
-          <li key={s}>
+          <li key={s} className={`season-${s}`}>
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <b>{t.seasons[s]}</b>
             <span className="muted">
@@ -225,7 +263,7 @@ function JoinRoom({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal title={t.play.joinRoom} onClose={onClose}>
-      <form className="stack" onSubmit={(e) => void submit(e)}>
+      <form className="stack" onSubmit={(e) => void submit(e)} noValidate>
         <TextField
           label={t.play.roomCode}
           className="code-input"
@@ -249,11 +287,15 @@ function JoinRoom({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** How many times a dropped matchmaking socket comes back before giving up. */
+const RECONNECTS = 3;
+
 /** Waiting in the matchmaking queue; the lobby sends a ticket when a race starts. */
 function Searching({ onClose }: { onClose: () => void }) {
   const t = useT();
   const navigate = useNavigate();
   const [status, setStatus] = useState<{ players: number; startsInSecs: number } | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const done = useRef(false);
   const onMessage = useEffectEvent((data: unknown) => {
     let msg: unknown;
@@ -264,6 +306,7 @@ function Searching({ onClose }: { onClose: () => void }) {
     }
     if (typeof msg !== "object" || msg === null || !("t" in msg)) return;
     const get = (k: string): unknown => Reflect.get(msg, k);
+    setReconnecting(false);
     if (msg.t === "queued") {
       setStatus({ players: Number(get("players")) || 1, startsInSecs: Number(get("startsInSecs")) || 0 });
     } else if (msg.t === "ticket") {
@@ -272,23 +315,51 @@ function Searching({ onClose }: { onClose: () => void }) {
         ticket: parseJoinTicket(get("ticket")),
         back: { to: "/play", search: { mode: "matchmaking" } },
       });
-      void navigate({ to: "/race" });
+      void navigate({ to: "/race", replace: true });
     } else if (msg.t === "error") {
       done.current = true;
       toast(get("error") === "no_server" ? t.common.noServer : t.common.error, "error");
       onClose();
     }
   });
-  const onSocketClose = useEffectEvent(() => {
-    if (!done.current) onClose();
+  const giveUp = useEffectEvent((closeCode: number) => {
+    done.current = true;
+    toast(closeCode === 4000 ? t.play.elsewhere : t.play.lost, "error");
+    onClose();
   });
+  // A dropped queue socket comes back a few times, waiting longer each time.
   useEffect(() => {
-    const ws = lobbySocket("/api/matchmaking/ws");
-    ws.addEventListener("message", (e) => onMessage(e.data));
-    ws.addEventListener("close", () => onSocketClose());
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let socket: WebSocket | null = null;
+    const connect = () => {
+      const ws = lobbySocket("/api/matchmaking/ws");
+      socket = ws;
+      ws.addEventListener("message", (e) => {
+        tries = 0;
+        onMessage(e.data);
+      });
+      ws.addEventListener("close", (e) => {
+        if (done.current || socket !== ws) return;
+        if (e.code === 4000 || tries >= RECONNECTS) {
+          giveUp(e.code);
+          return;
+        }
+        setReconnecting(true);
+        timer = setTimeout(
+          () => {
+            tries++;
+            connect();
+          },
+          500 * 2 ** tries,
+        );
+      });
+    };
+    connect();
     return () => {
       done.current = true;
-      ws.close();
+      clearTimeout(timer);
+      socket?.close(1000, "left");
     };
   }, []);
   return (
@@ -303,11 +374,13 @@ function Searching({ onClose }: { onClose: () => void }) {
     >
       <div className="searching">
         <Spinner />
-        {status && (
+        {status && !reconnecting ? (
           <div>
             <p>{t.play.queued(status.players)}</p>
             <p className="muted">{t.play.startsIn(status.startsInSecs)}</p>
           </div>
+        ) : (
+          <p className="muted">{reconnecting ? t.play.reconnecting : t.play.joining}</p>
         )}
       </div>
     </Modal>

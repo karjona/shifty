@@ -1,86 +1,150 @@
 // A race from the menus: the race takes the screen and the controller;
 // Start / Esc (or the button in the corner, or the browser's back) opens
-// the race menu over it (online races don't pause). A Tilt ends on its
-// podium. A time trial starts over from the race menu or its results.
-import { useQueryClient } from "@tanstack/react-query";
-import { useBlocker, useNavigate } from "@tanstack/react-router";
+// the race menu over it (online races don't pause), and leaving asks first
+// when it costs something. The last race's results move on by themselves,
+// or by Continue; then what comes after the race (wrapup.tsx) takes the
+// screen, over the race still running on television, or over a Tilt's
+// podium once the ceremony has played. Play again starts a single player
+// race straight from there, through the season card. A time trial ends on
+// the same panel, with Retry. Problems (the race server turning the ticket
+// down, going away, another release) get the same panel, with a way out.
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
-import type { PodiumData } from "../../game/podium.ts";
-import { RaceSession } from "../../game/race.ts";
+import { SEASONS } from "@shifty/rider";
+import { type RaceEnd, RaceSession, type Trouble, readPlan } from "../../game/race.ts";
+import { SeasonCard } from "../../game/season-change.ts";
 import { useT } from "../../i18n/index.ts";
-import { type PendingRace, fetchMe, meQuery, takePendingRace } from "../api.ts";
-import { toast } from "../toast.tsx";
+import {
+  ApiError,
+  type PendingRace,
+  forgetRace,
+  leftMatch,
+  meQuery,
+  playSingle,
+  raceMode,
+  setRequeue,
+  takePendingRace,
+} from "../api.ts";
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { MenuIcon } from "../icons.tsx";
 import { nav, pointing } from "../nav.ts";
-import { touchSettings } from "../../touch/device.ts";
 import { Button, Glyph } from "../ui.tsx";
+import { RaceControls } from "./controls.tsx";
 import { PodiumScreen } from "./podium.tsx";
+import { type EndAction, TroublePanel, type TrialSummary, WrapUp, useTroubleText } from "./wrapup.tsx";
 import { VERSION } from "../../version.ts";
+import { devParams } from "../../dev-params.ts";
 
-/** `sim::Phase::Results`. */
+/** `sim::Phase`. */
+const GRID = 0;
+const COUNTDOWN = 1;
+const RACING = 2;
 const RESULTS = 3;
 /** `sim::Phase`: the race waits on the grid, then its intro runs. */
 const BEFORE_COUNTDOWN = new Set([0, 4]);
+/** The last race's results show Continue after this long (ms), so a button held from the race doesn't skip them. */
+const CONTINUE_AFTER_MS = 2000;
+/** A time trial's run gets this long (ms) on the finish before its panel comes up. */
+const TRIAL_PANEL_MS = 1200;
+/** The season card's fade in (see `.season-change` in menu.css). */
+const CARD_FADE_MS = 900;
+
+/** The race on screen, and the card that covers its start when it follows another (Play again). */
+interface Run {
+  race: PendingRace | null;
+  card: SeasonCard | null;
+  key: number;
+}
 
 export function RaceScreen() {
+  const [run, setRun] = useState<Run>(() => ({ race: takePendingRace(), card: null, key: 0 }));
+  // The player's account stays at hand through the race, for the menus after it.
+  useQuery(meQuery);
+  const again = (race: PendingRace, card: SeasonCard) => setRun((r) => ({ race, card, key: r.key + 1 }));
+  return <RaceRun key={run.key} race={run.race} card={run.card} onAgain={again} />;
+}
+
+/** What the race is up to, for the screen (a few times a second is plenty). */
+interface View {
+  racePhase: number;
+  sport: "jetski" | "snow";
+  watching: boolean;
+  device: "keyboard" | "gamepad" | "touch";
+  /** This race's course is on screen, nothing covering it. */
+  onShow: boolean;
+  finalResults: boolean;
+  eventIndex: number;
+  eventCount: number;
+  trouble: Trouble | null;
+}
+
+/** What leaving costs now (null: nothing worth asking about). */
+type Cost = "tilt" | "race" | null;
+
+function RaceRun({
+  race,
+  card,
+  onAgain,
+}: {
+  race: PendingRace | null;
+  card: SeasonCard | null;
+  onAgain: (race: PendingRace, card: SeasonCard) => void;
+}) {
   const t = useT();
   const navigate = useNavigate();
   const hudRef = useRef<HTMLDivElement>(null);
-  const [race] = useState<PendingRace | null>(() => takePendingRace());
   /** The race server runs another release: this page must reload first. */
   const outdated = race !== null && race.ticket.version !== VERSION;
+  const mode = race ? raceMode(race) : "single";
+  const online = mode === "room" || mode === "matchmaking";
   const [session, setSession] = useState<RaceSession | null>(null);
   const [menu, setMenu] = useState(false);
-  const [status, setStatus] = useState("");
-  const [failed, setFailed] = useState(false);
-  const [view, setView] = useState<{
-    racePhase: number;
-    sport: "jetski" | "snow";
-    watching: boolean;
-    touch: boolean;
-  } | null>(null);
+  const [confirm, setConfirm] = useState<Cost>(null);
+  const [view, setView] = useState<View | null>(null);
+  const [end, setEnd] = useState<RaceEnd | null>(null);
+  /** A Tilt's ceremony is over: what comes after it takes the screen. */
+  const [afterPodium, setAfterPodium] = useState(false);
+  const [continueShown, setContinueShown] = useState(false);
+  const [trialPanel, setTrialPanel] = useState<TrialSummary | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { device } = useDevice();
-  const [podium, setPodium] = useState<PodiumData | null>(null);
-  const queryClient = useQueryClient();
-  const credits = useRef<number | null>(queryClient.getQueryData(meQuery.queryKey)?.rider?.credits ?? null);
-  const phaseNow = view?.racePhase ?? null;
 
-  // When a race's results come up, tell the player what it paid (the
-  // race server reports to the lobby as the race ends).
-  useEffect(() => {
-    if (phaseNow !== RESULTS) return undefined;
-    const id = setTimeout(() => {
-      void fetchMe().then((me) => {
-        if (!me) return;
-        queryClient.setQueryData(meQuery.queryKey, me);
-        const now = me.rider?.credits ?? null;
-        if (now !== null && credits.current !== null && now > credits.current)
-          toast(t.shop.earned(now - credits.current));
-        credits.current = now;
-      });
-    }, 2500);
-    return () => clearTimeout(id);
-  }, [phaseNow, queryClient, t]);
-
+  // Out of a race the browser's back doesn't come back to it: every way out replaces it,
+  // and a reload doesn't either.
   const back = () => {
+    forgetRace();
     if (!race) {
-      void navigate({ to: "/play" });
+      void navigate({ to: "/play", replace: true });
       return;
     }
-    if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params });
-    else void navigate({ to: "/play", search: race.back.search });
+    if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params, replace: true });
+    else void navigate({ to: "/play", search: race.back.search, replace: true });
   };
-  const planOver = useEffectEvent((data: PodiumData | null) => (data ? setPodium(data) : back()));
+  const goBack = useEffectEvent(() => back());
+  const planOver = useEffectEvent((data: RaceEnd) => {
+    forgetRace();
+    setMenu(false);
+    setConfirm(null);
+    setEnd(data);
+  });
 
   useEffect(() => {
     const hud = hudRef.current;
     if (!race || !hud) {
-      void navigate({ to: "/play" });
+      void card?.hide();
+      void navigate({ to: "/play", replace: true });
       return undefined;
     }
-    if (outdated) return undefined;
+    if (outdated) {
+      void card?.hide();
+      // A race kept through a reload, from an earlier release: nothing to go back to.
+      if (race.rejoin) goBack();
+      return undefined;
+    }
     let s: RaceSession | null = null;
     let live = true;
     void Engine.get().then((engine) => {
@@ -88,10 +152,12 @@ export function RaceScreen() {
       s = new RaceSession({
         ticket: race.ticket,
         hud,
-        status: setStatus,
-        onJoin: (ok) => setFailed(!ok),
+        status: () => {},
         onOver: (data) => planOver(data),
         trial: race.trial,
+        card: card ?? undefined,
+        // Dev: `?autopilot=1` rides menu races with the bot's inputs too, as it does the quick race.
+        autopilot: import.meta.env.DEV && devParams.get("autopilot") === "1",
       });
       engine.show(s);
       setSession(s);
@@ -101,35 +167,151 @@ export function RaceScreen() {
       const stage = s;
       if (stage) void Engine.get().then((engine) => engine.hide(stage));
     };
-  }, [race, navigate, outdated]);
+  }, [race, card, navigate, outdated]);
 
-  // What the race is up to, for the help (a few times a second is plenty).
   useEffect(() => {
     if (!session) return undefined;
     const id = setInterval(() => {
-      const { phase, racePhase, sport, watching } = session.state;
-      setView(phase === 1 ? { racePhase, sport, watching, touch: session.state.device === "touch" } : null);
+      const st = session.state;
+      setView(
+        st.phase === 1 || st.trouble
+          ? {
+              racePhase: st.racePhase,
+              sport: st.sport,
+              watching: st.watching,
+              device: st.device,
+              onShow: st.onShow,
+              finalResults: st.finalResults,
+              eventIndex: st.eventIndex,
+              eventCount: st.eventCount,
+              trouble: st.trouble,
+            }
+          : null,
+      );
     }, 250);
     return () => clearInterval(id);
   }, [session]);
 
-  /** A time trial's results: retry or leave. */
+  const trouble = end ? null : (view?.trouble ?? null);
   const trial = race?.trial !== undefined;
-  const trialResults = trial && view?.racePhase === RESULTS && !menu;
+  const trialResults = trial && view?.racePhase === RESULTS && trouble === null;
+  const finalResults = (view?.finalResults ?? false) && end === null && trouble === null;
+
+  // The last race's results: Continue shows after a beat.
+  useEffect(() => {
+    if (!finalResults) return undefined;
+    const id = setTimeout(() => setContinueShown(true), CONTINUE_AFTER_MS);
+    return () => {
+      clearTimeout(id);
+      setContinueShown(false);
+    };
+  }, [finalResults]);
+
+  // A time trial's run: its panel comes up a moment after the finish, and goes with a retry.
+  useEffect(() => {
+    if (!trialResults || !session) return undefined;
+    const id = setTimeout(() => {
+      const run = session.trialEnd();
+      const tr = race?.trial;
+      if (!run || !tr) return;
+      setTrialPanel({
+        course: tr.course,
+        season: SEASONS[tr.season] ?? "summer",
+        ticks: run.ticks,
+        hz: run.hz,
+        ghosts: run.ghosts,
+        callout: run.callout,
+        beat: run.beat,
+        name: run.name,
+      });
+    }, TRIAL_PANEL_MS);
+    return () => clearTimeout(id);
+  }, [trialResults, session, race]);
+
   const retry = () => {
     session?.retry();
     setMenu(false);
+    setTrialPanel(null);
   };
 
-  // The controller drives the rider; only Start (or Esc) reaches the menus.
+  /** Single player: the same pick again, straight in, through the season card. */
+  const playAgain = async () => {
+    if (!race || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const ticket = await playSingle(race.plan ?? { tilt: true });
+      const first = readPlan(ticket.token)[0];
+      const next = new SeasonCard(first?.conditions.season ?? "summer", true, first?.course ?? null);
+      next.loading = true;
+      await new Promise((resolve) => setTimeout(resolve, CARD_FADE_MS));
+      onAgain({ ...race, ticket }, next);
+    } catch (e) {
+      setError(e instanceof ApiError && e.code === "no_server" ? t.common.noServer : t.common.error);
+      setBusy(false);
+    }
+  };
+
+  const changeMode = () => {
+    forgetRace();
+    void navigate({ to: "/play", search: { mode }, replace: true });
+  };
+  const mainMenu = () => {
+    forgetRace();
+    void navigate({ to: "/", replace: true });
+  };
+  /** Leaving on purpose (confirmed where it costs something): the match isn't offered back. */
+  const quit = () => {
+    if (race && online) leftMatch(race.ticket.room);
+    back();
+  };
+  const toRoom = () => back();
+
+  // What leaving costs now: a Tilt under way, or a race you are still in.
+  const cost: Cost =
+    trial || end || !view || trouble
+      ? null
+      : view.eventCount > 1 && (view.eventIndex > 0 || !BEFORE_COUNTDOWN.has(view.racePhase))
+        ? "tilt"
+        : (view.racePhase === COUNTDOWN || view.racePhase === RACING) && !view.watching
+          ? "race"
+          : null;
+  const leave = () => {
+    if (cost && confirm === null) setConfirm(cost);
+    else quit();
+  };
+
+  const endShown = end !== null && (end.podium === null || afterPodium);
+  const trialShown = trialResults && trialPanel !== null;
+  const panels = menu || trouble !== null || outdated || end !== null || trialShown;
+
+  // The television keeps the riders clear of the panel.
   useEffect(() => {
-    nav.setEnabled(menu || failed || outdated || podium !== null || trialResults);
+    if (!session) return undefined;
+    if (!endShown && !trialShown) {
+      session.setPanel(null);
+      return undefined;
+    }
+    const place = () => {
+      const left = document.querySelector(".race-screen .end-panel")?.getBoundingClientRect().left;
+      session.setPanel(left === undefined ? null : left / innerWidth);
+    };
+    const id = requestAnimationFrame(place);
+    addEventListener("resize", place);
+    return () => {
+      cancelAnimationFrame(id);
+      removeEventListener("resize", place);
+    };
+  }, [session, endShown, trialShown]);
+
+  // The controller drives the rider; only Start (or Esc) reaches the menus (and Continue, on the last results).
+  useEffect(() => {
+    nav.setEnabled(panels || continueShown);
     session?.setPaused(menu);
     return () => nav.setEnabled(true);
-  }, [menu, failed, outdated, podium, session, trialResults]);
+  }, [panels, continueShown, menu, session]);
 
-  useAction("menu", () => setMenu((m) => !m), !outdated && podium === null);
-  useAction("play", retry, trialResults);
+  useAction("menu", () => setMenu((m) => !m), !outdated && end === null && !trialShown && trouble === null);
   // The browser's back (a swipe in from the screen's edge on a phone) opens the race menu instead of leaving.
   useBlocker({
     shouldBlockFn: ({ action }) => {
@@ -137,63 +319,112 @@ export function RaceScreen() {
       setMenu(true);
       return true;
     },
-    disabled: outdated || failed || podium !== null,
+    disabled: outdated || trouble !== null || end !== null || trialShown,
     enableBeforeUnload: false,
   });
   useAction(
     "back",
-    () => (failed || outdated || trialResults ? back() : setMenu(false)),
-    menu || failed || outdated || trialResults,
+    () => {
+      if (confirm) setConfirm(null);
+      else setMenu(false);
+    },
+    menu,
   );
   useAutoFocus();
 
-  if (podium) return <PodiumScreen data={podium} onDone={back} />;
+  const actions = (): { list: EndAction[]; back: EndAction } => {
+    const changeAction: EndAction = { label: t.end.changeMode, run: changeMode };
+    const menuAction: EndAction = { label: t.end.mainMenu, run: mainMenu };
+    if (mode === "trial")
+      return {
+        list: [{ label: t.trial.retry, run: retry, glyph: "play" }, changeAction, menuAction],
+        back: changeAction,
+      };
+    if (mode === "room") {
+      const toRoomAction: EndAction = { label: t.end.backToRoom, run: toRoom, glyph: "play" };
+      return { list: [toRoomAction, changeAction, menuAction], back: toRoomAction };
+    }
+    const again: EndAction =
+      mode === "matchmaking"
+        ? {
+            label: t.end.findRace,
+            run: () => {
+              setRequeue();
+              changeMode();
+            },
+            glyph: "play",
+          }
+        : { label: t.end.again, run: () => void playAgain(), glyph: "play" };
+    return { list: [again, changeAction, menuAction], back: changeAction };
+  };
 
-  if (outdated)
+  const wrapUp = (summary: Parameters<typeof WrapUp>[0]["summary"]) => {
+    const { list, back: backAction } = actions();
+    return (
+      <WrapUp
+        summary={summary}
+        mode={mode}
+        match={online && race ? race.ticket.room : null}
+        actions={list}
+        back={backAction}
+        busy={busy}
+        error={error}
+      />
+    );
+  };
+
+  if (outdated && !race?.rejoin)
     return (
       <div className="screen race-screen">
-        <div className="race-menu" data-nav-scope="">
-          <div className="panel">
-            <h2 className="panel-title">{t.race.updated.title}</h2>
-            <p>{t.race.updated.body}</p>
-            <Button kind="primary" onClick={() => location.reload()} autoFocus>
-              {t.race.updated.reload}
-            </Button>
-            <Button glyph="back" onClick={back}>
-              {t.race.leave}
-            </Button>
-          </div>
-        </div>
+        <TroublePanel
+          title={t.race.updated.title}
+          body={t.race.updated.body}
+          actions={[
+            { label: t.race.updated.reload, run: () => location.reload() },
+            { label: t.common.back, run: back },
+          ]}
+          back={{ label: t.common.back, run: back }}
+        />
       </div>
     );
 
+  if (end?.podium)
+    return (
+      <PodiumScreen data={end.podium} onContinue={() => setAfterPodium(true)}>
+        {afterPodium && wrapUp({ kind: "race", end })}
+      </PodiumScreen>
+    );
+
   return (
-    <div className="screen race-screen">
+    <div className={`screen race-screen${endShown || trialShown ? " wrapped" : ""}`}>
       <div ref={hudRef} className="race-hud" />
-      {status && <div className="race-status">{status}</div>}
-      {view && (BEFORE_COUNTDOWN.has(view.racePhase) || menu) && (
-        <div className={`race-help ${menu ? "in-menu" : ""}`}>
-          <b>{t.race.controls}</b>
-          {(view.touch
-            ? t.race.helpTouch[view.sport === "jetski" && touchSettings().gas === "hold" ? "jetskiHold" : view.sport]
-            : t.race.help[view.sport]
-          ).map((line) => (
-            <span key={line}>{line}</span>
-          ))}
-        </div>
-      )}
-      {trialResults && (
-        <div className="trial-actions" data-nav-scope="">
-          <Button kind="primary" glyph="play" onClick={retry} autoFocus>
-            {t.trial.retry}
-          </Button>
-          <Button glyph="back" onClick={back}>
-            {t.race.leave}
-          </Button>
-        </div>
-      )}
-      {!menu && !failed && (
+      {/* The controls while the grid waits (at the right: the title card has the left) and through the
+          countdown (low at the left); never over a season card or the intro. */}
+      {view &&
+        trouble === null &&
+        !menu &&
+        view.onShow &&
+        (view.racePhase === GRID || view.racePhase === COUNTDOWN) && (
+          <RaceControls
+            sport={view.sport}
+            device={view.device}
+            className={view.racePhase === GRID ? "waiting" : "countdown"}
+          />
+        )}
+      {!menu && trouble === null && !endShown && !trialShown && (
         <div className="race-menu-hint">
+          {continueShown && (
+            <button
+              type="button"
+              data-nav=""
+              data-nav-autofocus=""
+              className="race-continue"
+              onClick={() => session?.moveOnFromResults()}
+            >
+              {!pointing(device) && <Glyph action="confirm" />}
+              {t.end.continue}
+            </button>
+          )}
           {view?.watching && !trialResults && (
             <button type="button" tabIndex={-1} className="race-camera" onClick={() => session?.nextCamera()}>
               <Glyph action="play" />
@@ -211,23 +442,77 @@ export function RaceScreen() {
           </button>
         </div>
       )}
-      {(menu || failed) && (
-        <div className="race-menu" data-nav-scope="">
+      {menu && !confirm && (
+        <div className="race-menu with-controls" data-nav-scope="">
+          {view && <RaceControls sport={view.sport} device={view.device} />}
           <div className="panel">
             <h2 className="panel-title">{t.race.menu}</h2>
-            {!failed && (
-              <Button kind="primary" glyph="back" onClick={() => setMenu(false)} autoFocus>
-                {t.race.resume}
-              </Button>
-            )}
-            {!failed && trial && <Button onClick={retry}>{t.trial.retry}</Button>}
-            <Button glyph={failed ? "back" : undefined} onClick={back} autoFocus={failed}>
-              {t.race.leave}
+            <Button kind="primary" glyph="back" onClick={() => setMenu(false)} autoFocus>
+              {t.race.resume}
             </Button>
-            {!failed && <p className="muted small">{t.race.noPause}</p>}
+            {trial && <Button onClick={retry}>{t.trial.retry}</Button>}
+            <Button onClick={leave}>{t.race.leave}</Button>
+            {online && <p className="muted small">{t.race.noPause}</p>}
           </div>
         </div>
       )}
+      {menu && confirm && (
+        <div className="race-menu" data-nav-scope="">
+          <div className="panel leave-confirm">
+            <h2 className="panel-title">{confirm === "tilt" ? t.race.leaving.tilt : t.race.leaving.race}</h2>
+            <p>
+              {confirm === "tilt"
+                ? online
+                  ? t.race.leaving.tiltOnline
+                  : t.race.leaving.tiltSingle
+                : online
+                  ? t.race.leaving.raceOnline
+                  : t.race.leaving.raceSingle}
+            </p>
+            <Button kind="primary" glyph="back" onClick={() => setConfirm(null)} autoFocus>
+              {t.race.leaving.stay}
+            </Button>
+            <Button kind="danger" onClick={quit}>
+              {t.race.leaving.leave}
+            </Button>
+          </div>
+        </div>
+      )}
+      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} rejoin={race?.rejoin === true} />}
+      {endShown && end && wrapUp({ kind: "race", end })}
+      {trialShown && trialPanel && wrapUp({ kind: "trial", trial: trialPanel })}
     </div>
+  );
+}
+
+/**
+ * What went wrong, and the way back (a room's: where its race can be
+ * rejoined while it runs). Coming back to a race (`rejoin`), a turned-down
+ * ticket means the way back in is closed.
+ */
+function Problem({
+  trouble,
+  back,
+  room,
+  rejoin,
+}: {
+  trouble: Trouble;
+  back: () => void;
+  room: boolean;
+  rejoin: boolean;
+}) {
+  const t = useT();
+  const text = useTroubleText(trouble);
+  const closed = rejoin && trouble.kind === "rejected" && trouble.reason !== "version" && trouble.reason !== "full";
+  const { title, body } = closed ? t.race.trouble.rejoin : text;
+  const version = trouble.kind === "rejected" && trouble.reason === "version";
+  const backAction: EndAction = { label: room ? t.end.backToRoom : t.common.back, run: back, glyph: "back" };
+  return (
+    <TroublePanel
+      title={title}
+      body={body}
+      actions={version ? [{ label: t.race.updated.reload, run: () => location.reload() }, backAction] : [backAction]}
+      back={backAction}
+    />
   );
 }

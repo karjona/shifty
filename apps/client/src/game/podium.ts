@@ -14,7 +14,8 @@ import type { Body } from "../render/rider/skeleton.ts";
 import { sharedBay } from "./backdrops.ts";
 import type { Engine, Stage } from "./engine.ts";
 import type { RosterName, TiltRow } from "../ui/results.ts";
-import type { Season } from "./season-change.ts";
+import { COURSE_STEPS, type Season } from "./season-change.ts";
+import { type Wait, cardWait, closeCard } from "../loading.ts";
 import { PALETTE, SEASONS, setAccent } from "./seasons.ts";
 
 export interface PodiumRider {
@@ -192,6 +193,8 @@ const CARD_FADE_MS = 900;
 export class PodiumCard {
   private el: HTMLDivElement;
   private gone = false;
+  /** The podium's load, on the card's bar (see loading.ts). */
+  private wait: Wait;
 
   constructor(title: string, place: string) {
     this.el = document.createElement("div");
@@ -201,7 +204,14 @@ export class PodiumCard {
     const span = document.createElement("span");
     span.textContent = place;
     this.el.append(b, span);
+    this.el.insertAdjacentHTML(
+      "beforeend",
+      `<div class="load" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">` +
+        `<div class="load-bar"><i class="load-fill"></i></div>` +
+        `<div class="load-line"><div class="load-what"></div><div class="load-pct"></div></div></div>`,
+    );
     document.body.insertBefore(this.el, document.querySelector("#root"));
+    this.wait = cardWait("podium", COURSE_STEPS, this.el);
     requestAnimationFrame(() => this.el.classList.add("shown"));
   }
 
@@ -210,10 +220,17 @@ export class PodiumCard {
     return new Promise((resolve) => setTimeout(resolve, CARD_FADE_MS));
   }
 
-  hide(): void {
-    if (this.gone) return;
+  /** Fades the card out; resolves once it is gone. */
+  hide(): Promise<void> {
+    if (this.gone) return Promise.resolve();
     this.gone = true;
+    closeCard(this.wait);
     this.el.classList.remove("shown");
-    setTimeout(() => this.el.remove(), CARD_FADE_MS);
+    return new Promise((resolve) =>
+      setTimeout(() => {
+        this.el.remove();
+        resolve();
+      }, CARD_FADE_MS),
+    );
   }
 }

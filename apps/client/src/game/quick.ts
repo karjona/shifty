@@ -4,6 +4,7 @@
 // event (snow, gp for the Tilt, or a circuit's id or name: cape, glades), season, weather, turns,
 // time, seed, surface, pid, render=0, autopilot=1, scale, water.
 import { CIRCUITS, SEASONS, TIMES_OF_DAY, WEATHERS, circuit, timeOf } from "@shifty/rider";
+import { messages } from "../i18n/index.ts";
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
 import { Engine } from "./engine.ts";
 import { RaceSession } from "./race.ts";
@@ -106,7 +107,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
         render: params.get("render") !== "0",
         autopilot: params.get("autopilot") === "1",
         debug: true,
-        onOver: (podium) => {
+        onOver: ({ podium }) => {
           if (!podium) {
             location.reload();
             return;
@@ -119,7 +120,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
     );
   } catch (e) {
     console.error(e);
-    if (e instanceof WebTransportUnavailable) setStatus(e.message);
+    if (e instanceof WebTransportUnavailable) setStatus(messages().race.trouble[e.code].title);
     else setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }

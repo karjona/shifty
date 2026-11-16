@@ -4,8 +4,10 @@ import {
   type Appearance,
   type PlanRequest,
   type Setups,
+  decodeAppearance,
   defaultSetups,
   parseAppearance,
+  parsePlan,
   parseSetup,
   SPORTS,
 } from "@shifty/rider";
@@ -66,6 +68,13 @@ const strOrNull = (o: Obj, k: string): string | null => (typeof o[k] === "string
 const num = (o: Obj, k: string): number => (typeof o[k] === "number" ? o[k] : 0);
 const list = (v: unknown): Obj[] => (Array.isArray(v) ? (v as unknown[]).filter(isObj) : []);
 
+let onUnauthorized: () => void = () => {};
+
+/** Runs `handler` when the lobby says the session is gone (it expired, or you logged out in another tab). */
+export function onSessionEnded(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
 /** Calls the lobby; its JSON answer as an object. Errors carry the lobby's error code. */
 async function call(path: string, init: RequestInit = {}): Promise<Obj> {
   const headers = new Headers(init.headers);
@@ -74,6 +83,7 @@ async function call(path: string, init: RequestInit = {}): Promise<Obj> {
   const res = await fetch(path, { ...init, headers });
   const body: unknown = await res.json().catch(() => null);
   const obj = isObj(body) ? body : {};
+  if (res.status === 401) onUnauthorized();
   if (!res.ok) throw new ApiError(res.status, typeof obj.error === "string" ? obj.error : `http_${res.status}`);
   return obj;
 }
@@ -136,7 +146,13 @@ export async function fetchMe(): Promise<Me | null> {
   };
 }
 
-export const meQuery = queryOptions({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
+/** The account; looked at again when the game's tab comes back, in case the session ended meanwhile. */
+export const meQuery = queryOptions({
+  queryKey: ["me"],
+  queryFn: fetchMe,
+  staleTime: 30_000,
+  refetchOnWindowFocus: true,
+});
 
 /** Whether new accounts need an invite code, and whether this browser carries a usable one. */
 export const inviteQuery = queryOptions({
@@ -145,7 +161,11 @@ export const inviteQuery = queryOptions({
     const o = await call("/api/auth/invite/status");
     return { required: o.required === true, redeemed: o.redeemed === true };
   },
+  staleTime: 5 * 60_000,
 });
+
+/** The invite status asked again (after redeeming a code). */
+export const freshInviteQuery = { ...inviteQuery, staleTime: 0 };
 
 /** Redeems an invite code for this browser; false if it is unknown, used up or expired. */
 export async function redeemInvite(code: string): Promise<boolean> {
@@ -276,6 +296,17 @@ export async function roomExists(code: string): Promise<boolean> {
   }
 }
 
+/** A rider as the lobby sends it (base64url appearance bytes), or null if there is none or it doesn't read. */
+export function lookOf(b64: string): Appearance | null {
+  if (!b64) return null;
+  try {
+    const bin = atob(b64.replaceAll("-", "+").replaceAll("_", "/"));
+    return decodeAppearance(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
 /** A WebSocket to the lobby (same origin). */
 export function lobbySocket(path: string): WebSocket {
   const url = new URL(path, location.href);
@@ -301,22 +332,167 @@ export interface TrialRace {
   record: number | null;
 }
 
-/** Where a race goes back to when it's over. */
+/** A race to go to: its ticket, where it goes back to when it's over, and how to race it again. */
 export interface PendingRace {
   ticket: JoinTicket;
   back: { to: "/play"; search: { mode: Mode } } | { to: "/room/$code"; params: { code: string } };
   trial?: TrialRace;
+  /** Single player: the plan picked, raced again by Play again. */
+  plan?: PlanRequest;
+  /** Back into a race already under way (after a reload, or from the lobby's offer). */
+  rejoin?: boolean;
+}
+
+const MODES: readonly Mode[] = ["trial", "single", "room", "matchmaking"];
+
+/** The mode a race was started from. */
+export function raceMode(race: PendingRace): Mode {
+  if (race.trial) return "trial";
+  return race.back.to === "/room/$code" ? "room" : race.back.search.mode;
+}
+
+/** What a match paid you so far, as the lobby's ledger has it. */
+export interface MatchPay {
+  /** The races of the match whose results the lobby has (0-based). */
+  reported: number[];
+  paid: { event: number; reason: "race" | "style" | "grand_prix"; delta: number }[];
+  /** Your credits now. */
+  credits: number;
+  /** Your best place on the circuit asked about, before this match (null: none). */
+  bestBefore: number | null;
+}
+
+/** What a match you raced (its room id) paid you, and your best on `course` before it; null if the lobby doesn't know it. */
+export async function fetchMatchPay(match: string, course = -1): Promise<MatchPay | null> {
+  try {
+    const q = course >= 0 ? `?course=${course}` : "";
+    const o = await call(`/api/me/matches/${encodeURIComponent(match)}${q}`);
+    const reasons = ["race", "style", "grand_prix"] as const;
+    return {
+      reported: Array.isArray(o.reported)
+        ? (o.reported as unknown[]).filter((n): n is number => typeof n === "number")
+        : [],
+      paid: list(o.paid).flatMap((p) => {
+        const reason = reasons.find((r) => r === p.reason);
+        return reason ? [{ event: num(p, "event"), reason, delta: num(p, "delta") }] : [];
+      }),
+      credits: num(o, "credits"),
+      bestBefore: typeof o.bestBefore === "number" ? o.bestBefore : null,
+    };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Matchmaking from the end of a race: the mode select goes straight back into the queue. */
+let requeue = false;
+
+export function setRequeue(): void {
+  requeue = true;
+}
+
+/** Whether the mode select should open in the queue (once). */
+export function takeRequeue(): boolean {
+  const r = requeue;
+  requeue = false;
+  return r;
 }
 
 let pending: PendingRace | null = null;
 
-/** Hands a ticket to the race screen. */
+/** The race this tab is in, kept through a reload. */
+const RACE_KEY = "shifty.race";
+/** The last online match left on purpose (the mode select doesn't offer it back). */
+const LEFT_KEY = "shifty.left";
+
+/** Hands a ticket to the race screen (and keeps it for a reload of this tab). */
 export function setPendingRace(race: PendingRace): void {
   pending = race;
+  try {
+    sessionStorage.setItem(RACE_KEY, JSON.stringify({ ...race, rejoin: undefined }));
+  } catch {
+    // Without storage a reload just doesn't come back to the race.
+  }
 }
 
+/** The race to show: the one just handed over, or the one this tab was in before a reload. */
 export function takePendingRace(): PendingRace | null {
-  const r = pending;
+  const r = pending ?? keptRace();
   pending = null;
   return r;
 }
+
+/** This tab is done with its race: a reload doesn't come back to it. */
+export function forgetRace(): void {
+  try {
+    sessionStorage.removeItem(RACE_KEY);
+  } catch {
+    // Nothing kept.
+  }
+}
+
+/** The race this tab was in, checked (its ticket is only ever trusted by the race server). */
+function keptRace(): PendingRace | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(sessionStorage.getItem(RACE_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+  if (!isObj(v)) return null;
+  let ticket: JoinTicket;
+  try {
+    ticket = parseJoinTicket(v.ticket);
+  } catch {
+    return null;
+  }
+  const b = isObj(v.back) ? v.back : {};
+  const params = isObj(b.params) ? b.params : {};
+  const search = isObj(b.search) ? b.search : {};
+  const mode = MODES.find((m) => m === search.mode);
+  const back: PendingRace["back"] | null =
+    b.to === "/room/$code" && typeof params.code === "string"
+      ? { to: "/room/$code", params: { code: params.code } }
+      : b.to === "/play" && mode
+        ? { to: "/play", search: { mode } }
+        : null;
+  if (!back) return null;
+  const t = isObj(v.trial) ? v.trial : null;
+  const trial: TrialRace | undefined = t
+    ? {
+        course: num(t, "course"),
+        season: num(t, "season"),
+        ghosts: list(t.ghosts).flatMap((g) =>
+          typeof g.id === "string" ? [{ id: g.id, label: str(g, "label"), timeMs: num(g, "timeMs") }] : [],
+        ),
+        best: typeof t.best === "number" ? t.best : null,
+        record: typeof t.record === "number" ? t.record : null,
+      }
+    : undefined;
+  return { ticket, back, trial, plan: parsePlan(v.plan) ?? undefined, rejoin: true };
+}
+
+/** Leaving an online match on purpose: it isn't offered back. */
+export function leftMatch(match: string): void {
+  try {
+    localStorage.setItem(LEFT_KEY, match);
+  } catch {
+    // It may be offered back; rejoining is harmless.
+  }
+}
+
+/** A matchmaking race you are still in, with a ticket back into it (null: none). */
+export async function fetchLiveRace(): Promise<{ match: string; ticket: JoinTicket } | null> {
+  const o = await call("/api/me/live");
+  if (typeof o.match !== "string") return null;
+  let left: string | null = null;
+  try {
+    left = localStorage.getItem(LEFT_KEY);
+  } catch {
+    left = null;
+  }
+  return o.match === left ? null : { match: o.match, ticket: parseJoinTicket(o.ticket) };
+}
+
+export const liveRaceQuery = queryOptions({ queryKey: ["live-race"], queryFn: fetchLiveRace, staleTime: 5_000 });

@@ -1,5 +1,5 @@
 // How items, brands and credits read in the menus.
-import { item, model, type Brand } from "@shifty/rider";
+import { item, model, type Brand, type Sport } from "@shifty/rider";
 import { labelOf, type Messages } from "../i18n/index.ts";
 
 /** Brand names are proper names: the same in every language. */
@@ -26,3 +26,11 @@ export function itemBrand(id: string): string {
 }
 
 export const hexColour = (c: number) => `#${c.toString(16).padStart(6, "0")}`;
+
+/** The kits' sports (`summer` is the jetski's, `winter` the board's), as a picker's options. */
+export function sportOptions(t: Messages): { value: Sport; label: string }[] {
+  return [
+    { value: "summer", label: t.intro.sports.jetski },
+    { value: "winter", label: t.intro.sports.snow },
+  ];
+}

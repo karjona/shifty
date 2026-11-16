@@ -24,6 +24,7 @@ import type { Models } from "./env/models.ts";
 import { fadingInk, gustAt, scenerySnow, shadeKept, snowLoad, windNow } from "./mountain-look.ts";
 import type { RunData } from "./mountain.ts";
 import type { RunScenery } from "./runs.ts";
+import type { Steps } from "./slices.ts";
 
 /** A kind of tree: its model, and its shape as the forest is planted and its shade is thrown. */
 interface Kind {
@@ -443,10 +444,18 @@ export class Forest {
   readonly group = new THREE.Group();
   private batches: { centre: THREE.Vector3; radius: number; detail: THREE.Mesh | null; far: THREE.Mesh }[] = [];
 
-  constructor(trees: Tree[], models: Models) {
+  private trees: Tree[];
+
+  /** It is built by `build` (see slices.ts). */
+  constructor(trees: Tree[]) {
+    this.trees = trees;
     this.group.userData.noMerge = true;
+  }
+
+  /** Builds its batches from the models, a batch at a time. */
+  *build(models: Models): Steps {
     const chunks = new Map<string, Tree[]>();
-    for (const t of trees) {
+    for (const t of this.trees) {
       let chunk = chunks.get(t.chunk);
       if (!chunk) chunks.set(t.chunk, (chunk = []));
       chunk.push(t);
@@ -455,6 +464,7 @@ export class Forest {
     for (const [name, chunk] of chunks) {
       const near = name.startsWith("near");
       const lod = merged(chunk, models, true);
+      yield;
       if (!lod) continue;
       const far = new THREE.Mesh(lod, material);
       const fine = near ? merged(chunk, models, false) : null;
@@ -464,6 +474,7 @@ export class Forest {
       this.batches.push({ centre: sphere.center, radius: sphere.radius, detail, far });
       this.group.add(far);
       if (detail) this.group.add(detail);
+      yield;
     }
   }
 
@@ -493,9 +504,9 @@ function profile(k: Kind, t: number): number {
 /**
  * The shade the forest throws on the snow, for points `xyz` (`[x, y, z]`
  * each) under a sun standing toward `sun`: 0 in the open, 1 well inside a
- * tree's shadow, 0.5 on its edge.
+ * tree's shadow, 0.5 on its edge (worked out a slice at a time, see slices.ts).
  */
-export function forestShade(trees: Tree[], sun: THREE.Vector3, xyz: Float32Array): Float32Array {
+export function* forestShade(trees: Tree[], sun: THREE.Vector3, xyz: Float32Array): Steps<Float32Array> {
   const n = xyz.length / 3;
   const shade = new Float32Array(n);
   const flat = Math.hypot(sun.x, sun.z);
@@ -525,7 +536,9 @@ export function forestShade(trees: Tree[], sun: THREE.Vector3, xyz: Float32Array
       }
     }
   }
+  yield;
   for (let v = 0; v < n; v++) {
+    if (v % 4096 === 4095) yield;
     const x = xyz[v * 3]!;
     const y = xyz[v * 3 + 1]!;
     const z = xyz[v * 3 + 2]!;

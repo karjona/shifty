@@ -3,19 +3,31 @@
 // moves from race to race (a circuit in its conditions) in the same
 // session, with a short season change in between. Each race starts with its intro (see intro.ts), once
 // every screen has told the server its course is on show. A time trial
-// races ghosts (see ghosts.ts) and starts over on request.
+// races ghosts (see ghosts.ts) and starts over on request. The last race's
+// results stay up in the world (everyone on autopilot, on television): once
+// they have had their time, or the player moves on, the plan is over and
+// the menus take it from there, with the race still running behind them.
 import { type Appearance, SEASONS, SPORT_SEASONS, botAppearance, circuit, decodeAppearance } from "@shifty/rider";
-import { WasmClient, raceFields, renderStride, statsFields, weatherFields } from "../wasm/sim.js";
+import { WasmClient, planOf, raceFields, renderStride, statsFields, weatherFields } from "../wasm/sim.js";
 import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
 import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
-import { holdLoading } from "../loading.ts";
+import { type Work, begin, holdLoading, quietly, tracked, waitNow } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
-import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
+import {
+  connect,
+  type JoinTicket,
+  type Transport,
+  type TransportClosed,
+  WebTransportUnavailable,
+} from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
 import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
+import { loadModels } from "../render/env/models.ts";
+import { prefetchLook } from "../render/rider/model.ts";
+import { prefetchRide } from "../render/ride/ride.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
@@ -36,26 +48,91 @@ import {
   readWeather,
 } from "./conditions.ts";
 import { disposeTree } from "./dispose.ts";
+import { buildSliced } from "../render/slices.ts";
 import { Ghosts, ghostLabel, readGhost } from "./ghosts.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
-import { SeasonCard, SeasonChange } from "./season-change.ts";
+import { JOIN_STEPS, SeasonCard, SeasonChange, courseWait } from "./season-change.ts";
 import { TouchControls } from "../touch/controls.ts";
 import { canTouch, keepAwake, touchScreen } from "../touch/device.ts";
 
 /** Why the race server said no, by client phase (2 + the protocol's reject reason). */
-function rejectReason(phase: number): string {
-  const r = messages().race.reasons;
-  const reasons: Record<number, string> = {
-    3: r.version,
-    4: r.token,
-    5: r.full,
-    6: r.draining,
-    7: r.kicked,
-    8: r.started,
-    9: r.over,
-  };
-  return reasons[phase] ?? String(phase);
+const REJECTED: Record<number, Rejection> = {
+  3: "version",
+  4: "token",
+  5: "full",
+  6: "draining",
+  7: "kicked",
+  8: "started",
+  9: "over",
+};
+
+/** Why the race server said no. */
+export type Rejection = "version" | "token" | "full" | "draining" | "kicked" | "started" | "over" | "other";
+
+/** What went wrong with the race server, for the menus to explain. */
+export type Trouble =
+  | { kind: "rejected"; reason: Rejection }
+  /** This browser can't do WebTransport, or the race server can't be reached (UDP blocked?). */
+  | { kind: "unsupported" }
+  | { kind: "unreachable" }
+  /** The connection went away during the plan. */
+  | { kind: "lost" };
+
+/** A race of the room's plan, as its ticket draws it. */
+export interface PlannedRace {
+  course: number;
+  conditions: Conditions;
+}
+
+/** What went wrong when the connection to the race server closed, or the server fell silent. */
+function closeTrouble(_reason: TransportClosed | "silent"): Trouble {
+  return { kind: "lost" };
+}
+
+/** What went wrong when the race server couldn't be reached at all. */
+function connectTrouble(e: unknown): Trouble {
+  return { kind: e instanceof WebTransportUnavailable ? e.code : "unreachable" };
+}
+
+/** The races a ticket's room runs, in order (see `planOf`; empty if it can't be read). */
+export function readPlan(token: string): PlannedRace[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(planOf(token));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(data)) return [];
+  return (data as unknown[]).flatMap((e) => {
+    if (typeof e !== "object" || e === null) return [];
+    const n = (k: string) => Number(Reflect.get(e, k));
+    const season = SEASONS[n("season")];
+    const weather = WEATHERS[n("weather")];
+    const turns = WEATHERS[n("turns")];
+    if (!season || !weather || !turns) return [];
+    return [{ course: n("course"), conditions: { season, weather, turns, time: n("time") } }];
+  });
+}
+
+/** How a room's plan ended, for what comes after it. */
+export interface RaceEnd {
+  /** A Tilt's podium (null: one race). */
+  podium: PodiumData | null;
+  /** The last race: its circuit and conditions. */
+  course: number;
+  sport: "jetski" | "snow";
+  conditions: Conditions;
+  /** Your place in it (0: you weren't racing it), out of `racers`. */
+  place: number;
+  racers: number;
+  /** Your time (ticks; 0: not finished), and the sim's rate. */
+  finishTicks: number;
+  tickHz: number;
+  /** Your style points in it. */
+  points: number;
+  /** How many races the plan had (more than one: a Tilt). */
+  eventCount: number;
 }
 
 export interface RaceOptions {
@@ -72,8 +149,10 @@ export interface RaceOptions {
   debug?: boolean;
   /** Called once the race server has said yes or no. */
   onJoin?: (ok: boolean) => void;
-  /** Called once the room's plan is over (the last race's results are done), with a Tilt's podium. */
-  onOver?: (podium: PodiumData | null) => void;
+  /** Called once the room's plan is over (the last race's results have had their time, or the player moved on). */
+  onOver?: (end: RaceEnd) => void;
+  /** A season card already up over the screen (Play again): it covers the course while it loads. */
+  card?: SeasonCard;
   /** A time trial: its circuit and season, the ghosts to race and the times to beat. */
   trial?: TrialRace;
 }
@@ -96,6 +175,16 @@ export interface RaceState {
   watching: boolean;
   /** What the player rides with: the race's help talks about it. */
   device: "keyboard" | "gamepad" | "touch";
+  /** The last race's results are up (a time trial's aside): the player can move on. */
+  finalResults: boolean;
+  /** The races of the plan, as the ticket draws them. */
+  plan: PlannedRace[];
+  /** What went wrong, if anything. */
+  trouble: Trouble | null;
+  /** Nothing has come from the race server for a moment: the race goes on from prediction, the HUD's clock held. */
+  stalled: boolean;
+  /** This race's course is on screen, nothing covering it (a season card). */
+  onShow: boolean;
 }
 
 /** `sim::Phase`: the countdown, the race, the results. */
@@ -113,10 +202,9 @@ function parseRoster(json: string, seed: number): { names: Map<number, string>; 
     if (typeof e !== "object" || e === null) continue;
     const slot: unknown = Reflect.get(e, "slot");
     const name: unknown = Reflect.get(e, "name");
-    const bot: unknown = Reflect.get(e, "bot");
     const look: unknown = Reflect.get(e, "look");
     if (typeof slot !== "number" || typeof name !== "string") continue;
-    names.set(slot, bot === true ? `🤖 ${name}` : name);
+    names.set(slot, name);
     const bytes = Array.isArray(look) && look.every((b) => typeof b === "number") ? Uint8Array.from(look) : null;
     // Bots (and riders without a look) are dressed alike on every screen.
     looks.set(slot, (bytes && decodeAppearance(bytes)) ?? botAppearance(seed, slot));
@@ -150,6 +238,10 @@ function ticketSeason(token: string): Season {
 
 /** With no frame for this long (ms), a timer runs the netcode. */
 const STALLED_MS = 100;
+
+/** With nothing from the race server for this long (ms) a sign says so; for this long, the connection is lost. */
+const SILENT_MS = 2500;
+const SILENT_LOST_MS = 10_000;
 
 /** How long a course waits for its riders' art before it goes on without the late ones. */
 const RIDERS_WAIT_MS = 8000;
@@ -192,7 +284,9 @@ export class RaceSession implements Stage {
   private event = "";
   private conditions: Conditions = homeConditions("jetski");
   private sport: "jetski" | "snow" = "jetski";
-  private closedReason = "";
+  private closedReason: TransportClosed | null = null;
+  /** When the race server was last heard from (ms). */
+  private heardAt = performance.now();
   private joined = false;
   private last = performance.now();
   private stats: Record<string, number> = {};
@@ -202,8 +296,12 @@ export class RaceSession implements Stage {
   private card: SeasonCard | null = null;
   /** A season card is over the course (it loads, or the season changes). */
   private covered = true;
+  /** Counts the courses put up: one still building when the next comes is dropped. */
+  private courseToken = 0;
   /** The race whose results came up last: the grid after them waits for the next course. */
   private resultsEvent = -1;
+  /** The race whose results fetched the other sport's art ahead. */
+  private fetchedAhead = -1;
   private intro: RaceIntro | null = null;
   /** The cameras once your race is over. */
   private tv: Broadcast | null = null;
@@ -224,33 +322,58 @@ export class RaceSession implements Stage {
     over: false,
     watching: false,
     device: "keyboard",
+    finalResults: false,
+    plan: [],
+    trouble: null,
+    stalled: false,
+    onShow: false,
   };
-  /** The last race of the plan has reached its results. */
-  private finalResults = false;
+  /** The player moved on from the last race's results before they ran out. */
+  private moveOn = false;
   /** A time trial (its times to beat move as you beat them), and its ghosts. */
   private trial: TrialRace | null = null;
   private ghosts: Ghosts | null = null;
   /** What the last run set (a new best or record), and the ghosts it raced, for its results. */
   private trialCallout: string | null = null;
   private trialRaced: { label: string; ticks: number }[] = [];
+  /** What the last run beat: 2 the record (and your best), 1 your best, 0 nothing. */
+  private trialBeat = 0;
 
   private opts: RaceOptions;
 
   constructor(opts: RaceOptions) {
     this.opts = opts;
+    this.state.plan = readPlan(opts.ticket.token);
+    // The first race's sport, as the ticket draws it, until its course is in.
+    this.sport = circuit(this.state.plan[0]?.course ?? -1)?.sport ?? "jetski";
+    this.state.sport = this.sport;
     this.hud = new Hud(opts.hud);
     this.mapRoot = document.createElement("div");
     opts.hud.append(this.mapRoot);
     this.board = new Scoreboard(opts.hud);
   }
 
-  /** Takes down the loading sign put up by `joining`. */
+  /** Takes down the loading sign put up by `joining`, or ends the step it counts on the card. */
   private joinSign: (() => void) | null = null;
 
-  /** Puts the loading sign up saying how joining goes (null: joined, or turned away). */
-  private joining(label: (() => string) | null): void {
+  /**
+   * Says how joining goes, or what the race waits for (`what` says it; null:
+   * nothing): on the card's bar while one is up, or else on the loading sign.
+   */
+  private joining(what: "connect" | "join" | (() => string) | null): void {
     this.joinSign?.();
-    this.joinSign = label ? holdLoading(label) : null;
+    this.joinSign = null;
+    if (!what) return;
+    const wait = this.card?.loads;
+    const card = wait && !wait.closed ? wait : null;
+    if (typeof what === "function") this.joinSign = card ? card.hold(what) : holdLoading(what);
+    else if (card) {
+      const work: Work = card.begin(what);
+      this.joinSign = () => work.end();
+    } else {
+      const m = messages().race;
+      this.joinSign = holdLoading(what === "connect" ? () => m.connecting : () => m.joining);
+    }
   }
 
   /** Paused (a menu is open over the race): the rider gets no input. */
@@ -272,6 +395,43 @@ export class RaceSession implements Stage {
     this.client?.retry();
   }
 
+  /**
+   * A panel over the right of the screen from `left` (a share of its width,
+   * null: none): the television keeps the riders in the space left of it.
+   */
+  setPanel(left: number | null): void {
+    if (this.tv) this.tv.aside = left === null ? 0 : Math.max(0, 0.5 - left / 2);
+  }
+
+  /** Moves on from the last race's results before they run out (see `onOver`). */
+  moveOnFromResults(): void {
+    if (this.state.finalResults) this.moveOn = true;
+  }
+
+  /** A time trial's last run as its results show it: your time, the ghosts raced and what the run set. */
+  trialEnd(): {
+    ticks: number;
+    hz: number;
+    ghosts: { label: string; ticks: number }[];
+    callout: string | null;
+    beat: number;
+    name: string;
+  } | null {
+    const client = this.client;
+    if (!this.trial || !client) return null;
+    const mine = parseStandings(client.standingsJson()).find((s) => s.slot === client.slot());
+    const hz = this.readRace().tickHz;
+    const name = this.riders.get(client.slot())?.name ?? "";
+    return {
+      ticks: mine?.finishTicks ?? 0,
+      hz,
+      ghosts: this.trialRaced,
+      callout: this.trialCallout,
+      beat: this.trialBeat,
+      name,
+    };
+  }
+
   /** The ghosts' splits, for the HUD. */
   private ghostSplits(): void {
     this.hud.trial = (this.ghosts?.list ?? [])
@@ -288,6 +448,7 @@ export class RaceSession implements Stage {
     const record = trial.record === null || ms < trial.record;
     const best = trial.best === null || ms < trial.best;
     this.trialCallout = record ? m.newRecord : best ? m.newBest : null;
+    this.trialBeat = record ? 2 : best ? 1 : 0;
     if (best) trial.best = ms;
     if (record) trial.record = ms;
     // The race server reports the run as it ends; the lobby has it a moment later.
@@ -307,7 +468,8 @@ export class RaceSession implements Stage {
     const run = readGhost(pick, await fetchGhost(mine.ghost).catch(() => new Uint8Array()));
     if (!run || this.stopped || !this.ghosts) return;
     if (board.top[0]?.me) this.ghosts.drop("record");
-    await this.ghosts.replace("best", run);
+    // (In the background: the run goes on.)
+    await quietly(() => this.ghosts?.replace("best", run));
     this.ghostSplits();
   }
 
@@ -326,16 +488,29 @@ export class RaceSession implements Stage {
       void ghosts.loaded.then(() => this.ghostSplits());
     }
     if (this.opts.render ?? engine.render) {
-      this.card = new SeasonCard(ticketSeason(this.opts.ticket.token), false);
-      this.card.loading = true;
+      const first = this.state.plan[0];
+      this.card =
+        this.opts.card ?? new SeasonCard(first?.conditions.season ?? ticketSeason(this.opts.ticket.token), false);
+      if (first) {
+        this.card.season = first.conditions.season;
+        this.card.course = first.course;
+      }
+      this.card.load(first ? courseWait(first.course) : "course", JOIN_STEPS);
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
       this.tv = new Broadcast();
     }
-    this.joining(() => messages().race.connecting);
+    this.joining("connect");
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
-      this.opts.status(e instanceof Error ? e.message : String(e));
+      this.state.trouble = connectTrouble(e);
+      this.opts.status(
+        e instanceof WebTransportUnavailable
+          ? messages().race.trouble[e.code].title
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
       void this.card?.hide();
       this.opts.onJoin?.(false);
     });
@@ -351,11 +526,14 @@ export class RaceSession implements Stage {
     this.transport = transport;
     const client = new WasmClient(this.opts.ticket.token);
     this.client = client;
-    transport.onMessage((bytes) => client.handlePacket(bytes, performance.now()));
+    transport.onMessage((bytes) => {
+      this.heardAt = performance.now();
+      client.handlePacket(bytes, this.heardAt);
+    });
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.joining(() => messages().race.joining);
+    this.joining("join");
     if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -513,8 +691,14 @@ export class RaceSession implements Stage {
     this.shown = false;
     const old = this.env;
     const conditions = this.conditions;
+    // (The card's wait, or the sign's.)
+    const wait = waitNow();
+    const building = begin("scene", wait);
+    const token = ++this.courseToken;
+    // Built a slice at a time: the page (the card's bar, the netcode) carries on meanwhile.
+    let env: Environment;
     if (course.sport === "snow") {
-      this.env = new Mountain(
+      const mountain = new Mountain(
         course.run,
         {
           ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
@@ -524,8 +708,10 @@ export class RaceSession implements Stage {
         },
         conditions,
         course.id,
+        true,
       );
-      this.minimap = new RunMap(this.mapRoot, course.run);
+      await buildSliced(mountain.build());
+      env = mountain;
     } else {
       const water = {
         water: engine.view.water,
@@ -534,24 +720,33 @@ export class RaceSession implements Stage {
         course: course.bay,
         conditions,
       };
-      this.env = course.bay.place === "cape" ? new Cape(water) : new Bay(water);
-      this.minimap = new Minimap(this.mapRoot, course.bay);
+      const bay = course.bay.place === "cape" ? new Cape(water, true) : new Bay(water, true);
+      await buildSliced(bay.build());
+      env = bay;
     }
-    engine.world.setEnvironment(this.env);
+    if (token !== this.courseToken || this.stopped || this.client !== client) {
+      building.end();
+      disposeTree(env.group);
+      return;
+    }
+    this.env = env;
+    this.minimap =
+      course.sport === "snow" ? new RunMap(this.mapRoot, course.run) : new Minimap(this.mapRoot, course.bay);
+    engine.world.setEnvironment(env);
     const fields = weatherFields();
     const here: WeatherHere = { ...NO_WEATHER };
     engine.world.weatherAt = (x, z) => {
       const ptr = client.updateWeather(x, z);
       return readWeather(fields, new Float32Array(engine.wasm.memory.buffer, ptr, fields.length), here);
     };
-    this.intro?.setCourse(this.event, course, this.env);
-    this.tv?.setCourse(course, this.env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
+    this.intro?.setCourse(this.event, course, env);
+    this.tv?.setCourse(course, env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
     if (old) disposeTree(old.group);
-    const env = this.env;
     const ghostsIn = this.ghosts?.attach(engine.world.scene, env, this.state.course) ?? Promise.resolve();
     engine.world.addRiders(this.slots);
-    await env.ready;
-    await engine.warm(() => engine.world.compile());
+    building.end();
+    await tracked("scene", env.ready ?? Promise.resolve(), wait);
+    await engine.warm(() => engine.world.compile(), true, wait);
     // (The roster may have come in meanwhile.)
     if (this.client !== client) return;
     this.readRoster(engine, client);
@@ -560,9 +755,25 @@ export class RaceSession implements Stage {
     await Promise.race([Promise.all([...riders.map((r) => r.ready), ghostsIn]), late]);
     if (this.env !== env || this.stopped) return;
     this.ready = true;
+    // Its first frames, behind the card, make every shadow shader the race will need.
+    engine.world.warmShadows();
     // It draws behind the card until it runs smoothly.
-    await engine.settled();
+    await tracked("settle", engine.settled(), wait);
     if (this.env === env && !this.stopped) this.shown = true;
+  }
+
+  /**
+   * Fetches what the plan's other sport needs in the background while a
+   * race's results are up (a Tilt rides both): the next course's season
+   * card then waits on building and shaders, not on downloads.
+   */
+  private fetchAhead(): void {
+    const sport = this.sport === "snow" ? "summer" : "winter";
+    if (sport === "winter") void loadModels("snow", null);
+    for (const look of this.looks.values()) {
+      prefetchLook(look, sport);
+      prefetchRide(sport, look.outfits[sport].ride);
+    }
   }
 
   /** The HUD is off while a season card is up, and while the start has the screen. */
@@ -594,9 +805,24 @@ export class RaceSession implements Stage {
     const phase = client.phase();
     this.state.phase = phase;
     const m = messages().race;
-    if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
-    else if (this.closedReason) this.opts.status(m.lost(this.closedReason));
-    else this.opts.status("");
+    // Once the plan is over (or a time trial's run is), the race runs on here alone: nothing goes wrong.
+    const done = this.state.over || (this.trial !== null && this.state.racePhase === RESULTS);
+    if (phase >= 2) {
+      const reason = REJECTED[phase] ?? "other";
+      if (!done) this.state.trouble ??= { kind: "rejected", reason };
+      this.opts.status(m.rejected(reason === "other" ? String(phase) : m.reasons[reason]));
+    } else if (this.closedReason && !done) {
+      this.state.trouble ??= closeTrouble(this.closedReason);
+      this.opts.status(m.trouble.lost.title);
+    } else this.opts.status("");
+    // A silent race server: a sign after a moment, lost after a while (the connection may take long to close).
+    const silent = phase === 1 && !done && this.state.trouble === null ? now - this.heardAt : 0;
+    if (silent > SILENT_LOST_MS) this.state.trouble = closeTrouble("silent");
+    const stalled = silent > SILENT_MS && this.state.trouble === null;
+    if (stalled !== this.state.stalled) {
+      this.state.stalled = stalled;
+      this.joining(stalled ? () => messages().race.waiting : null);
+    }
     if (!this.joined && phase !== 0) {
       this.joined = true;
       this.joining(null);
@@ -618,12 +844,14 @@ export class RaceSession implements Stage {
       eventIndex: race.eventIndex,
       eventCount: race.eventCount,
     });
-    if (race.phase === RESULTS && race.eventIndex >= race.eventCount - 1 && !this.trial) this.finalResults = true;
-    else if (this.finalResults && race.phase !== RESULTS && !this.state.over) {
-      this.state.over = true;
-      const rows = this.board.final(this.gpPoints);
-      this.opts.onOver?.(rows && podiumData(rows, this.riders, this.looks, client.slot(), this.conditions.season));
-    }
+    this.state.finalResults = race.phase === RESULTS && race.eventIndex >= race.eventCount - 1 && !this.trial;
+    if (
+      this.state.finalResults &&
+      !this.state.over &&
+      this.state.trouble === null &&
+      (this.moveOn || race.phaseTicks >= race.phaseLength)
+    )
+      this.end(race, client);
     this.readRoster(engine, client);
     const event = eventKey(race.course, race.conditions);
     if (event !== this.event) {
@@ -666,18 +894,38 @@ export class RaceSession implements Stage {
     // The course on screen is this race's, and nothing covers it: the
     // server can start the race as far as this screen goes. (After a
     // race's results, the grid waits for the plan's next course.)
-    if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
-    else if (this.trial) {
+    if (race.phase === RESULTS) {
+      this.resultsEvent = race.eventIndex;
+      if (render && race.eventIndex < race.eventCount - 1 && this.fetchedAhead !== race.eventIndex) {
+        this.fetchedAhead = race.eventIndex;
+        this.fetchAhead();
+      }
+    } else if (this.trial) {
       this.resultsEvent = -1;
-      // A run's results stand against the ghosts it raced (a new best replaces yours after).
+      // A run's results stand against the ghosts it raced (a new best replaces yours after),
+      // the ones it beat named for what they were.
+      const t = messages().trial;
+      const beat = this.trialBeat;
       this.trialRaced = (this.ghosts?.list ?? [])
         .filter((r) => r.course === race.course)
-        .map((r) => ({ label: ghostLabel(r.pick), ticks: r.finishTicks }));
-      if (race.phase !== RACING) this.trialCallout = null;
+        .map((r) => ({
+          label:
+            r.pick.label === "best" && beat > 0
+              ? t.previousBest
+              : r.pick.label === "record" && beat > 1
+                ? t.previousRecord
+                : ghostLabel(r.pick),
+          ticks: r.finishTicks,
+        }));
+      if (race.phase !== RACING) {
+        this.trialCallout = null;
+        this.trialBeat = 0;
+      }
     }
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
+    this.state.onShow = onShow;
     const hud = !this.covered && !RaceIntro.active(race.phase);
     this.showHud(hud);
     const watching = onAir(race, this.sport);
@@ -685,10 +933,17 @@ export class RaceSession implements Stage {
     this.state.device = this.input.lastDevice;
     const touching = this.input.lastDevice === "touch";
     this.touch?.show(
-      touching && hud && !watching && !this.paused && (race.phase === COUNTDOWN || race.phase === RACING),
+      touching &&
+        hud &&
+        !watching &&
+        !this.paused &&
+        this.state.trouble === null &&
+        (race.phase === COUNTDOWN || race.phase === RACING),
       touching,
     );
     this.hud.showGauges(!watching);
+    // On television the cameras and the standings tell the race: the map would only cover the shot.
+    if (this.mapRoot.hidden !== watching) this.mapRoot.hidden = watching;
     this.sfx.broadcast = watching;
     if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
 
@@ -711,7 +966,8 @@ export class RaceSession implements Stage {
           const ticks = race.phase === RACING ? tick - race.phaseStart : 0;
           this.ghosts.place(ticks, on, engine.world.camera, dt);
         }
-        engine.world.render(riders, tick, dt, nextBuoy, shot);
+        // A rider who turns up mid-race comes in when their art does: nobody waits for it.
+        quietly(() => engine.world.render(riders, tick, dt, nextBuoy, shot));
         this.ghosts?.label(
           engine.world.camera,
           tick / race.tickHz,
@@ -727,24 +983,59 @@ export class RaceSession implements Stage {
     const me = riders.find((r) => r.isMe);
     race.wrongWay = this.wrongWay.update(race, me);
     const events = parseEvents(client.takeEventsJson());
-    this.hud.events(events, client.slot(), race);
+    // While the race server is silent, or gone, the HUD holds: its clock, its
+    // popups and their sounds (what the prediction alone makes up isn't news).
+    const held = this.state.stalled || this.state.trouble !== null;
+    if (!held) this.hud.events(events, client.slot(), race);
     if (this.trial)
       for (const e of events)
         if (e.kind === "finish" && e.slot === client.slot() && race.racing) this.trialFinish(e.ticks ?? 0, race.tickHz);
     const audible = this.shown && !this.seasonChange?.active;
-    this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
+    const heard = held ? [] : events;
+    this.sfx.frame(riders, race, heard, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    if (!held) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
     this.board.update({
       race,
       mySlot: client.slot(),
       standings: () => parseStandings(client.standingsJson()),
       riders: this.riders,
       gp,
+      next: this.nextRace(race),
       trial: this.trial ? { ghosts: this.trialRaced, callout: this.trialCallout } : undefined,
     });
     this.minimap?.update(riders, nextBuoy);
     this.updateDebug(now);
+  }
+
+  /** The plan's next race after the one on now, as the ticket draws it (null: none, or the plan can't be read). */
+  private nextRace(race: { course: number; eventIndex: number; eventCount: number }): PlannedRace | null {
+    const plan = this.state.plan;
+    if (plan.length !== race.eventCount || plan[race.eventIndex]?.course !== race.course) return null;
+    return plan[race.eventIndex + 1] ?? null;
+  }
+
+  /** The plan is over: what the menus show after it. */
+  private end(
+    race: RaceView & { course: number; conditions: Conditions; eventCount: number },
+    client: WasmClient,
+  ): void {
+    this.state.over = true;
+    const standings = parseStandings(client.standingsJson());
+    const mine = standings.find((s) => s.slot === client.slot());
+    const rows = race.eventCount > 1 ? this.board.final(this.gpPoints) : null;
+    this.opts.onOver?.({
+      podium: rows && podiumData(rows, this.riders, this.looks, client.slot(), this.conditions.season),
+      course: race.course,
+      sport: this.sport,
+      conditions: race.conditions,
+      place: mine?.place ?? 0,
+      racers: standings.length,
+      finishTicks: mine?.finishTicks ?? 0,
+      tickHz: race.tickHz,
+      points: mine?.points ?? 0,
+      eventCount: race.eventCount,
+    });
   }
 
   private updateDebug(now: number): void {
@@ -833,6 +1124,11 @@ export class RaceSession implements Stage {
     this.seasonChange?.cancel();
     this.sfx.stop();
     void this.card?.hide();
+    // Leaving on purpose says goodbye (the seat goes at once); a reload or a closed tab doesn't.
+    if (this.client && this.transport) {
+      this.client.bye();
+      this.sendOutgoing(this.client, this.transport);
+    }
     this.transport?.close();
     this.client?.free();
     this.client = null;

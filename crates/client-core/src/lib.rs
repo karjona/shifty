@@ -302,9 +302,24 @@ impl Client {
         self.retries = self.retries.wrapping_add(1);
     }
 
+    /// Leaving on purpose: tells the race server, so the seat goes at once
+    /// (a connection that just goes keeps it a while for a comeback).
+    pub fn bye(&mut self) {
+        if self.phase == Phase::Joined {
+            self.send(&ClientMsg::Bye);
+        }
+    }
+
     /// The room is a time trial.
     pub fn trial(&self) -> bool {
         self.trial
+    }
+
+    /// The race on now keeps its results up until the room ends them: a
+    /// time trial (until a retry), or the last race of the room's plan. The
+    /// server holds the same races' results.
+    fn holds_results(&self) -> bool {
+        self.trial || self.event_index.saturating_add(1) >= self.event_count
     }
 
     /// Tilt points by seat (None: no rider there).
@@ -522,7 +537,7 @@ impl Client {
                     w.surface_seed,
                 );
                 self.trial = w.trial;
-                self.world.trial = w.trial;
+                self.world.hold_results = self.holds_results();
                 self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
@@ -672,6 +687,7 @@ impl Client {
                 })
         });
         let mut world = self.base.clone();
+        world.hold_results = self.holds_results();
         world.tick = s.tick;
         world.race = s.race;
         world.riders = riders;
@@ -680,6 +696,19 @@ impl Client {
         let mut prev = world.riders;
         if target_tick.wrapping_sub(s.tick) as usize >= HISTORY - 8 {
             target_tick = s.tick;
+        }
+        // A clock that comes back never takes the race back across the start
+        // of the phase on screen (a countdown over never runs again): it comes
+        // back that far, and drifts the rest.
+        let start = self.world.race.phase_tick;
+        if !new_course
+            && target_tick < self.world.tick
+            && start > target_tick
+            && start > s.tick
+            && start <= self.world.tick
+            && (start - s.tick) < (HISTORY - 8) as u32
+        {
+            target_tick = start;
         }
         while world.tick < target_tick {
             let tick = world.tick + 1;
@@ -820,5 +849,49 @@ mod tests {
         // Much later, the same kind of event is news again.
         c.note_events(400, lap());
         assert_eq!(c.take_events().len(), 1);
+    }
+
+    #[test]
+    fn a_clock_coming_back_never_replays_a_countdown_that_is_over() {
+        use sim::race::{Phase as RacePhase, tuning::COUNTDOWN_TICKS};
+        let mut c = Client::new("t");
+        c.phase = Phase::Joined;
+        // On screen the race has been on for 20 ticks...
+        let go = 1000;
+        c.world.race = Race {
+            phase: RacePhase::Racing,
+            phase_tick: go,
+        };
+        c.world.tick = go + 20;
+        // ...and the server, its snapshot from before the start, says this
+        // screen runs far ahead: its clock comes back.
+        let snapshot = Snapshot {
+            tick: go - 6,
+            input_ack: 0,
+            input_lead: 60,
+            echo_client_time: 0,
+            echo_hold_ms: 0,
+            course: c.world.course,
+            conditions: c.world.conditions,
+            event_index: 0,
+            event_count: 1,
+            race: Race {
+                phase: RacePhase::Countdown,
+                phase_tick: go - COUNTDOWN_TICKS,
+            },
+            events: Vec::new(),
+            riders: Vec::new(),
+        };
+        c.apply_snapshot(&snapshot, 0.0);
+        assert_eq!(c.stats().resyncs, 1, "a hard resync");
+        assert_eq!(
+            c.race().phase,
+            RacePhase::Racing,
+            "the countdown stays over"
+        );
+        assert!(
+            c.world.tick >= go && c.world.tick < go + 20,
+            "came back to the start, no further"
+        );
     }
 }
