@@ -1419,12 +1419,14 @@ a {
   gap: var(--gap);
   min-height: 0;
 }
+/* The modes: a two-by-two set of tabs over the open mode's panel, the open
+   one underlined, so the panel keeps the column's height. */
 .mode-tabs {
-  flex-direction: column;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
   align-self: stretch;
   height: auto;
-  gap: 0;
   padding: 0 var(--pad);
   counter-reset: row;
 }
@@ -1433,18 +1435,23 @@ a {
 }
 .mode-tabs .tab {
   justify-content: flex-start;
-  height: var(--row);
+  min-width: 0;
+  height: 56px;
   padding: 0;
   border-bottom: 1px solid var(--rule);
-  color: var(--ink);
-  font-size: var(--fs-head);
+  color: rgb(29 27 23 / 0.56);
+  font-size: var(--fs-nav);
   font-weight: 760;
-  font-stretch: 112%;
-  letter-spacing: -0.012em;
+  font-stretch: 100%;
+  letter-spacing: -0.005em;
   text-transform: none;
+  white-space: nowrap;
   counter-increment: row;
 }
-.mode-tabs .tab:last-of-type {
+.mode-tabs .tab.on {
+  color: var(--ink);
+}
+.mode-tabs .tab:nth-last-of-type(-n + 2) {
   border-bottom: 0;
 }
 .mode-tabs .tab > * {
@@ -1454,19 +1461,19 @@ a {
 .mode-tabs .tab > span:first-child::before {
   content: counter(row, decimal-leading-zero);
   display: inline-block;
-  width: 48px;
+  width: 40px;
   font-size: var(--fs-label);
   font-weight: 600;
   font-stretch: 75%;
   letter-spacing: 0.04em;
   color: var(--ink-3);
-  vertical-align: 6px;
+  vertical-align: 3px;
 }
 .mode-tabs .tab::before {
   content: "";
   position: absolute;
   z-index: 0;
-  inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
+  inset: -1px -12px 0;
   background: var(--accent);
   box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
   opacity: 0;
@@ -1479,17 +1486,9 @@ a {
   align-self: center;
 }
 .mode-tabs .tab.on::after {
-  left: auto;
-  right: 4px;
-  top: 50%;
-  bottom: auto;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  border: solid currentColor;
-  border-width: 3px 3px 0 0;
-  background: none;
-  transform: rotate(45deg);
+  left: 40px;
+  right: 0;
+  bottom: 0;
   z-index: 1;
 }
 .mode-tabs .tab:focus {
@@ -2262,9 +2261,6 @@ a {
 .tab.on::after {
   animation: grow 280ms var(--ease) both;
 }
-.mode-tabs .tab.on::after {
-  animation: none;
-}
 @keyframes grow {
   from {
     transform: scaleX(0);
@@ -2458,7 +2454,11 @@ a {
 
 .trial-panel {
   flex: 1 1 auto;
-  gap: 12px;
+  gap: 8px;
+  padding-block: 24px;
+}
+.trial-panel .picker {
+  min-height: 52px;
 }
 .trial-panel > * {
   flex: none;
@@ -2489,8 +2489,8 @@ a {
   min-height: 160px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 4px;
 }
 .trial-board header {
   display: flex;
@@ -2514,6 +2514,14 @@ a {
   margin: 0;
   padding: 2px 0 0;
 }
+/* Your row, when it is past the top ten, stays in sight at the bottom of the board. */
+.trial-rows li.pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--paper);
+  box-shadow: 0 -2px 0 var(--ink);
+}
 .trial-note {
   display: flex;
   align-items: center;
@@ -2528,13 +2536,14 @@ a {
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
+  min-height: 33px;
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--rule);
   background: none;
   font: inherit;
   font-size: var(--fs-body);
+  line-height: 32px;
   color: var(--ink);
   text-align: left;
   cursor: pointer;

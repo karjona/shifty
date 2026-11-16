@@ -557,8 +557,7 @@ export const en = {
   },
   trial: {
     title: "Time trial",
-    about: (n: number) =>
-      `Race the clock in clear, steady weather. Pick up to ${n} ghosts from the leaderboard to chase.`,
+    about: (n: number) => `Clear, steady weather. Pick up to ${n} ghosts to chase.`,
     circuit: "Circuit",
     season: "Season",
     yourBest: "Your best",

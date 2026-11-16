@@ -139,7 +139,7 @@ export function TrialPanel({
           {rows.length > 0 && (
             <ol>
               {rows.map((r) => (
-                <li key={r.ghost}>
+                <li key={r.ghost} className={r.me && r.rank > (board.data?.top.length ?? 0) ? "pinned" : undefined}>
                   <button
                     type="button"
                     data-nav=""

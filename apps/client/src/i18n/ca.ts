@@ -558,8 +558,7 @@ export const ca: Messages = {
   },
   trial: {
     title: "Contrarellotge",
-    about: (n: number) =>
-      `Contra el rellotge, amb temps serè i estable. Tria fins a ${n} fantasmes de la classificació per perseguir-los.`,
+    about: (n: number) => `Temps serè i estable. Tria fins a ${n} fantasmes per perseguir.`,
     circuit: "Circuit",
     season: "Estació",
     yourBest: "El teu millor",

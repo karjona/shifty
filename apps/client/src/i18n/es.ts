@@ -566,8 +566,7 @@ export const es: Messages = {
   },
   trial: {
     title: "Contrarreloj",
-    about: (n: number) =>
-      `Contra el reloj, con tiempo despejado y estable. Elige hasta ${n} fantasmas de la clasificación para perseguirlos.`,
+    about: (n: number) => `Tiempo despejado y estable. Elige hasta ${n} fantasmas a los que perseguir.`,
     circuit: "Circuito",
     season: "Estación",
     yourBest: "Tu mejor",
