@@ -1,11 +1,17 @@
 // The race connection (WebTransport datagrams) behind a tiny interface, so the
 // game code and the fake-bad-network wrapper don't depend on what is underneath.
 
+/** Why a connection ended: closed by the other side, or lost (an error, the network). */
+export type TransportClosed = "closed" | "lost";
+
+/** Why there is no connection: no WebTransport in this browser, or the race server can't be reached. */
+export type TransportProblem = "unsupported" | "unreachable";
+
 export interface Transport {
   readonly kind: "webtransport";
   send(bytes: Uint8Array<ArrayBuffer>): void;
   onMessage(cb: (bytes: Uint8Array) => void): void;
-  onClose(cb: (reason: string) => void): void;
+  onClose(cb: (reason: TransportClosed) => void): void;
   close(): void;
 }
 
@@ -49,17 +55,24 @@ function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 
 class Listeners {
   message: ((b: Uint8Array) => void) | null = null;
-  close: ((r: string) => void) | null = null;
+  close: ((r: TransportClosed) => void) | null = null;
   closed = false;
-  fireClose(reason: string): void {
+  fireClose(reason: TransportClosed): void {
     if (this.closed) return;
     this.closed = true;
     this.close?.(reason);
   }
 }
 
-/** Thrown when this browser or network can't do WebTransport. */
-export class WebTransportUnavailable extends Error {}
+/** Thrown when this browser or network can't do WebTransport; `code` says which (the message is for logs). */
+export class WebTransportUnavailable extends Error {
+  readonly code: TransportProblem;
+
+  constructor(code: TransportProblem) {
+    super(`webtransport ${code}`);
+    this.code = code;
+  }
+}
 
 /**
  * The spec replaced `datagrams.writable` with `datagrams.createWritable()`.
@@ -73,9 +86,7 @@ function datagramWritable(wt: WebTransport): WritableStream<Uint8Array> {
 
 export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Transport> {
   if (typeof WebTransport === "undefined") {
-    throw new WebTransportUnavailable(
-      "This browser doesn't support WebTransport. Please use a recent Chrome, Edge, Firefox or Safari.",
-    );
+    throw new WebTransportUnavailable("unsupported");
   }
   const options: WebTransportOptions = {};
   if (ticket.certHashes.length > 0) {
@@ -89,13 +100,14 @@ export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Tra
     await Promise.race([wt.ready, timeout]);
   } catch {
     wt.close();
-    throw new WebTransportUnavailable("Couldn't reach the race server. Your network may be blocking UDP.");
+    throw new WebTransportUnavailable("unreachable");
   }
 
   const listeners = new Listeners();
   const writer = datagramWritable(wt).getWriter();
   const reader = wt.datagrams.readable.getReader();
   void (async () => {
+    let ended: TransportClosed = "closed";
     try {
       for (;;) {
         // Datagrams must be read one after another.
@@ -105,13 +117,14 @@ export async function connect(ticket: JoinTicket, timeoutMs = 4000): Promise<Tra
         listeners.message?.(value);
       }
     } catch {
-      // Session closed.
+      // The session failed.
+      ended = "lost";
     }
-    listeners.fireClose("webtransport closed");
+    listeners.fireClose(ended);
   })();
   wt.closed.then(
-    () => listeners.fireClose("webtransport closed"),
-    (e: unknown) => listeners.fireClose(`webtransport error: ${String(e)}`),
+    () => listeners.fireClose("closed"),
+    () => listeners.fireClose("lost"),
   );
 
   return {

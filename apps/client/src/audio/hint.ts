@@ -2,7 +2,8 @@
 // gamepad press doesn't count), so a player on a gamepad could go without
 // it for good. While sound is held back and a gamepad is in use, a small
 // paper tag in the bottom margin says how to get it; it goes once sound
-// runs, in the menus and in races alike.
+// runs, in the menus and in races alike, and comes back if the browser
+// holds sound back again later.
 import "./hint.css";
 import { messages, onLocale } from "../i18n/index.ts";
 import { audio } from "./index.ts";
@@ -51,8 +52,12 @@ export function installSoundHint(): void {
     if (label) label.textContent = messages().common.soundLocked;
   });
   const watch = (now: number) => {
-    if (audio.ctx?.state === "running") {
+    const ctx = audio.ctx;
+    if (ctx?.state === "running") {
       show(false);
+      padSince = -1;
+      // Sound can be held back again (Safari interrupts it): watch again then.
+      ctx.addEventListener("statechange", () => requestAnimationFrame(watch), { once: true });
       return;
     }
     if (padSince < 0 && padInUse()) padSince = now;

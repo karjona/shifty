@@ -33,6 +33,7 @@ import {
   checkAppearance,
   parseSetups,
   recentEarnings,
+  riderClaims,
   riderView,
   saveAppearance,
   saveSetups,
@@ -148,7 +149,7 @@ async function requirePlayer(c: Ctx) {
   if (!s) return { error: c.json({ error: "unauthorized" }, 401) } as const;
   const row = await getPlayer(c.var.db, s.user.id);
   if (!row) return { error: c.json({ error: "no_handle" }, 409) } as const;
-  return { user: s.user, player: view(row) } as const;
+  return { user: s.user, player: view(row), row } as const;
 }
 
 app.get("/api/me", async (c) => {
@@ -332,6 +333,8 @@ async function forwardSocket(c: Ctx, stub: { fetch(r: Request): Promise<Response
   const headers = new Headers({ upgrade: "websocket" });
   headers.set("x-shifty-user", p.user.id);
   headers.set("x-shifty-handle", encodeURIComponent(p.player.handle));
+  // Their rider as saved (only what they own), for the others in a room to see.
+  headers.set("x-shifty-look", riderClaims(p.row).look);
   for (const h of ["sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol"]) {
     const v = c.req.header(h);
     if (v) headers.set(h, v);

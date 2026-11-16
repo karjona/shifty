@@ -4,11 +4,11 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { setClubRiders } from "../../game/backdrops.ts";
+import { setClubParty, setClubRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
-import { type PlanRequest, TILT, parsePlan } from "@shifty/rider";
-import { lobbySocket, meQuery, setPendingRace } from "../api.ts";
+import { type Appearance, type PlanRequest, TILT, circuit, parsePlan } from "@shifty/rider";
+import { lobbySocket, lookOf, meQuery, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { PlanPickers, usePlanSummary } from "../plan.tsx";
@@ -52,6 +52,7 @@ function parseRoomMessage(data: unknown): RoomMessage | null {
                 userId: String(Reflect.get(x, "userId")),
                 handle: String(Reflect.get(x, "handle")),
                 ready: Reflect.get(x, "ready") === true,
+                appearance: lookOf(String(Reflect.get(x, "look") ?? "")),
               },
             ]
           : [],
@@ -66,7 +67,7 @@ interface RoomState {
   hostId: string;
   plan: PlanRequest;
   bots: number;
-  members: { userId: string; handle: string; ready: boolean }[];
+  members: { userId: string; handle: string; ready: boolean; appearance: Appearance | null }[];
   racing: string[];
 }
 
@@ -75,8 +76,15 @@ export function RoomScreen() {
   const t = useT();
   const navigate = useNavigate();
   const { code } = route.useParams();
-  const me = useSuspenseQuery(meQuery).data?.user.id ?? null;
+  const { data: account } = useSuspenseQuery(meQuery);
+  const me = account?.user.id ?? null;
+  const appearance = account?.rider?.appearance ?? null;
   const [room, setRoom] = useState<RoomState | null>(null);
+  // You on the terrace (also when the room is opened straight from a link), dressed for its race.
+  const sport = room && !room.plan.tilt && circuit(room.plan.race.course ?? -1)?.sport === "snow" ? "winter" : "summer";
+  useEffect(() => {
+    if (appearance) setClubRider(appearance, sport);
+  }, [appearance, sport]);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
@@ -93,7 +101,9 @@ export function RoomScreen() {
     const m = parseRoomMessage(data);
     if (m?.t === "state") {
       setRoom(m.room);
-      setClubRiders(m.room.members.length);
+      setClubParty(
+        m.room.members.filter((x) => x.userId !== me).map((x) => ({ id: x.userId, appearance: x.appearance })),
+      );
     } else if (m?.t === "ticket") {
       leaving.current = true;
       setPendingRace({ ticket: m.ticket, back: { to: "/room/$code", params: { code } } });

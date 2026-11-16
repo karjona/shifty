@@ -387,7 +387,6 @@ export const es: Messages = {
         "Aterriza con la tabla plana, a favor de la pendiente, ¡y suelta el grab antes!",
       ],
     },
-    lost: (why: string) => `Conexión perdida: ${why}`,
     rejected: (why: string) => `No puedes entrar: ${why}`,
     reasons: {
       version: "el juego se ha actualizado, recarga la página",
@@ -451,7 +450,7 @@ export const es: Messages = {
     go: "¡YA!",
     spectating: "De espectador · la próxima carrera, en breve",
     wrongWay: "SENTIDO CONTRARIO",
-    maxPower: "✓ POTENCIA MÁXIMA",
+    maxPower: "POTENCIA MÁXIMA",
     missedBuoy: "BOYA FALLADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VUELTA",

@@ -4,6 +4,7 @@ import {
   type Appearance,
   type PlanRequest,
   type Setups,
+  decodeAppearance,
   defaultSetups,
   parseAppearance,
   parsePlan,
@@ -274,6 +275,17 @@ export async function roomExists(code: string): Promise<boolean> {
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return false;
     throw e;
+  }
+}
+
+/** A rider as the lobby sends it (base64url appearance bytes), or null if there is none or it doesn't read. */
+export function lookOf(b64: string): Appearance | null {
+  if (!b64) return null;
+  try {
+    const bin = atob(b64.replaceAll("-", "+").replaceAll("_", "/"));
+    return decodeAppearance(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  } catch {
+    return null;
   }
 }
 
