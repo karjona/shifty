@@ -1,12 +1,11 @@
 // What the page shows while the game gets ready, and how far along it is.
 //
 // Work someone may be waiting on reports here as it goes: downloads count
-// their bytes (`download`), and the rest (building a scene, compiling
-// shaders, the race server's answer) says when it starts and when it ends
-// (`Wait.begin`). A wait gathers that work behind one cover: the boot
-// screen (the first load), a season card (a course loading), or the loading
-// sign in the bottom right corner (shorter waits, once they take long
-// enough to notice). A wait has a plan, the steps it usually goes through,
+// their bytes (`download`), shader warm-ups the shaders done, and the rest
+// (building a scene, the race server's answer) says when it starts and when
+// it ends (`Wait.begin`). A wait gathers that work behind one cover: the
+// boot screen (the first load), a season card (a course loading), or the
+// loading sign (shorter waits, once they take long enough to notice). A wait has a plan, the steps it usually goes through,
 // each weighed by how long it took in this browser last time (a first guess
 // the first time). The bar is the weighed sum of the steps' progress:
 // counted where there is something to count (bytes), timed against last
@@ -82,8 +81,8 @@ function remember(): void {
   }
 }
 
-/** Halfway between what was remembered and what happened now. */
-const blend = (old: number | undefined, now: number) => (old === undefined ? now : (old + now) / 2);
+/** Halfway between what was remembered and what happened this time. */
+const blend = (old: number | undefined, took: number) => (old === undefined ? took : (old + took) / 2);
 
 const now = () => performance.now();
 
