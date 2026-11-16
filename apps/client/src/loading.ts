@@ -32,7 +32,7 @@ const FIRST_GUESS: Record<Step, number> = {
   art: 1500,
   scene: 900,
   shaders: 2500,
-  settle: 1000,
+  settle: 2500,
 };
 /** Bytes a millisecond a download is guessed to go at, before one has been timed. */
 const FIRST_RATE = 1500;
@@ -83,6 +83,16 @@ function remember(): void {
 
 /** Halfway between what was remembered and what happened this time. */
 const blend = (old: number | undefined, took: number) => (old === undefined ? took : (old + took) / 2);
+
+/**
+ * How long a step is remembered to take: as long as it took this time if
+ * that was longer, else a quarter of the way down from what was
+ * remembered. A step weighed by its longer times finishes ahead of the bar
+ * more often than behind it, so the bar fills as the cover lifts rather
+ * than creeping through its last percent.
+ */
+const lean = (old: number | undefined, took: number) =>
+  old === undefined || took > old ? took : old - (old - took) / 4;
 
 const now = () => performance.now();
 
@@ -350,7 +360,7 @@ export class Wait {
       const jobs = this.jobs.filter((j) => j.step === step);
       if (jobs.some((j) => j.ended === null)) continue;
       const took = Math.max(...jobs.map((j) => j.ended ?? t)) - Math.min(...jobs.map((j) => j.start));
-      for (const key of this.keys(step)) memory.ms[key] = blend(memory.ms[key], took);
+      for (const key of this.keys(step)) memory.ms[key] = lean(memory.ms[key], took);
     }
     const big = this.jobs.filter((j) => j.bytes && j.ended !== null && j.total >= RATE_MIN_BYTES && j.done >= j.total);
     if (big.length > 0) {
