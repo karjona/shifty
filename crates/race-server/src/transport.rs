@@ -164,6 +164,8 @@ async fn metrics(State(s): State<AppState>) -> Response {
          draining {}\n\
          rooms {}\n\
          connections {}\n\
+         humans {}\n\
+         watching {}\n\
          ticks_total {ticks}\n\
          tick_us_avg {avg}\n\
          tick_us_max {}\n\
@@ -174,6 +176,8 @@ async fn metrics(State(s): State<AppState>) -> Response {
         u8::from(s.rooms.draining.load(Ordering::Relaxed)),
         m.rooms.load(Ordering::Relaxed),
         m.connections.load(Ordering::Relaxed),
+        m.humans.load(Ordering::Relaxed),
+        m.watching.load(Ordering::Relaxed),
         m.tick_us_max.load(Ordering::Relaxed),
         m.late_ticks.load(Ordering::Relaxed),
         m.bad_tokens.load(Ordering::Relaxed),

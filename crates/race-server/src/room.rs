@@ -4,8 +4,12 @@
 //! simulated network (see `tests/netcode.rs`).
 //!
 //! A room races its plan once: one course, or a Tilt (every course in
-//! order, points by finishing place). After the last race's results the room
-//! is over: it refuses everyone, and the caller closes it.
+//! order, points by finishing place). The last race's results stay up (the
+//! world holds them, everyone riding on autopilot), and once they have been
+//! up as long as any race's, the plan is over: the room refuses everyone,
+//! and lives on only while the people in it are still looking (see
+//! `is_done`), so their screens keep the race running behind what comes
+//! after it.
 //!
 //! Every race starts on the grid and waits there until everyone the lobby
 //! sent has arrived and every screen in the room has the race's course
@@ -24,9 +28,7 @@ use serde::Serialize;
 use sim::bot::bot_input;
 use sim::conditions::Event as RaceEvent;
 use sim::race::{Phase, Race};
-use sim::{
-    CourseId, Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, Weather, World,
-};
+use sim::{Input, Inputs, MAX_HUMANS, MAX_RIDERS, Setup, SurfaceKind, TICK_HZ, World};
 
 use crate::record::{RunReport, Trial};
 
@@ -56,8 +58,11 @@ pub const LOADING_TIMEOUT_MS: u64 = GRID_TIMEOUT_TICKS as u64 * 1000 / TICK_HZ a
 /// stick) instead of riding on with the last input the server had.
 pub const QUIET_INPUT_MS: u64 = 1_000;
 /// A time trial's results stay up this long at most (a forgotten tab):
-/// then its room is over.
+/// then its room is over, and done.
 pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
+/// A room whose plan is over lives on at most this long while people are
+/// still in it (looking at what the race paid, picking what's next).
+pub const AFTER_PLAN_TICKS: u32 = TICK_HZ * 60 * 5;
 /// Packet rate limit per connection: burst and sustained packets per second.
 const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
@@ -148,19 +153,9 @@ impl RoomConfig {
         for b in claims.room.bytes() {
             seed = (seed ^ u32::from(b)).wrapping_mul(0x0100_0193);
         }
-        let mut plan = claims.events();
-        plan.truncate(protocol::token::MAX_EVENTS);
-        if plan.is_empty() {
-            plan.push(RaceEvent::home(CourseId::Oval));
-        }
+        let plan = claims.room_plan();
         // A time trial: one race, in clear, steady weather.
-        let trial = claims.trial.then(|| {
-            plan.truncate(1);
-            let c = &mut plan[0].conditions;
-            c.weather = Weather::Clear;
-            c.turns = Weather::Clear;
-            c.season as u8
-        });
+        let trial = claims.trial.then(|| plan[0].conditions.season as u8);
         Self {
             id: claims.room.clone(),
             plan,
@@ -328,8 +323,10 @@ pub struct Room {
     round: u16,
     /// People seated in this run of the plan so far.
     arrived: usize,
-    /// The last race's results are done.
+    /// The plan is over: the last race's results have been up their time.
     over: bool,
+    /// The tick the plan ended at.
+    over_tick: u32,
     /// A time trial's runs.
     trial: Option<Trial>,
     pub stats: RoomStats,
@@ -349,8 +346,7 @@ pub struct Outbox {
 
 impl Room {
     pub fn new(config: RoomConfig) -> Self {
-        let mut world = World::for_event(config.plan[0], config.surface_kind, config.surface_seed);
-        world.trial = config.trial.is_some();
+        let world = World::for_event(config.plan[0], config.surface_kind, config.surface_seed);
         let mut room = Self {
             trial: config.trial.map(|season| Trial::new(&config.id, season)),
             world,
@@ -361,6 +357,7 @@ impl Room {
             round: 1,
             arrived: 0,
             over: false,
+            over_tick: 0,
             stats: RoomStats::default(),
             config,
         };
@@ -375,7 +372,15 @@ impl Room {
             room.world.spawn(slot);
         }
         room.apply_setups();
+        room.world.hold_results = room.holds_results();
         room
+    }
+
+    /// The race on now keeps its results up (until a retry, or the room
+    /// closes): a time trial's, and the last race of the plan. Clients hold
+    /// the same races' results (`client_core::Client`).
+    fn holds_results(&self) -> bool {
+        self.trial.is_some() || self.event_index + 1 >= self.config.plan.len()
     }
 
     /// The Tilt is under way: its first race has left the grid.
@@ -387,9 +392,20 @@ impl Room {
         self.event_index
     }
 
-    /// The plan is done: the last race's results are over.
+    /// The plan is over: the last race's results have been up as long as
+    /// any race's (a time trial's, `TRIAL_RESULTS_TICKS`). Nobody joins any
+    /// more; the world runs on.
     pub fn is_over(&self) -> bool {
         self.over
+    }
+
+    /// The room can close: its plan is over and nobody is left looking (or
+    /// it has lived on `AFTER_PLAN_TICKS`; a time trial's, at once).
+    pub fn is_done(&self) -> bool {
+        self.over
+            && (self.human_count() == 0
+                || self.trial.is_some()
+                || self.world.tick.wrapping_sub(self.over_tick) >= AFTER_PLAN_TICKS)
     }
 
     fn standings_event(&self) -> EventBody {
@@ -612,12 +628,18 @@ impl Room {
     }
 
     /// A player leaves. In a Tilt under way a bot takes the seat (the
-    /// player's points so far were already reported).
+    /// player's points so far were already reported). Once the plan is
+    /// over the rider rides on as it was, on autopilot like everyone, for
+    /// whoever is still looking.
     pub fn leave(&mut self, conn: ConnId) {
         let Some(slot) = self.slot_of(conn) else {
             return;
         };
         self.players[slot] = None;
+        if self.over {
+            self.seats[slot] = Seat::Bot;
+            return;
+        }
         self.broadcast_event(&EventBody::RiderLeft { slot: slot as u8 }, None);
         if self.grand_prix_started() && self.human_count() > 0 {
             self.seats[slot] = Seat::Bot;
@@ -699,6 +721,7 @@ impl Room {
         }
         self.arrived = 0;
         self.world.restart();
+        self.world.hold_results = self.holds_results();
     }
 
     /// Whether the race on the grid can start: everyone the lobby sent has
@@ -718,35 +741,54 @@ impl Room {
         timed_out
     }
 
-    /// The results are over: on to the next race of the plan, or the plan is
-    /// over after the last one.
-    fn results_done(&mut self) {
+    /// A race's results are over (never the last race's: the world holds
+    /// those): on to the plan's next race.
+    fn next_race(&mut self) {
         if self.event_index + 1 >= self.config.plan.len() {
-            self.over = true;
             return;
         }
         self.event_index += 1;
         self.load_course();
     }
 
+    /// The plan is over once the last race's results have been up their
+    /// time: from then on nobody joins, and the room lives on while anyone
+    /// is still looking.
+    fn check_over(&mut self) {
+        if self.over || self.world.race.phase != Phase::Results || !self.world.hold_results {
+            return;
+        }
+        let up = self.world.race.elapsed(self.world.tick);
+        let time = if self.trial.is_some() {
+            TRIAL_RESULTS_TICKS
+        } else {
+            sim::race::tuning::RESULTS_TICKS
+        };
+        if up >= time {
+            self.over = true;
+            self.over_tick = self.world.tick;
+        }
+    }
+
     /// A fresh world for the plan's current race (if it changed), with
     /// every seated rider on the grid.
     fn load_course(&mut self) {
         let event = self.config.plan[self.event_index];
-        if event == self.world.event() {
-            return;
-        }
-        let tick = self.world.tick;
-        let mut world = World::for_event(event, self.config.surface_kind, self.config.surface_seed);
-        world.tick = tick;
-        world.race = Race::new(tick);
-        for slot in 0..MAX_RIDERS {
-            if self.seats[slot] != Seat::Empty {
-                world.spawn(slot);
+        if event != self.world.event() {
+            let tick = self.world.tick;
+            let mut world =
+                World::for_event(event, self.config.surface_kind, self.config.surface_seed);
+            world.tick = tick;
+            world.race = Race::new(tick);
+            for slot in 0..MAX_RIDERS {
+                if self.seats[slot] != Seat::Empty {
+                    world.spawn(slot);
+                }
             }
+            self.world = world;
+            self.apply_setups();
         }
-        self.world = world;
-        self.apply_setups();
+        self.world.hold_results = self.holds_results();
     }
 
     /// Validate and buffer a packet of inputs. Never trusts the client: values
@@ -844,15 +886,10 @@ impl Room {
         }
         match (phase_before, self.world.race.phase) {
             (Phase::Racing, Phase::Results) => self.race_ended(&mut out),
-            (Phase::Results, Phase::Grid) => self.results_done(),
-            (_, Phase::Results)
-                if self.trial.is_some()
-                    && self.world.race.elapsed(self.world.tick) >= TRIAL_RESULTS_TICKS =>
-            {
-                self.over = true;
-            }
+            (Phase::Results, Phase::Grid) => self.next_race(),
             _ => {}
         }
+        self.check_over();
 
         let tick = self.world.tick;
         if tick.is_multiple_of(LEAD_WINDOW_TICKS) {
@@ -928,6 +965,7 @@ impl Room {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim::CourseId;
     use sim::race::tuning::{COUNTDOWN_TICKS, INTRO_TICKS};
 
     fn claims(pid: &str, events: Vec<u8>, bots: u8) -> JoinClaims {
@@ -1061,6 +1099,92 @@ mod tests {
             room.join(2, &claims("bea", vec![0], 3), 0, now).err(),
             Some(RejectReason::Over)
         );
+    }
+
+    #[test]
+    fn the_last_results_hold_and_the_room_lives_on_while_anyone_looks() {
+        let ana = claims("ana", vec![0], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        idle_until(&mut room, &mut now, |r| {
+            r.world().race.phase == Phase::Results
+        });
+        let results = room.world().race;
+        assert_eq!(results.phase, Phase::Results);
+        // The scoreboard has its usual time; then the plan is over...
+        run(
+            &mut room,
+            &mut now,
+            sim::race::tuning::RESULTS_TICKS - 2,
+            &[(1, Some(0))],
+        );
+        assert!(!room.is_over());
+        run(&mut room, &mut now, 2, &[(1, Some(0))]);
+        assert!(room.is_over());
+        assert!(!room.is_done(), "Ana is still looking");
+        // ...but the world runs on in its results, everyone on autopilot.
+        let tick = room.tick();
+        run(&mut room, &mut now, TICK_HZ * 20, &[(1, Some(0))]);
+        assert_eq!(room.world().race, results);
+        assert_eq!(room.tick(), tick + TICK_HZ * 20);
+        assert!(
+            (0..MAX_RIDERS)
+                .all(|s| room.world().riders[s].is_none() || room.world().on_autopilot(s))
+        );
+        assert_eq!(
+            room.join(2, &claims("bea", vec![0], 3), 0, now).err(),
+            Some(RejectReason::Over)
+        );
+        assert!(!room.is_done());
+        // It closes once it has lived on long enough.
+        run(
+            &mut room,
+            &mut now,
+            AFTER_PLAN_TICKS - TICK_HZ * 20,
+            &[(1, Some(0))],
+        );
+        assert!(room.is_done());
+        assert_eq!(room.world().race.phase, Phase::Results);
+    }
+
+    #[test]
+    fn a_room_after_its_plan_closes_once_nobody_looks_and_riders_who_leave_ride_on() {
+        let ana = claims("ana", vec![0], 2);
+        let bea = claims("bea", vec![0], 2);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &bea, 0, now).unwrap();
+        let both = [(1, Some(0)), (2, Some(0))];
+        for _ in 0..TICK_HZ * 60 * 8 {
+            if room.is_over() {
+                break;
+            }
+            run(&mut room, &mut now, 1, &both);
+        }
+        assert!(room.is_over());
+        let slot = room.slot_of(1).unwrap();
+        room.leave(1);
+        // Ana's rider rides on for Bea, as it was (nobody else learns of a change).
+        run(&mut room, &mut now, 30, &[(2, Some(0))]);
+        assert!(room.world().riders[slot].is_some());
+        assert_eq!(room.human_count(), 1);
+        assert!(!room.is_done());
+        room.leave(2);
+        assert!(room.is_done());
+    }
+
+    #[test]
+    fn a_tilts_races_move_on_and_only_its_last_results_hold() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        assert!(!room.world().hold_results);
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        idle_until(&mut room, &mut now, |r| r.event_index() == 1);
+        assert!(room.world().hold_results);
+        assert!(!room.is_over());
     }
 
     #[test]

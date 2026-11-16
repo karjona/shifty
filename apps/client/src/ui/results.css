@@ -359,3 +359,42 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* What comes next: the label, and between races of a Tilt the next race's season (in its colour) and circuit. */
+.board-next {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.board-upnext {
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 900;
+  font-stretch: 125%;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--next, var(--ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The heading: the circuit (on two lines if it must), and its conditions under it. */
+.board-title.circuit {
+  font-size: 56px;
+  line-height: 0.92;
+  white-space: normal;
+}
+.board-sub {
+  font-size: var(--fs-label);
+  font-weight: 560;
+  color: var(--ink-2);
+}
+/* The Tilt's narrower panel: its heading in the circuit's size, its label tighter, so they hold in every language. */
+.board-tilt .board-title {
+  font-size: 56px;
+}
+.board-tilt .board-head .board-label {
+  font-size: 17px;
+  letter-spacing: 0.12em;
+}

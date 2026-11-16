@@ -138,9 +138,11 @@ pub struct World {
     /// Each seat's setup for this course's sport. Not part of snapshots:
     /// it is set when a rider joins and stays for the whole room plan.
     pub setups: [Setup; MAX_RIDERS],
-    /// A time trial: the results stay up until the run starts over (see
-    /// `retry`). Set when the world is made, like the course.
-    pub trial: bool,
+    /// The results stay up until something else ends them: a time trial's
+    /// retry (see `retry`), or the room closing after the last race of its
+    /// plan. Set alike by the server and every client (from where the race
+    /// stands in the room's plan), like the course.
+    pub hold_results: bool,
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
@@ -157,7 +159,7 @@ impl World {
             race: Race::new(0),
             riders: [None; MAX_RIDERS],
             setups: [Setup::BALANCED; MAX_RIDERS],
-            trial: false,
+            hold_results: false,
         }
     }
 
@@ -523,7 +525,7 @@ impl World {
                     || (first != u32::MAX && elapsed >= first + race::tuning::FINISH_GRACE_TICKS)
                     || elapsed >= race::tuning::MAX_RACE_TICKS
             }
-            Phase::Results if self.trial => false,
+            Phase::Results if self.hold_results => false,
             phase => phase.duration().is_some_and(|d| elapsed >= d),
         };
         if !done {

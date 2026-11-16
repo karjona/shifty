@@ -886,3 +886,65 @@ fn bots_have_riders_names_that_every_screen_agrees_on() {
     h.run(1000.0, |_, _| Input::default());
     assert_eq!(bot_names(&h, 1), names);
 }
+
+#[test]
+fn after_the_last_results_the_world_runs_on_predicted_exactly_until_nobody_looks() {
+    let cond = NetConditions {
+        latency_ms: 80.0,
+        jitter_ms: 10.0,
+        loss: 0.02,
+    };
+    let mut h = Harness::on(CourseId::Mountain, 2, SurfaceKind::Flat);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    // Down the run on the bot's line, like the bots: the race ends when all are through.
+    let a = h.peers[0].client.slot().expect("joined");
+    for _ in 0..300 {
+        if h.room.world().race.phase == RacePhase::Results {
+            break;
+        }
+        h.drive(500.0, |_, c, _| bot_input(c.predicted_world(), a));
+    }
+    let results = h.room.world().race;
+    assert_eq!(results.phase, RacePhase::Results);
+    // The scoreboard's time goes by; the plan is over, and the results stay up.
+    let scoreboard = f64::from(sim::race::tuning::RESULTS_TICKS) * 1000.0 / f64::from(TICK_HZ);
+    h.run(scoreboard + 500.0, |_, _| Input::default());
+    assert!(h.room.is_over());
+    assert!(!h.room.is_done(), "a is still looking");
+    let before = h.peers[0].client.stats();
+    let tick = h.room.tick();
+    let mut rng = Pcg32::new(5);
+    h.run(10_000.0, |_, _| {
+        Input::from_analog(
+            rng.range(-1.0, 1.0),
+            1.0,
+            rng.range(-1.0, 1.0),
+            (rng.next_u32() & 0xFF) as u8,
+        )
+    });
+    // Everyone rides on autopilot in the results, on the server and on the
+    // screen alike: whatever a presses, nothing mispredicts.
+    assert_eq!(h.room.world().race, results);
+    assert_eq!(h.peers[0].client.race(), results);
+    assert!(h.room.tick() >= tick + TICK_HZ * 9);
+    let s = h.peers[0].client.stats();
+    assert!(s.snapshots - before.snapshots > 250, "{s:?}");
+    assert_eq!(s.mispredictions - before.mispredictions, 0, "{s:?}");
+    // Nobody new comes in; once a has gone, the room is done.
+    assert_eq!(
+        h.room
+            .join(
+                9,
+                &claims("z", 0, SurfaceKind::Flat, RaceClaims::default()),
+                0,
+                0
+            )
+            .err(),
+        Some(protocol::RejectReason::Over)
+    );
+    let conn = h.peers[0].conn;
+    h.room.leave(conn);
+    assert!(h.room.is_done());
+}
