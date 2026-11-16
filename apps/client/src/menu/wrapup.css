@@ -237,6 +237,30 @@
   gap: 12px;
   padding: 24px var(--pad) 20px;
 }
+/* A panel taller than the screen (a Tilt's standings and what it paid)
+   scrolls what it says under its actions and hints, which stay at its foot. */
+:root:not([data-compact]) .end-panel > .end-actions,
+:root:not([data-compact]) .end-panel > .hints {
+  position: sticky;
+  z-index: 1;
+  background: var(--paper);
+}
+:root:not([data-compact]) .end-panel > .end-actions {
+  bottom: 0;
+}
+:root:not([data-compact]) .end-panel:has(> .hints) > .end-actions {
+  bottom: 56px;
+}
+:root:not([data-compact]) .end-panel > .hints {
+  bottom: 0;
+  /* Paper across the whole width (rows scroll under it edge to edge), its rule inset as before. */
+  margin: 0;
+  padding: 0 var(--pad);
+  border-top: 0;
+  background:
+    linear-gradient(var(--rule), var(--rule)) var(--pad) 0 / calc(100% - 2 * var(--pad)) 1px no-repeat,
+    var(--paper);
+}
 
 /* --- when something went wrong: in the middle, over a dimmed race --- */
 
@@ -330,26 +354,28 @@
   }
 }
 
-/* The mode select: a matchmaking race still under way, offered back, under the screen's title. */
+/* The mode select: a matchmaking race still under way, offered back, at the top of the modes' column. */
 .live-race {
-  position: absolute;
-  z-index: 1;
-  left: var(--margin-x);
-  top: calc(var(--margin-y) + 158px + var(--gap));
+  flex: none;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: var(--gap);
-  width: 780px;
   padding: 16px 16px 16px var(--pad);
-  animation: rise 420ms var(--ease) both;
-}
-:root[data-compact] .live-race {
-  top: calc(var(--margin-y) + 96px + var(--gap));
-  width: 680px;
 }
 .live-race b {
+  min-width: 0;
   font-size: var(--fs-body);
   font-weight: 760;
-  white-space: nowrap;
+}
+.live-race .btn {
+  flex: none;
+}
+/* The compact mode select is a panel beside its rail: the offer goes across both, on top. */
+:root[data-compact] .mode-side:has(> .live-race) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+:root[data-compact] .live-race {
+  grid-column: 1 / -1;
+  padding: 8px 8px 8px var(--pad);
 }

@@ -933,7 +933,12 @@ export class RaceSession implements Stage {
     this.state.device = this.input.lastDevice;
     const touching = this.input.lastDevice === "touch";
     this.touch?.show(
-      touching && hud && !watching && !this.paused && (race.phase === COUNTDOWN || race.phase === RACING),
+      touching &&
+        hud &&
+        !watching &&
+        !this.paused &&
+        this.state.trouble === null &&
+        (race.phase === COUNTDOWN || race.phase === RACING),
       touching,
     );
     this.hud.showGauges(!watching);

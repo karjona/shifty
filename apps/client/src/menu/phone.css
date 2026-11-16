@@ -1289,6 +1289,10 @@
   column-gap: 40px;
   width: 100%;
 }
+/* No room for the results' call-out line on a phone: the panel after the race calls it out. */
+:root[data-compact] .board-results .board-verdict {
+  display: none;
+}
 /* The second column's heading is left blank. */
 :root[data-compact] .board-results > .board-panel:not(.board-trial)::after {
   content: "";

@@ -391,7 +391,8 @@ function Actions({ actions, back, busy }: { actions: EndAction[]; back: EndActio
 function EndHints({ actions, back }: { actions: EndAction[]; back: EndAction }) {
   const t = useT();
   const { device } = useDevice();
-  const play = actions.find((a) => a.glyph === "play");
+  // (When the first action is also the way back, it shows once, as the way back.)
+  const play = actions.find((a) => a.glyph === "play" && a.label !== back.label);
   if (pointing(device)) return null;
   return (
     <Hints
