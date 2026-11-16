@@ -1050,9 +1050,13 @@
   font-size: 22px;
 }
 :root[data-compact] #banner.count {
-  top: 60px;
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 4px);
   padding: 0;
   font-size: 124px;
+}
+:root[data-compact] #banner.count.ready {
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 24px);
+  font-size: 72px;
 }
 :root[data-compact] #banner.wrong {
   top: 132px;

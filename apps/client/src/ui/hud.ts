@@ -392,7 +392,9 @@ export class Hud {
     const bannerClass = race.wrongWay
       ? "wrong"
       : race.phase === COUNTDOWN || (race.phase === RACING && race.phaseTicks < hz)
-        ? "count"
+        ? banner === m.getReady
+          ? "count ready"
+          : "count"
         : "";
     if (bannerClass !== this.shown.bannerClass) {
       this.shown.bannerClass = bannerClass;
