@@ -6,7 +6,7 @@
 
 use client_core::{Client, Phase};
 use serde_json::json;
-use sim::course::{Keep, LandKind, Line, Sport, tuning as course_tuning};
+use sim::course::{BoatKind, Keep, LandKind, Line, Sport, tuning as course_tuning};
 use sim::mountain::{Feature, LipKind, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
@@ -843,8 +843,23 @@ fn course_json_on(world: &World) -> String {
                         LandKind::Mole => "mole",
                         LandKind::Stack => "stack",
                         LandKind::Arch => "arch",
+                        LandKind::Jetty => "jetty",
                     };
                     json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+                })
+                .collect();
+            let boats: Vec<serde_json::Value> = c
+                .boats
+                .iter()
+                .map(|b| {
+                    let kind = match b.kind {
+                        BoatKind::Llaut => "llaut",
+                        BoatKind::Trawler => "trawler",
+                        BoatKind::Yacht => "yacht",
+                        BoatKind::Inflatable => "inflatable",
+                        BoatKind::Sailboat => "sailboat",
+                    };
+                    json!({ "x": b.x, "z": b.z, "yaw": b.yaw, "length": b.length, "beam": b.beam, "kind": kind, "seed": b.seed })
                 })
                 .collect();
             // The centre line every 2 m, with how sharply it turns there.
@@ -874,6 +889,7 @@ fn course_json_on(world: &World) -> String {
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
+            out["boats"] = json!(boats);
             out["path"] = json!(path);
         }
         Line::Run(run) => out["run"] = run_json(c, run, world.cover_rocks()),

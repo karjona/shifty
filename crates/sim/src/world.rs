@@ -1,3 +1,4 @@
+use crate::capsule::{apart, separate};
 use crate::conditions::{self, Conditions, Event, Rock, SnowCover};
 use crate::course::{Course, CourseId, Frame, Line, Sport, collide_obstacles};
 use crate::input::Input;
@@ -469,7 +470,7 @@ impl World {
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
             buoy::bump(r, course, &self.surface, next);
-            let mut impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            let mut impact = course.collide(&mut r.pos, &mut r.vel, r.yaw, &self.surface, next);
             if !rocks.is_empty() {
                 let radius = course.sport.rider_radius();
                 let hit = collide_obstacles(
@@ -685,11 +686,14 @@ impl World {
             .collect()
     }
 
-    /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
-    /// slot order so every machine gets the same result. Riders on autopilot
-    /// (`auto`) only bump each other.
+    /// Rider-vs-rider bumps: equal masses, each a capsule along its heading
+    /// (see `Sport::body`), pushed apart in the XZ plane where their
+    /// closest points meet, resolved in slot order so every machine gets
+    /// the same result. Riders on autopilot (`auto`) only bump each other.
     fn resolve_collisions(&mut self, auto: &[bool; MAX_RIDERS]) {
-        let radius = self.course().sport.rider_radius();
+        let body = self.course().sport.body();
+        let min_dist = body.radius * 2.0;
+        let reach = body.reach() * 2.0;
         for i in 0..MAX_RIDERS {
             for j in (i + 1)..MAX_RIDERS {
                 if auto[i] != auto[j] {
@@ -701,19 +705,21 @@ impl World {
                 if (a.pos.y - b.pos.y).abs() > RIDER_HALF_HEIGHT * 2.0 {
                     continue;
                 }
-                let d = (b.pos - a.pos).horizontal();
-                let dist = d.length();
-                let min_dist = radius * 2.0;
-                if dist >= min_dist {
+                let centres = (b.pos - a.pos).horizontal();
+                if centres.dot(centres) >= reach * reach {
                     continue;
                 }
-                // Exactly overlapping: push apart along a fixed axis.
-                let n = if dist > 1e-4 {
-                    d * (1.0 / dist)
-                } else {
-                    Vec3::new(1.0, 0.0, 0.0)
+                let sa = body.segment(a.pos.x, a.pos.z, a.yaw);
+                let sb = body.segment(b.pos.x, b.pos.z, b.yaw);
+                // Lying across each other: apart the way their centres
+                // are; exactly on top of each other, out to the first's right.
+                let right = a.right();
+                let (_, cx, cz) = apart((0.0, 0.0), (centres.x, centres.z), (right.x, right.z));
+                let Some((nx, nz, depth)) = separate(&sa, &sb, min_dist, (cx, cz)) else {
+                    continue;
                 };
-                let push = n * ((min_dist - dist) * 0.5);
+                let n = Vec3::new(nx, 0.0, nz);
+                let push = n * (depth * 0.5);
                 let mut a2 = a;
                 let mut b2 = b;
                 a2.pos -= push;

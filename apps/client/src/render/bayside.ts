@@ -5,61 +5,18 @@
 import * as THREE from "three/webgpu";
 import type { WaterScenery } from "./bay.ts";
 import { UNREFLECTED } from "./cel/material.ts";
-import { type Berth, Fleet, Roamer, ferry, trawler, yacht } from "./coast/boats.ts";
+import { type Berth, Fleet, Roamer, ferry, mooredBerths, trawler, yacht } from "./coast/boats.ts";
 import { boatMaterial } from "./coast/materials.ts";
-import { random } from "./coast/shape.ts";
 import { Train } from "./coast/train.ts";
 import type { CourseData } from "./course.ts";
 import { buildScenery, farMaterial } from "./scenery.ts";
 import type { Steps } from "./slices.ts";
 
-/** The bay's boats at their berths. */
+/** The bay's boats at their berths: those the course has moored (the club's jetty draws its own), and the television's. */
 function berths(course: CourseData): Berth[] {
-  const r = random(11);
-  const out: Berth[] = [];
-  const town = course.land.find((l) => l.kind === "town");
-  if (town) {
-    const dx = town.bx - town.ax;
-    const dz = town.bz - town.az;
-    const len = Math.hypot(dx, dz);
-    const ux = dx / len;
-    const uz = dz / len;
-    let nx = -uz;
-    let nz = ux;
-    if (nx * -town.ax + nz * -town.az < 0) {
-      nx = -nx;
-      nz = -nz;
-    }
-    // Alongside the quay, bow to stern.
-    for (let a = 6; a < len - 6; a += 8.5 + r() * 9) {
-      const d = town.radius + 1.9 + r() * 0.5;
-      out.push({
-        x: town.ax + ux * a + nx * d,
-        z: town.az + uz * a + nz * d,
-        yaw: Math.atan2(ux, uz) + (r() < 0.5 ? Math.PI : 0) + (r() - 0.5) * 0.12,
-        kind: r() < 0.82 ? "llaut" : "inflatable",
-        seed: Math.floor(r() * 1000),
-      });
-    }
-  }
-  // At anchor off the quay's ends and out past the first straight, heads to the swell.
-  const sh = course.straightHalf;
-  const anchored: [number, number, Berth["kind"]][] = [
-    [sh + 78, 96, "trawler"],
-    [sh + 98, 124, "yacht"],
-    [sh + 62, 130, "llaut"],
-    [sh + 118, 88, "yacht"],
-    [-sh - 76, 100, "yacht"],
-    [-sh - 96, 128, "trawler"],
-    [-sh - 60, 134, "llaut"],
-    [-60, -128, "yacht"],
-    [48, -152, "yacht"],
-    [sh + 10, -134, "llaut"],
-    [-sh - 44, -112, "yacht"],
-  ];
-  for (const [x, z, kind] of anchored)
-    out.push({ x, z, yaw: Math.PI / 2 + (r() - 0.5) * 0.5, kind, seed: Math.floor(r() * 1000) });
+  const out: Berth[] = mooredBerths(course);
   // The television's boats off each turn (see game/broadcast-bay.ts).
+  const sh = course.straightHalf;
   const off = sh + course.outerLimit + 16;
   out.push({ x: off, z: 6, yaw: -Math.PI / 2, kind: "camera", seed: 1 });
   out.push({ x: -off, z: -6, yaw: Math.PI / 2, kind: "camera", seed: 2 });
