@@ -95,6 +95,7 @@ export function ModeSelect() {
   return (
     <div className="screen mode-select">
       <TopBar title={t.play.title} kicker={t.play.club} />
+      <LiveRace />
       <main className="mode-body">
         <div className="party">
           <Button kind="ghost" className="party-add" onClick={() => toast(t.play.partySoon)}>
@@ -104,7 +105,6 @@ export function ModeSelect() {
           </Button>
         </div>
         <div className="mode-side">
-          <LiveRace />
           <TabBar
             className="mode-tabs"
             value={mode}

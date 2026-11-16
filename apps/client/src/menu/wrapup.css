@@ -314,16 +314,26 @@
   }
 }
 
-/* The mode select: a matchmaking race still under way, offered back. */
+/* The mode select: a matchmaking race still under way, offered back, under the screen's title. */
 .live-race {
+  position: absolute;
+  z-index: 1;
+  left: var(--margin-x);
+  top: calc(var(--margin-y) + 158px + var(--gap));
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: var(--gap);
-  padding: 16px var(--pad);
+  width: 780px;
+  padding: 16px 16px 16px var(--pad);
   animation: rise 420ms var(--ease) both;
+}
+:root[data-compact] .live-race {
+  top: calc(var(--margin-y) + 96px + var(--gap));
+  width: 680px;
 }
 .live-race b {
   font-size: var(--fs-body);
   font-weight: 760;
+  white-space: nowrap;
 }
