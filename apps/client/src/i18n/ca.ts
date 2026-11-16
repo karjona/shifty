@@ -9,8 +9,18 @@ export const ca: Messages = {
     play: "Juga",
     tabs: "Pestanyes",
     loading: "Carregant…",
+    loadingSteps: {
+      code: "Baixant el joc",
+      connect: "Connectant amb el servidor de curses",
+      join: "Entrant a la cursa",
+      art: "Baixant pilots i escenaris",
+      scene: "Muntant l'escenari",
+      shaders: "Preparant els gràfics",
+      settle: "Ja gairebé hi som",
+    },
     soundLocked: "Fes clic, toca la pantalla o prem una tecla per activar el so",
     rotate: "Posa la pantalla en horitzontal per jugar",
+    swipeUp: "Llisca cap amunt per jugar a pantalla completa",
     retry: "Torna-ho a provar",
     close: "Tanca",
     cancel: "Cancel·la",
@@ -274,6 +284,8 @@ export const ca: Messages = {
     off: "No",
     homeScreen:
       "Per jugar a pantalla completa en un iPhone, afegeix Shifty a la pantalla d'inici: toca Comparteix, després Afegeix a la pantalla d'inici, i obre'l des d'allà.",
+    swipeBody:
+      "A Safari, llisca cap amunt sobre el joc per amagar les barres del navegador; llisca cap avall perquè tornin.",
     install: "Instal·la Shifty",
     installBody: "Instal·la'l com una app: a pantalla completa, a un toc.",
     account: "Compte",

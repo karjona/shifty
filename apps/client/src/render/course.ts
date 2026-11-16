@@ -17,6 +17,7 @@ import { buildLand, landDistance } from "./land.ts";
 import { waveHeight } from "./waves.ts";
 import { UNREFLECTED } from "./cel/material.ts";
 import type { RiderView } from "./world.ts";
+import type { Steps } from "./slices.ts";
 
 /** Which water course: the bay's oval, or the cape's loop. */
 export type WaterPlace = "bay" | "cape";
@@ -252,9 +253,9 @@ interface Floating {
 export class CourseView {
   readonly group = new THREE.Group();
   private floating: Floating[] = [];
-  private buoys: BuoyMarks;
-  private chevrons: ChevronBoards;
-  private boundary: THREE.InstancedMesh;
+  private buoys!: BuoyMarks;
+  private chevrons!: ChevronBoards;
+  private boundary!: THREE.InstancedMesh;
   private boundaryPoints: { x: number; z: number }[] = [];
   private matrix = new THREE.Matrix4();
   /** The breakwater's lamps. */
@@ -266,20 +267,33 @@ export class CourseView {
 
   readonly data: CourseData;
 
-  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land; `light` is which way its shade falls. */
+  /** `season` and `crowd` (how many people are out, 0-1) dress the bay's land; `light` is which way its shade falls.
+   * It is built by `build` (see slices.ts). */
   constructor(data: CourseData, season: Season = "summer", crowd = 1, light: Sunlight = OVERHEAD) {
     this.data = data;
-    if (data.place === "bay") {
+    this.dress = { season, crowd, light };
+  }
+
+  private dress: { season: Season; crowd: number; light: Sunlight };
+
+  /** Builds it, a piece at a time. */
+  *build(): Steps {
+    const { season, crowd, light } = this.dress;
+    if (this.data.place === "bay") {
       const life = new Life();
       this.buildBreakwater(crowd, light, life);
-      this.group.add(buildLand(this.data.land, season, crowd, this.crowd, life, light));
+      yield;
+      this.group.add(yield* buildLand(this.data.land, season, crowd, this.crowd, life, light));
+      yield;
       this.group.add(...life.build());
       const arms = this.crowd.build();
       if (arms) this.group.add(arms);
+      yield;
     }
     this.buildStartGate();
     this.buoys = new BuoyMarks(this.data);
     this.chevrons = new ChevronBoards(this.data);
+    yield;
     this.buildRamps();
     this.boundary = this.buildBoundary();
     for (const g of [this.buoys.group, this.chevrons.group]) {

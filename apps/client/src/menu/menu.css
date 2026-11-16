@@ -1410,8 +1410,8 @@ a {
   inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
   box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
 }
-/* The open section: a chevron pointing at its options. */
-.settings-sections .tab.on::after {
+/* The open section: a chevron pointing at its options (over the tabs' underline, compact or not). */
+.main-menu .settings-sections .tab.on[role="tab"]::after {
   left: auto;
   right: 4px;
   top: 50%;
@@ -1493,13 +1493,15 @@ a {
 /* The modes: a two-by-two set of tabs over the open mode's panel, the open
    one underlined, so the panel keeps the column's height. */
 .mode-tabs {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 24px;
   align-self: stretch;
   height: auto;
   padding: 0 var(--pad);
   counter-reset: row;
+}
+:root:not([data-compact]) .mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
 }
 .mode-tabs > .glyph {
   display: none;
@@ -2020,13 +2022,16 @@ a {
 .season-change.shown {
   opacity: 1;
 }
+/* The season's name: as big as the longest (Primavera) fits across, or the window's height allows; room under
+   it for its descenders (Spring's p and g). */
 .season-change b {
-  font-size: clamp(96px, 14vw, 260px);
-  line-height: 0.8;
+  font-size: clamp(64px, min(12vw, 30vh), 240px);
+  line-height: 0.9;
+  padding-bottom: 0.1em;
   font-weight: 900;
   font-stretch: 125%;
   font-style: italic;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 .season-change span {
   display: flex;

@@ -13,7 +13,7 @@ import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
 import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
-import { holdLoading } from "../loading.ts";
+import { type Work, begin, holdLoading, quietly, tracked, waitNow } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import {
   connect,
@@ -25,6 +25,9 @@ import {
 import { Bay } from "../render/bay.ts";
 import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
+import { loadModels } from "../render/env/models.ts";
+import { prefetchLook } from "../render/rider/model.ts";
+import { prefetchRide } from "../render/ride/ride.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
 import { Hud, type RaceView } from "../ui/hud.ts";
@@ -45,10 +48,11 @@ import {
   readWeather,
 } from "./conditions.ts";
 import { disposeTree } from "./dispose.ts";
+import { buildSliced } from "../render/slices.ts";
 import { Ghosts, ghostLabel, readGhost } from "./ghosts.ts";
 import { RaceIntro } from "./intro.ts";
 import { type PodiumData, podiumData } from "./podium.ts";
-import { SeasonCard, SeasonChange } from "./season-change.ts";
+import { JOIN_STEPS, SeasonCard, SeasonChange, courseWait } from "./season-change.ts";
 import { TouchControls } from "../touch/controls.ts";
 import { canTouch, keepAwake, touchScreen } from "../touch/device.ts";
 
@@ -292,8 +296,12 @@ export class RaceSession implements Stage {
   private card: SeasonCard | null = null;
   /** A season card is over the course (it loads, or the season changes). */
   private covered = true;
+  /** Counts the courses put up: one still building when the next comes is dropped. */
+  private courseToken = 0;
   /** The race whose results came up last: the grid after them waits for the next course. */
   private resultsEvent = -1;
+  /** The race whose results fetched the other sport's art ahead. */
+  private fetchedAhead = -1;
   private intro: RaceIntro | null = null;
   /** The cameras once your race is over. */
   private tv: Broadcast | null = null;
@@ -345,13 +353,27 @@ export class RaceSession implements Stage {
     this.board = new Scoreboard(opts.hud);
   }
 
-  /** Takes down the loading sign put up by `joining`. */
+  /** Takes down the loading sign put up by `joining`, or ends the step it counts on the card. */
   private joinSign: (() => void) | null = null;
 
-  /** Puts the loading sign up saying how joining goes (null: joined, or turned away). */
-  private joining(label: (() => string) | null): void {
+  /**
+   * Says how joining goes, or what the race waits for (`what` says it; null:
+   * nothing): on the card's bar while one is up, or else on the loading sign.
+   */
+  private joining(what: "connect" | "join" | (() => string) | null): void {
     this.joinSign?.();
-    this.joinSign = label ? holdLoading(label) : null;
+    this.joinSign = null;
+    if (!what) return;
+    const wait = this.card?.loads;
+    const card = wait && !wait.closed ? wait : null;
+    if (typeof what === "function") this.joinSign = card ? card.hold(what) : holdLoading(what);
+    else if (card) {
+      const work: Work = card.begin(what);
+      this.joinSign = () => work.end();
+    } else {
+      const m = messages().race;
+      this.joinSign = holdLoading(what === "connect" ? () => m.connecting : () => m.joining);
+    }
   }
 
   /** Paused (a menu is open over the race): the rider gets no input. */
@@ -446,7 +468,8 @@ export class RaceSession implements Stage {
     const run = readGhost(pick, await fetchGhost(mine.ghost).catch(() => new Uint8Array()));
     if (!run || this.stopped || !this.ghosts) return;
     if (board.top[0]?.me) this.ghosts.drop("record");
-    await this.ghosts.replace("best", run);
+    // (In the background: the run goes on.)
+    await quietly(() => this.ghosts?.replace("best", run));
     this.ghostSplits();
   }
 
@@ -472,12 +495,12 @@ export class RaceSession implements Stage {
         this.card.season = first.conditions.season;
         this.card.course = first.course;
       }
-      this.card.loading = true;
+      this.card.load(first ? courseWait(first.course) : "course", JOIN_STEPS);
       this.showHud(false);
       this.intro = new RaceIntro(this.opts.hud);
       this.tv = new Broadcast();
     }
-    this.joining(() => messages().race.connecting);
+    this.joining("connect");
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
       this.state.trouble = connectTrouble(e);
@@ -510,7 +533,7 @@ export class RaceSession implements Stage {
     transport.onClose((reason) => {
       this.closedReason = reason;
     });
-    this.joining(() => messages().race.joining);
+    this.joining("join");
     if (import.meta.env.DEV && this.opts.debug) {
       this.debug = createDebugPanel(this.net, { renderScale: engine.world.renderScale }, (s) => engine.setScale(s));
       this.debug.state.transport = transport.kind;
@@ -668,8 +691,14 @@ export class RaceSession implements Stage {
     this.shown = false;
     const old = this.env;
     const conditions = this.conditions;
+    // (The card's wait, or the sign's.)
+    const wait = waitNow();
+    const building = begin("scene", wait);
+    const token = ++this.courseToken;
+    // Built a slice at a time: the page (the card's bar, the netcode) carries on meanwhile.
+    let env: Environment;
     if (course.sport === "snow") {
-      this.env = new Mountain(
+      const mountain = new Mountain(
         course.run,
         {
           ribbon: (rows, offsets) => client.runRibbon(rows, offsets),
@@ -679,8 +708,10 @@ export class RaceSession implements Stage {
         },
         conditions,
         course.id,
+        true,
       );
-      this.minimap = new RunMap(this.mapRoot, course.run);
+      await buildSliced(mountain.build());
+      env = mountain;
     } else {
       const water = {
         water: engine.view.water,
@@ -689,24 +720,33 @@ export class RaceSession implements Stage {
         course: course.bay,
         conditions,
       };
-      this.env = course.bay.place === "cape" ? new Cape(water) : new Bay(water);
-      this.minimap = new Minimap(this.mapRoot, course.bay);
+      const bay = course.bay.place === "cape" ? new Cape(water, true) : new Bay(water, true);
+      await buildSliced(bay.build());
+      env = bay;
     }
-    engine.world.setEnvironment(this.env);
+    if (token !== this.courseToken || this.stopped || this.client !== client) {
+      building.end();
+      disposeTree(env.group);
+      return;
+    }
+    this.env = env;
+    this.minimap =
+      course.sport === "snow" ? new RunMap(this.mapRoot, course.run) : new Minimap(this.mapRoot, course.bay);
+    engine.world.setEnvironment(env);
     const fields = weatherFields();
     const here: WeatherHere = { ...NO_WEATHER };
     engine.world.weatherAt = (x, z) => {
       const ptr = client.updateWeather(x, z);
       return readWeather(fields, new Float32Array(engine.wasm.memory.buffer, ptr, fields.length), here);
     };
-    this.intro?.setCourse(this.event, course, this.env);
-    this.tv?.setCourse(course, this.env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
+    this.intro?.setCourse(this.event, course, env);
+    this.tv?.setCourse(course, env, course.sport === "snow" ? (points) => client.heightsAt(points) : undefined);
     if (old) disposeTree(old.group);
-    const env = this.env;
     const ghostsIn = this.ghosts?.attach(engine.world.scene, env, this.state.course) ?? Promise.resolve();
     engine.world.addRiders(this.slots);
-    await env.ready;
-    await engine.warm(() => engine.world.compile());
+    building.end();
+    await tracked("scene", env.ready ?? Promise.resolve(), wait);
+    await engine.warm(() => engine.world.compile(), true, wait);
     // (The roster may have come in meanwhile.)
     if (this.client !== client) return;
     this.readRoster(engine, client);
@@ -715,9 +755,25 @@ export class RaceSession implements Stage {
     await Promise.race([Promise.all([...riders.map((r) => r.ready), ghostsIn]), late]);
     if (this.env !== env || this.stopped) return;
     this.ready = true;
+    // Its first frames, behind the card, make every shadow shader the race will need.
+    engine.world.warmShadows();
     // It draws behind the card until it runs smoothly.
-    await engine.settled();
+    await tracked("settle", engine.settled(), wait);
     if (this.env === env && !this.stopped) this.shown = true;
+  }
+
+  /**
+   * Fetches what the plan's other sport needs in the background while a
+   * race's results are up (a Tilt rides both): the next course's season
+   * card then waits on building and shaders, not on downloads.
+   */
+  private fetchAhead(): void {
+    const sport = this.sport === "snow" ? "summer" : "winter";
+    if (sport === "winter") void loadModels("snow", null);
+    for (const look of this.looks.values()) {
+      prefetchLook(look, sport);
+      prefetchRide(sport, look.outfits[sport].ride);
+    }
   }
 
   /** The HUD is off while a season card is up, and while the start has the screen. */
@@ -838,8 +894,13 @@ export class RaceSession implements Stage {
     // The course on screen is this race's, and nothing covers it: the
     // server can start the race as far as this screen goes. (After a
     // race's results, the grid waits for the plan's next course.)
-    if (race.phase === RESULTS) this.resultsEvent = race.eventIndex;
-    else if (this.trial) {
+    if (race.phase === RESULTS) {
+      this.resultsEvent = race.eventIndex;
+      if (render && race.eventIndex < race.eventCount - 1 && this.fetchedAhead !== race.eventIndex) {
+        this.fetchedAhead = race.eventIndex;
+        this.fetchAhead();
+      }
+    } else if (this.trial) {
       this.resultsEvent = -1;
       // A run's results stand against the ghosts it raced (a new best replaces yours after),
       // the ones it beat named for what they were.
@@ -876,6 +937,8 @@ export class RaceSession implements Stage {
       touching,
     );
     this.hud.showGauges(!watching);
+    // On television the cameras and the standings tell the race: the map would only cover the shot.
+    if (this.mapRoot.hidden !== watching) this.mapRoot.hidden = watching;
     this.sfx.broadcast = watching;
     if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
 
@@ -898,7 +961,8 @@ export class RaceSession implements Stage {
           const ticks = race.phase === RACING ? tick - race.phaseStart : 0;
           this.ghosts.place(ticks, on, engine.world.camera, dt);
         }
-        engine.world.render(riders, tick, dt, nextBuoy, shot);
+        // A rider who turns up mid-race comes in when their art does: nobody waits for it.
+        quietly(() => engine.world.render(riders, tick, dt, nextBuoy, shot));
         this.ghosts?.label(
           engine.world.camera,
           tick / race.tickHz,

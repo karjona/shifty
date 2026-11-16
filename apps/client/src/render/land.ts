@@ -27,6 +27,7 @@ import {
 import { Shape, place, turned } from "./coast/shape.ts";
 import { capsuleOutline, landDistance, prism, rng } from "./coast/outline.ts";
 import { buildTown } from "./coast/town.ts";
+import type { Steps } from "./slices.ts";
 import { Planting } from "./coast/trees.ts";
 
 export { capsuleOutline, landDistance, prism, rng };
@@ -115,7 +116,7 @@ const kept = (x: number, z: number) => (x > 134 && z < 116) || Math.hypot(x + 24
 const MARKET = { kind: "market", along: 128 } as const;
 
 /** The bay's land, as it is in `season`, with `crowd` (0-1) of its people out; those who wave join `wavers`, its flags and smoke `life`. */
-export function buildLand(
+export function* buildLand(
   land: LandData[],
   season: Season,
   crowd: number,
@@ -123,16 +124,17 @@ export function buildLand(
   life: Life,
   /** Which way shade falls. */
   light: Sunlight = OVERHEAD,
-): THREE.Group {
+): Steps<THREE.Group> {
   const g = new THREE.Group();
   // (The rocks out in the bay are one mesh.)
   const rocks = new Shape();
-  land.forEach((l, i) => {
+  for (const [i, l] of land.entries()) {
     const seed = 1000 + i * 97;
-    if (l.kind === "town") g.add(buildTown(l, seed, season, crowd, wavers, life, kept, light, MARKET).group);
+    if (l.kind === "town") g.add((yield* buildTown(l, seed, season, crowd, wavers, life, kept, light, MARKET)).group);
     else if (l.kind === "island") g.add(island(l, seed));
     else boulder(rocks, l, seed);
-  });
+    yield;
+  }
   if (rocks.triangles > 0) g.add(rocks.mesh(rockMaterial()));
   return g;
 }

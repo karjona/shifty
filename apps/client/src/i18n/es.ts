@@ -9,8 +9,18 @@ export const es: Messages = {
     play: "Jugar",
     tabs: "Pestañas",
     loading: "Cargando…",
+    loadingSteps: {
+      code: "Descargando el juego",
+      connect: "Conectando con el servidor de carreras",
+      join: "Entrando en la carrera",
+      art: "Descargando pilotos y escenarios",
+      scene: "Montando el escenario",
+      shaders: "Preparando los gráficos",
+      settle: "Ya casi está",
+    },
     soundLocked: "Haz clic, toca la pantalla o pulsa una tecla para activar el sonido",
     rotate: "Gira la pantalla en horizontal para jugar",
+    swipeUp: "Desliza hacia arriba para jugar a pantalla completa",
     retry: "Reintentar",
     close: "Cerrar",
     cancel: "Cancelar",
@@ -274,6 +284,8 @@ export const es: Messages = {
     off: "No",
     homeScreen:
       "Para jugar a pantalla completa en un iPhone, añade Shifty a tu pantalla de inicio: toca Compartir, luego Añadir a pantalla de inicio, y ábrelo desde allí.",
+    swipeBody:
+      "En Safari, desliza hacia arriba sobre el juego para esconder las barras del navegador; desliza hacia abajo para que vuelvan.",
     install: "Instalar Shifty",
     installBody: "Instálalo como una app: a pantalla completa, a un toque.",
     account: "Cuenta",

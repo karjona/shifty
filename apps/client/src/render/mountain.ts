@@ -60,6 +60,8 @@ import { ParticlePool } from "./spray.ts";
 import { creek, lake, lipProps, runAt, runPoint } from "./mountain-props.ts";
 import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
+import { waitNow } from "../loading.ts";
+import { type Steps, buildNow, buildSliced } from "./slices.ts";
 import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan, liftEnds } from "./mountain-built.ts";
 import { farLandscape, landscape } from "./mountain-far.ts";
@@ -198,6 +200,8 @@ const GRID_SINK = 0.3;
 /** Coarse vertices this close to the run hide under the ribbon. */
 const GRID_HIDE = RIBBON_HALF - GRID_STEP;
 const ROWS_PER_CHUNK = 96;
+/** Rows of the ribbon asked of the sim at a time (see `buildSnow`). */
+const RIBBON_STRETCH = 64;
 /** The fog's range as the conditions' look works it out (m), and how far a clear day sees on the mountain. */
 const FOG_NEAR = 45;
 const FOG_FAR = 330;
@@ -524,8 +528,8 @@ export class Mountain implements Environment {
   private hemi: THREE.HemisphereLight | null = null;
   /** What the conditions look like (see look.ts). */
   readonly look: ConditionsLook;
-  private precipitation = new Precipitation();
-  private cumulus: Cumulus;
+  private precipitation!: Precipitation;
+  private cumulus!: Cumulus;
   /** True snow heights on the coarse grid (for cheap lookups: particles). */
   private gridHeights = new Float32Array(0);
   private grid = { x0: 0, z0: 0, nx: 0, nz: 0 };
@@ -567,8 +571,18 @@ export class Mountain implements Environment {
   /** The season, weather and time of day it is drawn in. */
   readonly conditions: Conditions;
 
-  /** `conditions`: the race's (a clear winter noon if left out); `course`: which run (`sim::CourseId`), for its scenery. */
-  constructor(run: RunData, terrain: Terrain, conditions?: Conditions, course = 1) {
+  /** Whether its build has begun, and what tells `ready` it is done. */
+  private made = false;
+  private madeAll: () => void = () => {};
+
+  /**
+   * `conditions`: the race's (a clear winter noon if left out); `course`:
+   * which run (`sim::CourseId`), for its scenery; `sliced`: built later, a
+   * slice at a time, by whoever made it (see `build`), otherwise at once.
+   */
+  constructor(run: RunData, terrain: Terrain, conditions?: Conditions, course = 1, sliced = false) {
+    // The scenery's models come down while the mountain is built.
+    const models = loadModels("snow", waitNow());
     this.conditions = conditions ?? homeConditions("snow");
     this.run = run;
     this.terrain = terrain;
@@ -585,6 +599,21 @@ export class Mountain implements Environment {
       snowLine: { summer: top + 600, fall: top - drop * 0.08, winter: bottom - 3000, spring: bottom + drop * 0.6 },
       mountain: true,
     });
+    this.scenery = runScenery(course);
+    const made = new Promise<void>((resolve) => (this.madeAll = resolve));
+    // What stands on it comes once the mountain is built and the models are in, a slice at a time.
+    this.ready = Promise.all([models, made]).then(([m]) => buildSliced(this.buildScenery(m)));
+    if (!sliced) buildNow(this.build());
+  }
+
+  /** Builds it (once), a piece at a time: the mountain round the run, the forest's plan, the run's snow. */
+  *build(): Steps {
+    if (this.made) return;
+    this.made = true;
+    const run = this.run;
+    const terrain = this.terrain;
+    const bottom = run.path.at(-1)!.y;
+    const drop = run.path[0]!.y - bottom;
     let cx = 0;
     let cz = 0;
     for (const p of run.path) {
@@ -592,9 +621,12 @@ export class Mountain implements Environment {
       cz += p.z / run.path.length;
     }
     this.cumulus = new Cumulus(new THREE.Vector3(cx, bottom + drop * 0.5, cz));
-    this.scenery = runScenery(course);
-    this.buildMountainAround();
+    yield* this.cumulus.build();
+    this.precipitation = new Precipitation();
+    yield;
+    yield* this.buildMountainAround();
     this.buildings = buildingPlan(run, this.scenery);
+    yield;
     const { x0, z0, nx, nz } = this.grid;
     this.trees = plantForest({
       run,
@@ -603,20 +635,24 @@ export class Mountain implements Environment {
       around: { x0, z0, width: (nx - 1) * GRID_STEP, depth: (nz - 1) * GRID_STEP },
       open: this.clearings(),
     });
-    this.buildSnow();
+    yield;
+    yield* this.buildSnow();
     this.trails.group.userData.noMerge = true;
     this.group.add(this.trails.group, this.powder.sprite, this.mist.sprite, this.precipitation.group);
     this.group.add(skyDome(), this.cumulus.mesh);
-    this.ready = loadModels("snow").then((models) => this.buildScenery(models));
+    this.madeAll();
   }
 
-  /** What stands on the mountain, once its models are in. */
-  private buildScenery(models: Models): void {
+  /** What stands on the mountain, once its models are in, a piece at a time. */
+  private *buildScenery(models: Models): Steps {
     const run = this.run;
-    this.buildForest(models);
+    yield* this.buildForest(models);
     this.buildFences();
+    yield;
     this.buildRocks(models);
+    yield;
     this.buildProps();
+    yield;
     this.built = new Built(
       run,
       this.scenery,
@@ -626,12 +662,14 @@ export class Mountain implements Environment {
       PALETTE[this.conditions.season].accent,
     );
     this.props.add(this.built.group);
+    yield;
     // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
     const plain = new Set<THREE.Mesh>();
     this.props.traverse((o) => {
       if (o instanceof THREE.Mesh && o.material instanceof THREE.MeshStandardNodeMaterial) plain.add(o);
     });
     celify(this.props);
+    yield;
     const lined = new Set<THREE.Material>();
     for (const mesh of plain) {
       const material: unknown = mesh.material;
@@ -639,7 +677,9 @@ export class Mountain implements Environment {
       lined.add(material);
       fadingInk(material, 1, 0.8, 0, 0.9);
     }
+    yield;
     mergeStatic(this.props, { cell: 400 });
+    yield;
     // Choughs over the summit, over the middle of the run and over the finish.
     const over = (k: number, up: number, aside: number) => {
       const p = run.path[Math.floor(k * (run.path.length - 1))]!;
@@ -648,6 +688,7 @@ export class Mountain implements Environment {
     const flocks = [over(0.02, 40, -30), over(0.33, 55, 70), over(0.62, 50, -60), over(0.95, 60, 20)];
     this.life = new MountainLife(this.trees, this.built.chimneys, flocks);
     this.props.add(this.life.group);
+    yield;
     const { x0, z0, nx, nz } = this.grid;
     const site = {
       run,
@@ -656,7 +697,10 @@ export class Mountain implements Environment {
       ridgeStart: this.scenery.ridgeStart,
     };
     const land = landscape(site);
-    this.props.add(farLandscape(site, land), alpineRanges(site, land));
+    yield;
+    this.props.add(farLandscape(site, land));
+    yield;
+    this.props.add(alpineRanges(site, land));
     this.group.add(this.props);
   }
 
@@ -718,11 +762,16 @@ export class Mountain implements Environment {
   }
 
   /** The run's snow: a ribbon of the sim's own heights, in chunks (so off-screen ones are culled). */
-  private buildSnow(): void {
+  private *buildSnow(): Steps {
     const rows = ribbonRows(this.run);
     const offsets = ribbonOffsets();
     const cols = offsets.length;
-    const xyz = this.terrain.ribbon(rows, offsets);
+    // The sim's heights along the run, a stretch at a time.
+    const xyz = new Float32Array(rows.length * cols * 3);
+    for (let r = 0; r < rows.length; r += RIBBON_STRETCH) {
+      xyz.set(this.terrain.ribbon(rows.subarray(r, r + RIBBON_STRETCH), offsets), r * cols * 3);
+      yield;
+    }
     const n = rows.length;
     // Normals from neighbours across the whole ribbon, so chunk seams don't show.
     const normals = new Float32Array(n * cols * 3);
@@ -742,11 +791,17 @@ export class Mountain implements Environment {
         if (nrm.y < 0) nrm.negate();
         normals.set([nrm.x, nrm.y, nrm.z], (r * cols + c) * 3);
       }
+      if (r % 64 === 63) yield;
     }
+    yield;
     const { shade, dye } = this.shapeOf(xyz, rows, offsets);
+    yield;
     const snowRows = this.snowAlong(xyz, rows.length, cols);
+    yield;
     this.buildTufts(xyz, rows, offsets, snowRows);
-    const treeShade = forestShade(this.trees, this.look.sun, xyz);
+    yield;
+    const treeShade = yield* forestShade(this.trees, this.look.sun, xyz);
+    yield;
     const mat = snowMaterial(true);
     for (let start = 0; start < n - 1; start += ROWS_PER_CHUNK) {
       const end = Math.min(n - 1, start + ROWS_PER_CHUNK);
@@ -808,6 +863,7 @@ export class Mountain implements Environment {
       // Each chunk is a batch of its own (so the ones out of view are culled).
       mesh.userData.noMerge = true;
       this.group.add(mesh);
+      yield;
     }
   }
 
@@ -819,7 +875,8 @@ export class Mountain implements Environment {
   private buildTufts(xyz: Float32Array, rows: Float32Array, offsets: Float32Array, snowRows: Float32Array): void {
     const cols = offsets.length;
     const rand = rng(606);
-    const line = LOOK.snowLine.value;
+    // (Its own look's: built a slice at a time, another look may be on show meanwhile.)
+    const line = this.look.snowLine;
     const spots: number[] = [];
     for (let r = 2; r < rows.length - 2; r += 1) {
       const limit = this.limitAt(rows[r]!);
@@ -988,7 +1045,7 @@ export class Mountain implements Environment {
   }
 
   /** The mountain beyond the ribbon: a coarse grid of the sim's heights, sunk a little (and well under the ribbon). */
-  private buildMountainAround(): void {
+  private *buildMountainAround(): Steps {
     let minX = Infinity;
     let maxX = -Infinity;
     let minZ = Infinity;
@@ -1007,6 +1064,7 @@ export class Mountain implements Environment {
     this.grid = { x0, z0, nx, nz };
     this.gridHeights = new Float32Array(nx * nz);
     for (let i = 0; i < nx * nz; i++) this.gridHeights[i] = data[i * 2]!;
+    yield;
     const mat = snowMaterial(false);
     const TILE = 64;
     for (let tz = 0; tz < nz - 1; tz += TILE) {
@@ -1041,14 +1099,17 @@ export class Mountain implements Environment {
         mesh.receiveShadow = true;
         mesh.userData.noMerge = true;
         this.group.add(mesh);
+        yield;
       }
     }
   }
 
   /** The forest, in its batches. */
-  private buildForest(models: Models): void {
-    this.forest = new Forest(this.trees, models);
-    this.props.add(this.forest.group);
+  private *buildForest(models: Models): Steps {
+    const forest = new Forest(this.trees);
+    yield* forest.build(models);
+    this.forest = forest;
+    this.props.add(forest.group);
   }
 
   /** Whether a point is in open ground: round each building, beside the finish area, and from the run's edge across its lake. */

@@ -15,8 +15,17 @@
   -webkit-touch-callout: none;
 }
 
+/* While the controls are up, no touch anywhere moves the page: on an
+   iPhone's Safari the page runs a swipe past the screen (boot.css), and a
+   thumb straying into the top band must not scroll it or bring the
+   browser's bars back. */
+html:has(.touch-controls:not([hidden])) {
+  touch-action: none;
+}
+
 /* Where a thumb can come down: each half below the top band (the HUD and
-   the race menu's button stay tappable there). */
+   the race menu's button stay tappable there). On a phone the band is the
+   race menu's button, sized on the menus' canvas (menu/phone.css). */
 .touch-zone {
   position: absolute;
   top: 22%;
@@ -24,6 +33,9 @@
   width: 50%;
   pointer-events: auto;
   touch-action: none;
+}
+:root[data-compact] .touch-zone {
+  top: calc(env(safe-area-inset-top, 0px) + 58px);
 }
 .touch-zone.left {
   left: 0;

@@ -10,6 +10,7 @@ import { messages } from "../i18n/index.ts";
 import { type GhostPick, fetchGhost } from "../menu/api.ts";
 import { GhostLook } from "../render/cel/ghost.ts";
 import { warmUp } from "../render/warm.ts";
+import { waitNow } from "../loading.ts";
 import type { Environment, RiderModel, RiderView } from "../render/world.ts";
 import { NameTags } from "../ui/tags.ts";
 import { ghostFrames, ghostHeader, ghostStride } from "../wasm/sim.js";
@@ -170,13 +171,14 @@ export class Ghosts {
   }
 
   private async build(g: Shown, env: Environment, scene: THREE.Scene): Promise<void> {
+    const wait = waitNow();
     const model = env.makeRider(g.slot, g.run.appearance);
     g.model = model;
     model.mesh.visible = false;
     await model.ready;
     if (g.model !== model || this.env !== env) return;
     g.look.apply(model.mesh);
-    await warmUp(model.mesh);
+    await warmUp(model.mesh, wait);
     if (g.model !== model || this.env !== env) return;
     scene.add(model.mesh);
     g.ready = true;

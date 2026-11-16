@@ -191,8 +191,13 @@ class Nav {
     return true;
   }
 
-  /** Focuses the screen's starting element if nothing in scope has focus. */
+  /**
+   * Focuses the screen's starting element if nothing in scope has focus. Not for a finger, which picks what
+   * it taps (a field focused for it would sit there with no keyboard, a button would look picked already);
+   * the first press of a controller or a key brings the focus back.
+   */
   ensureFocus(): void {
+    if (this.device === "touch") return;
     const active = document.activeElement;
     if (active instanceof HTMLElement && active !== document.body && scope().contains(active) && visible(active)) {
       return;
@@ -254,8 +259,9 @@ class Nav {
       if (e.key === "Escape" && this.fire("menu")) e.preventDefault();
       return;
     }
-    this.setDevice("keyboard");
     const typing = isTextInput(document.activeElement);
+    // A phone's on-screen keyboard sends keys too: typing with it is still a finger.
+    if (!(typing && this.device === "touch")) this.setDevice("keyboard");
     const dirs: Record<string, Dir> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
     const dir = dirs[e.key];
     if (dir) {

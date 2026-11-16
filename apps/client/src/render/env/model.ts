@@ -8,7 +8,8 @@
 // gull) stay apart, and named places come along as anchors. The work is
 // done a few milliseconds at a time, so the page keeps drawing meanwhile.
 import * as THREE from "three/webgpu";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { type Wait, begin } from "../../loading.ts";
+import { followArt, loadGltf } from "../art.ts";
 
 /** The geometry of each material class (`solid`), or of each class in each part of a scene split up (`solid#front`). */
 export type EnvParts = Map<string, THREE.BufferGeometry>;
@@ -36,8 +37,6 @@ export interface EnvModel {
   anchors: Map<string, EnvAnchor[]>;
 }
 
-const BASE = `${import.meta.env.BASE_URL}env`;
-const gltf = new GLTFLoader();
 const cache = new Map<string, Promise<EnvModel>>();
 
 /** How long the loader works before it lets the page draw a frame (ms). */
@@ -290,12 +289,17 @@ async function collect(
 /** The level of detail a node of the file is drawn at: 0 always, 1 from close by, 2 from afar. */
 const levelOf = (o: THREE.Object3D) => (typeof o.userData.lod === "number" ? o.userData.lod : 0);
 
-/** A scene of the art (e.g. `club`), loaded once; `split` splits its classes into parts (see `collect`). */
-export function loadEnv(name: string, split: EnvSplit | null = null): Promise<EnvModel> {
+/** A scene of the art (e.g. `club`), loaded once, `wait` counting its download and its making; `split` splits its
+ * classes into parts (see `collect`). */
+export function loadEnv(name: string, wait: Wait | null, split: EnvSplit | null = null): Promise<EnvModel> {
+  const path = `env/${name}.glb`;
   let p = cache.get(name);
-  if (!p) {
+  // (Still on its way: counted in this wait too.)
+  if (p) followArt([path], wait);
+  else {
     p = (async () => {
-      const file = await gltf.loadAsync(`${BASE}/${name}.glb`);
+      const file = await loadGltf(path, wait);
+      const making = begin("scene", wait);
       const scene = file.scene;
       scene.updateMatrixWorld(true);
       const anims: EnvAnim[] = [];
@@ -327,6 +331,7 @@ export function loadEnv(name: string, split: EnvSplit | null = null): Promise<En
       const near = await at(1);
       const far = await at(2);
       for (const g of sources.keys()) g.dispose();
+      making.end();
       return { parts, near, far, anims, anchors };
     })();
     cache.set(name, p);

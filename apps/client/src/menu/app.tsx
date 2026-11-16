@@ -9,6 +9,7 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   redirect,
   useNavigate,
 } from "@tanstack/react-router";
@@ -20,14 +21,13 @@ import { InfoPage } from "./screens/info.tsx";
 import { Login } from "./screens/login.tsx";
 import { MainMenu, type MenuTab } from "./screens/main-menu.tsx";
 import { ModeSelect, type Mode } from "./screens/play.tsx";
-import { RaceScreen } from "./screens/race.tsx";
 import { RiderScreen } from "./screens/rider.tsx";
 import { RoomScreen } from "./screens/room.tsx";
 import { ShopScreen } from "./screens/shop.tsx";
 import { Welcome } from "./screens/welcome.tsx";
 import { Toasts } from "./toast.tsx";
 import { Busy } from "./busy.tsx";
-import { booted } from "../loading.ts";
+import { afterBoot, booted } from "../loading.ts";
 
 interface Ctx {
   queryClient: QueryClient;
@@ -206,11 +206,16 @@ const roomRoute = createRoute({
   component: RoomScreen,
 });
 
+/** The race and the podium, with what only they draw (the mountain, the cape, the broadcast...): a download of
+ * their own, fetched in the background once the first screen is up. */
+const raceScreen = () => import("./screens/race.tsx");
+afterBoot(() => void raceScreen().catch(() => {}));
+
 const raceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/race",
   beforeLoad: requirePlayer,
-  component: RaceScreen,
+  component: lazyRouteComponent(raceScreen, "RaceScreen"),
 });
 
 const aboutRoute = createRoute({

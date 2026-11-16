@@ -29,6 +29,7 @@ import {
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { devParams } from "../../dev-params.ts";
 import { inkEdge } from "./material.ts";
+import { compileCounter } from "../warm.ts";
 
 /** Dev: `?inkdebug=line|normal|ink|depth` shows one of the ink pass's inputs instead of the frame. */
 const DEBUG = import.meta.env.DEV ? devParams.get("inkdebug") : null;
@@ -161,6 +162,15 @@ export class CelPost {
    */
   async compile(root: THREE.Object3D = this.scene, mirror = false): Promise<void> {
     const r = this.renderer;
+    // What the warm-up counts its compiles in (see warm.ts): both passes, the mirror's guessed as big as the first.
+    const count = compileCounter();
+    const passes = mirror ? 2 : 1;
+    let before = 0;
+    let first = 0;
+    const counted = (mirrored: boolean) => (e: ProgressEvent) => {
+      if (!mirrored) first = e.total;
+      count?.(before + e.loaded, mirrored ? before + e.total : e.total * passes);
+    };
     const culled: THREE.Object3D[] = [];
     root.traverse((o) => {
       if (!o.frustumCulled) return;
@@ -172,11 +182,12 @@ export class CelPost {
     try {
       r.setRenderTarget(this.scenePass.renderTarget);
       r.setMRT(this.scenePass.getMRT());
-      await r.compileAsync(root, this.camera, this.scene);
+      await r.compileAsync(root, this.camera, this.scene, counted(false));
       if (mirror) {
+        before = first;
         r.setRenderTarget(this.mirrorTarget);
         r.setMRT(null);
-        await r.compileAsync(root, this.camera, this.scene);
+        await r.compileAsync(root, this.camera, this.scene, counted(true));
       }
     } finally {
       r.setRenderTarget(target);

@@ -9,8 +9,19 @@ export const en = {
     play: "Play",
     tabs: "Tabs",
     loading: "Loading…",
+    /** What the boot screen, a season card or the loading sign says loads now. */
+    loadingSteps: {
+      code: "Downloading the game",
+      connect: "Connecting to the race server",
+      join: "Joining the race",
+      art: "Downloading riders and scenery",
+      scene: "Setting the scene",
+      shaders: "Getting the graphics ready",
+      settle: "Almost there",
+    },
     soundLocked: "Click, tap or press any key for sound",
     rotate: "Turn your screen sideways to play",
+    swipeUp: "Swipe up to play full screen",
     retry: "Try again",
     close: "Close",
     cancel: "Cancel",
@@ -274,6 +285,7 @@ export const en = {
     off: "Off",
     homeScreen:
       "For the whole screen on an iPhone, add Shifty to your Home Screen: tap Share, then Add to Home Screen, and open it from there.",
+    swipeBody: "In Safari, a swipe up on the game hides the browser's bars, and a swipe down brings them back.",
     install: "Install Shifty",
     installBody: "Install it as an app: the whole screen, one tap away.",
     account: "Account",

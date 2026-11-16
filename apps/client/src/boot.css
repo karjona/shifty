@@ -20,10 +20,26 @@
   opacity: 0;
   pointer-events: none;
 }
+/* The wordmark, and under it as wide as it the bar: what loads on the left, how far on the right. */
+#boot .boot-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+}
+/* As wide as the wordmark set in its face, whether or not the face is in yet (the bar never changes width). */
+#boot .load {
+  width: 444px;
+}
 #boot .boot-mark {
   display: flex;
   align-items: center;
   height: 72px;
+}
+/* Its words wait for the game's face (a moment at most): no flash of another font. */
+#boot:not(.fonts) .boot-mark,
+#boot:not(.fonts) .load-line {
+  visibility: hidden;
 }
 #boot .deg {
   font-size: 52px;
@@ -35,7 +51,7 @@
   width: 13px;
   height: 72px;
   margin: 0 18px 0 20px;
-  background: #2b3fd0;
+  background: var(--accent, #2b3fd0);
   animation: axis-rock 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
 }
 #boot .name {
@@ -46,13 +62,114 @@
   font-style: italic;
   letter-spacing: -0.02em;
 }
+#boot .load-bar {
+  height: 10px;
+}
+#boot .load-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5f5a51;
+  white-space: nowrap;
+}
+#boot .load-pct {
+  font-size: 16px;
+  font-weight: 700;
+  font-stretch: 75%;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #1d1b17;
+}
+/* A phone on its side: a little smaller, the same. */
+@media (max-height: 420px) {
+  #boot .boot-stack {
+    gap: 22px;
+    zoom: 0.8;
+  }
+}
 
-/* The loading sign: in the bottom right corner, over everything, whenever
-   something loads (see loading.ts). Laid out on the 1920×1080 canvas, in the
-   margin under the screens' columns. */
+/* A bar (the boot screen's, a season card's, the sign's): a track with a 1px
+   ink edge, filled in the season's accent, its head cut at 23.4° like the
+   wordmark's axis. */
+.load-bar {
+  position: relative;
+  overflow: hidden;
+  background: rgb(29 27 23 / 0.06);
+  box-shadow: inset 0 0 0 1px rgb(29 27 23 / 0.32);
+}
+.load-bar.off {
+  visibility: hidden;
+}
+.load-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--accent, #2b3fd0);
+  /* (tan 23.4° of its height) */
+  clip-path: polygon(0 0, 100% 0, calc(100% - 0.4327 * var(--bar-h, 10px)) 100%, 0 100%);
+}
+.load-pct.off {
+  visibility: hidden;
+}
+
+/* A season card over a course while it loads: under the circuit's name,
+   in the card's paper colour (the accent is in the card's own colours). */
+.season-change .load {
+  width: min(600px, 44vw);
+  margin-top: 12px;
+}
+.season-change .load-bar {
+  --bar-h: 8px;
+  height: 8px;
+  background: rgb(246 241 231 / 0.18);
+  box-shadow: inset 0 0 0 1px rgb(246 241 231 / 0.7);
+}
+.season-change .load-fill {
+  background: #f6f1e7;
+}
+.season-change .load-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 12px;
+  font-size: clamp(12px, 0.9vw, 17px);
+  line-height: 1.2;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* (The circuit's line draws its own mark before it: not these.) */
+.season-change .load-line span::before {
+  content: none;
+}
+.season-change .load-pct {
+  font-size: clamp(14px, 1.1vw, 21px);
+  font-weight: 700;
+  font-stretch: 75%;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The loading sign: in the bottom right corner, over everything, while
+   something shorter loads (see loading.ts), with a slim bar along its foot
+   when there is progress to show. Laid out on the 1920×1080 canvas, in the
+   margin under the screens' columns; on a phone's compact canvas, whose
+   columns run to the foot of the screen, at the top between the screen's
+   title and the player's card. */
 #loading {
   position: fixed;
-  right: 72px;
+  right: var(--margin-x, 72px);
   bottom: 12px;
   z-index: 110;
   zoom: var(--ui-zoom, 1);
@@ -82,6 +199,13 @@
     opacity 200ms ease,
     visibility 0s 200ms;
 }
+:root[data-compact] #loading {
+  top: calc(var(--margin-y, 24px) + 18px);
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  translate: -50% 0;
+}
 #loading.on {
   opacity: 1;
   visibility: visible;
@@ -93,6 +217,24 @@
   height: 20px;
   background: var(--accent, #2b3fd0);
   animation: axis-rock 0.7s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+}
+#loading .load-bar {
+  --bar-h: 4px;
+  position: absolute;
+  inset: auto 0 0;
+  height: 4px;
+  box-shadow: none;
+}
+
+/* On a phone (scale.ts: data-compact) the sign stands in the bottom left on
+   the menus' canvas, clear of the safe areas and of the panels' buttons. */
+:root[data-compact] #loading {
+  zoom: var(--menu-zoom, 0.6);
+  left: max(var(--safe-left, 0px), 28px);
+  right: auto;
+  bottom: max(var(--safe-bottom, 0px), 14px);
+  height: 40px;
+  font-size: 17px;
 }
 
 /* Something loading: the axis rocks from 23.4° one way to 23.4° the other. */
@@ -161,5 +303,110 @@
   }
   100% {
     transform: none;
+  }
+}
+
+/* Safari on an iPhone (device.ts: installSafariBars) hides its bars once the
+   page scrolls: the page runs a swipe past the screen, and every layer of the
+   game stays fixed in place. */
+html[data-swipe] {
+  height: auto;
+  overflow: visible;
+  touch-action: pan-x pan-y;
+}
+html[data-swipe] body {
+  height: auto;
+  min-height: calc(100lvh + 160px);
+  overflow: visible;
+}
+html[data-swipe] #app {
+  position: fixed;
+  inset: 0;
+}
+
+/* While Safari's bars are up, the boot screen says to swipe them away. */
+#boot .boot-swipe {
+  display: none;
+}
+html[data-bars] #boot .boot-swipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 650;
+  font-stretch: 112%;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+#boot .boot-swipe svg {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: var(--accent, #2b3fd0);
+  stroke-width: 3;
+  stroke-linecap: square;
+  animation: swipe-up 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+@keyframes swipe-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+/* Over a race waiting on its grid or running its intro while Safari's bars
+   are up: a swipe up now gives the race the whole screen (once the touch
+   controls are up, nothing moves the page). */
+#swipe {
+  display: none;
+}
+html[data-bars]:is(:has(.race-controls.waiting), :has(.intro-card.shown)) #swipe {
+  position: fixed;
+  z-index: 20;
+  top: 8px;
+  left: max(env(safe-area-inset-left, 0px), 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 8px;
+  background: var(--accent, #2b3fd0);
+  box-shadow: 0 6px 16px rgb(24 16 8 / 0.24);
+  color: #f6f1e7;
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: swipe-hint-in 400ms ease both;
+}
+#swipe svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: square;
+  animation: swipe-up 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+@keyframes swipe-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
   }
 }

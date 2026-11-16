@@ -4,12 +4,13 @@
 import { type Appearance, ITEMS, type Item, SLOTS, type Slot, type Sport, fits, model } from "@shifty/rider";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { setClubCloseUp, setClubRider, setClubRiders, showClubRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { ApiError, buyItem, meQuery, storeRider } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop, useScrollEdges } from "../hooks.ts";
 import { hexColour, itemBrand, itemLabel, sportOptions } from "../items.ts";
+import { nav } from "../nav.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
@@ -35,6 +36,7 @@ export function ShopScreen() {
   const [busy, setBusy] = useState(false);
   useLoading(busy);
   const edges = useScrollEdges();
+  const tapped = useRef<string | null>(null);
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/", search: { tab: "collection" } }), !buying);
   useEffect(() => {
@@ -115,11 +117,15 @@ export function ShopScreen() {
                     type="button"
                     data-nav=""
                     data-nav-autofocus={n === 0 ? "" : undefined}
-                    className={`shop-item ${owned ? "owned" : ""}`}
+                    className={`shop-item ${owned ? "owned" : ""} ${trying === it.id ? "trying" : ""}`}
                     onFocus={() => setTrying(it.id)}
                     onMouseEnter={() => setTrying(it.id)}
                     onClick={() => {
-                      if (owned) toast(t.shop.wearIt);
+                      // A finger has no pointing: its first tap on an item tries it on, the next one buys it.
+                      if (nav.device === "touch" && tapped.current !== it.id) {
+                        tapped.current = it.id;
+                        setTrying(it.id);
+                      } else if (owned) toast(t.shop.wearIt);
                       else setBuying(it);
                     }}
                   >
