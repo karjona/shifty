@@ -202,6 +202,7 @@ function Head({
   heroSub,
   rank = 0,
   out = false,
+  stack = false,
 }: {
   kicker: string;
   title: string;
@@ -214,9 +215,11 @@ function Head({
   rank?: number;
   /** Disqualified: the place reads so in red. */
   out?: boolean;
+  /** The hero under the title, not beside it (a time is wide). */
+  stack?: boolean;
 }) {
   return (
-    <header className="end-head">
+    <header className={`end-head${stack ? " stack" : ""}`}>
       <div className="end-what">
         <span className="board-label">{kicker}</span>
         <b className="end-title">{title}</b>
@@ -486,6 +489,7 @@ export function WrapUp({
             hero={trial.best > 0 ? formatTime(trial.best, trial.hz) : t.trial.noLap}
             heroSub={t.trial.yourBest}
             rank={trial.beat === 2 ? 1 : 0}
+            stack
           />
         )}
         {end?.podium && <TiltStandings end={end} />}

@@ -1230,3 +1230,26 @@ fn a_time_trial_session_is_predicted_lap_after_lap_through_a_void_lap_a_retry_an
     assert_eq!(best, laps(&h).best * 1000 / TICK_HZ);
     assert_eq!(h.room.world().race.phase, RacePhase::Racing);
 }
+
+#[test]
+fn a_time_trial_session_closed_for_idling_reaches_the_screen() {
+    let cond = NetConditions {
+        latency_ms: 70.0,
+        jitter_ms: 10.0,
+        loss: 0.05,
+    };
+    let mut h = Harness::trial(race_in(CourseId::Oval, 0, 0, 0), SurfaceKind::Swells);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    let slot = h.peers[0].client.slot().expect("joined");
+    h.drive(5000.0, |_, c, _| bot_input(c.predicted_world(), slot));
+    assert_eq!(h.peers[0].client.session_over(), None);
+    // Hands off for three minutes: the room closes the session and says why.
+    let idle = race_server::room::TRIAL_IDLE_TICKS as f64 * 1000.0 / f64::from(TICK_HZ);
+    h.run(idle + 2000.0, |_, _| Input::default());
+    assert_eq!(h.room.world().race.phase, RacePhase::Results);
+    let c = &h.peers[0].client;
+    assert_eq!(c.session_over(), Some(protocol::SessionEnd::Idle));
+    assert_eq!(c.predicted_world().race.phase, RacePhase::Results);
+}

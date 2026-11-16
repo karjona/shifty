@@ -1175,6 +1175,10 @@
   padding: 0 22px;
   font-size: 20px;
 }
+/* A time trial's lap starts over from the race menu: the speed keeps its place by the menu button. */
+:root[data-compact] .race-menu-hint .race-retry {
+  display: none;
+}
 
 /* The controls (menu/screens/controls.tsx) while the grid waits: in the
    top right under the menu button, the title card having the bottom left.

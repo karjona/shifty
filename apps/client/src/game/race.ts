@@ -471,11 +471,18 @@ export class RaceSession implements Stage {
       best: race.bestLap,
       hz: race.tickHz,
       laps: race.lapsDone,
-      ghosts: this.trialRaced.map((g) => ({
-        label:
-          g.pick === "best" && beat > 0 ? t.previousBest : g.pick === "record" && beat > 1 ? t.previousRecord : g.label,
-        ticks: g.ticks,
-      })),
+      // (After a reload, your best may be this session's own lap: it isn't a ghost you raced.)
+      ghosts: this.trialRaced
+        .filter((g) => !(g.pick === "best" && g.ticks === race.bestLap))
+        .map((g) => ({
+          label:
+            g.pick === "best" && beat > 0
+              ? t.previousBest
+              : g.pick === "record" && beat > 1
+                ? t.previousRecord
+                : g.label,
+          ticks: g.ticks,
+        })),
       beat,
       name: this.riders.get(client.slot())?.name ?? "",
       practice: race.practice,
