@@ -1,6 +1,7 @@
 // The game: the menus, or (dev server only) a quick race, a look check, the podium or the sound board.
 import "./style.css";
 import "./menu/menu.css";
+import "./menu/phone.css";
 import { createRoot } from "react-dom/client";
 import { installSound } from "./audio/ui.ts";
 import { App } from "./menu/app.tsx";
@@ -8,12 +9,16 @@ import { devParams } from "./dev-params.ts";
 import { booted } from "./loading.ts";
 import { messages, onLocale } from "./i18n/index.ts";
 import { installScreen } from "./touch/device.ts";
+import { installTyping } from "./menu/typing.ts";
 
 installSound();
 installScreen();
+installTyping();
 onLocale(() => {
   const rotate = document.querySelector("#rotate span");
   if (rotate) rotate.textContent = messages().common.rotate;
+  const swipe = document.querySelector("#swipe span");
+  if (swipe) swipe.textContent = messages().common.swipeUp;
 });
 
 // The quick race, the look checks, the podium and the sound board only exist on the dev server: builds

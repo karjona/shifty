@@ -307,15 +307,17 @@ export class Hud {
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
       const lap = Math.min(Math.max(race.lap, 1), race.laps);
-      const score = `<div><span>${m.labels.score}</span> ${race.points}</div>`;
+      const score = `<div class="hud-score"><span>${m.labels.score}</span> ${race.points}</div>`;
       const first = race.looped
-        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? CHECK : `${lap}/${race.laps}`}</div>${score}`
+        ? `<div class="hud-lap"><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? CHECK : `${lap}/${race.laps}`}</div>${score}`
         : score;
       const split = this.split && performance.now() < this.split.until ? this.split.html : "";
-      const event = gp ? `<div><span>${m.labels.race}</span> ${gp.index + 1}/${gp.count}</div>` : "";
+      const event = gp ? `<div class="hud-race"><span>${m.labels.race}</span> ${gp.index + 1}/${gp.count}</div>` : "";
       // A time trial is you alone: no place to show.
-      const pos = this.trial ? "" : `<div><span>${m.labels.pos}</span> ${race.place}/${race.racers}</div>`;
-      const clock = `<div><span>${m.labels.time}</span> <b class="hud-clock"></b></div>`;
+      const pos = this.trial
+        ? ""
+        : `<div class="hud-pos"><span>${m.labels.pos}</span> ${race.place}/${race.racers}</div>`;
+      const clock = `<div class="hud-time"><span>${m.labels.time}</span> <b class="hud-clock"></b></div>`;
       if (this.write(this.info, "info", event + first + pos + clock + split)) {
         this.clock = this.info.querySelector(".hud-clock");
         this.shown.time = "";

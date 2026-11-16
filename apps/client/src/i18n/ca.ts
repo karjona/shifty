@@ -9,6 +9,7 @@ export const ca: Messages = {
     loading: "Carregant…",
     soundLocked: "Fes clic, toca la pantalla o prem una tecla per activar el so",
     rotate: "Posa la pantalla en horitzontal per jugar",
+    swipeUp: "Llisca cap amunt per jugar a pantalla completa",
     retry: "Torna-ho a provar",
     close: "Tanca",
     cancel: "Cancel·la",
@@ -128,9 +129,9 @@ export const ca: Messages = {
     slots: {
       head: "Cap",
       eyes: "Ulls",
-      top: "A dalt",
+      top: "Tors",
       vest: "Armilla",
-      bottom: "A baix",
+      bottom: "Cames",
       hands: "Mans",
       feet: "Peus",
       ride: "Vehicle",
@@ -256,6 +257,8 @@ export const ca: Messages = {
     off: "No",
     homeScreen:
       "Per jugar a pantalla completa en un iPhone, afegeix Shifty a la pantalla d'inici: toca Comparteix, després Afegeix a la pantalla d'inici, i obre'l des d'allà.",
+    swipeBody:
+      "A Safari, llisca cap amunt sobre el joc per amagar les barres del navegador; llisca cap avall perquè tornin.",
     install: "Instal·la Shifty",
     installBody: "Instal·la'l com una app: a pantalla completa, a un toc.",
     account: "Compte",

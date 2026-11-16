@@ -24,6 +24,7 @@ import {
   type GasMode,
   install,
   onScreenChange,
+  phoneSafari,
   screenVersion,
   setGasMode,
   standalone,
@@ -208,8 +209,10 @@ function TouchPanels() {
   const t = useT();
   useSyncExternalStore(onScreenChange, screenVersion);
   const away = !standalone();
-  const toggle = canFullscreen() && away;
-  const homeScreen = apple() && away && !canFullscreen();
+  // An iPhone's Safari says it can go full screen, but its way is the swipe (or the Home Screen).
+  const iphone = phoneSafari();
+  const toggle = canFullscreen() && away && !iphone;
+  const homeScreen = apple() && away && (iphone || !canFullscreen());
   return (
     <>
       {canTouch() && (
@@ -226,7 +229,7 @@ function TouchPanels() {
           />
         </Panel>
       )}
-      {(toggle || homeScreen || canInstall()) && (
+      {(toggle || homeScreen || iphone || canInstall()) && (
         <Panel title={t.settings.screen} className="screen-panel">
           {toggle && (
             <Picker<"on" | "off">
@@ -239,6 +242,7 @@ function TouchPanels() {
               onChange={(v) => (v === "on" ? enterFullscreen() : exitFullscreen())}
             />
           )}
+          {iphone && <p className="muted">{t.settings.swipeBody}</p>}
           {homeScreen && <p className="muted">{t.settings.homeScreen}</p>}
           {canInstall() && (
             <>

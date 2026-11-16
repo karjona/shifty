@@ -163,9 +163,16 @@ export class Minimap implements CourseMap {
 }
 
 /** Winter: the run from the top of the screen to the bottom. */
+/** A run's map is drawn at least this wide for its length: its turns spread sideways so they read. */
+const RUN_ASPECT = 0.3;
+/** ...spreading them at most this many times. */
+const RUN_SPREAD_MAX = 3;
+
 export class RunMap implements CourseMap {
   private svg: SVGSVGElement;
   private dots = new Map<number, SVGCircleElement>();
+  /** Sideways (x) on the map from x on the run. */
+  private side: (x: number) => number;
 
   constructor(root: HTMLElement, run: RunData) {
     let minX = Infinity;
@@ -179,6 +186,12 @@ export class RunMap implements CourseMap {
       maxZ = Math.max(maxZ, p.z);
     }
     const pad = 30;
+    const spread = Math.min(RUN_SPREAD_MAX, Math.max(1, (RUN_ASPECT * (maxZ - minZ)) / Math.max(1, maxX - minX)));
+    const mid = (minX + maxX) / 2;
+    const side = (x: number) => mid + (x - mid) * spread;
+    this.side = side;
+    minX = side(minX);
+    maxX = side(maxX);
     const w = maxX - minX + pad * 2;
     const h = maxZ - minZ + pad * 2;
     const height = Math.min(innerHeight * 0.6, 520);
@@ -193,7 +206,7 @@ export class RunMap implements CourseMap {
       },
       root,
     );
-    const line = run.path.map((p) => `${p.x.toFixed(1)},${p.z.toFixed(1)}`).join(" ");
+    const line = run.path.map((p) => `${side(p.x).toFixed(1)},${p.z.toFixed(1)}`).join(" ");
     node("polyline", { points: line, class: "run-edge" }, this.svg);
     node("polyline", { points: line, class: "run-snow" }, this.svg);
     const tick = (g: { x: number; z: number; yaw: number; half: number }, cls: string) => {
@@ -202,9 +215,9 @@ export class RunMap implements CourseMap {
       node(
         "line",
         {
-          x1: g.x - rx * (g.half + 8),
+          x1: side(g.x - rx * (g.half + 8)),
           y1: g.z - rz * (g.half + 8),
-          x2: g.x + rx * (g.half + 8),
+          x2: side(g.x + rx * (g.half + 8)),
           y2: g.z + rz * (g.half + 8),
           class: cls,
         },
@@ -225,7 +238,7 @@ export class RunMap implements CourseMap {
         dot = node("circle", { r: 16, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" }, this.svg);
         this.dots.set(r.slot, dot);
       }
-      dot.setAttribute("cx", r.x.toFixed(1));
+      dot.setAttribute("cx", this.side(r.x).toFixed(1));
       dot.setAttribute("cy", r.z.toFixed(1));
       dot.classList.toggle("me", r.isMe);
       if (r.isMe) this.svg.append(dot);

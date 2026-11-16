@@ -876,6 +876,8 @@ export class RaceSession implements Stage {
       touching,
     );
     this.hud.showGauges(!watching);
+    // On television the cameras and the standings tell the race: the map would only cover the shot.
+    if (this.mapRoot.hidden !== watching) this.mapRoot.hidden = watching;
     this.sfx.broadcast = watching;
     if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
 

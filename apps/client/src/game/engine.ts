@@ -8,6 +8,7 @@ import { AutoResolution } from "./resolution.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
 import { booted, whileLoading } from "../loading.ts";
+import { touchScreen } from "../touch/device.ts";
 
 /** Something on screen, drawn every frame. */
 export interface Stage {
@@ -43,6 +44,11 @@ const LOAD_MAX_MS = 15000;
 /** Automatic resolution draws at most this many pixels, and at least this many rows. */
 const AUTO_MAX_PIXELS = 2560 * 1440;
 const AUTO_MIN_ROWS = 540;
+/**
+ * A touch screen starts at most this many device pixels per CSS pixel (a phone's three would be over three
+ * million pixels for a small, weak GPU); more come once frames keep up.
+ */
+const AUTO_TOUCH_START_RATIO = 2;
 
 /** Someone waiting for drawing to settle, since `since` (ms). */
 interface Settling {
@@ -113,7 +119,8 @@ export class Engine {
       this.world.setRenderScale(scale, scale < 1);
       return;
     }
-    this.auto.bounds(innerWidth, innerHeight, devicePixelRatio, AUTO_MAX_PIXELS, AUTO_MIN_ROWS);
+    const start = touchScreen() ? AUTO_TOUCH_START_RATIO : devicePixelRatio;
+    this.auto.bounds(innerWidth, innerHeight, devicePixelRatio, AUTO_MAX_PIXELS, AUTO_MIN_ROWS, start);
     this.auto.reset();
     this.world.setRenderScale(this.auto.scale, false);
   }
