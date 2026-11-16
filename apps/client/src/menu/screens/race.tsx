@@ -395,10 +395,19 @@ function RaceRun({
   return (
     <div className={`screen race-screen${endShown || trialShown ? " wrapped" : ""}`}>
       <div ref={hudRef} className="race-hud" />
-      {/* The controls while the grid waits (the title card has the left; not over a season card or the intro). */}
-      {view && trouble === null && !menu && view.racePhase === GRID && view.onShow && (
-        <RaceControls sport={view.sport} device={view.device} className="waiting" />
-      )}
+      {/* The controls while the grid waits (at the right: the title card has the left) and through the
+          countdown (low at the left); never over a season card or the intro. */}
+      {view &&
+        trouble === null &&
+        !menu &&
+        view.onShow &&
+        (view.racePhase === GRID || view.racePhase === COUNTDOWN) && (
+          <RaceControls
+            sport={view.sport}
+            device={view.device}
+            className={view.racePhase === GRID ? "waiting" : "countdown"}
+          />
+        )}
       {!menu && trouble === null && !endShown && !trialShown && (
         <div className="race-menu-hint">
           {continueShown && (

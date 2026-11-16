@@ -1,7 +1,7 @@
-/* The race's controls (see screens/controls.tsx): numbered-less rows of the
-   device's own buttons and what they do, on paper. While the grid waits it
-   stands at the right, clear of the title card; in the race menu, beside
-   the menu's panel. */
+/* The race's controls (see screens/controls.tsx): rows of the device's own
+   buttons and what they do, on paper. While the grid waits it stands at the
+   right, clear of the title card; through the countdown low at the left; in
+   the race menu, beside the menu's panel. */
 
 .race-controls {
   display: flex;
@@ -41,6 +41,9 @@
   border-bottom: 1px solid var(--rule);
   font-size: var(--fs-label);
   line-height: 1.3;
+}
+.race-controls.gamepad .ctl-rows li {
+  grid-template-columns: 104px 1fr;
 }
 .race-controls.touch .ctl-rows li {
   grid-template-columns: 1fr;
@@ -86,6 +89,14 @@
   position: absolute;
   right: var(--margin-x);
   top: calc(var(--margin-y) + 56px + var(--gap));
+  animation: rise 420ms var(--ease) both;
+}
+
+/* Through the countdown: low at the left, over the speed and under the count's banner. */
+.race-controls.countdown {
+  position: absolute;
+  left: var(--margin-x);
+  bottom: 180px;
   animation: rise 420ms var(--ease) both;
 }
 
