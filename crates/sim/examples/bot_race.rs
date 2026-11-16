@@ -1,5 +1,6 @@
 //! Runs a full bots-only race and prints what happened: finish times,
-//! missed buoys, tricks, points and bails, and which tricks were landed.
+//! missed buoys or gates and disqualifications, tricks, points and bails,
+//! and which tricks were landed.
 //! For tuning bots, tricks and the courses, in any conditions.
 //!
 //! `cargo run -p sim --example bot_race --release [seed] [course] [season weather [turns] [time]]`
@@ -8,7 +9,8 @@
 //! conditions are names (`winter storm clear 60`), the course's home
 //! conditions if left out. `bot_race table [seed]` races every circuit in
 //! every season its sport rides, in a spread of weathers, and prints a
-//! table: the times against the home conditions', falls and tricks.
+//! table: the times against the home conditions', misses (all of them,
+//! the most by one bot) and disqualifications, falls and tricks.
 //! `BOT_TRACE=<slot>` prints where that bot is every second.
 
 use std::collections::BTreeMap;
@@ -137,6 +139,15 @@ fn race(event: Event, seed: u32) -> Outcome {
     }
 }
 
+/// Misses in all, the most by one rider, and how many were disqualified.
+fn misses(o: &Outcome) -> (u32, u8, usize) {
+    let st = o.world.standings();
+    let all = st.iter().map(|s| u32::from(s.progress.misses)).sum();
+    let most = st.iter().map(|s| s.progress.misses).max().unwrap_or(0);
+    let out = st.iter().filter(|s| s.progress.disqualified()).count();
+    (all, most, out)
+}
+
 /// Finish times (s) of those who finished, fastest first, and how many didn't.
 fn times(o: &Outcome) -> (Vec<f32>, usize) {
     let mut t: Vec<f32> = o
@@ -183,11 +194,15 @@ fn main() {
     for st in o.world.standings() {
         let p = st.progress;
         let slot = usize::from(st.slot);
+        let time = if p.disqualified() {
+            format!("DQ {:>5.1}s", p.disqualified_ticks as f32 / 60.0)
+        } else {
+            format!("{:>6.2}s", p.finish_ticks as f32 / 60.0)
+        };
         println!(
-            "{}. bot {} {:>6.2}s  missed {}  tricks {:>2} ({:>5} pts)  bails {}  air {:.1}s",
+            "{}. bot {} {time:>9}  missed {}  tricks {:>2} ({:>5} pts)  bails {}  air {:.1}s",
             st.place,
             slot + 1,
-            p.finish_ticks as f32 / 60.0,
             p.misses,
             p.tricks,
             p.points,
@@ -206,9 +221,22 @@ fn main() {
 /// conditions.
 fn table(seed: u32) {
     println!(
-        "{:<10} {:<7} {:<16} {:>8} {:>8} {:>7} {:>4} {:>6} {:>7}",
-        "circuit", "season", "weather", "winner", "median", "vs home", "dnf", "bails", "tricks"
+        "{:<10} {:<7} {:<16} {:>8} {:>8} {:>7} {:>4} {:>6} {:>4} {:>3} {:>6} {:>7}",
+        "circuit",
+        "season",
+        "weather",
+        "winner",
+        "median",
+        "vs home",
+        "dnf",
+        "missed",
+        "most",
+        "dq",
+        "bails",
+        "tricks"
     );
+    let mut worst = (0u8, String::new());
+    let mut out_all = 0;
     for &course in CourseId::ALL {
         let home = race(Event::home(course), seed);
         let (home_times, _) = times(&home);
@@ -249,8 +277,13 @@ fn table(seed: u32) {
                     _ => (f32::NAN, f32::NAN),
                 };
                 let tricks: u32 = o.landed.values().map(|v| v.0).sum();
+                let (missed, most, out) = misses(&o);
+                out_all += out;
+                if most > worst.0 {
+                    worst = (most, format!("{course:?} {season:?} {label}"));
+                }
                 println!(
-                    "{:<10} {:<7} {:<16} {:>7.2}s {:>7.2}s {:>+6.1}% {:>4} {:>6} {:>7}",
+                    "{:<10} {:<7} {:<16} {:>7.2}s {:>7.2}s {:>+6.1}% {:>4} {:>6} {:>4} {:>3} {:>6} {:>7}",
                     format!("{course:?}"),
                     format!("{season:?}"),
                     label,
@@ -258,10 +291,17 @@ fn table(seed: u32) {
                     median,
                     (median / home_median - 1.0) * 100.0,
                     dnf,
+                    missed,
+                    most,
+                    out,
                     o.bails.iter().sum::<u32>(),
                     tricks
                 );
             }
         }
     }
+    println!(
+        "disqualified in all: {out_all}; most misses by one bot: {} ({})",
+        worst.0, worst.1
+    );
 }
