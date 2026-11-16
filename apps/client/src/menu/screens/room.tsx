@@ -98,7 +98,7 @@ export function RoomScreen() {
       leaving.current = true;
       setPendingRace({ ticket: m.ticket, back: { to: "/room/$code", params: { code } } });
       socket.close();
-      void navigate({ to: "/race" });
+      void navigate({ to: "/race", replace: true });
     } else if (m?.t === "error") {
       const msg =
         m.error === "full"

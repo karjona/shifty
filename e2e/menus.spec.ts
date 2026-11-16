@@ -55,9 +55,12 @@ test("sign up, pick a handle and race the Tilt against bots", async ({ browser }
   // A Tilt: a race per season (two, summer then winter, with fewer circuits than seasons).
   await expect.poll(() => page.evaluate(() => window.__shifty.race().eventCount)).toBeGreaterThanOrEqual(2);
   await expect.poll(() => page.evaluate(() => Object.values(window.__shifty.names()))).toContain(handle);
-  // The race menu takes you back to the mode select.
+  // The race menu takes you back to the mode select, asking first once the Tilt is under way.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /leave the race/iu }).click();
+  const confirm = page.getByRole("button", { name: /^leave$/iu });
+  await expect(confirm.or(page.locator(".mode-select"))).toBeVisible();
+  if (await confirm.isVisible()) await confirm.click();
   await page.waitForURL(/\/play/u);
 });
 
