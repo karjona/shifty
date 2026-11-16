@@ -123,6 +123,8 @@ export interface Environment {
   closeShadows?(on: boolean): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
   ground(x: number, z: number, t: number): number;
+  /** Moves the chase camera's spot `eye` (x and z) back to where it sees clear of what lines the course, if it can't there. */
+  keepEye?(eye: { x: number; z: number }): void;
   /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
   makeRider(slot: number, appearance: Appearance | null): RiderModel;
   /** Per frame, once the riders are placed. */
@@ -200,6 +202,8 @@ export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(55, 1, 0.3, 4000);
+  /** Where the chase camera stands this frame, on the ground's plane. */
+  private eyeSpot = { x: 0, z: 0 };
   /** The race's weather, read once a frame at the camera (null outside a race). */
   weatherAt: WeatherSource | null = null;
   backend: "webgpu" | "webgl2" = "webgl2";
@@ -665,8 +669,11 @@ export class World {
 
     const fx = Math.sin(this.camHeading);
     const fz = Math.cos(this.camHeading);
-    const x = me.x - fx * this.camBack;
-    const z = me.z - fz * this.camBack;
+    const eye = this.eyeSpot;
+    eye.x = me.x - fx * this.camBack;
+    eye.z = me.z - fz * this.camBack;
+    env.keepEye?.(eye);
+    const { x, z } = eye;
     const up = c.up + this.camAir * c.airUp;
     let floor = env.ground(x, z, t) + c.clearance;
     if (c.floorFollow !== undefined) {

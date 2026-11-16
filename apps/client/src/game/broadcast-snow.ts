@@ -14,6 +14,9 @@ import { type Rig, type Watch, clear, drone, onRider } from "./broadcast-rig.ts"
 
 /** Past the finish, the finish area reaches this far (m). */
 const AREA = 70;
+/** A camera beside the run stands at least this far (m) from a gate's pole, and this far in from trees and rock. */
+const GATE_ROOM = 6;
+const WOODED_INSET = 3.2;
 /** The final pitch, as the camera under the arch sees it (m before the finish). */
 const PITCH_FROM = 130;
 const PITCH_TO = 22;
@@ -243,17 +246,24 @@ export function snowRigs(
       if (bend > Math.PI) bend -= Math.PI * 2;
       if (bend < -Math.PI) bend += Math.PI * 2;
       sideOf = Math.abs(bend) > 0.05 ? (bend > 0 ? 1 : -1) : -sideOf;
-      // At the run's edge, under the boughs of the trees beside it and
-      // clear of its rock walls. Clear of the run's own pines and towers.
+      // At the run's edge, in from the boughs of the trees beside it (a
+      // fir's lowest reach furthest) and its rock walls' buttresses. Clear
+      // of the run's own pines, towers and gate poles (a pole by the lens
+      // would fill the shot).
       for (let tries = 0; tries < 4; tries++) {
         const i = Math.max(0, Math.min(run.path.length - 1, Math.round((sideS - run.path[0]!.s) / 4)));
         const p = run.path[i]!;
         const limit = sideOf > 0 ? p.limitR : p.limitL;
-        // (Crouched low under the trees' boughs and the rock's overhangs.)
         const edge = sideOf > 0 ? p.edgeR : p.edgeL;
-        const crouch = edge === "trees" || edge === "rock";
-        sideEye.copy(on(sideS, sideOf * (limit - (crouch ? 1.6 : 1.2)), crouch ? 0.9 : 1.7));
-        if (!run.obstacles.some((o) => Math.hypot(o.x - sideEye.x, o.z - sideEye.z) < o.radius + 4)) break;
+        const inset = edge === "trees" || edge === "rock" ? WOODED_INSET : 1.2;
+        sideEye.copy(on(sideS, sideOf * Math.max(0, limit - inset), 1.5));
+        const clearOf = (x: number, z: number, room: number) => Math.hypot(x - sideEye.x, z - sideEye.z) >= room;
+        const poles = run.gates.every((g) =>
+          [-1, 1].every((k) =>
+            clearOf(g.x - Math.cos(g.yaw) * g.half * k, g.z + Math.sin(g.yaw) * g.half * k, GATE_ROOM),
+          ),
+        );
+        if (poles && run.obstacles.every((o) => clearOf(o.x, o.z, o.radius + 4))) break;
         sideS += 10;
       }
     },
