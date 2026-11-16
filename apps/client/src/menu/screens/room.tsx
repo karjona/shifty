@@ -93,9 +93,16 @@ export function RoomScreen() {
   };
   useAction("back", leave);
 
+  // Whether you were ready when the socket dropped: a reconnect says so again.
+  const ready = useRef<{ was: boolean; back: boolean }>({ was: false, back: false });
   const onMessage = useEffectEvent((socket: WebSocket, data: unknown) => {
     const m = parseRoomMessage(data);
     if (m?.t === "state") {
+      const mineNow = m.room.members.find((x) => x.userId === me);
+      if (ready.current.back && ready.current.was && mineNow && !mineNow.ready && m.room.hostId !== me) {
+        socket.send(JSON.stringify({ t: "ready", ready: true }));
+      }
+      ready.current = { was: mineNow?.ready ?? false, back: false };
       setRoom(m.room);
       setClubRiders(m.room.members.length);
     } else if (m?.t === "ticket") {
@@ -146,6 +153,7 @@ export function RoomScreen() {
           return;
         }
         setReconnecting(true);
+        ready.current.back = true;
         checkSession();
         timer = setTimeout(
           () =>
