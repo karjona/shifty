@@ -209,17 +209,17 @@ const CHECKPOINTS: &[f32] = &[240.0, 480.0, 720.0, 960.0, 1200.0, 1450.0, 1700.0
 
 const OBSTACLES: &[super::ObstacleDef] = &[
     // The second chairlift, up the side of the bowl.
-    tower(250.0, 10.4),
-    tower(340.0, 10.4),
-    tower(430.0, 10.4),
-    tower(520.0, 10.4),
+    tower(250.0, 12.5),
+    tower(340.0, 12.5),
+    tower(430.0, 12.5),
+    tower(520.0, 12.5),
     // Rocks at the bowl's edge.
     rock(292.0, -10.2, 1.2),
     // The glades: pines close on both sides of every turn, and in the
     // middle of the straights.
     pine(676.0, -5.0),
     pine(718.0, 5.0),
-    pine(772.0, 1.0),
+    pine(764.0, 3.2),
     pine(798.0, -5.3),
     pine(826.0, 5.0),
     pine(874.0, -5.0),
@@ -227,8 +227,7 @@ const OBSTACLES: &[super::ObstacleDef] = &[
     pine(942.0, 5.0),
     pine(996.0, 5.0),
     pine(1012.0, -5.0),
-    pine(1052.0, -2.5),
-    pine(1066.0, 3.0),
+    pine(1078.0, -3.0),
     pine(1088.0, 5.2),
     pine(1112.0, -5.0),
     pine(1152.0, -4.5),
@@ -237,7 +236,7 @@ const OBSTACLES: &[super::ObstacleDef] = &[
     rock(1392.0, -2.8, 0.9),
     // The last pitch.
     rock(1660.0, -6.5, 1.1),
-    pine(1760.0, 7.0),
+    pine(1694.0, 7.0),
     rock(1880.0, 7.6, 1.0),
 ];
 

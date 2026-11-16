@@ -54,11 +54,14 @@ fn main() {
     let mut seed = 1;
     let mut only = None;
     let mut by_kind = false;
+    let mut trick_only = false;
     for a in std::env::args().skip(1) {
         if let Ok(n) = a.parse() {
             seed = n;
         } else if a == "kinds" {
             by_kind = true;
+        } else if a == "tricks" {
+            trick_only = true;
         } else {
             only = CourseId::ALL.iter().copied().find(|c| {
                 a.eq_ignore_ascii_case(&format!("{c:?}")) && c.sport() == Sport::Snowboard
@@ -67,6 +70,10 @@ fn main() {
     }
     if by_kind {
         kinds(only);
+        return;
+    }
+    if trick_only {
+        tricks(only);
         return;
     }
     for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
@@ -371,7 +378,7 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
             if (from..to).contains(&s) {
                 println!(
                     "   s {s:6.1} off {off:+5.1} line {:+5.1} {:3.0} km/h {} steer {:+.2} lean {:+.2}",
-                    sim::bot::snow_line(run, slot, s),
+                    sim::bot::snow_line(run, w.cover_rocks(), slot, s),
                     r.speed() * 3.6,
                     if r.grounded { "snow" } else { "air " },
                     r.last_input.steer_f(),
@@ -554,17 +561,39 @@ fn spread(course: CourseId) -> Vec<Event> {
 
 /// One bot alone down the run riding as `bot`: its time (s) and falls.
 fn solo(event: Event, bot: SnowBot) -> (f32, u32) {
+    let (t, falls, _) = solo_landings(event, bot);
+    (t, falls)
+}
+
+/// [`solo`], and how many of its landings were sketchy.
+fn solo_landings(event: Event, bot: SnowBot) -> (f32, u32, u32) {
     let mut w = World::for_event(event, SurfaceKind::Flat, 1);
     let run = w.course().run().expect("a run");
     w.spawn(0);
     w.start_intro();
     let mut inputs: Inputs = [None; MAX_RIDERS];
     let mut falls = 0;
+    let mut sketchy = 0;
     for _ in 0..60 * 60 * 6 {
         inputs[0] = Some(snowboard_input(&w, run, 0, bot));
+        // `SOLO_TRACE=1` prints the lone bot every second.
+        if std::env::var_os("SOLO_TRACE").is_some() && w.tick.is_multiple_of(60) {
+            let r = w.riders[0].unwrap();
+            let (s, off) = run.project(r.pos.x, r.pos.z);
+            println!(
+                "   solo s {s:6.1} off {off:+5.1} {:3.0} km/h",
+                r.speed() * 3.6
+            );
+        }
         for e in w.step(&inputs) {
             if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
                 falls += 1;
+            }
+            if matches!(
+                e.kind,
+                EventKind::Sketchy | EventKind::Trick { sketchy: true, .. }
+            ) {
+                sketchy += 1;
             }
         }
         if w.riders[0].unwrap().race.finished() {
@@ -577,7 +606,44 @@ fn solo(event: Event, bot: SnowBot) -> (f32, u32) {
     } else {
         f32::NAN
     };
-    (t, falls)
+    (t, falls, sketchy)
+}
+
+/// What tricks cost a bot alone at the fastest bots' pace, in every
+/// condition of the spread.
+fn tricks(only: Option<CourseId>) {
+    let fast = SnowBot::of(2).pace;
+    let mut cost = Vec::new();
+    for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
+        for event in spread(lab.course) {
+            let (clean, f0, k0) = solo_landings(
+                event,
+                SnowBot {
+                    pace: fast,
+                    trickster: false,
+                },
+            );
+            let (tricking, f1, k1) = solo_landings(
+                event,
+                SnowBot {
+                    pace: fast,
+                    trickster: true,
+                },
+            );
+            let c = event.conditions;
+            println!(
+                "{:?} {:?} {:?}>{:?}: clean {clean:.2} s ({f0} falls, {k0} sketchy), tricking {tricking:.2} s ({f1} falls, {k1} sketchy): {:+.2} s",
+                lab.course,
+                c.season,
+                c.weather,
+                c.turns,
+                tricking - clean
+            );
+            cost.push(tricking - clean);
+        }
+    }
+    cost.sort_by(f32::total_cmp);
+    println!("median {:+.2} s", cost[cost.len() / 2]);
 }
 
 /// Who wins, by kind of bot, across a spread of conditions on each run.
@@ -596,6 +662,8 @@ fn kinds(only: Option<CourseId>) {
     let mut most_misses = 0u8;
     let mut points = [0u32; 3];
     let mut by_gate = std::collections::BTreeMap::new();
+    let mut fell = std::collections::BTreeMap::new();
+    let mut trick_cost = Vec::<f32>::new();
     for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
         println!("== {:?}", lab.course);
         for event in spread(lab.course) {
@@ -618,6 +686,23 @@ fn kinds(only: Option<CourseId>) {
                     best_falls = f;
                 }
             }
+            // What tricks cost a bot riding at the fastest bots' pace.
+            let fast = SnowBot::of(2).pace;
+            let (clean, _) = solo(
+                event,
+                SnowBot {
+                    pace: fast,
+                    trickster: false,
+                },
+            );
+            let (tricking, _) = solo(
+                event,
+                SnowBot {
+                    pace: fast,
+                    trickster: true,
+                },
+            );
+            trick_cost.push(tricking - clean);
             let mut w = World::for_event(event, SurfaceKind::Flat, 1);
             for slot in 0..MAX_RIDERS {
                 w.spawn(slot);
@@ -631,6 +716,18 @@ fn kinds(only: Option<CourseId>) {
                 for e in w.step(&inputs) {
                     if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
                         falls[usize::from(e.slot) % 3] += 1;
+                        if let (Some(r), Some(run)) =
+                            (w.riders[usize::from(e.slot)], w.course().run())
+                        {
+                            let (s, off) = run.project(r.pos.x, r.pos.z);
+                            let at = format!(
+                                "{:?} s~{:.0} {}",
+                                lab.course,
+                                (s / 10.0).round() * 10.0,
+                                if off < 0.0 { "left" } else { "right" }
+                            );
+                            *fell.entry(at).or_insert(0u32) += 1;
+                        }
                     }
                     if let EventKind::Buoy {
                         buoy, ok: false, ..
@@ -702,6 +799,21 @@ fn kinds(only: Option<CourseId>) {
         "winner median {:+.1}% vs alone flat out; most gates one bot missed in a race: {most_misses}",
         median(&mut best_gap)
     );
+    trick_cost.sort_by(f32::total_cmp);
+    println!(
+        "tricks cost a fast bot alone: median {:+.2} s (from {:+.2} to {:+.2} s)",
+        trick_cost[trick_cost.len() / 2],
+        trick_cost[0],
+        trick_cost[trick_cost.len() - 1]
+    );
+    let mut fell: Vec<(String, u32)> = fell.into_iter().collect();
+    fell.sort_by_key(|f| std::cmp::Reverse(f.1));
+    let fell: Vec<String> = fell
+        .iter()
+        .take(12)
+        .map(|(at, n)| format!("{at} x{n}"))
+        .collect();
+    println!("falls most at: {}", fell.join(", "));
     for (gate, (n, when)) in by_gate {
         let when: Vec<String> = when.into_iter().collect();
         println!("   {gate}: missed {n} times ({})", when.join(" "));

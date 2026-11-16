@@ -511,7 +511,7 @@ const ROCK_ROOM: f32 = 2.0;
 /// No rocks in the way into a run's gate: from this far before it (m) to
 /// `ROCK_GATE_AFTER` past it, within `ROCK_GATE_SIDE` m of its poles.
 const ROCK_GATE_BEFORE: f32 = 25.0;
-const ROCK_GATE_AFTER: f32 = 15.0;
+const ROCK_GATE_AFTER: f32 = 30.0;
 const ROCK_GATE_SIDE: f32 = 1.5;
 
 /// Whether a rock at `(s, offset)` stands in the way into one of a run's gates.
@@ -552,8 +552,9 @@ fn place_rocks(run: &Run, start_s: f32) -> Vec<Rock> {
         let height = rng.range(0.35, 0.6);
         let (x, z) = run.centerline(s).at_offset(offset);
         let near_gate = gates.iter().any(|&g| (g - s).abs() < ROCK_CLEAR_GATE);
-        // Off the built features (tables, rollers, kickers): flat snow only.
-        let on_feature = (-3..=3).any(|i| run.features_at(s + i as f32 * 5.0, offset).abs() > 0.05);
+        // Off the built features (tables, rollers, kickers), and not where
+        // riders still fly off one.
+        let on_feature = (-9..=3).any(|i| run.jumps_at(s + i as f32 * 5.0, offset).abs() > 0.05);
         let crowded = run.obstacles().iter().any(|o| {
             let (dx, dz) = (o.x - x, o.z - z);
             let clear = o.radius + radius + ROCK_CLEAR_OBSTACLE;
@@ -1222,7 +1223,7 @@ mod tests {
                         .all(|&g| (g - k.s).abs() > ROCK_CLEAR_GATE)
                 );
                 // Off anything built; a bowl's dish or a gully's floor is just snow.
-                assert!(run.features_at(k.s, k.offset).abs() <= 0.05);
+                assert!(run.jumps_at(k.s, k.offset).abs() <= 0.05);
             }
             let fall = World::for_event(
                 Event {

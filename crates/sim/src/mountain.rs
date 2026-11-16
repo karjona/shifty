@@ -756,8 +756,21 @@ impl Run {
 
     /// Height of what is built on (or dug into) the run at `(s, offset)`.
     pub fn features_at(&self, s: f32, offset: f32) -> f32 {
+        self.built_at(s, offset, true)
+    }
+
+    /// Height of what is built on the run at `(s, offset)`, leaving out what
+    /// is dug into it (gullies, bowls): its jumps, rollers and spines.
+    pub fn jumps_at(&self, s: f32, offset: f32) -> f32 {
+        self.built_at(s, offset, false)
+    }
+
+    fn built_at(&self, s: f32, offset: f32, dug: bool) -> f32 {
         let mut h = 0.0;
         for f in self.features {
+            if !dug && matches!(f, Feature::Gully { .. } | Feature::Bowl { .. }) {
+                continue;
+            }
             h += match *f {
                 Feature::Table {
                     s: s0,
@@ -1220,9 +1233,9 @@ pub static RUN: Run = Run::new(
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
         Feature::Table {
             s: 1620.0,
@@ -1242,9 +1255,9 @@ pub static RUN: Run = Run::new(
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
         Feature::Table {
             s: 1870.0,
@@ -1253,9 +1266,9 @@ pub static RUN: Run = Run::new(
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
     ],
     &[250.0, 520.0, 800.0, 1050.0, 1290.0, 1560.0, 1850.0],
@@ -1309,7 +1322,7 @@ pub static RUN: Run = Run::new(
         gate(1415.0, 3.0, 8.0),
         gate(1598.0, 1.5, 8.0),
         gate(1735.0, -3.0, 8.0),
-        gate(1950.0, -2.0, 8.0),
+        gate(1975.0, -1.0, 8.0),
     ],
     &[Cliff {
         s: 1058.6,
