@@ -62,8 +62,8 @@ const MOUNTAIN: RunScenery = {
     { from: 1010, to: 1100, count: 8, near: 3, far: 26, size: 5 },
     { from: 1400, to: 2000, count: 12, near: 8, far: 50, size: 5 },
   ],
-  // Either side of the cliff (the run's rock walls come from the sim).
-  walls: [{ from: 1044, to: 1102, height: 9, out: 1.5 }],
+  // (The run's rock walls and its cliff come from the sim.)
+  walls: [],
   creek: null,
 };
 

@@ -1,7 +1,9 @@
 // Dev: a circuit in its conditions without a race, for look tests.
 //  `/?celshot=course&event=snow&season=fall&weather=storm&turns=clear&time=dusk&turn=0.5&view=1`
 //  (`event`, `season`, `weather`, `turns` and `time` as the quick race takes
-//  them; `turn` how far the weather has turned, 0-1; `view` one of the
+//  them; `turn` how far the weather has turned, 0-1; `at` (and `off`) a
+//  rider that far down a run (and off its centre line; `back`: seen from
+//  that far below, looking back up); `view` one of the
 //  circuit's set views: a rider from behind along the course, then a wide
 //  one; or `eye=x,y,z&look=x,y,z`; or `fly=0-1`, the intro's fly-over that
 //  far through; or, on a run, `tv=<camera>&rider=<m down the run>`, one of
@@ -109,10 +111,38 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
     const [x = 0, y = 0, z = 0] = (params.get(k) ?? "").split(",").map(Number);
     return new THREE.Vector3(x, y, z);
   };
+  // A rider `at` metres down a run, `off` metres to their right of its centre line.
+  const along = (): View | null => {
+    if (data.sport !== "snow" || !params.has("at")) return null;
+    const path = data.run.path;
+    const p = path[Math.max(0, Math.min(path.length - 1, Math.round((Number(params.get("at")) - path[0]!.s) / 4)))]!;
+    const off = Number(params.get("off") ?? 0);
+    const x = p.x - Math.cos(p.yaw) * off;
+    const z = p.z + Math.sin(p.yaw) * off;
+    const y = env.ground(x, z, 0);
+    const fx = Math.sin(p.yaw);
+    const fz = Math.cos(p.yaw);
+    // `back`: seen from that many metres further down, looking back up at them.
+    const back = Number(params.get("back") ?? 0);
+    if (back > 0) {
+      const bx = x + fx * back;
+      const bz = z + fz * back;
+      return {
+        eye: new THREE.Vector3(bx, env.ground(bx, bz, 0) + 2.4, bz),
+        look: new THREE.Vector3(x, y + 1, z),
+        rider: { x, z, yaw: p.yaw },
+      };
+    }
+    return {
+      eye: new THREE.Vector3(x - fx * 4.5, y + 2.2, z - fz * 4.5),
+      look: new THREE.Vector3(x + fx * 10, y - 1.2, z + fz * 10),
+      rider: { x, z, yaw: p.yaw },
+    };
+  };
   const view: View =
     params.has("eye") && params.has("look")
       ? { eye: point("eye"), look: point("look"), rider: null }
-      : views[Math.min(views.length - 1, Number(params.get("view") ?? 0))]!;
+      : (along() ?? views[Math.min(views.length - 1, Number(params.get("view") ?? 0))]!);
   const turn = Number(params.get("turn") ?? 0);
   // The intro's fly-over, held at one moment of it.
   const fly = params.has("fly") ? new Flyover(data, env).intro(Number(params.get("fly")) * 7, 7) : null;

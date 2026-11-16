@@ -1243,7 +1243,9 @@ export class Mountain implements Environment {
       let u = 0;
       let open = false;
       this.run.path.forEach((p, i) => {
-        const fenced = (side > 0 ? p.edgeR : p.edgeL) === "netting";
+        // (No netting down a cliff's face.)
+        const dropping = this.run.cliffs.some((c) => p.s > c.s - 3 && p.s < c.s + c.face + 6);
+        const fenced = (side > 0 ? p.edgeR : p.edgeL) === "netting" && !dropping;
         const [x, z] = tops[i]!;
         const y = ys[i]!;
         if (!fenced) {

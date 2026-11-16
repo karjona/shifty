@@ -285,9 +285,11 @@ export function rockWalls(
 }
 
 /**
- * A cliff's face across the run: rock from its lip down to its foot, a little
- * proud of the snow's steep face, in columns of a few metres, out past the
- * run's edges into the slope either side.
+ * A cliff's face across the run and out into the slope either side, as far
+ * as the ground drops: columns of rock a few metres wide standing proud of
+ * the snow's steep face, each in two tiers with a ledge between (one face
+ * where the drop is small), its brow out over the tier below; snow lies on
+ * the brow and the ledges, and icicles hang from the brows that overhang.
  */
 export function cliffFaces(
   run: RunData,
@@ -295,33 +297,71 @@ export function cliffFaces(
   heights: (points: Float32Array) => Float32Array,
 ): THREE.Mesh[] {
   const rock = new Shape();
+  const hanging = new Shape();
   const rand = rng(4242);
+  /** How far behind the lip the rock begins, and how far past the face's foot the ground is read (m). */
+  const BACK = 0.3;
+  const PAST = 0.6;
   for (const c of cliffs) {
-    const reach = runPoint(run, c.s).limit + 10;
-    const cols: number[] = [];
-    for (let o = -reach; o < reach; o += 2 + rand() * 2) cols.push(o);
-    cols.push(reach);
-    // The ground at the lip and at the foot under each column's edge.
-    const pts = new Float32Array(cols.length * 4);
-    cols.forEach((o, i) => {
-      const top = runAt(run, c.s - 0.4, o);
-      const foot = runAt(run, c.s + c.face + 0.8, o);
-      pts.set([top.x, top.z, foot.x, foot.z], i * 4);
-    });
-    const ys = heights(pts);
     const f = runPoint(run, c.s);
-    const fwd: P = [Math.sin(f.yaw), 0.2, Math.cos(f.yaw)];
-    for (let i = 0; i + 1 < cols.length; i++) {
-      const proud = 0.25 + rand() * 0.5;
-      const at = (k: number, top: boolean): P => {
-        const o = cols[i + k]!;
-        const q = runAt(run, top ? c.s - 0.4 : c.s + c.face + 0.8, o);
-        const y = ys[(i + k) * 2 + (top ? 0 : 1)]!;
-        return [q.x + fwd[0] * proud, top ? y + 0.15 : y - 0.6, q.z + fwd[2] * proud];
-      };
-      const tone = FACES[Math.floor(rand() * FACES.length)]!;
-      rock.quad(at(0, false), at(1, false), at(1, true), at(0, true), fwd, tone);
+    const fx = Math.sin(f.yaw);
+    const fz = Math.cos(f.yaw);
+    const reach = f.limit + 34;
+    const edges: number[] = [];
+    for (let o = -reach; o < reach; o += 2.2 + rand() * 3) edges.push(o);
+    edges.push(reach);
+    // The ground along the lip and along the foot, under each column's edges.
+    const wide = c.face + BACK + PAST;
+    const lip = edges.map((o) => runAt(run, c.s - BACK, o));
+    const pts = new Float32Array(edges.length * 4);
+    lip.forEach((q, i) => pts.set([q.x, q.z, q.x + fx * wide, q.z + fz * wide], i * 4));
+    const ys = heights(pts);
+    const toward: P = [fx, 0.25, fz];
+    const tone = () => FACES[Math.floor(rand() * FACES.length)]!;
+    for (let i = 0; i + 1 < edges.length; i++) {
+      const top = [ys[i * 2]!, ys[(i + 1) * 2]!] as const;
+      const foot = [ys[i * 2 + 1]!, ys[(i + 1) * 2 + 1]!] as const;
+      const tall = Math.min(top[0] - foot[0], top[1] - foot[1]);
+      if (tall < 1.8) continue;
+      // Out from the lip line (m): the brow, the upper tier's foot, the ledge's rim, the foot.
+      const brow = 0.5 + rand() * 0.8;
+      const split = 0.35 + rand() * 0.3;
+      const lean = rand() < 0.4 ? -(0.1 + rand() * 0.3) : rand() * 0.4;
+      const mid = Math.max(brow + lean, wide * (1 - split) + 0.3);
+      const ledge = 0.5 + rand() * 0.9;
+      const out = Math.max(mid + ledge + rand() * 0.5 - 0.15, wide + 0.3 + rand() * 0.5);
+      const at = (k: 0 | 1, d: number, y: number): P => [lip[i + k]!.x + fx * d, y, lip[i + k]!.z + fz * d];
+      const yTop = (k: 0 | 1) => top[k] - 0.3;
+      const yMid = (k: 0 | 1) => foot[k] + (top[k] - foot[k]) * split;
+      const yFoot = (k: 0 | 1) => foot[k] - 0.8;
+      const t = [at(0, brow, yTop(0)), at(1, brow, yTop(1))] as const;
+      const back = [at(0, -0.2, yTop(0)), at(1, -0.2, yTop(1))] as const;
+      const base = [at(0, out, yFoot(0)), at(1, out, yFoot(1))] as const;
+      rock.quad(back[0], back[1], t[1], t[0], [0, 1, 0], TOP);
+      blanket(rock, t[0], t[1], back[1], back[0], 0.5);
+      const tiers = tall > 3.5;
+      if (tiers) {
+        const m = [at(0, mid, yMid(0)), at(1, mid, yMid(1))] as const;
+        const rim = [at(0, mid + ledge, yMid(0)), at(1, mid + ledge, yMid(1))] as const;
+        rock.quad(m[0], m[1], t[1], t[0], toward, tone());
+        rock.quad(m[0], m[1], rim[1], rim[0], [0, 1, 0], TOP);
+        rock.quad(base[0], base[1], rim[1], rim[0], toward, tone());
+        blanket(rock, rim[0], rim[1], m[1], m[0], 0.4);
+        if (lean < -0.08) icicles(hanging, t[0], t[1], Math.min(1.5, (top[0] - foot[0]) * (1 - split) * 0.35), rand);
+      } else rock.quad(base[0], base[1], t[1], t[0], toward, tone());
+      // Its two ends, where its neighbours stand back from it.
+      for (const k of [0, 1] as const) {
+        const other = k === 0 ? 1 : 0;
+        const end: P = [lip[i + k]!.x - lip[i + other]!.x, 0, lip[i + k]!.z - lip[i + other]!.z];
+        const inTop = at(k, -0.2, yTop(k));
+        const inFoot = at(k, -0.2, yFoot(k));
+        if (tiers) {
+          const inMid = at(k, -0.2, yMid(k));
+          rock.quad(t[k], at(k, mid, yMid(k)), inMid, inTop, end, SIDE);
+          rock.quad(at(k, mid + ledge, yMid(k)), base[k], inFoot, inMid, end, SIDE);
+        } else rock.quad(t[k], base[k], inFoot, inTop, end, SIDE);
+      }
     }
   }
-  return [rock.mesh(rockMaterial())].filter((m) => m !== null);
+  return [rock.mesh(rockMaterial()), hanging.mesh(icicleMaterial())].filter((m) => m !== null);
 }
