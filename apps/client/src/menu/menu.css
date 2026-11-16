@@ -346,20 +346,22 @@ a {
 .tab .glyph {
   --glyph-ink: inherit;
 }
+/* Glyphs never draw their letters under 11px on the screen, however small
+   the window scales the canvas (--ui-zoom). */
 .glyph-pad {
   display: block;
-  height: 36px;
+  height: max(36px, calc(22px / var(--ui-zoom, 1)));
   width: auto;
   overflow: visible;
 }
 .glyph-pad.shoulder {
-  height: 32px;
+  height: max(32px, calc(23px / var(--ui-zoom, 1)));
 }
 .btn .glyph-pad {
-  height: 32px;
+  height: max(32px, calc(22px / var(--ui-zoom, 1)));
 }
 .btn .glyph-pad.shoulder {
-  height: 28px;
+  height: max(28px, calc(23px / var(--ui-zoom, 1)));
 }
 .glyph-pad .g-body {
   fill: currentColor;
@@ -391,19 +393,19 @@ a {
   align-items: center;
   justify-content: center;
   min-width: 36px;
-  height: 36px;
+  height: max(36px, calc(20px / var(--ui-zoom, 1)));
   padding: 0 9px;
   box-shadow: inset 0 0 0 2px currentColor;
-  font-size: 18px;
+  font-size: max(18px, calc(11.5px / var(--ui-zoom, 1)));
   font-weight: 800;
   font-stretch: 100%;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .btn .glyph-key {
-  height: 32px;
+  height: max(32px, calc(20px / var(--ui-zoom, 1)));
   min-width: 32px;
-  font-size: 17px;
+  font-size: max(17px, calc(11.5px / var(--ui-zoom, 1)));
 }
 
 /* --- tabs: their shoulder buttons at the ends; the current one is underlined --- */
