@@ -2668,6 +2668,10 @@ a {
   font-stretch: 75%;
   font-variant-numeric: tabular-nums;
 }
+.trial-row.empty {
+  cursor: default;
+  color: var(--ink-3);
+}
 .trial-row .pick {
   width: 20px;
   height: 20px;

@@ -99,13 +99,17 @@ export function useRiderShot(shot: RiderShot): (el: HTMLElement | null) => void 
 /** A space shorter than this (of the window's height) is no room for a rider: they stand in the default place. */
 const MIN_SPACE = 0.3;
 
-/** The free space of `el` on screen, below its screen's top bar (null once it has left the page, or when the
+/** The free space of `el` on screen, below its screen's top bar and tabs (null once it has left the page, or when the
  * layout leaves it no room, as narrow windows stack the panels). */
 function spaceOf(el: HTMLElement): ScreenBox | null {
   if (!el.isConnected) return null;
   const r = el.getBoundingClientRect();
-  const bar = el.closest(".screen")?.querySelector(".topbar")?.getBoundingClientRect();
-  const top = Math.max(r.top, bar ? bar.bottom : 0);
+  // Below the top bar, and below the main menu's tabs where they run over the space.
+  let top = r.top;
+  for (const bar of el.closest(".screen")?.querySelectorAll(".topbar, .menu-tabs") ?? []) {
+    const b = bar.getBoundingClientRect();
+    if (b.right > r.left && b.left < r.right) top = Math.max(top, b.bottom);
+  }
   if ((r.bottom - top) / innerHeight < MIN_SPACE) return null;
   return {
     left: r.left / innerWidth,

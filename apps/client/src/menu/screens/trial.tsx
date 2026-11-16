@@ -12,6 +12,9 @@ import { useScrollEdges } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { Button, Handle, Panel, Picker, Spinner } from "../ui.tsx";
 
+/** The rows a board shows (the lobby's top ten): the empty ones as open places. */
+const BOARD_ROWS = 10;
+
 /** Most ghosts in one run. */
 export const MAX_GHOSTS = 3;
 
@@ -152,6 +155,12 @@ export function TrialPanel({
                     <span className="time">{formatTime(r.timeMs, 1000)}</span>
                     <span className="pick" aria-hidden="true" />
                   </button>
+                </li>
+              ))}
+              {Array.from({ length: Math.max(0, BOARD_ROWS - rows.length) }, (_, i) => (
+                <li key={`empty-${i}`} className="trial-row empty" aria-hidden="true">
+                  <span className="num">{rows.length + i + 1}</span>
+                  <span className="who">—</span>
                 </li>
               ))}
             </ol>
