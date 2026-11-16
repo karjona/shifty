@@ -268,6 +268,8 @@ fn jumps(lab: &Lab) {
                 for e in w.step(&inputs) {
                     if e.kind == EventKind::Bail {
                         outcome = "FELL".into();
+                    } else if e.kind == EventKind::Sketchy && outcome == "-" {
+                        outcome = "sketchy".into();
                     }
                 }
                 let r2 = w.riders[0].unwrap();

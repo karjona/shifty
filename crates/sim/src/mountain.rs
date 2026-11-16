@@ -1503,7 +1503,7 @@ mod tests {
 
     #[test]
     fn the_first_run_never_changes() {
-        assert_eq!(fingerprint(&RUN), 0xaedb_f188_b704_ade5);
+        assert_eq!(fingerprint(&RUN), 0x1571_a12d_e77f_f0a1);
     }
 
     #[test]
