@@ -63,8 +63,8 @@ pub const QUIET_INPUT_MS: u64 = 1_000;
 /// A time trial session's results stay up this long (time enough for its
 /// screen to hear why it ended): then its room is over, and done.
 pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 30;
-/// A time trial session ends after this long without anything from the
-/// player's controls...
+/// A time trial session ends after this long with the player's input
+/// never changing (a pad left alone, a phone left on auto-gas)...
 pub const TRIAL_IDLE_TICKS: u32 = TICK_HZ * 60 * 3;
 /// ...or this long in all.
 pub const TRIAL_SESSION_TICKS: u32 = TICK_HZ * 60 * 60;
@@ -354,8 +354,10 @@ pub struct Room {
     over_tick: u32,
     /// A time trial's laps.
     trial: Option<Trial>,
-    /// A time trial: the tick the player's controls last moved.
+    /// A time trial: the tick the player's input last changed (or a retry
+    /// came), and the input it changed to.
     active_tick: u32,
+    active_input: Input,
     pub stats: RoomStats,
 }
 
@@ -377,6 +379,7 @@ impl Room {
         let mut room = Self {
             trial: config.trial.then(|| Trial::new(&config.id)),
             active_tick: 0,
+            active_input: Input::default(),
             world,
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
@@ -928,12 +931,10 @@ impl Room {
         p.ack_events(packet.event_ack);
         // Readiness only moves on (packets can arrive out of order).
         p.ready = p.ready.max(packet.ready);
-        if let Some(trial) = &mut self.trial {
-            let moved =
-                trial.retries(packet.retry) || packet.inputs.iter().any(|i| *i != Input::default());
-            if moved {
-                self.active_tick = server_tick;
-            }
+        if let Some(trial) = &mut self.trial
+            && trial.retries(packet.retry)
+        {
+            self.active_tick = server_tick;
         }
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
@@ -950,6 +951,10 @@ impl Room {
                 continue;
             }
             let fresh = tick > prev_highest;
+            if fresh && self.trial.is_some() && *input != self.active_input {
+                self.active_input = *input;
+                self.active_tick = server_tick;
+            }
             if fresh {
                 let margin = i64::from(tick) - i64::from(server_tick);
                 worst = Some(worst.map_or(margin, |w| w.min(margin)));

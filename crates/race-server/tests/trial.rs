@@ -1,6 +1,6 @@
 //! Time trial sessions: one rider lapping alone, every lap that ranks
 //! recorded for the lobby, a retry straight to the countdown, and a session
-//! the room closes when the player stops riding or after an hour.
+//! the room closes when the player's input stops changing or after an hour.
 
 use protocol::ghost::{Ghost, frames_for};
 use protocol::token::{JoinClaims, RaceClaims};
@@ -265,7 +265,7 @@ fn session_over(s: &Session) -> Vec<SessionEnd> {
 }
 
 #[test]
-fn a_session_ends_after_three_minutes_without_input() {
+fn a_session_ends_after_three_minutes_without_a_change_of_input() {
     let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
     s.until(true, |r| r.world().race.phase == Phase::Racing);
     // Riding keeps it going...
@@ -278,7 +278,8 @@ fn a_session_ends_after_three_minutes_without_input() {
     }
     assert_eq!(s.phase(), Phase::Racing);
     assert!(session_over(&s).is_empty());
-    for _ in 0..3 {
+    // (A snapshot every other tick carries the news.)
+    for _ in 0..4 {
         s.tick(false);
     }
     assert_eq!(s.phase(), Phase::Results);
@@ -291,6 +292,33 @@ fn a_session_ends_after_three_minutes_without_input() {
         s.tick(true);
     }
     assert!(s.room.is_over() && s.room.is_done());
+}
+
+#[test]
+fn a_session_with_the_input_held_still_ends_too() {
+    // A phone left on auto-gas: the same throttle, never a change.
+    let gas = Input::from_analog(0.0, 1.0, 0.0, 0);
+    let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
+    s.until(true, |r| r.world().race.phase == Phase::Racing);
+    for _ in 0..TICK_HZ * 30 {
+        s.tick(true);
+    }
+    for _ in 0..TRIAL_IDLE_TICKS - 2 {
+        s.tick_with(gas);
+    }
+    assert_eq!(s.phase(), Phase::Racing);
+    // A retry is a sign of life.
+    s.retries += 1;
+    s.tick_with(gas);
+    for _ in 0..TRIAL_IDLE_TICKS - 120 {
+        s.tick_with(gas);
+    }
+    assert_ne!(s.phase(), Phase::Results);
+    for _ in 0..130 {
+        s.tick_with(gas);
+    }
+    assert_eq!(s.phase(), Phase::Results);
+    assert_eq!(session_over(&s), [SessionEnd::Idle]);
 }
 
 #[test]

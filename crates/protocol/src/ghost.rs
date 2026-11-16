@@ -522,6 +522,46 @@ mod tests {
         }
     }
 
+    /// A run's gates, raised as buoys like a loop's, are splits too.
+    #[test]
+    fn a_runs_gates_raised_as_buoys_are_splits() {
+        let mut world = World::on_course(CourseId::Mountain, SurfaceKind::Swells, 3);
+        world.trial = true;
+        world.disqualify = false;
+        world.spawn(0);
+        world.start_intro();
+        let mut rec = LapRecorder::new(Vec::new());
+        let mut gates = Vec::new();
+        for _ in 0..sim::TICK_HZ * 60 * 4 {
+            let input = sim::bot::bot_input(&world, 0);
+            let mut events = world.step(&[Some(input), None, None, None, None, None, None, None]);
+            let r = world.riders[0].expect("rider");
+            let into = world.tick.wrapping_sub(r.race.laps.start);
+            if r.race.laps.start != 0 && into > 0 && into.is_multiple_of(900) {
+                events.push(SimEvent {
+                    slot: 0,
+                    kind: EventKind::Buoy {
+                        buoy: gates.len() as u8,
+                        ok: true,
+                        meter: 0,
+                    },
+                });
+                gates.push(into);
+            }
+            if let Some(end) = rec.after_step(&world, 0, &events) {
+                let ghost = end.ghost.expect("a whole lap");
+                assert!(gates.len() >= 4, "{gates:?}");
+                for g in &gates {
+                    assert!(ghost.splits.contains(g), "{g} in {:?}", ghost.splits);
+                }
+                assert!(ghost.splits.len() > gates.len(), "the checkpoints too");
+                assert!(Ghost::decode(&ghost.encode()).is_ok());
+                return;
+            }
+        }
+        panic!("the run never ended");
+    }
+
     #[test]
     fn broken_ghosts_are_refused() {
         let bytes = bot_run(CourseId::Mountain).encode();

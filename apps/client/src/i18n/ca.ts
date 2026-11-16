@@ -623,6 +623,7 @@ export const ca: Messages = {
     newBest: "NOU RÈCORD PERSONAL!",
     newRecord: "NOU RÈCORD!",
     retry: "Reinicia la volta",
+    leave: "Surt de la sessió",
     practice: "Pràctica",
     practiceNote: "Pràctica: amb temps, sense classificació ni fantasmes.",
     void: "NUL·LA",
@@ -633,7 +634,7 @@ export const ca: Messages = {
     laps: (n: number) => (n === 1 ? "1 volta" : `${n.toLocaleString("ca")} voltes`),
     noLap: "Cap volta neta",
     ended: {
-      idle: "La sessió s'ha tancat després de tres minuts sense rodar.",
+      idle: "La sessió s'ha tancat després de tres minuts sense tocar els controls.",
       hour: "La sessió s'ha tancat al cap d'una hora.",
     },
   },
