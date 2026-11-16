@@ -7,6 +7,7 @@
 
 pub mod bot;
 pub mod buoy;
+pub mod capsule;
 pub mod circuit;
 pub mod conditions;
 pub mod course;
@@ -115,7 +116,106 @@ pub fn determinism_scenario(ticks: u32) -> u64 {
         }
         hash = hash.rotate_left(17) ^ world.state_hash();
     }
+    for course in [CourseId::Oval, CourseId::Mountain] {
+        hash = hash.rotate_left(17) ^ trial_scenario(course).0;
+    }
     hash
+}
+
+/// What a time trial session of `trial_scenario` went through.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TrialSeen {
+    /// Laps ended, and how many of them void.
+    pub laps: u8,
+    pub void: u8,
+    /// A lap under way was started over.
+    pub retried: bool,
+    /// A run went back to the top for its next lap.
+    pub back_to_top: bool,
+}
+
+/// A time trial session for the determinism check: one rider on the bot's
+/// line, a lap ridden past the wrong side of every buoy (void) and a retry
+/// mid-lap on a loop; on a run, a lap and the way back to the top for the
+/// next. Its state hash at the end, and what it went through.
+pub fn trial_scenario(course: CourseId) -> (u64, TrialSeen) {
+    let mut world = World::for_event(
+        conditions::Event::home(course),
+        SurfaceKind::Swells,
+        0xC0FFEE,
+    );
+    world.trial = true;
+    world.disqualify = false;
+    world.hold_results = true;
+    world.spawn(0);
+    world.start_intro();
+    let looped = world.course().looped();
+    let mut seen = TrialSeen::default();
+    let mut inputs: Inputs = [None; MAX_RIDERS];
+    let mut after = 0u32;
+    for _ in 0..TICK_HZ * 60 * 6 {
+        let Some(r) = world.riders[0] else { break };
+        let laps = r.race.laps;
+        inputs[0] = Some(if looped && laps.done == 1 {
+            wrong_side_input(&world, 0)
+        } else {
+            bot::bot_input(&world, 0)
+        });
+        if looped
+            && !seen.retried
+            && laps.done == 2
+            && laps.start != 0
+            && world.tick - laps.start == 600
+        {
+            world.retry();
+            seen.retried = true;
+        }
+        let phase = world.race.phase;
+        for e in world.step(&inputs) {
+            if let race::EventKind::LapTime { clean, .. } = e.kind {
+                seen.laps += 1;
+                seen.void += u8::from(!clean);
+            }
+        }
+        if !looped && phase == Phase::Racing && world.race.phase == Phase::Countdown {
+            seen.back_to_top = true;
+        }
+        let done = if looped {
+            seen.retried && seen.laps >= 3
+        } else {
+            seen.back_to_top
+        };
+        if done {
+            after += 1;
+            if after > TICK_HZ * 10 {
+                break;
+            }
+        }
+    }
+    (world.state_hash(), seen)
+}
+
+/// Steers a rider past the wrong side of its next buoy (a void lap).
+fn wrong_side_input(world: &World, slot: usize) -> Input {
+    let Some(r) = world.riders[slot] else {
+        return Input::default();
+    };
+    let course = world.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = match gate.checked_sub(1).and_then(|i| course.buoys.get(i)) {
+        Some(b) => match b.keep {
+            course::Keep::Right => b.offset + 4.0,
+            course::Keep::Left => b.offset - 4.0,
+        },
+        None => 0.0,
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = math::clamp(-math::angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+    Input::from_analog(steer, 1.0, 0.0, 0)
 }
 
 #[cfg(test)]
@@ -990,6 +1090,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_determinism_check_covers_a_time_trial_session() {
+        let (_, loop_) = trial_scenario(CourseId::Oval);
+        assert!(
+            loop_.retried && loop_.laps >= 3 && loop_.void >= 1,
+            "{loop_:?}"
+        );
+        assert!(loop_.void < loop_.laps, "{loop_:?}");
+        let (_, run) = trial_scenario(CourseId::Mountain);
+        assert!(run.back_to_top && run.laps == 1 && run.void == 0, "{run:?}");
     }
 
     #[test]

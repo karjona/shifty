@@ -12,6 +12,7 @@ import * as THREE from "three/webgpu";
 import { attribute, positionLocal, uniformArray, uv, vec3 } from "three/tsl";
 import { CelMaterial, inkId } from "../cel/material.ts";
 import { waveHeight } from "../waves.ts";
+import type { CourseData } from "../course.ts";
 import { Shape, box, place, post, random, turned } from "./shape.ts";
 
 const WHITE = 0xf4f1ea;
@@ -111,12 +112,13 @@ const LLAUT_COLOURS: [number, number][] = [
   [0x3f8a6a, WHITE],
 ];
 
-/** A llaüt, about 6 m: `seed` picks its colours and what it carries (a cuddy, a mast and yard, an awning). */
-export function llaut(seed: number): THREE.BufferGeometry {
+/** A llaüt, about 6 m (`size` long, if given): `seed` picks its colours and what it carries (a cuddy, a mast and yard, an awning). */
+export function llaut(seed: number, size?: number): THREE.BufferGeometry {
   const r = random(seed);
   const s = new Shape();
   const [side, band] = LLAUT_COLOURS[Math.floor(r() * LLAUT_COLOURS.length)]!;
-  const length = 5.4 + r() * 1.4;
+  const drawn = 5.4 + r() * 1.4;
+  const length = size ?? drawn;
   const sheer = llautSheer;
   const deck = loft(s, {
     length,
@@ -396,13 +398,24 @@ export function ferry(): THREE.BufferGeometry {
 
 export type BoatKind = "llaut" | "trawler" | "yacht" | "inflatable" | "camera";
 
-/** Where a boat lies: the middle of its hull at the water line, its heading, and what it is. */
+/** Where a boat lies: the middle of its hull at the water line, its heading, what it is, and (a llaüt) how long. */
 export interface Berth {
   x: number;
   z: number;
   yaw: number;
   kind: BoatKind;
   seed: number;
+  length?: number;
+}
+
+/** The boats a course has moored, at their berths (the sailboats at a jetty are drawn with it). */
+export function mooredBerths(course: CourseData): Berth[] {
+  const out: Berth[] = [];
+  for (const b of course.boats) {
+    if (b.kind === "sailboat") continue;
+    out.push({ x: b.x, z: b.z, yaw: b.yaw, kind: b.kind, seed: b.seed, length: b.length });
+  }
+  return out;
 }
 
 /** The boat a berth holds. */
@@ -411,7 +424,7 @@ function boatOf(b: Berth): THREE.BufferGeometry {
   if (b.kind === "yacht") return yacht(b.seed);
   if (b.kind === "inflatable") return inflatable();
   if (b.kind === "camera") return cameraBoat();
-  return llaut(b.seed);
+  return llaut(b.seed, b.length);
 }
 
 /** How many boats one fleet can hold. */

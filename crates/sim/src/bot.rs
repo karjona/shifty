@@ -5,7 +5,7 @@
 
 use crate::DT;
 use crate::conditions::Rock;
-use crate::course::{Keep, Line};
+use crate::course::{Course, Keep, Line};
 use crate::input::{Input, buttons};
 use crate::jetski as jet;
 use crate::math::{TAU, angle_diff, atan2, clamp, smoothstep, sqrt};
@@ -21,54 +21,232 @@ pub fn bot_input(world: &World, slot: usize) -> Input {
     }
 }
 
+/// How a jetski bot rides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JetskiBot {
+    /// Throttle (1 = flat out).
+    pub pace: f32,
+    /// Its lane on the first leg (0-3, left to right): away from the buoys
+    /// it rides that far to the side of the line through them, and it
+    /// moves a lane over at every buoy.
+    pub lane: u8,
+    /// How wide of a buoy's middle it passes (m).
+    pub margin: f32,
+    /// Whether it tricks whenever it flies.
+    pub trickster: bool,
+    /// The laps on which it takes the ramps on its line: bit `k` for lap
+    /// `k + 1`.
+    pub ramp_laps: u8,
+    /// How far off its line (m) a ramp still counts as on it.
+    pub ramp_reach: f32,
+    /// Whether it pulls back on some crests to pop.
+    pub pops: bool,
+}
+
+/// How fast a seat's bot rides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tier {
+    Fast,
+    Middling,
+    Slow,
+}
+
+/// Each seat's bot: its tier and whether it tricks. Bots fill the seats
+/// from the last one down, so a field of any size has fast, middling and
+/// slow bots in it, tricksters and not.
+pub const JETSKI_SEATS: [(Tier, bool); crate::MAX_RIDERS] = [
+    (Tier::Middling, true),
+    (Tier::Slow, false),
+    (Tier::Middling, false),
+    (Tier::Middling, true),
+    (Tier::Slow, false),
+    (Tier::Slow, true),
+    (Tier::Fast, false),
+    (Tier::Fast, true),
+];
+
+impl JetskiBot {
+    /// The bot in a seat: its tier's pace (a trickster's a little higher:
+    /// what its tricks cost it, it makes up between the ramps), its own
+    /// lane and room round the buoys, and one lap on which it takes the
+    /// ramps on its line.
+    pub fn of(slot: usize) -> Self {
+        let (tier, trickster) = JETSKI_SEATS[slot % crate::MAX_RIDERS];
+        let (pace, margin) = match tier {
+            Tier::Fast => (FAST_PACE, 2.5),
+            Tier::Middling => (MIDDLING_PACE, 3.0),
+            Tier::Slow => (SLOW_PACE, 3.5),
+        };
+        Self {
+            pace: if trickster { pace } else { pace - TRICKS_PACE },
+            lane: (slot % 4) as u8,
+            margin: margin + (slot % 2) as f32 * 0.5,
+            trickster,
+            ramp_laps: if trickster { 1 << (slot % 3) } else { 0 },
+            ramp_reach: RAMP_REACH,
+            pops: false,
+        }
+    }
+}
+
+/// Each tier's throttle, and how much less of it a bot that never tricks
+/// gives.
+const FAST_PACE: f32 = 1.0;
+const MIDDLING_PACE: f32 = 0.92;
+const SLOW_PACE: f32 = 0.84;
+const TRICKS_PACE: f32 = 0.015;
+/// How far off its line (m) a ramp's middle can be for a trickster to
+/// take it.
+const RAMP_REACH: f32 = 4.5;
+
+/// How far ahead (m, and s per m/s) a jetski bot aims, and how hard it
+/// steers per radian off that aim.
+const LOOK: f32 = 10.0;
+const LOOK_PER_SPEED: f32 = 0.5;
+const STEER_GAIN: f32 = 3.0;
+/// How wide of a ramp's side (m) a bot not taking it keeps.
+const RAMP_CLEAR: f32 = 1.5;
+/// A bot this close to a buoy's middle (m) on its wrong side is about to miss it.
+const BUOY_CLEAR: f32 = 1.0;
+/// Over this far (m) from a buoy a bot moves from its lane onto the line
+/// through the buoys; and how far apart lanes are (m).
+const LANE_BLEND: f32 = 30.0;
+const LANE_WIDTH: f32 = 2.5;
+
+/// A jetski bot's line: straight (along the course) from where it passed
+/// the last buoy to where it passes the next one, `lane` to the side
+/// away from them.
+struct RacingLine {
+    /// Arc length and offset where it passes the last buoy and the next.
+    prev: (f32, f32),
+    next: (f32, f32),
+    /// And the one after.
+    after: (f32, f32),
+    /// Its lane before the next buoy and after it (m to the right).
+    lanes: (f32, f32),
+    /// The next buoy: its offset and the side it is kept on.
+    buoy: f32,
+    keep: Keep,
+}
+
+impl RacingLine {
+    fn of(world: &World, r: &Rider, bot: JetskiBot) -> Self {
+        let course = world.course();
+        let n = course.buoys.len();
+        let gate = usize::from(r.race.next_gate) % course.gate_count();
+        let next = gate.saturating_sub(1);
+        let passing = |i: usize| {
+            let b = &course.buoys[i % n];
+            let side = match b.keep {
+                Keep::Right => -bot.margin,
+                Keep::Left => bot.margin,
+            };
+            (b.s, b.offset + side)
+        };
+        let b = &course.buoys[next];
+        // A lane over at every buoy, round all four in turn (counting laps
+        // from the last buoy, so the lane holds over the start line).
+        let lap = usize::from(r.race.lap) + usize::from(gate == 0);
+        let leg = usize::from(bot.lane) + next + n * lap;
+        let lane = |k: usize| ((k % 4) as f32 - 1.5) * LANE_WIDTH;
+        Self {
+            prev: passing(next + n - 1),
+            next: passing(next),
+            after: passing(next + 1),
+            lanes: (lane(leg), lane(leg + 1)),
+            buoy: b.offset,
+            keep: b.keep,
+        }
+    }
+
+    /// The line's offset at arc length `at`, ahead of the last buoy.
+    fn at(&self, course: &Course, at: f32) -> f32 {
+        let span = |a: (f32, f32), b: (f32, f32)| course.wrap_s(b.0 - a.0).max(1.0);
+        let into = course.wrap_s(at - self.prev.0);
+        let first = span(self.prev, self.next);
+        let (from, to, k, len, lane) = if into <= first {
+            (self.prev, self.next, into / first, first, self.lanes.0)
+        } else {
+            let second = span(self.next, self.after);
+            let k = (into - first) / second;
+            (self.next, self.after, k.min(1.0), second, self.lanes.1)
+        };
+        let base = from.1 + (to.1 - from.1) * k;
+        // Away from the buoys, its own lane.
+        let near = (k * len).min((1.0 - k) * len);
+        base + lane * clamp(near / LANE_BLEND, 0.0, 1.0)
+    }
+}
+
 /// Jetski bots follow the course, swing out to pass each buoy on its
 /// correct side, pull back on some crests to pop, and some take the ramps.
 /// In the air tricksters pick a trick for each jump (a rotation, a stunt,
 /// or both) and do the parts that fit the air left.
 fn jetski_input(world: &World, slot: usize) -> Input {
+    jetski_input_as(world, slot, JetskiBot::of(slot))
+}
+
+/// What the jetski bot `bot` does this tick, riding seat `slot`.
+pub fn jetski_input_as(world: &World, slot: usize, bot: JetskiBot) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
     };
     let course = world.course();
     let (s, _) = course.project(r.pos.x, r.pos.z);
 
-    // Each bot has its own lane, pace and appetite for air.
-    let lane = ((slot % 4) as f32 - 1.5) * 2.5;
-    let pace = 0.9 + (slot % 3) as f32 * 0.05;
-    let margin = 2.5 + (slot % 3) as f32;
+    let pace = bot.pace;
+    let trickster = bot.trickster;
+    let speed = r.speed();
+    let look = LOOK + speed * LOOK_PER_SPEED;
+    let line = RacingLine::of(world, &r, bot);
+    let mut target_offset = line.at(course, s + look);
+    let to_buoy = course.delta_s(s, line.next.0);
 
-    let trickster = slot % 3 != 1;
-    let mut target_offset = lane;
-    let gate = usize::from(r.race.next_gate) % course.gate_count();
-    if gate >= 1 {
-        let b = &course.buoys[gate - 1];
-        if course.delta_s(s, b.s) < 70.0 {
-            target_offset = match b.keep {
-                Keep::Right => b.offset - margin,
-                Keep::Left => b.offset + margin,
+    // The ramps: on its ramp lap a bot takes those on its line (lined up
+    // with one and pulling back all the way up it); otherwise it keeps
+    // clear of them.
+    for rd in course.ramps {
+        let ahead = course.delta_s(s, rd.s);
+        if !(0.0..45.0).contains(&ahead) {
+            continue;
+        }
+        let mid = line.at(course, rd.s + rd.length * 0.5);
+        if r.race.lap >= 1
+            && bot.ramp_laps & (1 << (r.race.lap - 1).min(7)) != 0
+            && (rd.offset - mid).abs() <= bot.ramp_reach
+        {
+            target_offset = rd.offset;
+            break;
+        }
+        let clear = rd.width * 0.5 + RAMP_CLEAR;
+        if (target_offset - rd.offset).abs() < clear {
+            target_offset = if mid >= rd.offset {
+                rd.offset + clear
+            } else {
+                rd.offset - clear
             };
         }
-    }
-    // Tricksters line up with a ramp coming up and pull back all the way up it.
-    let ramp_ahead = course
-        .ramps
-        .iter()
-        .find(|rd| (0.0..45.0).contains(&course.delta_s(s, rd.s)));
-    if let Some(rd) = ramp_ahead
-        && trickster
-    {
-        target_offset = rd.offset;
     }
     let on_ramp = course
         .ramp_under(r.pos.x, r.pos.z, &world.surface, world.tick)
         .is_some();
-    let look = 12.0 + r.speed() * 0.6;
     let (tx, tz) = course.centerline(s + look).at_offset(target_offset);
     let desired = atan2(tx - r.pos.x, tz - r.pos.z);
     // Positive steer turns right, which lowers yaw.
-    let steer = clamp(-angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+    let steer = clamp(-angle_diff(r.yaw, desired) * STEER_GAIN, -1.0, 1.0);
+    // Coming up on the wrong side of the next buoy: ease off to turn tighter.
+    let (_, offset) = course.project(r.pos.x, r.pos.z);
+    let wrong = match line.keep {
+        Keep::Right => offset - (line.buoy - BUOY_CLEAR),
+        Keep::Left => (line.buoy + BUOY_CLEAR) - offset,
+    };
+    let pace = if wrong > 0.0 && to_buoy > 0.0 && to_buoy < speed * 1.2 + 6.0 {
+        pace * clamp(1.0 - wrong * 0.25, 0.25, 1.0)
+    } else {
+        pace
+    };
 
-    let pops = world.tick.wrapping_add(slot as u32 * 131) % 400 < 200;
+    let pops = bot.pops && world.tick.wrapping_add(slot as u32 * 131) % 400 < 200;
     if r.grounded {
         let lean = if (pops || on_ramp) && r.vel.y > 1.5 {
             -1.0

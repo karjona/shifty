@@ -51,11 +51,39 @@ export interface CourseData {
   buoys: { x: number; z: number; s: number; yaw: number; keep: "left" | "right" }[];
   ramps: { x: number; z: number; yaw: number; length: number; width: number; height: number }[];
   land: LandData[];
+  /** Jetties on piles out from the land: solid, drawn with what they belong to (the bay's is the club's). */
+  jetties: LandData[];
+  /** Boats at their moorings: solid hulls (see `sim::course::BoatDef`). */
+  boats: BoatData[];
   /** The centre line every 2 m. */
   path: PathPoint[];
 }
 
-export type LandKind = "town" | "island" | "rock" | "headland" | "coast" | "beach" | "mole" | "stack" | "arch";
+export type LandKind =
+  | "town"
+  | "island"
+  | "rock"
+  | "headland"
+  | "coast"
+  | "beach"
+  | "mole"
+  | "stack"
+  | "arch"
+  | "jetty";
+
+/** What a moored boat is: the sailboats at a jetty are drawn with it (the club's). */
+export type MooredKind = "llaut" | "trawler" | "yacht" | "inflatable" | "sailboat";
+
+/** A boat at its mooring: its hull's middle at the water line, its bow's heading, its size, and how it looks. */
+export interface BoatData {
+  x: number;
+  z: number;
+  yaw: number;
+  length: number;
+  beam: number;
+  kind: MooredKind;
+  seed: number;
+}
 
 /** Solid land: a capsule around the segment a-b (see `sim::course::LandDef`). */
 export interface LandData {

@@ -294,6 +294,29 @@ html {
     background: #8e2416;
   }
 }
+/* A time trial's lap: a void lap's clock and last lap struck through, and
+   the tag that says so (red) or that the session is practice (quiet). */
+#race-info .hud-time.void .hud-clock,
+#race-info .hud-last.void b {
+  text-decoration: line-through;
+  text-decoration-thickness: 4px;
+  color: #8f887c;
+}
+#race-info .hud-last b {
+  font-weight: inherit;
+}
+#race-info > .hud-tag {
+  justify-content: center;
+  font-size: 30px;
+  letter-spacing: 0.08em;
+}
+#race-info > .hud-tag.void {
+  background: #b8321f;
+  color: #f6f1e7;
+}
+#race-info > .hud-tag.practice {
+  color: #5f5a51;
+}
 /* The verdict when misses disqualify you: a paper panel over the race. */
 #verdict {
   position: fixed;
@@ -310,7 +333,7 @@ html {
     0 0 0 1px rgb(29 27 23 / 0.2),
     0 16px 40px rgb(24 16 8 / 0.3);
   pointer-events: none;
-  animation: verdict-in 420ms cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: verdict-in 340ms cubic-bezier(0.3, 0, 0.2, 1) both;
   transition: opacity 400ms ease;
 }
 #verdict[hidden] {
@@ -345,7 +368,11 @@ html {
 @keyframes verdict-in {
   from {
     opacity: 0;
-    transform: translateX(-60px) skewX(-6deg);
+    transform: scale(1.4);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.97);
   }
 }
 #banner {

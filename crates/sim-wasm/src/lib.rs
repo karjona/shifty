@@ -6,7 +6,7 @@
 
 use client_core::{Client, Phase};
 use serde_json::json;
-use sim::course::{Gate, Keep, LandKind, Line, Sport, tuning as course_tuning};
+use sim::course::{BoatKind, Gate, Keep, LandKind, Line, Sport, tuning as course_tuning};
 use sim::mountain::{EdgeKind, Feature, LipKind, Mark, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
@@ -82,7 +82,7 @@ fn missing_input(world: &World, slot: usize) -> Input {
 }
 
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 30] = [
+pub const RACE_FIELDS: [&str; 37] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -113,6 +113,13 @@ pub const RACE_FIELDS: [&str; 30] = [
     "time",
     "disqualifiedTicks",
     "maxMisses",
+    "trial",
+    "lapTicks",
+    "lapsDone",
+    "bestLap",
+    "lastLap",
+    "lastVoid",
+    "sessionOver",
 ];
 
 /// Layout of the weather buffer (f32), for the look: the race's weather at
@@ -225,9 +232,16 @@ impl WasmClient {
         self.inner.set_ready(u8::try_from(event).ok());
     }
 
-    /// Time trial: start the run over from the countdown.
+    /// Time trial: start the lap over from the countdown.
     pub fn retry(&mut self) {
         self.inner.retry();
+    }
+
+    /// Time trial: leave the session on purpose (a goodbye goes out with
+    /// the next packets); the race runs on here alone, on its results.
+    #[wasm_bindgen(js_name = leaveSession)]
+    pub fn leave_session(&mut self) {
+        self.inner.leave_session();
     }
 
     /// The room is a time trial (once joined).
@@ -442,6 +456,17 @@ impl WasmClient {
             } else {
                 0.0
             },
+            f64::from(u8::from(world.trial)),
+            if p.laps.start != 0 {
+                f64::from(world.tick.wrapping_sub(p.laps.start))
+            } else {
+                -1.0
+            },
+            f64::from(p.laps.done),
+            f64::from(p.laps.best),
+            f64::from(p.laps.last),
+            f64::from(u8::from(p.laps.last_void)),
+            f64::from(self.inner.session_over().map_or(0, |r| r as u8)),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -486,7 +511,8 @@ impl WasmClient {
 
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
-    /// `finish` (`ticks`), `disqualified` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
+    /// `finish` (`ticks`), `lapTime` (a time trial's lap ended: `lap`,
+    /// `ticks`, `clean`, `best`), `disqualified` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
     /// `grab`, `stunt`, `grabTicks`, `points`, `sketchy`), `sketchy` (a
     /// plain jump landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
@@ -508,6 +534,20 @@ impl WasmClient {
                 EventKind::Finish { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
                 }
+                EventKind::LapTime {
+                    lap,
+                    ticks,
+                    clean,
+                    best,
+                } => json!({
+                    "tick": e.tick,
+                    "slot": e.slot,
+                    "kind": "lapTime",
+                    "lap": lap,
+                    "ticks": ticks,
+                    "clean": clean,
+                    "best": best,
+                }),
                 EventKind::Disqualified { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "disqualified", "ticks": ticks })
                 }
@@ -907,8 +947,23 @@ fn course_json_on(world: &World) -> String {
                         LandKind::Mole => "mole",
                         LandKind::Stack => "stack",
                         LandKind::Arch => "arch",
+                        LandKind::Jetty => "jetty",
                     };
                     json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+                })
+                .collect();
+            let boats: Vec<serde_json::Value> = c
+                .boats
+                .iter()
+                .map(|b| {
+                    let kind = match b.kind {
+                        BoatKind::Llaut => "llaut",
+                        BoatKind::Trawler => "trawler",
+                        BoatKind::Yacht => "yacht",
+                        BoatKind::Inflatable => "inflatable",
+                        BoatKind::Sailboat => "sailboat",
+                    };
+                    json!({ "x": b.x, "z": b.z, "yaw": b.yaw, "length": b.length, "beam": b.beam, "kind": kind, "seed": b.seed })
                 })
                 .collect();
             // The centre line every 2 m, with how sharply it turns there.
@@ -938,6 +993,7 @@ fn course_json_on(world: &World) -> String {
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
+            out["boats"] = json!(boats);
             out["path"] = json!(path);
         }
         Line::Run(run) => out["run"] = run_json(c, run, world.cover_rocks()),

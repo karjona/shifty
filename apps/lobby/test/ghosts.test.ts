@@ -7,8 +7,10 @@ import {
   decodeGhost,
   parseRun,
   parseTrial,
+  parseTrialPlay,
   shapeBoard,
   trialQuery,
+  unranked,
 } from "../src/ghosts.ts";
 import { b64urlEncode } from "../src/tickets.ts";
 
@@ -26,6 +28,7 @@ const u32 = (out: number[], v: number) => out.push(v & 0xff, (v >>> 8) & 0xff, (
 interface Spec {
   course?: number;
   season?: number;
+  revision?: number;
   finishTicks?: number;
   frames?: number;
   splits?: number[];
@@ -34,13 +37,13 @@ interface Spec {
   body?: number[];
 }
 
-/** A version 1 ghost blob. */
+/** A version 2 ghost blob. */
 function ghost(spec: Spec = {}): Uint8Array {
   const finishTicks = spec.finishTicks ?? 5401;
   const frames = spec.frames ?? Math.ceil(finishTicks / 2) + 1;
   const splits = spec.splits ?? [1800, 3600, finishTicks];
   const look = spec.look ?? [1, 0, 2, 3, 4];
-  const out = [1, spec.course ?? 0, spec.season ?? 0, 2];
+  const out = [2, spec.course ?? 0, spec.season ?? 0, spec.revision ?? 1, 2];
   u32(out, finishTicks);
   out.push(frames & 0xff, frames >>> 8, splits.length);
   for (const s of splits) u32(out, s);
@@ -64,12 +67,12 @@ function ghost(spec: Spec = {}): Uint8Array {
 }
 
 const msAt = (ticks: number) => Math.floor((ticks * 1000) / 60);
-const run = { course: 0, season: 0, timeMs: msAt(5401) };
+const run = { course: 0, season: 0, revision: 1, timeMs: msAt(5401) };
 
 void test("a ghost that matches its run is accepted", () => {
   assert.deepEqual(checkGhost(ghost(), run), { finishTicks: 5401, frames: 2702, splits: [1800, 3600, 5401] });
   const snow = ghost({ course: 1, season: 2, finishTicks: 5400, splits: [5400], look: [] });
-  assert.deepEqual(checkGhost(snow, { course: 1, season: 2, timeMs: 90_000 }), {
+  assert.deepEqual(checkGhost(snow, { course: 1, season: 2, revision: 1, timeMs: 90_000 }), {
     finishTicks: 5400,
     frames: 2701,
     splits: [5400],
@@ -78,15 +81,16 @@ void test("a ghost that matches its run is accepted", () => {
 
 /** A ghost `crates/protocol/src/ghost.rs` encodes, byte for byte. */
 const RUST_GHOST = Uint8Array.from(
-  "0101020205000000040002030000000500000002090882028008020f8010ff07ff1fa610800201c0027f02"
+  "020102010205000000040002030000000500000002090882028008020f8010ff07ff1fa610800201c0027f02"
     .match(/../gu)
     ?.map((h) => Number.parseInt(h, 16)) ?? [],
 );
 
 void test("the race server's ghosts pass", () => {
-  const rust = { course: 1, season: 2, timeMs: 83 };
+  const rust = { course: 1, season: 2, revision: 1, timeMs: 83 };
   assert.deepEqual(checkGhost(RUST_GHOST, rust), { finishTicks: 5, frames: 4, splits: [3, 5] });
-  assert.deepEqual([...RUST_GHOST.subarray(19, 22)], [2, 9, 8]);
+  assert.deepEqual([...RUST_GHOST.subarray(20, 23)], [2, 9, 8]);
+  assert.equal(checkGhost(RUST_GHOST, { ...rust, revision: 0 }), "revision");
   assert.equal(checkGhost(RUST_GHOST, { ...rust, timeMs: 84 }), "time");
   assert.equal(checkGhost(RUST_GHOST, { ...rust, course: 0 }), "course");
 });
@@ -96,11 +100,12 @@ void test("a ghost that doesn't match its run is refused", () => {
   assert.equal(checkGhost(ghost({ course: 1 }), run), "course");
   assert.equal(checkGhost(ghost({ season: 3 }), run), "season");
   assert.equal(checkGhost(ghost({ frames: 2701 }), run), "frames");
+  assert.equal(checkGhost(ghost({ revision: 2 }), run), "revision");
   const wrongVersion = ghost();
-  wrongVersion[0] = 2;
+  wrongVersion[0] = 1;
   assert.equal(checkGhost(wrongVersion, run), "version");
   const wrongStep = ghost();
-  wrongStep[3] = 1;
+  wrongStep[4] = 1;
   assert.equal(checkGhost(wrongStep, run), "frame_ticks");
   assert.equal(checkGhost(ghost({ finishTicks: 0, frames: 1, splits: [0] }), { ...run, timeMs: 0 }), "finish");
 });
@@ -148,6 +153,8 @@ const body = {
   pid: "user_1",
   course: 0,
   season: 0,
+  revision: 1,
+  weather: 0,
   timeMs: 123_450,
   ghost: "AQAA",
 };
@@ -163,6 +170,11 @@ void test("run reports are checked before they are trusted", () => {
     { course: 32 },
     { course: -1 },
     { season: 4 },
+    { revision: -1 },
+    { revision: 256 },
+    { revision: undefined },
+    { weather: 7 },
+    { weather: undefined },
     { timeMs: "123450" },
     { timeMs: 0 },
     { ghost: 7 },
@@ -172,6 +184,33 @@ void test("run reports are checked before they are trusted", () => {
     { room: "t/abc" },
   ])
     assert.equal(parseRun({ ...body, ...bad }), null, JSON.stringify(bad));
+});
+
+void test("a lap ranks only on the circuit as it is now, in clear weather", () => {
+  assert.equal(unranked({ course: 0, revision: 1, weather: 0 }), null);
+  assert.equal(unranked({ course: 0, revision: 0, weather: 0 }), "revision");
+  assert.equal(unranked({ course: 0, revision: 2, weather: 0 }), "revision");
+  assert.equal(unranked({ course: 1, revision: 1, weather: 6 }), "practice");
+  assert.equal(unranked({ course: 31, revision: 1, weather: 0 }), "circuit");
+});
+
+void test("a time trial is ridden in the weather picked, clear unless its season brings it", () => {
+  assert.deepEqual(parseTrialPlay({ course: 0, season: 0 }), { course: 0, season: 0, weather: 0 });
+  assert.deepEqual(parseTrialPlay({ course: 1, season: 2, weather: 6, time: 60 }), {
+    course: 1,
+    season: 2,
+    weather: 6,
+    time: 60,
+  });
+  // No snow in summer, and no racing at night: the time moves into daylight.
+  assert.deepEqual(parseTrialPlay({ course: 0, season: 0, weather: 6, time: 3 }), {
+    course: 0,
+    season: 0,
+    weather: 0,
+    time: 32,
+  });
+  assert.deepEqual(parseTrialPlay({ course: 0, season: 0, weather: "rain" }), { course: 0, season: 0, weather: 0 });
+  assert.equal(parseTrialPlay({ course: 1, season: 0, weather: 0 }), null);
 });
 
 void test("a time trial names a circuit and a season its sport rides", () => {

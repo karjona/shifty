@@ -11,7 +11,7 @@ import { type Appearance, type PlanRequest, TILT, circuit, parsePlan } from "@sh
 import { lobbySocket, lookOf, meQuery, roomExists, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
-import { PlanPickers, PlanRows } from "../plan.tsx";
+import { PlanPickers, PlanRows, prefetchScenery } from "../plan.tsx";
 import { Button, Handle, Hints, Panel, Picker } from "../ui.tsx";
 import { useLoading } from "../busy.tsx";
 import { TopBar } from "./common.tsx";
@@ -96,6 +96,11 @@ export function RoomScreen() {
   useEffect(() => {
     if (appearance) setClubRider(appearance, sport);
   }, [appearance, sport]);
+  // The scenery of the room's race comes down while everyone waits.
+  const roomPlan = room?.plan ?? null;
+  useEffect(() => {
+    if (roomPlan) prefetchScenery(roomPlan);
+  }, [roomPlan]);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();

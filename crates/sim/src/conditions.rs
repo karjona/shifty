@@ -1053,7 +1053,12 @@ mod tests {
         let join = |v: &[u8]| v.iter().map(u8::to_string).collect::<Vec<_>>().join(" ");
         let mut lines = Vec::new();
         for &c in CourseId::ALL {
-            lines.push(format!("circuit {} {}", c as u8, sport(c.sport())));
+            lines.push(format!(
+                "circuit {} {} {}",
+                c as u8,
+                sport(c.sport()),
+                c.course().revision
+            ));
         }
         for s in [Sport::Jetski, Sport::Snowboard] {
             let seasons: Vec<u8> = s.seasons().iter().map(|&x| x as u8).collect();

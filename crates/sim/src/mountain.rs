@@ -1337,10 +1337,12 @@ pub static MOUNTAIN: Course = Course {
     line: Line::Run(&RUN),
     lane_half: 8.0,
     laps: 1,
+    revision: 1,
     start_s: 40.0,
     buoys: &[],
     ramps: &[],
     land: &[],
+    boats: &[],
     sea: SeaState::OPEN_SEA,
 };
 

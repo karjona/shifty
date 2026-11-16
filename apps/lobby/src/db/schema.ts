@@ -311,9 +311,9 @@ export const raceResult = pgTable(
 );
 
 /**
- * Every time trial run a race server reported, best or not. `room` and
- * `run` (the attempt in that room) identify it, so a retried report is kept
- * once; a deleted account keeps its runs, without the user.
+ * Every time trial lap a race server reported, best or not. `room` and
+ * `run` (the lap in that room) identify it, so a retried report is kept
+ * once; a deleted account keeps its laps, without the user.
  */
 export const timeTrialRun = pgTable(
   "time_trial_run",
@@ -324,6 +324,8 @@ export const timeTrialRun = pgTable(
     userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
     course: smallint("course").notNull(),
     season: smallint("season").notNull(),
+    /** The circuit's revision (0: laps from before revisions). */
+    revision: smallint("revision").notNull().default(0),
     timeMs: integer("time_ms").notNull(),
     createdAt: createdAt(),
   },
@@ -336,7 +338,7 @@ export const timeTrialRun = pgTable(
 );
 
 /**
- * A player's best time trial run per course and season, with its ghost
+ * A player's best time trial lap per course and season, with its ghost
  * (see ghosts.ts for the format). The id is the ghost's: a new best gets a
  * new id, so the bytes behind an id never change.
  */
@@ -349,6 +351,8 @@ export const timeTrialBest = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
     course: smallint("course").notNull(),
     season: smallint("season").notNull(),
+    /** The circuit's revision (0: bests from before revisions); only the circuit's revision now ranks. */
+    revision: smallint("revision").notNull().default(0),
     timeMs: integer("time_ms").notNull(),
     ghost: bytea("ghost").notNull(),
     /** Milliseconds, so a value read back compares exactly in rank queries. */

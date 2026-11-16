@@ -2,8 +2,10 @@
 // (WASM), the world drawn from its prediction, and the HUD. A Tilt
 // moves from race to race (a circuit in its conditions) in the same
 // session, with a short season change in between. Each race starts with its intro (see intro.ts), once
-// every screen has told the server its course is on show. A time trial
-// races ghosts (see ghosts.ts) and starts over on request. The last race's
+// every screen has told the server its course is on show. A time trial is
+// a session of laps without end against ghosts (see ghosts.ts), a lap
+// started over on request, until the player leaves or the room closes it.
+// The last race's
 // results stay up in the world (everyone on autopilot, on television): once
 // they have had their time, or the player moves on, the plan is over and
 // the menus take it from there, with the race still running behind them.
@@ -12,7 +14,7 @@ import { WasmClient, planOf, raceFields, renderStride, statsFields, weatherField
 import { RaceAudio } from "../audio/race.ts";
 import { messages } from "../i18n/index.ts";
 import { type FrameInput, InputReader } from "../input.ts";
-import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
+import { type TrialRace, fetchBoard, fetchGhost, keepTrial } from "../menu/api.ts";
 import { type Work, begin, holdLoading, quietly, tracked, waitNow } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
 import {
@@ -30,7 +32,7 @@ import { prefetchLook } from "../render/rider/model.ts";
 import { prefetchRide } from "../render/ride/ride.ts";
 import type { Environment, RiderView } from "../render/world.ts";
 import { createDebugPanel } from "../ui/debug.ts";
-import { Hud, type RaceView } from "../ui/hud.ts";
+import { Hud, type RaceEvent, type RaceView, formatTime } from "../ui/hud.ts";
 import { Minimap, RunMap, type CourseMap } from "../ui/minimap.ts";
 import { type RosterName, Scoreboard } from "../ui/results.ts";
 import { WrongWay } from "../ui/wrong-way.ts";
@@ -78,6 +80,26 @@ export type Trouble =
   | { kind: "unreachable" }
   /** The connection went away during the plan. */
   | { kind: "lost" };
+
+/** How a time trial session ended: the player left it, or the room closed it (no riding for a while, the hour, or unsaid). */
+export type SessionEnd = "left" | "idle" | "hour" | "closed";
+
+/** A time trial session as its panel shows it at the end. */
+export interface TrialEnd {
+  /** The session's best clean lap (ticks; 0: none), and the sim's rate. */
+  best: number;
+  hz: number;
+  /** Laps ridden, clean or void. */
+  laps: number;
+  /** The ghosts raced (their lap times), named for what they were if the session beat them. */
+  ghosts: { label: string; ticks: number }[];
+  /** What the session set on the board: 2 the record, 1 your best, 0 nothing. */
+  beat: number;
+  name: string;
+  /** Ridden in weather that isn't clear: timed, not ranked. */
+  practice: boolean;
+  ended: SessionEnd;
+}
 
 /** A race of the room's plan, as its ticket draws it. */
 export interface PlannedRace {
@@ -166,6 +188,8 @@ export interface RaceState {
   phase: number;
   /** The race (`sim::Phase`): 0 on the grid, 4 intro, 1 countdown, 2 racing, 3 results. */
   racePhase: number;
+  /** Through the countdown, the whole seconds left (the HUD calls "Get ready" above 3); 0 otherwise. */
+  countdown: number;
   sport: "jetski" | "snow";
   course: number;
   /** The race's season, weather and time of day (null before the first snapshot). */
@@ -319,6 +343,7 @@ export class RaceSession implements Stage {
   readonly state: RaceState = {
     phase: 0,
     racePhase: 0,
+    countdown: 0,
     sport: "jetski",
     course: -1,
     conditions: null,
@@ -335,14 +360,15 @@ export class RaceSession implements Stage {
   };
   /** The player moved on from the last race's results before they ran out. */
   private moveOn = false;
-  /** A time trial (its times to beat move as you beat them), and its ghosts. */
+  /** A time trial (its times to beat and your best's ghost move as you beat them), and its ghosts. */
   private trial: TrialRace | null = null;
   private ghosts: Ghosts | null = null;
-  /** What the last run set (a new best or record), and the ghosts it raced, for its results. */
-  private trialCallout: string | null = null;
-  private trialRaced: { label: string; ticks: number }[] = [];
-  /** What the last run beat: 2 the record (and your best), 1 your best, 0 nothing. */
+  /** The ghosts raced from the session's start: who, and their lap times. */
+  private trialRaced: { label: string; pick: string; ticks: number }[] = [];
+  /** What the session set on the board: 2 the record (and your best), 1 your best, 0 nothing. */
   private trialBeat = 0;
+  /** The player left the time trial session. */
+  private trialLeft = false;
 
   private opts: RaceOptions;
 
@@ -395,9 +421,23 @@ export class RaceSession implements Stage {
     this.input.pressCamera();
   }
 
-  /** A time trial: starts the run over, straight to the countdown. */
+  /** A time trial: starts the lap over, straight to the countdown. */
   retry(): void {
     this.client?.retry();
+  }
+
+  /** A time trial: leaves the session (it says goodbye; the race runs on here alone, on its results). */
+  leaveSession(): void {
+    const client = this.client;
+    if (!this.trial || !client || this.trialLeft) return;
+    this.trialLeft = true;
+    client.leaveSession();
+    if (this.transport) this.sendOutgoing(client, this.transport);
+  }
+
+  /** A time trial as it stands: its picks, with your best's ghost and the times to beat as the session moved them. */
+  trialRace(): TrialRace | null {
+    return this.trial && { ...this.trial, ghosts: [...this.trial.ghosts] };
   }
 
   /**
@@ -413,27 +453,42 @@ export class RaceSession implements Stage {
     if (this.state.finalResults) this.moveOn = true;
   }
 
-  /** A time trial's last run as its results show it: your time, the ghosts raced and what the run set. */
-  trialEnd(): {
-    ticks: number;
-    hz: number;
-    ghosts: { label: string; ticks: number }[];
-    callout: string | null;
-    beat: number;
-    name: string;
-  } | null {
+  /** How the session ended (null: it goes on). */
+  private sessionEnd(sessionOver: number): SessionEnd | null {
+    if (this.trialLeft) return "left";
+    if (this.state.racePhase !== RESULTS) return null;
+    return sessionOver === 1 ? "idle" : sessionOver === 2 ? "hour" : "closed";
+  }
+
+  /** A time trial session as its panel shows it once it is over (null: it isn't). */
+  trialEnd(): TrialEnd | null {
     const client = this.client;
     if (!this.trial || !client) return null;
-    const mine = parseStandings(client.standingsJson()).find((s) => s.slot === client.slot());
-    const hz = this.readRace().tickHz;
-    const name = this.riders.get(client.slot())?.name ?? "";
+    const race = this.readRace();
+    const ended = this.sessionEnd(race.sessionOver);
+    if (!ended) return null;
+    const t = messages().trial;
+    const beat = this.trialBeat;
     return {
-      ticks: mine?.finishTicks ?? 0,
-      hz,
-      ghosts: this.trialRaced,
-      callout: this.trialCallout,
-      beat: this.trialBeat,
-      name,
+      best: race.bestLap,
+      hz: race.tickHz,
+      laps: race.lapsDone,
+      // (After a reload, your best may be this session's own lap: it isn't a ghost you raced.)
+      ghosts: this.trialRaced
+        .filter((g) => !(g.pick === "best" && g.ticks === race.bestLap))
+        .map((g) => ({
+          label:
+            g.pick === "best" && beat > 0
+              ? t.previousBest
+              : g.pick === "record" && beat > 1
+                ? t.previousRecord
+                : g.label,
+          ticks: g.ticks,
+        })),
+      beat,
+      name: this.riders.get(client.slot())?.name ?? "",
+      practice: race.practice,
+      ended,
     };
   }
 
@@ -444,20 +499,36 @@ export class RaceSession implements Stage {
       .map((r) => ({ label: ghostLabel(r.pick), splits: r.splits }));
   }
 
-  /** Through the finish of a time trial: a new best or record is called out, and the new best becomes your ghost. */
-  private trialFinish(ticks: number, hz: number): void {
+  /**
+   * A lap of a time trial ended: its time said, a new best or record called
+   * out (clean, in clear weather), and the new best raced as your ghost
+   * from then on.
+   */
+  private lapEnded(e: RaceEvent, race: RaceView): void {
     const trial = this.trial;
     if (!trial) return;
-    const ms = Math.floor((ticks * 1000) / hz);
     const m = messages().trial;
-    const record = trial.record === null || ms < trial.record;
-    const best = trial.best === null || ms < trial.best;
-    this.trialCallout = record ? m.newRecord : best ? m.newBest : null;
-    this.trialBeat = record ? 2 : best ? 1 : 0;
-    if (best) trial.best = ms;
+    const ticks = e.ticks ?? 0;
+    const time = formatTime(ticks, race.tickHz);
+    if (!e.clean) {
+      this.hud.popup(m.voidLap(time), "bad");
+      return;
+    }
+    this.hud.popup(time, "big");
+    const ms = Math.floor((ticks * 1000) / race.tickHz);
+    const record = !race.practice && (trial.record === null || ms < trial.record);
+    const best = !race.practice && (trial.best === null || ms < trial.best);
+    const callout = record ? m.newRecord : best ? m.newBest : e.best ? m.bestLap : null;
+    if (callout) this.hud.popup(callout, "big");
+    if (!best) return;
+    this.trialBeat = Math.max(this.trialBeat, record ? 2 : 1);
+    trial.best = ms;
     if (record) trial.record = ms;
-    // The race server reports the run as it ends; the lobby has it a moment later.
-    if (best && this.ghosts) setTimeout(() => void this.refreshBest(trial, ms), 2500);
+    // Kept for a reload of this tab, with what the session set.
+    trial.beat = this.trialBeat;
+    keepTrial(trial);
+    // The race server reports the lap as it ends; the lobby has it a moment later.
+    if (this.ghosts) setTimeout(() => void this.refreshBest(trial, ms), 2500);
   }
 
   /** Races your new best from now on (and drops the record's ghost if it's yours now). */
@@ -472,8 +543,12 @@ export class RaceSession implements Stage {
     const pick = { id: mine.ghost, label: "best", timeMs: mine.timeMs };
     const run = readGhost(pick, await fetchGhost(mine.ghost).catch(() => new Uint8Array()));
     if (!run || this.stopped || !this.ghosts) return;
-    if (board.top[0]?.me) this.ghosts.drop("record");
-    // (In the background: the run goes on.)
+    // Kept for a reload of this tab: it races your best again.
+    const mineIsRecord = board.top[0]?.me === true;
+    trial.ghosts = [...trial.ghosts.filter((g) => g.label !== "best" && !(mineIsRecord && g.label === "record")), pick];
+    keepTrial(trial);
+    if (mineIsRecord) this.ghosts.drop("record");
+    // (In the background: the session goes on.)
     await quietly(() => this.ghosts?.replace("best", run));
     this.ghostSplits();
   }
@@ -486,11 +561,19 @@ export class RaceSession implements Stage {
     }
     this.sleep = keepAwake();
     if (this.opts.trial) {
-      this.trial = { ...this.opts.trial };
+      const trial = { ...this.opts.trial };
+      this.trial = trial;
+      this.trialBeat = trial.beat ?? 0;
       this.hud.trial = [];
-      const ghosts = new Ghosts(this.opts.trial.ghosts, this.opts.hud);
+      // Practice weather races no ghosts.
+      const ghosts = new Ghosts(trial.weather === 0 ? trial.ghosts : [], this.opts.hud);
       this.ghosts = ghosts;
-      void ghosts.loaded.then(() => this.ghostSplits());
+      void ghosts.loaded.then((runs) => {
+        this.trialRaced = runs
+          .filter((r) => r.course === trial.course)
+          .map((r) => ({ label: ghostLabel(r.pick), pick: r.pick.label, ticks: r.finishTicks }));
+        this.ghostSplits();
+      });
     }
     if (this.opts.render ?? engine.render) {
       const first = this.state.plan[0];
@@ -638,6 +721,8 @@ export class RaceSession implements Stage {
     eventIndex: number;
     eventCount: number;
     gpVersion: number;
+    /** Why the room closed a time trial session (0: it didn't; 1 no riding for a while, 2 the hour). */
+    sessionOver: number;
   } {
     const client = this.client!;
     const keys = raceFields();
@@ -678,6 +763,14 @@ export class RaceSession implements Stage {
       eventCount: f("eventCount") || 1,
       gpVersion: f("gpVersion"),
       autopilot: f("autopilot") === 1,
+      trial: f("trial") === 1,
+      lapTicks: f("lapTicks"),
+      lapsDone: f("lapsDone"),
+      bestLap: f("bestLap"),
+      lastLap: f("lastLap"),
+      lastVoid: f("lastVoid") === 1,
+      practice: f("trial") === 1 && conditions.weather !== "clear",
+      sessionOver: f("sessionOver"),
     };
   }
 
@@ -823,8 +916,8 @@ export class RaceSession implements Stage {
     const phase = client.phase();
     this.state.phase = phase;
     const m = messages().race;
-    // Once the plan is over (or a time trial's run is), the race runs on here alone: nothing goes wrong.
-    const done = this.state.over || (this.trial !== null && this.state.racePhase === RESULTS);
+    // Once the plan is over (or a time trial's session is), the race runs on here alone: nothing goes wrong.
+    const done = this.state.over || this.trialLeft || (this.trial !== null && this.state.racePhase === RESULTS);
     if (phase >= 2) {
       const reason = REJECTED[phase] ?? "other";
       if (!done) this.state.trouble ??= { kind: "rejected", reason };
@@ -856,6 +949,8 @@ export class RaceSession implements Stage {
     const race = this.readRace();
     Object.assign(this.state, {
       racePhase: race.phase,
+      countdown:
+        race.phase === COUNTDOWN ? Math.ceil(Math.max(0, race.phaseLength - race.phaseTicks) / race.tickHz) : 0,
       sport: this.sport,
       course: race.course,
       conditions: race.conditions,
@@ -920,25 +1015,6 @@ export class RaceSession implements Stage {
       }
     } else if (this.trial) {
       this.resultsEvent = -1;
-      // A run's results stand against the ghosts it raced (a new best replaces yours after),
-      // the ones it beat named for what they were.
-      const t = messages().trial;
-      const beat = this.trialBeat;
-      this.trialRaced = (this.ghosts?.list ?? [])
-        .filter((r) => r.course === race.course)
-        .map((r) => ({
-          label:
-            r.pick.label === "best" && beat > 0
-              ? t.previousBest
-              : r.pick.label === "record" && beat > 1
-                ? t.previousRecord
-                : ghostLabel(r.pick),
-          ticks: r.finishTicks,
-        }));
-      if (race.phase !== RACING) {
-        this.trialCallout = null;
-        this.trialBeat = 0;
-      }
     }
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
@@ -963,7 +1039,12 @@ export class RaceSession implements Stage {
     // On television the cameras and the standings tell the race: the map would only cover the shot.
     if (this.mapRoot.hidden !== watching) this.mapRoot.hidden = watching;
     this.sfx.broadcast = watching;
-    if (this.input.takeCamera() && watching && !this.paused) this.tv?.next();
+    // Y / △ / P: in a time trial, the lap starts over; on television, another camera.
+    if (this.input.takeCamera() && !this.paused) {
+      const lapping = race.phase === COUNTDOWN || race.phase === RACING;
+      if (this.trial && lapping && !this.trialLeft) this.retry();
+      else if (watching) this.tv?.next();
+    }
 
     const riders = this.readRiders();
     const nextBuoy = this.nextMark(race.looped, race.nextGate);
@@ -981,7 +1062,9 @@ export class RaceSession implements Stage {
         if (this.ghosts) {
           const running = race.phase === RACING || race.phase === COUNTDOWN;
           const on = running && !watching && !this.covered && (!shot || shot.chase >= 1);
-          const ticks = race.phase === RACING ? tick - race.phaseStart : 0;
+          // Ghosts ride the lap under way from its start (waiting on the line until one starts).
+          const lapStart = race.phaseStart + race.phaseTicks - race.lapTicks;
+          const ticks = race.phase === RACING && race.lapTicks >= 0 ? tick - lapStart : 0;
           this.ghosts.place(ticks, on, engine.world.camera, dt);
         }
         // A rider who turns up mid-race comes in when their art does: nobody waits for it.
@@ -1005,9 +1088,8 @@ export class RaceSession implements Stage {
     // popups and their sounds (what the prediction alone makes up isn't news).
     const held = this.state.stalled || this.state.trouble !== null;
     if (!held) this.hud.events(events, client.slot(), race);
-    if (this.trial)
-      for (const e of events)
-        if (e.kind === "finish" && e.slot === client.slot() && race.racing) this.trialFinish(e.ticks ?? 0, race.tickHz);
+    if (this.trial && !held)
+      for (const e of events) if (e.kind === "lapTime" && e.slot === client.slot()) this.lapEnded(e, race);
     const audible = this.shown && !this.seasonChange?.active;
     const heard = held ? [] : events;
     this.sfx.frame(riders, race, heard, client.slot(), this.lastInput, engine.world.camera, audible, dt);
@@ -1020,7 +1102,7 @@ export class RaceSession implements Stage {
       riders: this.riders,
       gp,
       next: this.nextRace(race),
-      trial: this.trial ? { ghosts: this.trialRaced, callout: this.trialCallout } : undefined,
+      trial: this.trial !== null,
     });
     this.minimap?.update(riders, nextBuoy);
     this.updateDebug(now);

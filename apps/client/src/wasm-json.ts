@@ -1,6 +1,6 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
-import type { CourseData, LandKind } from "./render/course.ts";
+import type { CourseData, LandData, LandKind, MooredKind } from "./render/course.ts";
 import type {
   CliffData,
   EdgeKind,
@@ -62,6 +62,7 @@ export function parseEvents(json: string): RaceEvent[] {
       kind !== "buoy" &&
       kind !== "checkpoint" &&
       kind !== "lap" &&
+      kind !== "lapTime" &&
       kind !== "finish" &&
       kind !== "disqualified" &&
       kind !== "trick" &&
@@ -87,6 +88,8 @@ export function parseEvents(json: string): RaceEvent[] {
       points: num(o, "points"),
       sketchy: o.sketchy === true,
       index: num(o, "index"),
+      clean: o.clean === true,
+      best: o.best === true,
     });
   }
   return out;
@@ -208,11 +211,23 @@ const LAND_KINDS: readonly LandKind[] = [
   "mole",
   "stack",
   "arch",
+  "jetty",
 ];
 const landKind = (v: unknown): LandKind => LAND_KINDS.find((k) => k === v) ?? "rock";
 
+const MOORED_KINDS: readonly MooredKind[] = ["llaut", "trawler", "yacht", "inflatable", "sailboat"];
+const mooredKind = (v: unknown): MooredKind => MOORED_KINDS.find((k) => k === v) ?? "llaut";
+
 function parseBay(o: Obj): CourseData {
   const start = isObj(o.start) ? o.start : {};
+  const land: LandData[] = list(o.land).map((l) => ({
+    ax: num(l, "ax"),
+    az: num(l, "az"),
+    bx: num(l, "bx"),
+    bz: num(l, "bz"),
+    radius: num(l, "radius"),
+    kind: landKind(l.kind),
+  }));
   return {
     place: o.place === "cape" ? "cape" : "bay",
     length: num(o, "length"),
@@ -242,13 +257,16 @@ function parseBay(o: Obj): CourseData {
       width: num(r, "width"),
       height: num(r, "height"),
     })),
-    land: list(o.land).map((l) => ({
-      ax: num(l, "ax"),
-      az: num(l, "az"),
-      bx: num(l, "bx"),
-      bz: num(l, "bz"),
-      radius: num(l, "radius"),
-      kind: landKind(l.kind),
+    land: land.filter((l) => l.kind !== "jetty"),
+    jetties: land.filter((l) => l.kind === "jetty"),
+    boats: list(o.boats).map((b) => ({
+      x: num(b, "x"),
+      z: num(b, "z"),
+      yaw: num(b, "yaw"),
+      length: num(b, "length"),
+      beam: num(b, "beam"),
+      kind: mooredKind(b.kind),
+      seed: num(b, "seed"),
     })),
     path: list(o.path).map((p) => ({
       s: num(p, "s"),
