@@ -161,7 +161,11 @@ export const inviteQuery = queryOptions({
     const o = await call("/api/auth/invite/status");
     return { required: o.required === true, redeemed: o.redeemed === true };
   },
+  staleTime: 5 * 60_000,
 });
+
+/** The invite status asked again (after redeeming a code). */
+export const freshInviteQuery = { ...inviteQuery, staleTime: 0 };
 
 /** Redeems an invite code for this browser; false if it is unknown, used up or expired. */
 export async function redeemInvite(code: string): Promise<boolean> {

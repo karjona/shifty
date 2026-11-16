@@ -13,7 +13,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useT } from "../i18n/index.ts";
-import { ApiError, inviteQuery, meQuery, onSessionEnded, redeemInvite } from "./api.ts";
+import { ApiError, freshInviteQuery, inviteQuery, meQuery, onSessionEnded, redeemInvite } from "./api.ts";
 import { useAction, useAutoFocus } from "./hooks.ts";
 import { Button, Panel, Wordmark } from "./ui.tsx";
 import { InfoPage } from "./screens/info.tsx";
@@ -131,9 +131,8 @@ const loginRoute = createRoute({
   path: "/login",
   validateSearch: (s: Record<string, unknown>): { error?: string } => ({ error: str(s.error) }),
   beforeLoad: async ({ context }) => {
-    const me = await signedIn(context);
+    const [me] = await Promise.all([signedIn(context), context.queryClient.ensureQueryData(inviteQuery)]);
     if (me) throw redirect({ to: me.player ? (me.rider?.appearance ? "/" : "/rider") : "/welcome" });
-    await context.queryClient.ensureQueryData(inviteQuery);
   },
   component: LoginScreen,
 });
@@ -150,7 +149,7 @@ const inviteRoute = createRoute({
     } catch {
       error = "too_many";
     }
-    await context.queryClient.fetchQuery(inviteQuery);
+    await context.queryClient.fetchQuery(freshInviteQuery);
     throw redirect({ to: "/login", search: { error } });
   },
 });
@@ -241,6 +240,9 @@ const routeTree = rootRoute.addChildren([
 ]);
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
+// The first screen needs the account and, signed out, the invite status: both asked at once.
+void queryClient.prefetchQuery(meQuery);
+void queryClient.prefetchQuery(inviteQuery);
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPendingMinMs: 0 });
 

@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { getLocale, useT } from "../../i18n/index.ts";
-import { ApiError, auth, inviteQuery, meQuery, redeemInvite } from "../api.ts";
+import { ApiError, auth, freshInviteQuery, inviteQuery, meQuery, redeemInvite } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { Button, Panel, TextField, Wordmark } from "../ui.tsx";
 import { Footer, LanguagePicker } from "./common.tsx";
@@ -99,7 +99,7 @@ export function Login() {
     setError(null);
     try {
       if (await redeemInvite(inviteCode)) {
-        await queryClient.fetchQuery(inviteQuery);
+        await queryClient.fetchQuery(freshInviteQuery);
         go("signup");
       } else {
         setError(t.login.badInvite);
