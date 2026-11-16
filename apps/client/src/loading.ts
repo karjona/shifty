@@ -546,6 +546,8 @@ export function download(
   entry.bytes.then(
     () => {
       job.end();
+      const took = (job.ended ?? now()) - job.start;
+      if (job.done >= RATE_MIN_BYTES && took > 30) lastRate = job.done / took;
       if (!entry.keep) downloads.delete(url);
     },
     () => {
@@ -569,8 +571,11 @@ export function downloadRate(): number {
     done += job.done;
     span = Math.max(span, t - job.start);
   }
-  return done >= RATE_MIN_BYTES / 2 && span > 50 ? done / span : (memory.rate ?? FIRST_RATE);
+  return done >= RATE_MIN_BYTES / 2 && span > 50 ? done / span : (lastRate ?? memory.rate ?? FIRST_RATE);
 }
+
+/** How fast the last download big enough to tell went (bytes a millisecond). */
+let lastRate: number | null = null;
 
 /** Counts `url` in `wait` too, if it is on its way. */
 export function joinDownload(url: string, wait: Wait | null): void {
