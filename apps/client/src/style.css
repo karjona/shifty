@@ -310,7 +310,7 @@ html {
     0 0 0 1px rgb(29 27 23 / 0.2),
     0 16px 40px rgb(24 16 8 / 0.3);
   pointer-events: none;
-  animation: verdict-in 420ms cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation: verdict-in 340ms cubic-bezier(0.3, 0, 0.2, 1) both;
   transition: opacity 400ms ease;
 }
 #verdict[hidden] {
@@ -345,7 +345,11 @@ html {
 @keyframes verdict-in {
   from {
     opacity: 0;
-    transform: translateX(-60px) skewX(-6deg);
+    transform: scale(1.4);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(0.97);
   }
 }
 #banner {
