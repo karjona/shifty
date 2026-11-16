@@ -459,6 +459,85 @@ function merged(trees: Tree[], models: Models, far: boolean): THREE.BufferGeomet
 }
 
 /** The forest as it is drawn: a mesh per stretch of the run (in detail close by, simpler from far off) and per square of the mountain. */
+/** A sight line is checked against the trees of the cells it crosses (m), and passes this far clear of a tree (m). */
+const SIGHT_CELL = 12;
+const SIGHT_CLEAR = 0.7;
+/** A picture is kept clear of trees this far of the way to what it shows (0-1): a tree by the lens fills it, one by the rider is scenery. */
+const SIGHT_NEAR = 0.4;
+/** A picture is this many times wider than tall. */
+const SIGHT_ASPECT = 16 / 9;
+/** A bare trunk's radius (m), below its crown. */
+const TRUNK = 0.4;
+
+/**
+ * Which lines of sight the forest leaves open. A tree stands in the way as
+ * its trunk up to its crown, and its crown as a cone narrowing to its top
+ * (a round crown keeps its width).
+ */
+export class ForestSight {
+  private cells = new Map<number, Tree[]>();
+
+  constructor(trees: Tree[]) {
+    for (const t of trees) {
+      const r = KINDS[t.kind]!.reach * t.scale + SIGHT_CLEAR + SIGHT_CELL;
+      const i0 = Math.floor((t.x - r) / SIGHT_CELL);
+      const i1 = Math.floor((t.x + r) / SIGHT_CELL);
+      const j0 = Math.floor((t.z - r) / SIGHT_CELL);
+      const j1 = Math.floor((t.z + r) / SIGHT_CELL);
+      for (let i = i0; i <= i1; i++) {
+        for (let j = j0; j <= j1; j++) {
+          let cell = this.cells.get(shadeCell(i, j));
+          if (!cell) this.cells.set(shadeCell(i, j), (cell = []));
+          cell.push(t);
+        }
+      }
+    }
+  }
+
+  /**
+   * Whether no tree stands between `eye` and `at` (not counting the last
+   * `skip` m before `at`). With `frame`, the height (m) of a picture taken
+   * from `eye` of what is at `at`, no tree stands in the picture either
+   * over the near part of the way.
+   */
+  clear(eye: THREE.Vector3, at: THREE.Vector3, frame = 0, skip = 1.5): boolean {
+    const dx = at.x - eye.x;
+    const dz = at.z - eye.z;
+    const flat = Math.hypot(dx, dz);
+    if (flat < 1e-3) return true;
+    const reach = Math.max(0, 1 - skip / flat);
+    const steps = Math.max(1, Math.ceil(flat / (SIGHT_CELL / 2)));
+    let last = -1;
+    for (let n = 0; n <= steps; n++) {
+      const k = n / steps;
+      const key = shadeCell(Math.floor((eye.x + dx * k) / SIGHT_CELL), Math.floor((eye.z + dz * k) / SIGHT_CELL));
+      if (key === last) continue;
+      last = key;
+      const cell = this.cells.get(key);
+      if (!cell) continue;
+      for (const t of cell) {
+        // Where the line passes nearest the trunk, seen from above.
+        const along = Math.max(0, Math.min(reach, ((t.x - eye.x) * dx + (t.z - eye.z) * dz) / (flat * flat)));
+        const off = Math.hypot(eye.x + dx * along - t.x, eye.z + dz * along - t.z);
+        const kind = KINDS[t.kind]!;
+        const width = kind.reach * t.scale;
+        // Half the picture's height there, and the room the line needs.
+        const half = along < SIGHT_NEAR ? (frame / 2) * along : 0;
+        const room = SIGHT_CLEAR + half * SIGHT_ASPECT;
+        if (off > width + room) continue;
+        const tall = kind.height * t.scale * t.tall;
+        const up = eye.y + (at.y - eye.y) * along - t.y;
+        if (up - half > tall) continue;
+        const crown = kind.crownFrom * tall;
+        const lowest = Math.max(crown, up - half);
+        const crownWidth = kind.round ? width : width * (1 - (lowest - crown) / Math.max(1e-3, tall - crown));
+        if (off < (up + half < crown ? TRUNK : crownWidth) + room) return false;
+      }
+    }
+    return true;
+  }
+}
+
 export class Forest {
   readonly group = new THREE.Group();
   private batches: { centre: THREE.Vector3; radius: number; detail: THREE.Mesh | null; far: THREE.Mesh }[] = [];

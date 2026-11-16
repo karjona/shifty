@@ -62,7 +62,7 @@ import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
 import { waitNow } from "../loading.ts";
 import { type Steps, buildNow, buildSliced } from "./slices.ts";
-import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
+import { Forest, ForestSight, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan, liftEnds } from "./mountain-built.ts";
 import { farLandscape, landscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
@@ -256,6 +256,8 @@ const CLEAR_FAR = 4000;
 /** The chase camera stays this far (m) inside a run's riding limit, and looks for its nearest point this many points either way first. */
 const EYE_INSET = 1.5;
 const EYE_SEARCH = 12;
+/** A line of sight passes this far clear of a rock or a lift tower (m). */
+const SIGHT_ROOM = 0.6;
 /** The forest is cut back this far either side of the chairlift's line (m). */
 const LIFT_SWATHE = 8;
 /** No trees stand within this of the middle of the grid (m). */
@@ -606,6 +608,8 @@ export class Mountain implements Environment {
   private trails = new CarveTrails();
   private forest: Forest | null = null;
   private trees: Tree[] = [];
+  /** The forest's lines of sight, made when a camera first asks. */
+  private forestSight: ForestSight | null = null;
   private buildings: Building[] = [];
   private built: Built | null = null;
   private gates: SnowGates | null = null;
@@ -827,6 +831,22 @@ export class Mountain implements Environment {
     const kept = Math.max(-room, Math.min(room, off));
     eye.x += rx * (kept - off);
     eye.z += rz * (kept - off);
+  }
+
+  sight(eye: THREE.Vector3, at: THREE.Vector3, frame = 0): boolean {
+    this.forestSight ??= new ForestSight(this.trees);
+    if (!this.forestSight.clear(eye, at, frame)) return false;
+    const dx = at.x - eye.x;
+    const dz = at.z - eye.z;
+    const flat2 = dx * dx + dz * dz;
+    for (const o of this.run.obstacles) {
+      // The run's pines are in the forest.
+      if (o.kind === "pine" || flat2 < 1e-6) continue;
+      const along = Math.max(0, Math.min(1, ((o.x - eye.x) * dx + (o.z - eye.z) * dz) / flat2));
+      if (eye.y + (at.y - eye.y) * along > o.y + o.height) continue;
+      if (Math.hypot(eye.x + dx * along - o.x, eye.z + dz * along - o.z) < o.radius + SIGHT_ROOM) return false;
+    }
+    return true;
   }
 
   ground(x: number, z: number): number {

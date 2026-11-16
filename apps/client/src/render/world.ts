@@ -125,6 +125,12 @@ export interface Environment {
   ground(x: number, z: number, t: number): number;
   /** Moves the chase camera's spot `eye` (x and z) back to where it sees clear of what lines the course, if it can't there. */
   keepEye?(eye: { x: number; z: number }): void;
+  /**
+   * Whether what stands on the course (trees, rocks, towers; not the
+   * ground) leaves the line from `eye` to `at` open; with `frame`, also a
+   * picture that tall (m) of what is at `at`, near the lens.
+   */
+  sight?(eye: THREE.Vector3, at: THREE.Vector3, frame?: number): boolean;
   /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
   makeRider(slot: number, appearance: Appearance | null): RiderModel;
   /** Per frame, once the riders are placed. */

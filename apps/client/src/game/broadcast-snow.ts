@@ -14,8 +14,40 @@ import { type Rig, type Watch, clear, drone, onRider } from "./broadcast-rig.ts"
 
 /** Past the finish, the finish area reaches this far (m). */
 const AREA = 70;
-/** A camera beside the run stands at least this far (m) from a gate's pole, and this far in from trees and rock. */
-const GATE_ROOM = 6;
+/**
+ * A camera beside the run has no gate, log or rock lip this close up the
+ * run from it (m), where it would stand large between the lens and the
+ * rider, or this close below it; it stands this far above one instead, or
+ * this far ahead of its rider at least.
+ */
+const GATE_ABOVE = 26;
+const GATE_BELOW = 4;
+const GATE_KEEP = 6;
+const SIDE_LEAST = 20;
+/**
+ * Where a camera beside the run may stand: on the outside of the bend or
+ * the inside (1, -1), this much further down the run (m). It takes the
+ * first that sees the rider's whole way down to it, looked at every
+ * `SIDE_STEP` m to within `SIDE_NEAR` m of the lens, or the one seeing
+ * most of it, one that sees the rider where it is now first.
+ */
+const SIDE_SPOTS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [1, 10],
+  [-1, 0],
+  [-1, 10],
+  [1, 20],
+  [-1, 20],
+  [1, -10],
+  [-1, -10],
+  [1, -20],
+  [-1, -20],
+];
+/** How tall a slice of the world a camera beside the run frames at its rider (m). */
+const SIDE_FRAME = 3.6;
+const SIDE_STEP = 7;
+const SIDE_NEAR = 6;
+/** A camera beside the run stands this far in from trees and rock (m). */
 const WOODED_INSET = 3.2;
 /** The final pitch, as the camera under the arch sees it (m before the finish). */
 const PITCH_FROM = 130;
@@ -81,8 +113,8 @@ export function snowRigs(
   // The snow in the way, sampled in one go.
   const probe = new Float32Array(32);
   const sightAt = new THREE.Vector3();
-  const sees = (eye: THREE.Vector3, r: RiderView) => {
-    sightAt.set(r.x, r.y + 0.5, r.z);
+  /** Whether the snow leaves the line from `eye` to `sightAt` open. */
+  const over = (eye: THREE.Vector3) => {
     if (!heights) return clear(eye, sightAt, ground, 8);
     for (let i = 0; i < 16; i++) {
       const k = (i + 1) / 17;
@@ -93,6 +125,14 @@ export function snowRigs(
     let i = 0;
     return clear(eye, sightAt, () => h[i++] ?? 0, 17, 0, Infinity);
   };
+  const sees = (eye: THREE.Vector3, r: RiderView) => {
+    sightAt.set(r.x, r.y + 0.5, r.z);
+    return over(eye);
+  };
+  /** Whether neither the snow nor what stands on the mountain is between `eye` and `sightAt`, nor in a picture of it `frame` m tall. */
+  const open = (eye: THREE.Vector3, frame: number) => over(eye) && (env.sight?.(eye, sightAt, frame) ?? true);
+  /** What stands in the run and would fill a lens just below it: gates, and the logs and rocks under lips (m down the run). */
+  const stands = [...run.gates.map((g) => g.s), ...run.lips.filter((lip) => lip.kind !== "wind").map((lip) => lip.lip)];
   const near = (s: number) => s > finish - PITCH_TO - 50 && s < finish + AREA;
   /** Riders coming down to the finish, the nearest to it first. */
   const coming = (w: Watch, from: number, to: number) =>
@@ -239,42 +279,64 @@ export function snowRigs(
       w.me && w.me.speed > 2 && along.of(w.me) < finish - UP_THE_RUN ? { slot: w.me.slot, score: 0.9 } : null,
     begin(_w, r) {
       const riderS = along.of(r);
-      sideS = riderS + 30 + r.speed;
+      const ahead = riderS + 30 + r.speed;
       // On the outside of the way the run bends between the rider and the
-      // camera, so the edge's trees, netting and rock stay out of the shot.
-      let bend = pathAt(sideS).yaw - pathAt(riderS).yaw;
+      // camera first, so the edge's trees, netting and rock stay out of the shot.
+      let bend = pathAt(ahead).yaw - pathAt(riderS).yaw;
       if (bend > Math.PI) bend -= Math.PI * 2;
       if (bend < -Math.PI) bend += Math.PI * 2;
-      sideOf = Math.abs(bend) > 0.05 ? (bend > 0 ? 1 : -1) : -sideOf;
-      // At the run's edge, in from the boughs of the trees beside it (a
-      // fir's lowest reach furthest) and its rock walls' buttresses. Clear
-      // of the run's own pines, towers and gate poles (a pole by the lens
-      // would fill the shot).
-      for (let tries = 0; tries < 4; tries++) {
-        const i = Math.max(0, Math.min(run.path.length - 1, Math.round((sideS - run.path[0]!.s) / 4)));
-        const p = run.path[i]!;
-        const limit = sideOf > 0 ? p.limitR : p.limitL;
-        const edge = sideOf > 0 ? p.edgeR : p.edgeL;
+      const outside = Math.abs(bend) > 0.05 ? (bend > 0 ? 1 : -1) : -sideOf;
+      // How far off the centre line the rider comes down.
+      const above = pathAt(riderS);
+      const offset = (above.x - r.x) * Math.cos(above.yaw) + (r.z - above.z) * Math.sin(above.yaw);
+      let best = -1;
+      for (const [side, further] of SIDE_SPOTS) {
+        if (best >= 2) break;
+        let s = ahead + further;
+        const prop = stands.find((at) => at > s - GATE_ABOVE && at < s + GATE_BELOW);
+        if (prop !== undefined) s = prop - GATE_KEEP > riderS + SIDE_LEAST ? prop - GATE_KEEP : prop + GATE_ABOVE;
+        // At the run's edge, in from the boughs of the trees beside it (a
+        // fir's lowest reach furthest) and its rock walls' buttresses, and
+        // clear of the run's own pines, rocks and towers.
+        const p = pathAt(s);
+        const right = side * outside > 0;
+        const edge = right ? p.edgeR : p.edgeL;
         const inset = edge === "trees" || edge === "rock" ? WOODED_INSET : 1.2;
-        sideEye.copy(on(sideS, sideOf * Math.max(0, limit - inset), 1.5));
-        const clearOf = (x: number, z: number, room: number) => Math.hypot(x - sideEye.x, z - sideEye.z) >= room;
-        const poles = run.gates.every((g) =>
-          [-1, 1].every((k) =>
-            clearOf(g.x - Math.cos(g.yaw) * g.half * k, g.z + Math.sin(g.yaw) * g.half * k, GATE_ROOM),
-          ),
-        );
-        if (poles && run.obstacles.every((o) => clearOf(o.x, o.z, o.radius + 4))) break;
-        sideS += 10;
+        const eye = on(s, (right ? 1 : -1) * Math.max(0, (right ? p.limitR : p.limitL) - inset), 1.5);
+        const crowded = run.obstacles.some((o) => Math.hypot(o.x - eye.x, o.z - eye.z) < o.radius + 4);
+        let seen = 0;
+        let looks = 0;
+        let first = 0;
+        for (let at = riderS; at < s - SIDE_NEAR; at += SIDE_STEP) {
+          if (crowded) break;
+          const q = pathAt(at);
+          sightAt.copy(on(at, Math.max(1 - q.limitL, Math.min(q.limitR - 1, offset)), 1));
+          if (open(eye, SIDE_FRAME)) {
+            seen++;
+            if (looks === 0) first = 1;
+          }
+          looks++;
+        }
+        const share = first + (looks > 0 ? seen / looks : 0);
+        if (share > best) {
+          best = share;
+          sideEye.copy(eye);
+          sideS = s;
+          sideOf = right ? 1 : -1;
+        }
       }
     },
     aim(_w, r, out) {
       out.eye.copy(sideEye);
-      out.frame = 3.6;
+      out.frame = SIDE_FRAME;
       out.follow = 6;
       onRider(out, r);
     },
     holds: (_w, r) =>
-      along.of(r) < sideS + 12 && Math.hypot(sideEye.x - r.x, sideEye.z - r.z) < 120 && sees(sideEye, r),
+      along.of(r) < sideS + 12 &&
+      Math.hypot(sideEye.x - r.x, sideEye.z - r.z) < 120 &&
+      sees(sideEye, r) &&
+      (env.sight?.(sideEye, sightAt) ?? true),
   };
 
   const rigs = [low, pitch, orbit, crane, wide, trackside, drone("drone", (x, z) => ground(x, z))];
