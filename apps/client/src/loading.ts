@@ -466,7 +466,7 @@ export function holdLoading(label: (() => string) | null = null, after = 0): () 
 export function cardWait(name: string, plan: Step[], el: HTMLElement): Wait {
   const wait = new Wait(name, plan);
   cards.push(wait);
-  // What the sign was waiting on, the card waits on now.
+  // What the sign was waiting on, the card waits on from here.
   const sign = signWait;
   if (sign && !sign.closed) {
     signWait = null;
