@@ -733,7 +733,7 @@ export class RaceSession implements Stage {
     const audible = this.shown && !this.seasonChange?.active;
     this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
     this.board.update({
       race,
       mySlot: client.slot(),

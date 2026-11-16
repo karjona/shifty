@@ -385,7 +385,7 @@ export const ca: Messages = {
     go: "JA!",
     spectating: "D'espectador · la propera cursa, aviat",
     wrongWay: "SENTIT CONTRARI",
-    maxPower: "✓ POTÈNCIA MÀXIMA",
+    maxPower: "POTÈNCIA MÀXIMA",
     missedBuoy: "BOIA FALLADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VOLTA",

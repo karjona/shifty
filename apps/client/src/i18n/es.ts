@@ -393,7 +393,7 @@ export const es: Messages = {
     go: "¡YA!",
     spectating: "De espectador · la próxima carrera, en breve",
     wrongWay: "SENTIDO CONTRARIO",
-    maxPower: "✓ POTENCIA MÁXIMA",
+    maxPower: "POTENCIA MÁXIMA",
     missedBuoy: "BOYA FALLADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VUELTA",

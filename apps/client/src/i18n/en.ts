@@ -386,7 +386,7 @@ export const en = {
     go: "GO!",
     spectating: "Spectating · next race soon",
     wrongWay: "WRONG WAY",
-    maxPower: "✓ MAX POWER",
+    maxPower: "MAX POWER",
     missedBuoy: "MISSED BUOY",
     checkpoint: (i: number, n: number) => `CHECKPOINT ${i}/${n}`,
     finalLap: "FINAL LAP",
