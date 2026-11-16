@@ -62,7 +62,8 @@ void test("those back, or gone too long, drop out of the list; the next to run o
   assert.equal(nextExpiry([], ROOM_AWAY_MS), null);
 });
 
-void test("only a normal close is leaving on purpose; drops and the browser going away keep the place", () => {
+void test("a page closing its socket is leaving on purpose; drops and pages going away keep the place", () => {
   assert.equal(closedOnPurpose(1000), true);
-  for (const code of [1001, 1005, 1006, 1011, 4000]) assert.equal(closedOnPurpose(code), false, String(code));
+  assert.equal(closedOnPurpose(1005), true);
+  for (const code of [1001, 1006, 1011, 4000]) assert.equal(closedOnPurpose(code), false, String(code));
 });

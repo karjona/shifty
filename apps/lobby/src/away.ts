@@ -1,16 +1,20 @@
 // Members whose socket dropped (a network blip, a page that reloads) are
 // kept a while for their screen to reconnect: a room shows them as still
 // there and keeps their place; the matchmaking queue keeps their place in
-// line. Leaving on purpose (a close with code 1000, or a `leave` message)
-// lets go at once.
+// line. Leaving on purpose (the page closing its socket, or a `leave`
+// message) lets go at once.
 
 /** A room keeps a dropped member this long (ms). */
 export const ROOM_AWAY_MS = 30_000;
 /** The matchmaking queue keeps a dropped player's place this long (ms). */
 export const QUEUE_AWAY_MS = 20_000;
 
-/** A socket closed on purpose: the player meant to go. */
-export const closedOnPurpose = (code: number): boolean => code === 1000;
+/**
+ * A socket closed on purpose: the page closed it (1000, or 1005 for a close
+ * without a code), so the player meant to go. A dropped connection (1006)
+ * and a page going away (1001: a reload, a closed tab) may come back.
+ */
+export const closedOnPurpose = (code: number): boolean => code === 1000 || code === 1005;
 
 /** Someone gone since `at` (ms), and what is kept for them. */
 export interface Away<T> {
