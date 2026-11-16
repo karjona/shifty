@@ -377,6 +377,12 @@ export const es: Messages = {
       ],
     },
     lost: (why: string) => `Conexión perdida: ${why}`,
+    connection: {
+      unsupported: "Este navegador no puede correr en línea. Prueba con un Chrome, Edge, Firefox o Safari recientes.",
+      unreachable: "No hemos podido llegar al servidor de carreras. Puede que tu red bloquee el tráfico del juego.",
+      closed: "El servidor de carreras ha cerrado la conexión.",
+      lost: "Se ha perdido la conexión con el servidor de carreras.",
+    },
     rejected: (why: string) => `No puedes entrar: ${why}`,
     reasons: {
       version: "el juego se ha actualizado, recarga la página",

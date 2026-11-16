@@ -369,6 +369,12 @@ export const ca: Messages = {
       ],
     },
     lost: (why: string) => `Connexió perduda: ${why}`,
+    connection: {
+      unsupported: "Aquest navegador no pot córrer en línia. Prova amb un Chrome, Edge, Firefox o Safari recents.",
+      unreachable: "No hem pogut arribar al servidor de curses. Potser la teva xarxa bloqueja el trànsit del joc.",
+      closed: "El servidor de curses ha tancat la connexió.",
+      lost: "S'ha perdut la connexió amb el servidor de curses.",
+    },
     rejected: (why: string) => `No pots entrar: ${why}`,
     reasons: {
       version: "el joc s'ha actualitzat, torna a carregar la pàgina",

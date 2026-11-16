@@ -370,6 +370,13 @@ export const en = {
       ],
     },
     lost: (why: string) => `Connection lost: ${why}`,
+    /** What became of the connection to the race server (see net/transport.ts). */
+    connection: {
+      unsupported: "This browser can't race online. Try a recent Chrome, Edge, Firefox or Safari.",
+      unreachable: "Couldn't reach the race server. Your network may be blocking the game's traffic.",
+      closed: "The race server ended the connection.",
+      lost: "The connection to the race server was lost.",
+    },
     rejected: (why: string) => `Can't join: ${why}`,
     reasons: {
       version: "the game was updated, please reload the page",

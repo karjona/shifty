@@ -12,7 +12,13 @@ import { type FrameInput, InputReader } from "../input.ts";
 import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
 import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
-import { connect, type JoinTicket, type Transport } from "../net/transport.ts";
+import {
+  connect,
+  type JoinTicket,
+  type Transport,
+  type TransportClosed,
+  WebTransportUnavailable,
+} from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
 import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
@@ -191,7 +197,7 @@ export class RaceSession implements Stage {
   private event = "";
   private conditions: Conditions = homeConditions("jetski");
   private sport: "jetski" | "snow" = "jetski";
-  private closedReason = "";
+  private closedReason: TransportClosed | null = null;
   private joined = false;
   private last = performance.now();
   private stats: Record<string, number> = {};
@@ -334,7 +340,13 @@ export class RaceSession implements Stage {
     this.joining(() => messages().race.connecting);
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
-      this.opts.status(e instanceof Error ? e.message : String(e));
+      this.opts.status(
+        e instanceof WebTransportUnavailable
+          ? messages().race.connection[e.code]
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
       void this.card?.hide();
       this.opts.onJoin?.(false);
     });
@@ -594,7 +606,7 @@ export class RaceSession implements Stage {
     this.state.phase = phase;
     const m = messages().race;
     if (phase >= 2) this.opts.status(m.rejected(rejectReason(phase)));
-    else if (this.closedReason) this.opts.status(m.lost(this.closedReason));
+    else if (this.closedReason) this.opts.status(m.connection[this.closedReason]);
     else this.opts.status("");
     if (!this.joined && phase !== 0) {
       this.joined = true;
