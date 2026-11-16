@@ -376,11 +376,19 @@ class SeasonField implements Stage {
 }
 
 /** The club's terrace, with the riders gathered at the front of it. */
+/** Someone in your party on the terrace: their id, and how they look (null: a stand-in dressed for the seat). */
+export interface PartyMember {
+  id: string;
+  appearance: Appearance | null;
+}
+
 class Club implements Stage {
   private engine: Engine | null = null;
   private group = new THREE.Group();
+  /** You, in front. */
   private avatars: Avatar[] = [];
-  private count = 1;
+  /** The others, in the order they came: each on the terrace once their art is in. */
+  private party: { id: string; avatar: Avatar; in: boolean }[] = [];
 
   private you: { appearance: Appearance; sport: Sport } | null = null;
   private closeUp = 0;
@@ -391,10 +399,12 @@ class Club implements Stage {
     this.wantCloseUp = on;
   }
 
-  /** Dresses your rider (the one in front). */
+  /** Dresses your rider (the one in front); your party dresses for the same sport. */
   setYou(appearance: Appearance, sport: Sport): void {
+    const changed = this.you?.sport !== sport;
     this.you = { appearance, sport };
     this.avatars[0]?.set(appearance, sport);
+    if (changed) for (const p of this.party) p.avatar.set(p.avatar.dressedAs, sport);
   }
 
   private withRide = false;
@@ -405,27 +415,56 @@ class Club implements Stage {
     this.avatars[0]?.showRide(on);
   }
 
-  /** How many riders stand on the terrace (you and your party). */
+  /** How many riders stand on the terrace (you and your party): the others as stand-ins. */
   setRiders(count: number): void {
-    this.count = Math.max(1, Math.min(4, count));
+    const others = Math.max(0, Math.min(3, count - 1));
+    this.setParty(Array.from({ length: others }, (_, i) => ({ id: `stand-in ${i + 1}`, appearance: null })));
+  }
+
+  /** The others in your party (up to three), each as themselves. */
+  setParty(members: readonly PartyMember[]): void {
+    const wanted = members.slice(0, 3);
+    for (const p of this.party.filter((x) => !wanted.some((m) => m.id === x.id))) {
+      p.avatar.mesh.removeFromParent();
+      p.avatar.dispose();
+    }
+    const sport = this.you?.sport ?? "summer";
+    this.party = wanted.map((m, i) => {
+      const had = this.party.find((x) => x.id === m.id);
+      if (had) {
+        if (m.appearance) had.avatar.set(m.appearance, sport);
+        return had;
+      }
+      const p = { id: m.id, avatar: new Avatar(m.appearance, i + 1, sport), in: false };
+      // They step on once their art is in (compiled ahead: see RiderFigure), never half dressed.
+      void p.avatar.ready.then(() => {
+        p.in = true;
+        this.place();
+      });
+      return p;
+    });
     this.place();
   }
 
   private place(): void {
     const spots = heroSpots();
-    while (this.avatars.length < this.count) {
-      const you = this.avatars.length === 0 ? this.you : null;
-      const a = new Avatar(you?.appearance ?? null, this.avatars.length, you?.sport ?? "summer");
-      if (this.avatars.length === 0) a.showRide(this.withRide);
+    if (this.avatars.length === 0) {
+      const a = new Avatar(this.you?.appearance ?? null, 0, this.you?.sport ?? "summer");
+      a.showRide(this.withRide);
       this.avatars.push(a);
     }
-    this.avatars.forEach((a, i) => {
+    const you = this.avatars[0]!;
+    const put = (a: Avatar, i: number) => {
       const spot = spots[i]!;
       a.stance = i === 0 ? "crossed" : "idle";
       a.mesh.position.set(spot.x, CLUB.floor, spot.z);
       a.mesh.rotation.y = spot.yaw;
-      if (i < this.count) this.group.add(a.mesh);
-      else a.mesh.removeFromParent();
+      this.group.add(a.mesh);
+    };
+    put(you, 0);
+    this.party.forEach((p, i) => {
+      if (p.in) put(p.avatar, i + 1);
+      else p.avatar.mesh.removeFromParent();
     });
   }
 
@@ -480,13 +519,16 @@ class Club implements Stage {
 
   loaded(): Promise<void> {
     const club = this.engine?.render ? bay(this.engine).ready : Promise.resolve();
-    return Promise.all([club, ...this.avatars.slice(0, this.count).map((a) => a.ready)]).then(() => {});
+    return Promise.all([club, ...this.avatars.map((a) => a.ready), ...this.party.map((p) => p.avatar.ready)]).then(
+      () => {},
+    );
   }
 
   frame(now: number, dt: number): void {
     const engine = this.engine;
     if (!engine?.render) return;
     for (const a of this.avatars) a.update(dt);
+    for (const p of this.party) if (p.in) p.avatar.update(dt);
     this.closeUp += ((this.wantCloseUp ? 1 : 0) - this.closeUp) * (1 - Math.exp(-dt * 3));
     const h = heroView(this.closeUp * this.closeUp * (3 - 2 * this.closeUp));
     engine.world.renderFrom(h.eye, h.look, now / 1000, dt, h.fov);
@@ -608,7 +650,12 @@ export function preloadClub(engine: Engine, appearance: Appearance): void {
   void engine.preload(c);
 }
 
-/** Sets how many riders stand on the club's terrace. */
+/** Sets how many riders stand on the club's terrace (you, and stand-ins for the others). */
 export function setClubRiders(count: number): void {
   (club ??= new Club()).setRiders(count);
+}
+
+/** Puts your party on the club's terrace beside you, each as themselves (a stand-in where their look is unknown). */
+export function setClubParty(members: readonly PartyMember[]): void {
+  (club ??= new Club()).setParty(members);
 }
