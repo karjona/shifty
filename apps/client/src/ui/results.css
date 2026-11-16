@@ -102,6 +102,7 @@
   font-weight: 820;
 }
 .c-time .still {
+  white-space: nowrap;
   font-size: 15px;
   font-weight: 650;
   font-stretch: 112%;
