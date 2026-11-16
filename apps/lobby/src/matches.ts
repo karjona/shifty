@@ -31,7 +31,7 @@ export async function pickServer(env: Env) {
   return server;
 }
 
-/** A private race against bots: the Tilt, or one race on a circuit picked or drawn, its conditions drawn. Not recorded. */
+/** A private race against bots: the Tilt, or one race with its circuit and conditions picked or drawn. Not recorded. */
 export async function startSingle(env: Env, racer: Racer, plan: PlanRequest): Promise<JoinTicket> {
   const server = await pickServer(env);
   const { db, close } = openDb(databaseUrl(env));
@@ -46,7 +46,7 @@ export async function startSingle(env: Env, racer: Racer, plan: PlanRequest): Pr
     room: roomId("s"),
     pid: racer.userId,
     name: racer.handle,
-    plan: plan.tilt ? TILT : { tilt: false, race: plan.race.course === undefined ? {} : { course: plan.race.course } },
+    plan,
     seed: planSeed(),
     bots: FIELD - 1,
     rider,

@@ -311,7 +311,7 @@ export const ca: Messages = {
     events: { gp: "El Tilt", race: "Una cursa" },
     eventAbout: {
       gp: "Un any a Costa Nevada: una cursa cada estació, a l'aigua i a la muntanya. Punts a cada cursa.",
-      race: "Una cursa al circuit que triïs (o qualsevol), amb l'estació, el temps i l'hora del dia que toquin.",
+      race: "Una cursa: tria el circuit, l'estació, el temps i l'hora del dia, o deixa a l'atzar el que vulguis.",
       pick: "Una cursa: a la sala, l'amfitrió tria el circuit, l'estació, el temps i l'hora del dia, o els deixa a l'atzar.",
     },
     seasonSports: { water: "Aigua", mountain: "Muntanya", either: "Aigua o muntanya" },
@@ -347,7 +347,6 @@ export const ca: Messages = {
     weather: "Temps",
     time: "Hora del dia",
     draw: "A l'atzar",
-    drawn: "A l'atzar",
     bots: "Bots",
     start: "Comença la cursa",
     waiting: "Esperant que l'amfitrió comenci.",
