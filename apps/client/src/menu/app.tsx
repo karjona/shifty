@@ -152,7 +152,7 @@ const roomRoute = createRoute({
 /** The race and the podium, with what only they draw (the mountain, the cape, the broadcast...): a download of
  * their own, fetched in the background once the first screen is up. */
 const raceScreen = () => import("./screens/race.tsx");
-afterBoot(() => void raceScreen());
+afterBoot(() => void raceScreen().catch(() => {}));
 
 const raceRoute = createRoute({
   getParentRoute: () => rootRoute,
