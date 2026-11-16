@@ -13,6 +13,7 @@ import { hexColour, itemBrand, itemLabel, sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { useLoading } from "../busy.tsx";
 
 const forSale = (sport: Sport, slot: Slot, a: Appearance): Item[] =>
   ITEMS.filter((i) => {
@@ -32,6 +33,7 @@ export function ShopScreen() {
   const [trying, setTrying] = useState<string | null>(null);
   const [buying, setBuying] = useState<Item | null>(null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const edges = useScrollEdges();
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/", search: { tab: "collection" } }), !buying);

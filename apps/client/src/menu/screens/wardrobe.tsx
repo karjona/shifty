@@ -12,6 +12,7 @@ import { useRiderShot, useScrollEdges } from "../hooks.ts";
 import { hexColour, itemLabel, sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Panel, Picker } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 
 /** Items you own for a sport's slot that fit your body. */
 export function choices(sport: Sport, slot: Slot, a: Appearance, owned: Set<string>): string[] {
@@ -30,6 +31,7 @@ export function Wardrobe() {
   const [sport, setSport] = useState<Sport>("summer");
   const [a, setA] = useState<Appearance | null>(rider?.appearance ?? null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const space = useRiderShot("body");
   const edges = useScrollEdges();
   useEffect(() => {

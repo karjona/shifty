@@ -7,6 +7,7 @@ import { ApiError, auth, claimHandle, meQuery } from "../api.ts";
 import { useAutoFocus, useBackdrop } from "../hooks.ts";
 import { Button, Handle, Panel, TextField, Wordmark } from "../ui.tsx";
 import { LanguagePicker } from "./common.tsx";
+import { useLoading } from "../busy.tsx";
 
 /** A starting suggestion: the GitHub name, or the email's first part. */
 function suggestion(name: string, email: string): string {
@@ -26,6 +27,7 @@ export function Welcome() {
   const [name, setName] = useState(() => suggestion(me?.user.name ?? "", me?.user.email ?? ""));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const [done, setDone] = useState<string | null>(null);
   useAutoFocus();
 

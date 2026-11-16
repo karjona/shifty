@@ -9,6 +9,7 @@ import { meQuery, saveSetups, storeRider } from "../api.ts";
 import { sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Modal, Picker } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 
 /** `◀ ■■■□□□ ▶`: left and right take a point off or put one on. */
 function StatRow({
@@ -80,6 +81,7 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
   );
   const [sport, setSport] = useState<Sport>("summer");
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const s = setups[sport];
   const used = STATS.reduce((n, k) => n + s[k], 0);
   const left = STAT_BUDGET - used;

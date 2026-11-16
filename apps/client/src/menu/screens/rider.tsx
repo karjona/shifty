@@ -29,6 +29,7 @@ import { hexColour } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { useLoading } from "../busy.tsx";
 
 const FACE: ReadonlySet<Part> = new Set([
   "hair",
@@ -65,6 +66,7 @@ export function RiderScreen() {
     () => saved ?? { look: randomLook(Math.random), outfits: defaultOutfits("male") },
   );
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const [focus, setFocus] = useState<"body" | "face">("body");
   const space = useRiderShot(focus);
   const edges = useScrollEdges();
