@@ -9,16 +9,17 @@ export interface Kit {
   noise: AudioBuffer;
   grain: AudioBuffer;
   gust: AudioBuffer;
-  /** One engine revolution of a three-cylinder two-stroke: every third harmonic fires. */
+  /** One cycle (two revolutions) of a three-cylinder four-stroke: every third harmonic is a firing. */
   engine: PeriodicWave;
   clip: Float32Array<ArrayBuffer>;
 }
 
 export function makeKit(ctx: BaseAudioContext): Kit {
-  const n = 40;
+  const n = 96;
   const real = new Float32Array(n + 1);
   const imag = new Float32Array(n + 1);
-  for (let k = 1; k <= n; k++) imag[k] = (k % 3 === 0 ? 1 : 0.22) / k ** 0.85;
+  // The harmonics between the firings (uneven cylinders) carry the low growl.
+  for (let k = 1; k <= n; k++) imag[k] = (k % 3 === 0 ? 1 : 0.5) / Math.max(1, k / 3) ** 0.8;
   return {
     noise: noiseBuffer(ctx, 4, 0xa11),
     grain: grainBuffer(ctx, 4, 0xb22),
@@ -30,6 +31,10 @@ export function makeKit(ctx: BaseAudioContext): Kit {
 
 /** Engine revolutions per second at full revs; idle and the cut-out are fractions of it. */
 export const REV_MAX = 118;
+/** Engine cycles per revolution (a four-stroke fires each cylinder every other turn). */
+const CYCLE = 0.5;
+/** The engine wave's frequency at `revs`: three firings a cycle, 177 Hz flat out and 34 Hz at idle. */
+const cycleHz = (revs: number): number => REV_MAX * CYCLE * Math.max(revs, 0.02);
 export const REV_IDLE = 0.19;
 /** Unloaded (the pump out of the water), the engine overruns its full revs by this much. */
 const REV_AIR = 1.12;
@@ -65,20 +70,24 @@ export function stepRevs(
   return revs + (target - revs) * (1 - Math.exp(-rate * dt));
 }
 
-/** Your jetski's engine: firing buzz through a drive stage, exhaust rasp, pump whine. */
+/**
+ * Your jetski's engine: the firing pulses through a drive stage and the
+ * hull's own resonances (they stay put while the revs move, which is what
+ * gives it a body), exhaust rasp, and the jet pump's rush.
+ */
 export class JetEngine {
   readonly out: GainNode;
   private osc: OscillatorNode;
-  private whine: OscillatorNode;
-  private noise: AudioBufferSourceNode;
+  private sources: AudioBufferSourceNode[];
   private freq: Glide;
+  private lumpy: Glide;
   private drive: Glide;
   private tone: Glide;
   private level: Glide;
   private raspTone: Glide;
   private raspLevel: Glide;
-  private whineFreq: Glide;
-  private whineLevel: Glide;
+  private pumpTone: Glide;
+  private pumpLevel: Glide;
   revs = REV_IDLE;
   private load = 0;
 
@@ -86,36 +95,44 @@ export class JetEngine {
     this.out = gain(ctx, 0);
     this.osc = ctx.createOscillator();
     this.osc.setPeriodicWave(kit.engine);
-    this.osc.frequency.value = REV_MAX * REV_IDLE;
+    this.osc.frequency.value = cycleHz(REV_IDLE);
+    // No two firings alike: the pitch wanders a little, most at idle.
+    const wander = loop(ctx, kit.noise, 0.57, 0.02);
+    const wanderLp = biquad(ctx, "lowpass", 14, 0.7);
+    const wanderDepth = gain(ctx, 0);
+    wander.connect(wanderLp).connect(wanderDepth).connect(this.osc.detune);
     const pre = gain(ctx, 0.25);
     const shaper = ctx.createWaveShaper();
     shaper.curve = kit.clip;
     shaper.oversample = "2x";
-    const lp = biquad(ctx, "lowpass", 600, 1.2);
-    this.osc.connect(pre).connect(shaper).connect(lp).connect(this.out);
+    const chest = biquad(ctx, "peaking", 110, 1.2);
+    chest.gain.value = 5;
+    const box = biquad(ctx, "peaking", 300, 1.4);
+    box.gain.value = 4;
+    const lp = biquad(ctx, "lowpass", 500, 0.9);
+    this.osc.connect(pre).connect(shaper).connect(chest).connect(box).connect(lp).connect(this.out);
     // Exhaust rasp: noise gated by the firing pulses (ring-modulated by the engine's own wave).
-    this.noise = loop(ctx, kit.noise, 0.13);
-    const bp = biquad(ctx, "bandpass", 1500, 0.9);
+    const noise = loop(ctx, kit.noise, 0.13);
+    const bp = biquad(ctx, "bandpass", 500, 0.8);
     const am = gain(ctx, 0);
     const rasp = gain(ctx, 0);
     this.osc.connect(am.gain);
-    this.noise.connect(bp).connect(am).connect(rasp).connect(this.out);
-    // Jet pump whine.
-    this.whine = ctx.createOscillator();
-    this.whine.type = "triangle";
-    const wg = gain(ctx, 0);
-    this.whine.connect(wg).connect(this.out);
-    const t = ctx.currentTime;
-    this.osc.start(t);
-    this.whine.start(t);
+    noise.connect(bp).connect(am).connect(rasp).connect(this.out);
+    // The jet pump: a narrow rush at its blades' rate.
+    const pumpBp = biquad(ctx, "bandpass", 300, 5);
+    const pump = gain(ctx, 0);
+    noise.connect(pumpBp).connect(pump).connect(this.out);
+    this.sources = [wander, noise];
+    this.osc.start(ctx.currentTime);
     this.freq = new Glide(this.osc.frequency, 0.03, 0.05);
+    this.lumpy = new Glide(wanderDepth.gain, 0.2, 1);
     this.drive = new Glide(pre.gain, 0.05, 0.005);
     this.tone = new Glide(lp.frequency, 0.05, 5);
     this.level = new Glide(this.out.gain, 0.05, 0.002);
     this.raspTone = new Glide(bp.frequency, 0.05, 10);
     this.raspLevel = new Glide(rasp.gain, 0.05, 0.002);
-    this.whineFreq = new Glide(this.whine.frequency, 0.03, 0.5);
-    this.whineLevel = new Glide(wg.gain, 0.08, 0.001);
+    this.pumpTone = new Glide(pumpBp.frequency, 0.05, 5);
+    this.pumpLevel = new Glide(pump.gain, 0.08, 0.001);
   }
 
   update(t: number, dt: number, throttle: number, speedN: number, air: boolean, bail: boolean): void {
@@ -126,21 +143,22 @@ export class JetEngine {
     const l = this.load;
     // Below idle the engine is stopping (a bail): it fades with its revs.
     const running = clamp01(r / REV_IDLE);
-    this.freq.to(REV_MAX * Math.max(r, 0.02), t);
-    this.drive.to(0.25 + 0.75 * l, t);
-    this.tone.to((380 + 2600 * (0.35 * r + 0.65 * l)) * (air ? 1.35 : 1), t);
-    // The drive stage makes most of the difference between idle and full throttle.
-    this.level.to((0.11 + 0.02 * r + 0.012 * l) * running, t, bail ? 0.15 : 0.05);
-    this.raspTone.to(800 + 2400 * r, t);
-    this.raspLevel.to(0.3 * l * r * running, t);
-    this.whineFreq.to(REV_MAX * Math.max(r, 0.02) * 13.5, t);
-    this.whineLevel.to((0.025 * r * r + (air ? 0.02 : 0)) * running, t);
+    this.freq.to(cycleHz(r), t);
+    // Cents of wander: a loping idle, steadier as it revs.
+    this.lumpy.to(180 - 130 * clamp01(r), t);
+    this.drive.to(0.22 + 0.5 * l, t);
+    this.tone.to((800 + 2200 * (0.35 * r + 0.65 * l)) * (air ? 1.3 : 1), t);
+    this.level.to((0.13 + 0.01 * r + 0.04 * l) * running, t, bail ? 0.15 : 0.05);
+    this.raspTone.to(450 + 1100 * r, t);
+    this.raspLevel.to(0.4 * l * r * running, t);
+    // Out of the water the pump spins free and sings.
+    this.pumpTone.to(REV_MAX * 3 * Math.max(r, 0.02), t);
+    this.pumpLevel.to((0.05 * r * r + (air ? 0.09 : 0)) * running, t);
   }
 
   stop(t: number): void {
     this.osc.stop(t);
-    this.whine.stop(t);
-    this.noise.stop(t);
+    for (const s of this.sources) s.stop(t);
   }
 }
 
@@ -320,7 +338,7 @@ class Placement {
   }
 }
 
-/** Someone else's jetski: engine buzz and hull hiss, placed around you. */
+/** Someone else's jetski: engine growl and hull hiss, placed around you. */
 export class FarJetski {
   private place: Placement;
   private osc: OscillatorNode;
@@ -363,8 +381,8 @@ export class FarJetski {
     cutoff: number,
   ): void {
     const running = clamp01(revs / REV_IDLE);
-    this.freq.to(REV_MAX * Math.max(revs, 0.02) * doppler, t);
-    this.tone.to((500 + 2200 * (0.4 * revs + 0.6 * load)) * (air ? 1.3 : 1), t);
+    this.freq.to(cycleHz(revs) * doppler, t);
+    this.tone.to((380 + 1500 * (0.4 * revs + 0.6 * load)) * (air ? 1.3 : 1), t);
     this.engine.to((0.06 + 0.08 * revs + 0.06 * load) * running, t);
     this.hiss.to(air ? 0 : 0.1 * speedN ** 1.3, t);
     this.place.place(t, level, pan, cutoff);

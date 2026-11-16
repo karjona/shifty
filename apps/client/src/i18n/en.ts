@@ -307,6 +307,8 @@ export const en = {
     partySoon: "Soon: form a party with your friends' handles.",
     createRoom: "Create a room",
     joinRoom: "Join a room",
+    /** A matchmaking race the player is still in (they closed the tab). */
+    liveRace: "You have a race under way",
     roomCode: "Room code",
     join: "Join",
     noRoom: "There's no room with that code.",
@@ -366,19 +368,28 @@ export const en = {
     /** Nothing has come from the race server for a moment. */
     waiting: "Waiting for the race server…",
     controls: "Controls",
+    /** Keys as printed on them. */
+    keys: { space: "Space", shift: "Shift" },
     help: {
-      jetski: [
-        "Stick: steer and lean (pull back on a crest to fly) · RT throttle · LT brake",
-        "In the air: A + stick spins and flips, X + stick barrel-rolls, B + stick does a stunt. Let go in time to land!",
-        "Keyboard: WASD drive · arrows steer and lean · Space spin · Shift roll · E stunt",
-        "Pass red buoys on your right, green ones on your left.",
-      ],
-      snow: [
-        "Stick: steer · up (or RT) tuck · down (or LT) sit back and brake",
-        "Hold A to load a jump, let go at the lip · in the air: X + stick spins and flips, B grabs",
-        "Keyboard: WASD steer, tuck, brake · Space jump · J / Shift spin · K / E grab",
-        "Land flat on the board, along the slope, and let go of the grab first!",
-      ],
+      jetski: {
+        steer: "Steer and lean: pull back on a crest to fly",
+        gas: "Throttle · brake",
+        spin: "In the air: spin and flip",
+        roll: "In the air: barrel roll",
+        stunt: "A stunt (the direction picks it); let go in time to land",
+        tip: "Pass red buoys on your right, green ones on your left.",
+        keySteer: "Steer",
+        keyLean: "Lean: pull back on a crest to fly",
+      },
+      snow: {
+        steer: "Steer · up to tuck · down to sit back and brake",
+        jump: "Hold to load a jump, let go at the lip",
+        spin: "In the air: spin and flip",
+        grab: "Grab (the direction picks it)",
+        tip: "Land flat on the board, along the slope, and let go of the grab first!",
+        keySteer: "Steer",
+        keyTuck: "Tuck · sit back and brake",
+      },
     },
     /** The touch screen's buttons. */
     touch: { trick: "Trick", roll: "Roll", stunt: "Stunt", jump: "Jump", grab: "Grab", gas: "Gas", brake: "Brake" },
@@ -447,6 +458,10 @@ export const en = {
         body: "Races need WebTransport: please use a recent Chrome, Edge, Firefox or Safari.",
       },
       lost: { title: "Lost the race server", body: "The connection dropped, and the race goes on without you." },
+      rejoin: {
+        title: "Couldn't get back into the race",
+        body: "It may have ended, or the race server has let your seat go.",
+      },
     },
   },
   hud: {
@@ -520,6 +535,16 @@ export const en = {
     /** Your place in the Tilt, beside it: its points. */
     points: (n: number) => `${n} pts`,
     standings: "Final standings",
+    /** A line for a result worth calling out (nothing for an ordinary one). */
+    verdicts: {
+      win: "Race won",
+      podium: "On the podium",
+      tiltWin: "You win the Tilt",
+      tiltPodium: "On the Tilt's podium",
+      record: "New record",
+      personalBest: "New personal best",
+      best: (circuit: string) => `Your best finish on ${circuit}`,
+    },
     paid: "What it paid",
     waiting: "Waiting for the results…",
     late: "What it paid hasn't come through yet. It will reach your credits shortly.",

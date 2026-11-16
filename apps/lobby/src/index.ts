@@ -23,7 +23,7 @@ import {
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
 import { devMailbox } from "./mail.ts";
-import { NoRaceServer, startSingle } from "./matches.ts";
+import { NoRaceServer, liveMatch, startSingle } from "./matches.ts";
 import { claimHandle, getPlayer, isCard, isTitle, setCard, view } from "./players.ts";
 import { parseReport, storeReport } from "./results.ts";
 import { matchPay } from "./rewards.ts";
@@ -199,12 +199,26 @@ app.get("/api/me/earnings", async (c) => {
   return c.json({ earnings: await recentEarnings(c.var.db, p.user.id) });
 });
 
-/** What a match you raced in paid you, race by race, and your credits now. */
+/** The matchmaking race you are still in, if any, with a ticket back into it. */
+app.get("/api/me/live", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const servers = await c.env.SERVERS.get(c.env.SERVERS.idFromName("all")).live();
+  const live = await liveMatch(c.var.db, c.env.LOBBY_SIGNING_KEY, servers, {
+    userId: p.user.id,
+    handle: p.player.handle,
+  });
+  return c.json(live ?? { match: null });
+});
+
+/** What a match you raced in paid you, race by race, your credits now, and your best on `?course` before it. */
 app.get("/api/me/matches/:id", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   const id = c.req.param("id");
-  const pay = /^m_[A-Za-z0-9]{1,40}$/u.test(id) ? await matchPay(c.var.db, id, p.user.id) : null;
+  const course = Number(c.req.query("course"));
+  const known = Number.isInteger(course) && course >= 0 && course < 256 ? course : undefined;
+  const pay = /^m_[A-Za-z0-9]{1,40}$/u.test(id) ? await matchPay(c.var.db, id, p.user.id, known) : null;
   if (!pay) return c.json({ error: "no_match" }, 404);
   return c.json(pay);
 });

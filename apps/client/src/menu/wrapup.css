@@ -13,8 +13,24 @@
   inset: 0;
   pointer-events: none;
 }
-.end-layer .hints {
+/* The hints sit at the panel's foot, leaving the screen's corners (the
+   speed, the riders on television) to the race. */
+.end-panel .hints {
+  position: static;
+  height: 56px;
+  margin: 0 var(--pad);
+  border-top: 1px solid var(--rule);
+  background: none;
+  box-shadow: none;
+  font-size: var(--fs-label);
   pointer-events: auto;
+  animation: none;
+}
+.end-panel .hints > :first-child {
+  padding-left: 0;
+}
+.end-panel .hints > :last-child {
+  padding-right: 0;
 }
 /* Anchored at the bottom: what it paid comes in above the actions, which stay put. */
 .end-panel {
@@ -32,10 +48,20 @@
   box-shadow: var(--lift);
   font-variant-numeric: tabular-nums;
   pointer-events: auto;
-  animation: rise 420ms var(--ease) both;
+  animation: end-arrive 560ms cubic-bezier(0.2, 1.2, 0.35, 1) both;
 }
 .end-panel > * {
   flex-shrink: 0;
+}
+/* It comes in with a little weight: in from the side, settling past its place and back. */
+@keyframes end-arrive {
+  from {
+    opacity: 0;
+    transform: translateX(80px);
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* --- the top: what it was, and your place --- */
@@ -209,7 +235,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 24px var(--pad) var(--pad);
+  padding: 24px var(--pad) 20px;
 }
 
 /* --- when something went wrong: in the middle, over a dimmed race --- */
@@ -225,6 +251,7 @@
   position: static;
   width: 640px;
   margin: 0;
+  animation: rise 420ms var(--ease) both;
 }
 
 /* --- the last results: Continue, in the corner --- */
@@ -292,4 +319,37 @@
 }
 :root[data-compact] .end-actions .btn {
   min-height: 48px;
+}
+
+/* A finger leaves no hover behind. */
+@media (hover: none) {
+  .end-layer .hint:hover {
+    --glyph-ink: var(--paper);
+    background: none;
+    color: inherit;
+  }
+}
+
+/* The mode select: a matchmaking race still under way, offered back, under the screen's title. */
+.live-race {
+  position: absolute;
+  z-index: 1;
+  left: var(--margin-x);
+  top: calc(var(--margin-y) + 158px + var(--gap));
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  width: 780px;
+  padding: 16px 16px 16px var(--pad);
+  animation: rise 420ms var(--ease) both;
+}
+:root[data-compact] .live-race {
+  top: calc(var(--margin-y) + 96px + var(--gap));
+  width: 680px;
+}
+.live-race b {
+  font-size: var(--fs-body);
+  font-weight: 760;
+  white-space: nowrap;
 }

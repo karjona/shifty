@@ -3,7 +3,7 @@
 // always pays (even when bots fill the seats); a private room pays only
 // races with two or more people in them; single player never pays. Rewards
 // are tuned so a full Tilt earns about a fifth of an average item.
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "./db/client.ts";
 import { ledger, match, matchPlayer, player, raceResult } from "./db/schema.ts";
 import type { ResultReport } from "./results.ts";
@@ -85,10 +85,15 @@ export interface MatchPay {
   paid: { event: number; reason: Payout["reason"]; delta: number }[];
   /** The player's credits now. */
   credits: number;
+  /** The player's best place on the circuit asked about, in the matches before this one (null: none). */
+  bestBefore: number | null;
 }
 
-/** What a match paid one of its players (null: no such match, or not theirs). */
-export async function matchPay(db: Db, matchId: string, userId: string): Promise<MatchPay | null> {
+/**
+ * What a match paid one of its players (null: no such match, or not
+ * theirs), and their best place on `course` before it.
+ */
+export async function matchPay(db: Db, matchId: string, userId: string, course?: number): Promise<MatchPay | null> {
   const [m] = await db
     .select({ mode: match.mode })
     .from(match)
@@ -108,6 +113,13 @@ export async function matchPay(db: Db, matchId: string, userId: string): Promise
       .where(and(eq(ledger.userId, userId), sql`left(${ledger.ref}, ${prefix.length}) = ${prefix}`)),
     db.select({ credits: player.credits }).from(player).where(eq(player.userId, userId)).limit(1),
   ]);
+  const [best] =
+    course === undefined
+      ? []
+      : await db
+          .select({ place: sql<number | null>`min(${raceResult.place})` })
+          .from(raceResult)
+          .where(and(eq(raceResult.userId, userId), eq(raceResult.course, course), ne(raceResult.matchId, matchId)));
   const paid = rows.flatMap((r) => {
     const event = Number(r.ref.slice(prefix.length).split(":")[1]);
     const reason = PAID_REASONS.find((x) => x === r.reason);
@@ -118,5 +130,6 @@ export async function matchPay(db: Db, matchId: string, userId: string): Promise
     reported: [...new Set(results.map((r) => r.event))].toSorted((a, b) => a - b),
     paid: paid.toSorted((a, b) => a.event - b.event),
     credits: me?.credits ?? 0,
+    bestBefore: best?.place ?? null,
   };
 }

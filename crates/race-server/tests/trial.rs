@@ -32,6 +32,7 @@ fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
         look: protocol::token::b64(&[4, 5, 6]),
         setups: Vec::new(),
         trial: true,
+        rejoin: false,
     }
 }
 
