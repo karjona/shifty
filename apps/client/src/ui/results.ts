@@ -13,7 +13,7 @@ import { PALETTE, setAccent } from "../game/seasons.ts";
 import { type GrandPrixView, type RaceView, type StandingView, formatTime, ordinal } from "./hud.ts";
 import { laurelSvg } from "./laurel.ts";
 
-/** Tilt points by finishing place. Riders who haven't finished get last place's. */
+/** Tilt points by finishing place. Riders who haven't finished (the disqualified among them) get last place's. */
 export const TILT_POINTS = [10, 8, 6, 5, 4, 3, 2, 1];
 
 const RACING = 2;
@@ -60,15 +60,8 @@ export interface BoardInput {
   gp: GrandPrixView | null;
   /** The plan's next race, if it is known (a Tilt between races). */
   next?: { course: number; conditions: Conditions } | null;
-  /** A time trial: your run placed among the ghosts', the results up until a retry (no countdown). */
-  trial?: TrialBoard;
-}
-
-/** A time trial's results: the ghosts raced (their names and times) and what the run set, if anything. */
-export interface TrialBoard {
-  ghosts: { label: string; ticks: number }[];
-  /** "New record", "New personal best", or null. */
-  callout: string | null;
+  /** A time trial: you alone, lapping; its end has a panel of its own (wrapup.tsx). */
+  trial?: boolean;
 }
 
 /** A rider's line in the Tilt standings. */
@@ -82,7 +75,7 @@ export interface TiltRow {
   move: number | null;
 }
 
-/** The Tilt points a place earns: riders who didn't finish get last place's, out of `riders`. */
+/** The Tilt points a place earns: riders who didn't finish (or were disqualified) get last place's, out of `riders`. */
 export function tiltPoints(s: StandingView, riders: number): number {
   const last = TILT_POINTS[Math.min(Math.max(riders, 1), TILT_POINTS.length) - 1]!;
   if (s.finishTicks <= 0) return last;
@@ -166,9 +159,11 @@ export class Scoreboard {
     this.wasResults = results;
 
     const hz = race.tickHz;
-    const sinceFinish = race.finishTicks > 0 ? race.phaseTicks - race.finishTicks : 0;
+    // Your race is over through the finish, or out.
+    const over = race.finishTicks > 0 ? race.finishTicks : race.disqualifiedTicks;
+    const sinceOver = over > 0 ? race.phaseTicks - over : 0;
     const watching =
-      race.phase === RACING && (race.racing ? race.finishTicks > 0 && sinceFinish >= TOWER_DELAY * hz : true);
+      !input.trial && race.phase === RACING && (race.racing ? over > 0 && sinceOver >= TOWER_DELAY * hz : true);
     this.tower.hidden = !watching;
     if (watching) {
       const now = performance.now();
@@ -181,10 +176,8 @@ export class Scoreboard {
       this.towerKey = "";
     }
 
-    this.board.hidden = !results;
-    if (results && input.trial) {
-      this.renderTrial(input, input.standings(), input.trial);
-    } else if (results) {
+    this.board.hidden = !results || input.trial === true;
+    if (results && !input.trial) {
       const list = input.standings();
       const tilt = gp ? this.tiltRows(list, gp, race) : null;
       this.renderBoard(input, list, tilt);
@@ -233,53 +226,6 @@ export class Scoreboard {
     return rows;
   }
 
-  /** A time trial's results: your run among the ghosts you raced, by time. */
-  private renderTrial(input: BoardInput, list: StandingView[], trial: TrialBoard): void {
-    const { race, mySlot, riders } = input;
-    const m = messages().results;
-    const key = JSON.stringify([list, trial, mySlot, m.title]);
-    if (key === this.boardKey) return;
-    this.boardKey = key;
-    const hz = race.tickHz;
-    const mine = list.find((s) => s.slot === mySlot);
-    const rows = trial.ghosts.map((g) => ({
-      name: `<span class="c-name ghost">${escapeHtml(g.label)}</span>`,
-      ticks: g.ticks,
-      me: false,
-    }));
-    const myTicks = mine && mine.finishTicks > 0 ? mine.finishTicks : Infinity;
-    rows.push({ name: nameCell(mySlot, riders), ticks: myTicks, me: true });
-    // Ties go to whoever set the time first: the ghost.
-    rows.sort((a, b) => a.ticks - b.ticks || Number(a.me) - Number(b.me));
-    const best = rows[0]?.ticks ?? 0;
-    const place = rows.findIndex((r) => r.me) + 1;
-    const body = rows
-      .map((r, i) => {
-        const time = !Number.isFinite(r.ticks)
-          ? m.dnf
-          : r.ticks === best
-            ? formatTime(r.ticks, hz)
-            : gapText(r.ticks - best, hz);
-        return (
-          `<div class="board-row${r.me ? " me" : " ghost"}${Number.isFinite(r.ticks) ? "" : " out"}">` +
-          `<span class="c-place">${i + 1}</span>${r.name}<span class="c-time">${time}</span></div>`
-        );
-      })
-      .join("");
-    const season = messages().seasons[race.season];
-    const title = escapeHtml(circuitTitle(race.course));
-    const hero = Number.isFinite(myTicks)
-      ? `<div class="board-mine"><b>${ordinal(place)}</b><span>${formatTime(myTicks, hz)}</span></div>`
-      : `<div class="board-mine"><b>${m.dnf}</b></div>`;
-    const callout = trial.callout ? `<p class="board-callout">${escapeHtml(trial.callout)}</p>` : "";
-    this.board.innerHTML =
-      `<section class="board-panel board-race board-trial">` +
-      `<header class="board-head"><div><span class="board-label">${messages().trial.title}</span>` +
-      `<b class="board-title circuit">${title}</b><span class="board-sub">${season}</span>${callout}</div>${hero}</header>` +
-      `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span></div>${body}</section>`;
-    this.countdown = null;
-  }
-
   private renderTower(input: BoardInput, list: StandingView[]): void {
     const { race, mySlot, riders } = input;
     const m = messages().results;
@@ -288,7 +234,7 @@ export class Scoreboard {
     const style = !race.looped || list.some((s) => s.points > 0);
     const done = list.filter((s) => s.finishTicks > 0);
     const key = JSON.stringify([
-      list.map((s) => [s.slot, s.place, s.finishTicks, s.lap, style ? s.points : 0]),
+      list.map((s) => [s.slot, s.place, s.finishTicks, s.disqualifiedTicks, s.lap, style ? s.points : 0]),
       mySlot,
       m.racing,
     ]);
@@ -299,11 +245,14 @@ export class Scoreboard {
       .map((s) => {
         const fin = s.finishTicks > 0;
         const fresh = fin && !first && !this.finished.has(s.slot);
-        const time = !fin
-          ? `<span class="still">${race.looped ? m.lap(Math.max(1, s.lap), race.laps) : m.racing}</span>`
-          : s.finishTicks === best
-            ? formatTime(s.finishTicks, hz)
-            : gapText(s.finishTicks - best, hz);
+        const dq = s.disqualifiedTicks > 0;
+        const time = dq
+          ? `<span class="dq">${m.dsq}</span>`
+          : !fin
+            ? `<span class="still">${race.looped ? m.lap(Math.max(1, s.lap), race.laps) : m.racing}</span>`
+            : s.finishTicks === best
+              ? formatTime(s.finishTicks, hz)
+              : gapText(s.finishTicks - best, hz);
         const cls = ["board-row", s.slot === mySlot ? "me" : "", fin ? "" : "out", fresh ? "fresh" : ""].join(" ");
         return (
           `<div class="${cls}"><span class="c-place">${s.place}</span>` +
@@ -346,20 +295,22 @@ export class Scoreboard {
     const sub = escapeHtml(conditionsLine(race.conditions));
     const won = new Map(tilt?.map((r) => [r.slot, r.won]) ?? []);
     const style = !race.looped || list.some((s) => s.points > 0);
-    // Summer: buoys missed, tricks (and style, once tricks score); winter: tricks and style.
+    // On the water buoys missed, on a run gates missed once anyone has; tricks (and style, once tricks score).
     const cols: Column[] = [];
-    if (race.looped) cols.push([m.cols.missed, (s) => String(s.misses)]);
+    if (race.looped || list.some((s) => s.misses > 0)) cols.push([m.cols.missed, (s) => String(s.misses)]);
     cols.push([m.cols.tricks, (s) => String(s.tricks)]);
     if (style) cols.push([m.cols.style, (s) => String(s.points)]);
     if (tilt) cols.push([m.cols.tilt, (s) => `+${won.get(s.slot) ?? 0}`]);
     const rows = list
       .map((s) => {
         const time =
-          s.finishTicks <= 0
-            ? m.dnf
-            : s.finishTicks === best
-              ? formatTime(s.finishTicks, hz)
-              : gapText(s.finishTicks - best, hz);
+          s.disqualifiedTicks > 0
+            ? `<span class="dq">${m.dsq}</span>`
+            : s.finishTicks <= 0
+              ? m.dnf
+              : s.finishTicks === best
+                ? formatTime(s.finishTicks, hz)
+                : gapText(s.finishTicks - best, hz);
         const cls = ["board-row", s.slot === mySlot ? "me" : "", s.finishTicks > 0 ? "" : "out"].join(" ");
         return (
           `<div class="${cls}"><span class="c-place">${s.place}</span>` +
@@ -379,13 +330,17 @@ export class Scoreboard {
     // 1st to 3rd stand on the podium's base, the winner crowned, and the result is called out.
     const rank = mine && mine.finishTicks > 0 && mine.place <= 3 ? mine.place : 0;
     const hero = mine
-      ? `<div class="board-mine${rank > 0 ? ` ranked rank-${rank}` : ""}">` +
-        `<b>${rank === 1 ? laurelSvg() : ""}${mine.finishTicks > 0 ? ordinal(mine.place) : m.dnf}</b>` +
+      ? `<div class="board-mine${rank > 0 ? ` ranked rank-${rank}` : mine.disqualifiedTicks > 0 ? " dq" : ""}">` +
+        `<b>${rank === 1 ? laurelSvg() : ""}${mine.finishTicks > 0 ? ordinal(mine.place) : mine.disqualifiedTicks > 0 ? m.dsq : m.dnf}</b>` +
         `<span>${mine.finishTicks > 0 ? formatTime(mine.finishTicks, hz) : ""}</span></div>`
       : "";
     const v = messages().end.verdicts;
     const verdict =
-      rank > 0 ? `<p class="board-verdict${rank === 1 ? " win" : ""}">${rank === 1 ? v.win : v.podium}</p>` : "";
+      rank > 0
+        ? `<p class="board-verdict${rank === 1 ? " win" : ""}">${rank === 1 ? v.win : v.podium}</p>`
+        : mine && mine.disqualifiedTicks > 0
+          ? `<p class="board-verdict out">${v.disqualified}</p>`
+          : "";
     const raceLabel = race.eventCount > 1 ? `${m.title} · ${m.race(race.eventIndex + 1, race.eventCount)}` : m.title;
     const nextLabel = race.eventCount <= 1 ? m.back : last ? m.podium : m.next;
     // Between races of a Tilt: the next one's season (in its colour) and circuit.
@@ -415,7 +370,7 @@ export class Scoreboard {
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +
       cols.map(([label]) => `<span>${label}</span>`).join("") +
       `</div>${rows}` +
-      (tilt || input.trial ? "" : `<footer class="board-foot">${next}<b class="board-left"></b></footer>`) +
+      (tilt ? "" : `<footer class="board-foot">${next}<b class="board-left"></b></footer>`) +
       `</section>`;
     // Moves once there are earlier results to compare with.
     const moves = tilt?.some((r) => r.move !== null) ?? false;

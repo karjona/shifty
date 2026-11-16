@@ -28,6 +28,8 @@
   --edge-b: max(var(--safe-bottom, 0px), 14px);
   --margin-x: var(--edge-l);
   --head: 76px;
+  /* The race info's strip: your place's figure under its label. */
+  --strip: 98px;
   --body-top: calc(var(--margin-y) + var(--head) + var(--gap));
   --rail: 248px;
   --col-r: 640px;
@@ -979,6 +981,23 @@
 :root[data-compact] #race-info {
   flex-wrap: wrap;
 }
+/* The verdict of a disqualification: high in the middle, over the scene above the rider. */
+:root[data-compact] #verdict {
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + var(--gap));
+}
+:root[data-compact] #verdict b {
+  padding: 0 32px;
+  font-size: 64px;
+  line-height: 90px;
+}
+:root[data-compact] #verdict span {
+  padding: 10px 32px 12px;
+  font-size: 24px;
+}
+/* A time trial's tag sits in the strip at the size of its labels. */
+:root[data-compact] #race-info > .hud-tag {
+  font-size: 22px;
+}
 /* A split comes in under the strip for its few seconds (high over the stick's half, where no thumb rests). */
 :root[data-compact] #race-info .split {
   order: 2;
@@ -1031,9 +1050,13 @@
   font-size: 22px;
 }
 :root[data-compact] #banner.count {
-  top: 60px;
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 4px);
   padding: 0;
   font-size: 124px;
+}
+:root[data-compact] #banner.count.ready {
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 24px);
+  font-size: 72px;
 }
 :root[data-compact] #banner.wrong {
   top: 132px;
@@ -1042,7 +1065,7 @@
   line-height: 70px;
 }
 :root[data-compact] #popups {
-  top: calc(var(--safe-top) + var(--margin-y) + var(--head) + 6px);
+  top: calc(var(--safe-top) + var(--margin-y) + var(--strip) + 6px);
   gap: 6px;
 }
 /* Two at a time: more would come down over the rider. */
@@ -1092,7 +1115,7 @@
 :root[data-compact] .intro-card {
   bottom: var(--edge-b);
   min-width: 0;
-  max-width: min(980px, 100% - min(600px, 34%) - var(--edge-l) - var(--edge-r) - var(--gap));
+  max-width: min(980px, 100% - min(560px, 40%) - var(--edge-l) - var(--edge-r) - var(--gap));
   padding: 16px 26px 14px;
 }
 :root[data-compact] .intro-kicker,
@@ -1155,6 +1178,10 @@
 :root[data-compact] .race-menu-hint .race-continue {
   padding: 0 22px;
   font-size: 20px;
+}
+/* A time trial's lap starts over from the race menu: the speed keeps its place by the menu button. */
+:root[data-compact] .race-menu-hint .race-retry {
+  display: none;
 }
 
 /* The controls (menu/screens/controls.tsx) while the grid waits: in the
@@ -1226,6 +1253,10 @@
 
 /* --- the race's end on a phone --- */
 
+/* The race info goes while the tower has its place. */
+:root[data-compact] :has(> .board > .board-tower:not([hidden])) > #race-info {
+  display: none;
+}
 /* The standings tower while the others finish: top left, under where the race info was. */
 :root[data-compact] .board-tower {
   --cols: 44px 1fr 120px;

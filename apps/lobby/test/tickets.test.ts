@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { b64urlDecode, b64urlEncode, legacyPlan, mintTicket } from "../src/tickets.ts";
+import { b64urlDecode, b64urlEncode, legacyPlan, mintTicket, singlePlan } from "../src/tickets.ts";
 
 /** Seed [7; 32], as in the Rust tests. */
 const SEED = b64urlEncode(new Uint8Array(32).fill(7));
@@ -139,4 +139,71 @@ void test("a time trial ticket sends the rider alone on one course and season", 
     humans: 1,
     trial: true,
   });
+});
+
+/** The race a ticket's claims ask for. */
+function claimsOf(token: string): { tilt?: unknown; races?: unknown } {
+  const claims: unknown = JSON.parse(new TextDecoder().decode(b64urlDecode(token.split(".")[0] ?? "")));
+  assert.ok(typeof claims === "object" && claims !== null);
+  return { tilt: Reflect.get(claims, "tilt"), races: Reflect.get(claims, "races") };
+}
+
+async function singleTicket(plan: unknown) {
+  const p = singlePlan(plan);
+  assert.ok(p);
+  const ticket = await mintTicket(SEED, {
+    server: { addr: "race.example:443", version: "1.2.3", certHashes: [] },
+    room: "s_test",
+    pid: "user_1",
+    name: "Lord Kylian#0042",
+    plan: p,
+    seed: 99,
+    bots: 7,
+    humans: 1,
+  });
+  return claimsOf(ticket.token);
+}
+
+void test("a single race keeps the circuit, season, weather and time of day picked", async () => {
+  // The cape in fall, in the rain, at dusk.
+  const claims = await singleTicket({ tilt: false, race: { course: 2, season: 1, weather: 4, time: 104 } });
+  assert.deepEqual(claims.races, [{ course: 2, season: 1, weather: 4, time: 104 }]);
+  assert.equal(claims.tilt, undefined);
+  // Nothing picked: all of it drawn.
+  assert.deepEqual((await singleTicket({ tilt: false, race: {} })).races, [{}]);
+  // No plan at all: the Tilt.
+  assert.equal((await singleTicket(undefined)).tilt, true);
+});
+
+void test("a single race's picks that don't fit go to the draw", async () => {
+  // Summer on the mountain: no snow in summer, so the season is drawn (the race server moves the time into its daylight).
+  assert.deepEqual(singlePlan({ tilt: false, race: { course: 1, season: 0, time: 72 } }), {
+    tilt: false,
+    race: { course: 1, time: 72 },
+  });
+  // Snow in summer and rain in summer never come up: drawn.
+  assert.deepEqual(singlePlan({ tilt: false, race: { course: 0, season: 0, weather: 6, turns: 4 } }), {
+    tilt: false,
+    race: { course: 0, season: 0 },
+  });
+  // A start before a winter dawn moves to the first start of the day.
+  assert.deepEqual(singlePlan({ tilt: false, race: { course: 1, season: 2, time: 30 } }), {
+    tilt: false,
+    race: { course: 1, season: 2, time: 47 },
+  });
+  // An unknown circuit, out-of-range numbers and junk: drawn.
+  assert.deepEqual(singlePlan({ tilt: false, race: { course: 99, season: 7, weather: -1, time: 1e9, x: 1 } }), {
+    tilt: false,
+    race: {},
+  });
+  assert.deepEqual((await singleTicket({ tilt: false, race: { course: "2", weather: 2.5 } })).races, [{}]);
+  // Not a plan.
+  assert.equal(singlePlan({ race: { course: 0 } }), null);
+  assert.equal(singlePlan("tilt"), null);
+});
+
+void test("the Tilt ignores a single race's picks", async () => {
+  const claims = await singleTicket({ tilt: true, race: { course: 1, season: 2, weather: 6, time: 72 } });
+  assert.equal(claims.tilt, true);
+  assert.equal(claims.races, undefined);
 });

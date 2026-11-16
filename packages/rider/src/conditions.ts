@@ -25,14 +25,16 @@ export interface Circuit {
   /** Its name's key in the menus' text. */
   key: string;
   sport: CircuitSport;
+  /** `sim::Course::revision`: time trial times rank only against those of the same revision. */
+  revision: number;
 }
 
 /** Every circuit, in id order (`sim::CourseId::ALL`). */
 export const CIRCUITS: readonly Circuit[] = [
-  { id: 0, key: "bay", sport: "jetski" },
-  { id: 1, key: "mountain", sport: "snow" },
-  { id: 2, key: "cape", sport: "jetski" },
-  { id: 3, key: "glades", sport: "snow" },
+  { id: 0, key: "bay", sport: "jetski", revision: 1 },
+  { id: 1, key: "mountain", sport: "snow", revision: 1 },
+  { id: 2, key: "cape", sport: "jetski", revision: 1 },
+  { id: 3, key: "glades", sport: "snow", revision: 1 },
 ];
 
 export const circuit = (id: number): Circuit | undefined => CIRCUITS.find((c) => c.id === id);
@@ -144,7 +146,7 @@ export function parsePlan(v: unknown): PlanRequest | null {
 /** The fixture the sim renders too (`crates/sim/src/conditions.rs`): one line per fact. */
 export function conditionsFixture(): string {
   const lines: string[] = [];
-  for (const c of CIRCUITS) lines.push(`circuit ${c.id} ${c.sport}`);
+  for (const c of CIRCUITS) lines.push(`circuit ${c.id} ${c.sport} ${c.revision}`);
   for (const sport of ["jetski", "snow"] as const)
     lines.push(`sport ${sport} ${SPORT_SEASONS[sport].map((s) => SEASONS.indexOf(s)).join(" ")}`);
   for (const [i, s] of SEASONS.entries()) {

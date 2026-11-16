@@ -44,6 +44,10 @@ export function runPoint(run: RunData, s: number): RunPoint {
     half: lerp(a.half, b.half),
     wall: lerp(a.wall, b.wall),
     limit: lerp(a.limit, b.limit),
+    limitL: lerp(a.limitL, b.limitL),
+    limitR: lerp(a.limitR, b.limitR),
+    edgeL: (t < 0.5 ? a : b).edgeL,
+    edgeR: (t < 0.5 ? a : b).edgeR,
   };
 }
 

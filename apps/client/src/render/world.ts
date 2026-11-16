@@ -123,6 +123,14 @@ export interface Environment {
   closeShadows?(on: boolean): void;
   /** Height of the ground (or water) under `(x, z)` at time `t` (s). */
   ground(x: number, z: number, t: number): number;
+  /** Moves the chase camera's spot `eye` (x and z) back to where it sees clear of what lines the course, if it can't there. */
+  keepEye?(eye: { x: number; z: number }): void;
+  /**
+   * Whether what stands on the course (trees, rocks, towers; not the
+   * ground) leaves the line from `eye` to `at` open; with `frame`, also a
+   * picture that tall (m) of what is at `at`, near the lens.
+   */
+  sight?(eye: THREE.Vector3, at: THREE.Vector3, frame?: number): boolean;
   /** A rider's model; `appearance` is what they look like and wear (null: made up for the seat). */
   makeRider(slot: number, appearance: Appearance | null): RiderModel;
   /** Per frame, once the riders are placed. */
@@ -167,6 +175,8 @@ const DIP_DAMPING = 10;
 const DEFAULT_SKY = 0xa8d8f0;
 /** A rider and their shadow fit in a sphere this big around them (m). */
 const RIDER_REACH = 4.5;
+/** Another rider this near the chase camera (m, from the eye to their middle) would fill the view: left out. */
+const CAMERA_CLEAR = 1.9;
 /** Riders further from the camera than this (m) are drawn without their outline. */
 const OUTLINE_FAR = 45;
 /** Riders further from the camera than this (m) are left out of reflections. */
@@ -198,6 +208,8 @@ export class World {
   readonly renderer: THREE.WebGPURenderer;
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(55, 1, 0.3, 4000);
+  /** Where the chase camera stands this frame, on the ground's plane. */
+  private eyeSpot = { x: 0, z: 0 };
   /** The race's weather, read once a frame at the camera (null outside a race). */
   weatherAt: WeatherSource | null = null;
   backend: "webgpu" | "webgl2" = "webgl2";
@@ -212,6 +224,7 @@ export class World {
   private viewProjection = new THREE.Matrix4();
   /** Around a rider: the figure, and the shadow it throws. */
   private bounds = new THREE.Sphere(new THREE.Vector3(), RIDER_REACH);
+  private near = new THREE.Vector3();
   private seen = new Set<number>();
   /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
@@ -526,7 +539,13 @@ export class World {
       this.seen.add(r.slot);
       const model = this.rider(env, r.slot);
       model.update(r, dt);
-      const shown = r.isMe || this.inView(model.mesh.position);
+      const crowding =
+        !shot &&
+        this.near
+          .copy(model.mesh.position)
+          .setY(r.y + 0.9)
+          .distanceTo(this.camera.position) < CAMERA_CLEAR;
+      const shown = r.isMe || (this.inView(model.mesh.position) && !crowding);
       model.mesh.visible = shown;
       if (shown) {
         this.detail(model.mesh, r, focus);
@@ -656,8 +675,11 @@ export class World {
 
     const fx = Math.sin(this.camHeading);
     const fz = Math.cos(this.camHeading);
-    const x = me.x - fx * this.camBack;
-    const z = me.z - fz * this.camBack;
+    const eye = this.eyeSpot;
+    eye.x = me.x - fx * this.camBack;
+    eye.z = me.z - fz * this.camBack;
+    env.keepEye?.(eye);
+    const { x, z } = eye;
     const up = c.up + this.camAir * c.airUp;
     let floor = env.ground(x, z, t) + c.clearance;
     if (c.floorFollow !== undefined) {

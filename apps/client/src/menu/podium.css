@@ -54,6 +54,24 @@
   text-overflow: ellipsis;
   text-shadow: 0 6px 40px rgb(24 16 8 / 0.3);
 }
+/* Fitted left of the gate (screens/podium.tsx): set at the size that fits, on two lines if it must. */
+.podium-title b.fitted {
+  flex: none;
+  width: max-content;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+.podium-title b.wrapped {
+  display: -webkit-box;
+  width: auto;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 0.92;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .podium-champion {
   padding: 0 24px;
   background: var(--accent);

@@ -1,0 +1,1 @@
+ALTER TABLE "race_result" ADD COLUMN "disqualified" boolean DEFAULT false NOT NULL;

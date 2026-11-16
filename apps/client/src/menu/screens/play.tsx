@@ -7,7 +7,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
-import { CIRCUITS, type PlanRequest, SEASONS, circuit } from "@shifty/rider";
+import { CIRCUITS, type PlanRequest, SEASONS, WEATHERS, circuit } from "@shifty/rider";
 import {
   ApiError,
   createRoom,
@@ -55,7 +55,14 @@ export function ModeSelect() {
   useLoading(busy);
   const pickTrial = useCallback((c: TrialChoice) => {
     setTrial(c);
-    keepPicks({ trial: { course: c.course, season: SEASONS[c.season] ?? "summer" } });
+    keepPicks({
+      trial: {
+        course: c.course,
+        season: SEASONS[c.season] ?? "summer",
+        weather: WEATHERS[c.weather] ?? "clear",
+        ...(c.time === undefined ? {} : { time: c.time }),
+      },
+    });
   }, []);
   const { data: me } = useSuspenseQuery(meQuery);
   const appearance = me?.rider?.appearance ?? null;
@@ -87,7 +94,7 @@ export function ModeSelect() {
     setBusy(true);
     try {
       if (mode === "trial" && trial?.race) {
-        const ticket = await playTimeTrial(trial.course, trial.season);
+        const ticket = await playTimeTrial(trial.race);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
         await navigate({ to: "/race", replace: true });
       } else if (mode === "single") {
@@ -135,7 +142,7 @@ export function ModeSelect() {
           ) : (
             <Panel key={mode} className="mode-panel" label={t.play.modes[mode]}>
               <p className="mode-about">{t.play.about[mode]}</p>
-              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
+              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="all" />}
               {mode === "room" && (
                 <>
                   <PlanPickers plan={plan} onChange={setPlan} fields="event" />

@@ -1,7 +1,19 @@
 // JSON from our own WASM, parsed defensively anyway: a malformed field
 // becomes a default value instead of a crash or a lie in the types.
-import type { CourseData, LandKind } from "./render/course.ts";
-import type { GateData, LipData, ObstacleData, RunData, RunPoint, SpineData, TableData } from "./render/mountain.ts";
+import type { CourseData, LandData, LandKind, MooredKind } from "./render/course.ts";
+import type {
+  CliffData,
+  EdgeKind,
+  GateData,
+  LipData,
+  ObstacleData,
+  RockWallData,
+  RunData,
+  RunGateData,
+  RunPoint,
+  SpineData,
+  TableData,
+} from "./render/mountain.ts";
 import type { RaceEvent, StandingView } from "./ui/hud.ts";
 import type { RosterName } from "./ui/results.ts";
 
@@ -20,6 +32,7 @@ export function parseStandings(json: string): StandingView[] {
     place: num(o, "place"),
     lap: num(o, "lap"),
     finishTicks: num(o, "finishTicks"),
+    disqualifiedTicks: num(o, "disqualifiedTicks"),
     misses: num(o, "misses"),
     tricks: num(o, "tricks"),
     points: num(o, "points"),
@@ -49,7 +62,9 @@ export function parseEvents(json: string): RaceEvent[] {
       kind !== "buoy" &&
       kind !== "checkpoint" &&
       kind !== "lap" &&
+      kind !== "lapTime" &&
       kind !== "finish" &&
+      kind !== "disqualified" &&
       kind !== "trick" &&
       kind !== "sketchy" &&
       kind !== "bail"
@@ -73,6 +88,8 @@ export function parseEvents(json: string): RaceEvent[] {
       points: num(o, "points"),
       sketchy: o.sketchy === true,
       index: num(o, "index"),
+      clean: o.clean === true,
+      best: o.best === true,
     });
   }
   return out;
@@ -96,8 +113,12 @@ const gate = (v: unknown): GateData => {
     yaw: num(g, "yaw"),
     half: num(g, "half"),
     limit: num(g, "limit"),
+    gate: num(g, "gate"),
   };
 };
+
+const edge = (v: unknown): EdgeKind =>
+  v === "trees" ? "trees" : v === "netting" ? "netting" : v === "rock" ? "rock" : "bank";
 
 function parseRun(o: Obj): RunData {
   return {
@@ -116,6 +137,36 @@ function parseRun(o: Obj): RunData {
       half: num(p, "half"),
       wall: num(p, "wall"),
       limit: num(p, "limit"),
+      limitL: num(p, "limitL"),
+      limitR: num(p, "limitR"),
+      edgeL: edge(p.edgeL),
+      edgeR: edge(p.edgeR),
+    })),
+    gates: list(o.gates).map((g): RunGateData => ({
+      s: num(g, "s"),
+      offset: num(g, "offset"),
+      x: num(g, "x"),
+      y: num(g, "y"),
+      z: num(g, "z"),
+      yaw: num(g, "yaw"),
+      half: num(g, "half"),
+      gate: num(g, "gate"),
+    })),
+    cliffs: list(o.cliffs).map((c): CliffData => ({
+      s: num(c, "s"),
+      face: num(c, "face"),
+      x: num(c, "x"),
+      z: num(c, "z"),
+      yaw: num(c, "yaw"),
+      top: num(c, "top"),
+      bottom: num(c, "bottom"),
+      half: num(c, "half"),
+    })),
+    walls: list(o.walls).map((w): RockWallData => ({
+      from: num(w, "from"),
+      to: num(w, "to"),
+      side: num(w, "side") > 0 ? 1 : -1,
+      height: num(w, "height"),
     })),
     obstacles: list(o.obstacles).map((b): ObstacleData => ({
       x: num(b, "x"),
@@ -124,6 +175,7 @@ function parseRun(o: Obj): RunData {
       radius: num(b, "radius"),
       height: num(b, "height"),
       kind: b.kind === "tower" ? "tower" : b.kind === "rock" ? "rock" : "pine",
+      cover: b.cover === true,
     })),
     tables: list(o.tables).map((t): TableData => ({
       s: num(t, "s"),
@@ -159,11 +211,23 @@ const LAND_KINDS: readonly LandKind[] = [
   "mole",
   "stack",
   "arch",
+  "jetty",
 ];
 const landKind = (v: unknown): LandKind => LAND_KINDS.find((k) => k === v) ?? "rock";
 
+const MOORED_KINDS: readonly MooredKind[] = ["llaut", "trawler", "yacht", "inflatable", "sailboat"];
+const mooredKind = (v: unknown): MooredKind => MOORED_KINDS.find((k) => k === v) ?? "llaut";
+
 function parseBay(o: Obj): CourseData {
   const start = isObj(o.start) ? o.start : {};
+  const land: LandData[] = list(o.land).map((l) => ({
+    ax: num(l, "ax"),
+    az: num(l, "az"),
+    bx: num(l, "bx"),
+    bz: num(l, "bz"),
+    radius: num(l, "radius"),
+    kind: landKind(l.kind),
+  }));
   return {
     place: o.place === "cape" ? "cape" : "bay",
     length: num(o, "length"),
@@ -193,13 +257,16 @@ function parseBay(o: Obj): CourseData {
       width: num(r, "width"),
       height: num(r, "height"),
     })),
-    land: list(o.land).map((l) => ({
-      ax: num(l, "ax"),
-      az: num(l, "az"),
-      bx: num(l, "bx"),
-      bz: num(l, "bz"),
-      radius: num(l, "radius"),
-      kind: landKind(l.kind),
+    land: land.filter((l) => l.kind !== "jetty"),
+    jetties: land.filter((l) => l.kind === "jetty"),
+    boats: list(o.boats).map((b) => ({
+      x: num(b, "x"),
+      z: num(b, "z"),
+      yaw: num(b, "yaw"),
+      length: num(b, "length"),
+      beam: num(b, "beam"),
+      kind: mooredKind(b.kind),
+      seed: num(b, "seed"),
     })),
     path: list(o.path).map((p) => ({
       s: num(p, "s"),

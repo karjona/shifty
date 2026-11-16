@@ -1,7 +1,7 @@
 // Minimaps, seen from above with +X to the right and +Z down. On the water:
 // the bay's oval or the cape's loop, with buoys, ramps and every rider (the
 // races run clockwise). On the snow: the run snaking down the mountain, with
-// its checkpoints.
+// its checkpoints and its gates (the next one ringed).
 import type { CourseData } from "../render/course.ts";
 import type { RunData } from "../render/mountain.ts";
 import type { RiderView } from "../render/world.ts";
@@ -171,6 +171,8 @@ const RUN_SPREAD_MAX = 3;
 export class RunMap implements CourseMap {
   private svg: SVGSVGElement;
   private dots = new Map<number, SVGCircleElement>();
+  private gates: { x: number; z: number }[];
+  private nextRing: SVGCircleElement;
   /** Sideways (x) on the map from x on the run. */
   private side: (x: number) => number;
 
@@ -185,7 +187,7 @@ export class RunMap implements CourseMap {
       minZ = Math.min(minZ, p.z);
       maxZ = Math.max(maxZ, p.z);
     }
-    const pad = 30;
+    const pad = 60;
     const spread = Math.min(RUN_SPREAD_MAX, Math.max(1, (RUN_ASPECT * (maxZ - minZ)) / Math.max(1, maxX - minX)));
     const mid = (minX + maxX) / 2;
     const side = (x: number) => mid + (x - mid) * spread;
@@ -212,13 +214,15 @@ export class RunMap implements CourseMap {
     const tick = (g: { x: number; z: number; yaw: number; half: number }, cls: string) => {
       const rx = -Math.cos(g.yaw);
       const rz = Math.sin(g.yaw);
+      // (Across the map's ribbon, which is drawn wider than the run.)
+      const reach = Math.max(g.half + 8, 46 / spread);
       node(
         "line",
         {
-          x1: side(g.x - rx * (g.half + 8)),
-          y1: g.z - rz * (g.half + 8),
-          x2: side(g.x + rx * (g.half + 8)),
-          y2: g.z + rz * (g.half + 8),
+          x1: side(g.x - rx * reach),
+          y1: g.z - rz * reach,
+          x2: side(g.x + rx * reach),
+          y2: g.z + rz * reach,
           class: cls,
         },
         this.svg,
@@ -227,15 +231,31 @@ export class RunMap implements CourseMap {
     for (const c of run.checkpoints) tick(c, "checkpoint");
     tick(run.startGate, "start");
     tick(run.finish, "start");
+    this.gates = run.gates.map((g) => ({ x: side(g.x), z: g.z }));
+    this.gates.forEach((g, i) =>
+      node("circle", { cx: g.x, cy: g.z, r: 15, class: `gate ${i % 2 === 0 ? "red" : "blue"}` }, this.svg),
+    );
+    this.nextRing = node("circle", { r: 30, class: "next" }, this.svg);
+    this.nextRing.style.display = "none";
   }
 
-  update(riders: RiderView[]): void {
+  update(riders: RiderView[], nextGate: number | null): void {
+    const g = nextGate === null ? undefined : this.gates[nextGate];
+    this.nextRing.style.display = g ? "" : "none";
+    if (g) {
+      this.nextRing.setAttribute("cx", String(g.x));
+      this.nextRing.setAttribute("cy", String(g.z));
+    }
     const seen = new Set<number>();
     for (const r of riders) {
       seen.add(r.slot);
       let dot = this.dots.get(r.slot);
       if (!dot) {
-        dot = node("circle", { r: 16, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" }, this.svg);
+        dot = node(
+          "circle",
+          { r: r.isMe ? 30 : 22, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" },
+          this.svg,
+        );
         this.dots.set(r.slot, dot);
       }
       dot.setAttribute("cx", this.side(r.x).toFixed(1));

@@ -36,6 +36,20 @@
       "when": 1794094091751,
       "tag": "0004_time_trials",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794821039783,
+      "tag": "0005_disqualified",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794822414442,
+      "tag": "0006_trial_revisions",
+      "breakpoints": true
     }
   ]
 }

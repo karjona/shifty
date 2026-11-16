@@ -1,3 +1,4 @@
+use crate::capsule::{apart, separate};
 use crate::conditions::{self, Conditions, Event, Rock, SnowCover};
 use crate::course::{Course, CourseId, Frame, Line, Sport, collide_obstacles};
 use crate::input::Input;
@@ -143,6 +144,16 @@ pub struct World {
     /// plan. Set alike by the server and every client (from where the race
     /// stands in the room's plan), like the course.
     pub hold_results: bool,
+    /// Missing `race::tuning::MAX_MISSES` buoys or gates disqualifies a
+    /// rider (off in a time trial). Set alike by the server and every
+    /// client, like `hold_results`.
+    pub disqualify: bool,
+    /// A time trial session: laps without end, timed one by one (see
+    /// `race::Laps`). The race never ends by itself: a loop is lapped until
+    /// the session ends (`end_session`), and a run goes back to the top
+    /// for its next lap once the rider has ridden out past the finish. Set
+    /// alike by the server and every client, like `hold_results`.
+    pub trial: bool,
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
@@ -160,6 +171,8 @@ impl World {
             riders: [None; MAX_RIDERS],
             setups: [Setup::BALANCED; MAX_RIDERS],
             hold_results: false,
+            disqualify: true,
+            trial: false,
         }
     }
 
@@ -341,14 +354,33 @@ impl World {
     }
 
     /// Starts the run over straight from the countdown, everyone back on
-    /// the grid (a time trial's retry: the intro has been seen). Only the
-    /// server calls this; clients learn it from snapshots.
+    /// the grid (a time trial's retry: the intro has been seen; the lap
+    /// under way is dropped, the session's laps kept). Only the server
+    /// calls this; clients learn it from snapshots.
     pub fn retry(&mut self) {
         self.race = Race {
             phase: Phase::Countdown,
             phase_tick: self.tick,
         };
         self.line_up();
+        self.sync_weather();
+    }
+
+    /// Ends a time trial session: on to its results, held (the lap under
+    /// way is dropped). Only the server calls this; clients learn it from
+    /// snapshots.
+    pub fn end_session(&mut self) {
+        if self.race.phase == Phase::Results {
+            return;
+        }
+        self.race = Race {
+            phase: Phase::Results,
+            phase_tick: self.tick,
+        };
+        for r in self.riders.iter_mut().flatten() {
+            r.race.laps = r.race.laps.kept();
+        }
+        self.sync_weather();
     }
 
     /// Takes every rider out of the race to ride free: not held on the grid,
@@ -364,15 +396,15 @@ impl World {
 
     /// Whether a seat's rider rides on autopilot: out of the race, its
     /// inputs come from `bot` instead of its player, and it passes through
-    /// riders still racing. That is a rider through the finish (for the
-    /// rest of the race), one who joined mid-race (until the next one), and
-    /// everyone on the results.
+    /// riders still racing. That is a rider through the finish or
+    /// disqualified (for the rest of the race), one who joined mid-race
+    /// (until the next one), and everyone on the results.
     pub fn on_autopilot(&self, slot: usize) -> bool {
         let Some(r) = &self.riders[slot] else {
             return false;
         };
         match self.race.phase {
-            Phase::Racing => r.race.finished() || !r.race.racing,
+            Phase::Racing => r.race.done() || !r.race.racing,
             Phase::Results => true,
             Phase::Grid | Phase::Intro | Phase::Countdown => false,
         }
@@ -438,7 +470,7 @@ impl World {
         for (slot, rider) in self.riders.iter_mut().enumerate() {
             let Some(r) = rider else { continue };
             buoy::bump(r, course, &self.surface, next);
-            let mut impact = course.collide(&mut r.pos, &mut r.vel, &self.surface, next);
+            let mut impact = course.collide(&mut r.pos, &mut r.vel, r.yaw, &self.surface, next);
             if !rocks.is_empty() {
                 let radius = course.sport.rider_radius();
                 let hit = collide_obstacles(
@@ -495,9 +527,13 @@ impl World {
                 s,
                 offset,
                 &self.race,
+                self.trial,
                 next,
                 &mut events,
             );
+            if self.disqualify {
+                race::disqualify(&mut r.race, &self.race, slot, next, &mut events);
+            }
         }
         self.tick = next;
         self.advance_phase();
@@ -508,6 +544,7 @@ impl World {
     fn advance_phase(&mut self) {
         let elapsed = self.race.elapsed(self.tick);
         let done = match self.race.phase {
+            Phase::Racing if self.trial => self.ridden_out(),
             Phase::Racing => {
                 let racers = self.riders.iter().flatten().filter(|r| r.race.racing);
                 let mut any = false;
@@ -517,7 +554,7 @@ impl World {
                     any = true;
                     if r.race.finished() {
                         first = first.min(r.race.finish_ticks);
-                    } else {
+                    } else if !r.race.disqualified() {
                         all_done = false;
                     }
                 }
@@ -535,6 +572,8 @@ impl World {
             Phase::Grid => Phase::Intro,
             Phase::Intro => Phase::Countdown,
             Phase::Countdown => Phase::Racing,
+            // A time trial's run: back to the top for the next lap.
+            Phase::Racing if self.trial => Phase::Countdown,
             Phase::Racing => Phase::Results,
             Phase::Results => Phase::Grid,
         };
@@ -547,24 +586,55 @@ impl World {
         if matches!(next, Phase::Grid | Phase::Countdown) {
             self.line_up();
         }
+        // A time trial's lap on a run starts with the start signal.
+        if next == Phase::Racing && self.trial && !self.course().looped() {
+            let tick = self.tick;
+            for r in self.riders.iter_mut().flatten() {
+                if r.race.racing {
+                    r.race.laps.start = tick;
+                }
+            }
+        }
     }
 
-    /// Everyone to the grid, lined up for the race.
+    /// A time trial on a run: everyone racing is through the finish and has
+    /// ridden out `RUN_OUT_TICKS` past it (never on a loop).
+    fn ridden_out(&self) -> bool {
+        if self.course().looped() {
+            return false;
+        }
+        let elapsed = self.race.elapsed(self.tick);
+        let mut any = false;
+        for r in self.riders.iter().flatten().filter(|r| r.race.racing) {
+            any = true;
+            if !r.race.finished() || elapsed < r.race.finish_ticks + race::tuning::RUN_OUT_TICKS {
+                return false;
+            }
+        }
+        any
+    }
+
+    /// Everyone to the grid, lined up for the race (in a time trial, with
+    /// the session's laps so far).
     fn line_up(&mut self) {
         let course = self.course();
         for slot in 0..MAX_RIDERS {
-            if self.riders[slot].is_some() {
+            if let Some(old) = self.riders[slot] {
                 let spot = course.grid_spot(slot);
                 let y = self.rest_height(spot.x, spot.z);
                 let mut r = Rider::at(spot, y);
                 r.race = Progress::lined_up();
+                if self.trial {
+                    r.race.laps = old.race.laps.kept();
+                }
                 self.riders[slot] = Some(r);
             }
         }
     }
 
-    /// Racing riders in race order: finishers by time, then by distance
-    /// covered. Riding free (joined mid-race) are left out.
+    /// Racing riders in race order: finishers by time, then riders still
+    /// racing by distance covered, then the disqualified, the later out
+    /// first. Riding free (joined mid-race) are left out.
     pub fn standings(&self) -> Vec<Standing> {
         let course = self.course();
         let mut list: Vec<(u8, Progress, f32)> = self
@@ -586,11 +656,25 @@ impl World {
                 })
             })
             .collect();
-        list.sort_by(|a, b| match (a.1.finished(), b.1.finished()) {
-            (true, true) => a.1.finish_ticks.cmp(&b.1.finish_ticks).then(a.0.cmp(&b.0)),
-            (true, false) => core::cmp::Ordering::Less,
-            (false, true) => core::cmp::Ordering::Greater,
-            (false, false) => b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)),
+        // 0 finished, 1 still racing, 2 disqualified.
+        let rank = |p: &Progress| {
+            if p.finished() {
+                0
+            } else if p.disqualified() {
+                2
+            } else {
+                1
+            }
+        };
+        list.sort_by(|a, b| {
+            rank(&a.1)
+                .cmp(&rank(&b.1))
+                .then_with(|| match rank(&a.1) {
+                    0 => a.1.finish_ticks.cmp(&b.1.finish_ticks),
+                    1 => b.2.total_cmp(&a.2),
+                    _ => b.1.disqualified_ticks.cmp(&a.1.disqualified_ticks),
+                })
+                .then(a.0.cmp(&b.0))
         });
         list.iter()
             .enumerate()
@@ -602,11 +686,14 @@ impl World {
             .collect()
     }
 
-    /// Rider-vs-rider bumps: equal-mass spheres in the XZ plane, resolved in
-    /// slot order so every machine gets the same result. Riders on autopilot
-    /// (`auto`) only bump each other.
+    /// Rider-vs-rider bumps: equal masses, each a capsule along its heading
+    /// (see `Sport::body`), pushed apart in the XZ plane where their
+    /// closest points meet, resolved in slot order so every machine gets
+    /// the same result. Riders on autopilot (`auto`) only bump each other.
     fn resolve_collisions(&mut self, auto: &[bool; MAX_RIDERS]) {
-        let radius = self.course().sport.rider_radius();
+        let body = self.course().sport.body();
+        let min_dist = body.radius * 2.0;
+        let reach = body.reach() * 2.0;
         for i in 0..MAX_RIDERS {
             for j in (i + 1)..MAX_RIDERS {
                 if auto[i] != auto[j] {
@@ -618,19 +705,21 @@ impl World {
                 if (a.pos.y - b.pos.y).abs() > RIDER_HALF_HEIGHT * 2.0 {
                     continue;
                 }
-                let d = (b.pos - a.pos).horizontal();
-                let dist = d.length();
-                let min_dist = radius * 2.0;
-                if dist >= min_dist {
+                let centres = (b.pos - a.pos).horizontal();
+                if centres.dot(centres) >= reach * reach {
                     continue;
                 }
-                // Exactly overlapping: push apart along a fixed axis.
-                let n = if dist > 1e-4 {
-                    d * (1.0 / dist)
-                } else {
-                    Vec3::new(1.0, 0.0, 0.0)
+                let sa = body.segment(a.pos.x, a.pos.z, a.yaw);
+                let sb = body.segment(b.pos.x, b.pos.z, b.yaw);
+                // Lying across each other: apart the way their centres
+                // are; exactly on top of each other, out to the first's right.
+                let right = a.right();
+                let (_, cx, cz) = apart((0.0, 0.0), (centres.x, centres.z), (right.x, right.z));
+                let Some((nx, nz, depth)) = separate(&sa, &sb, min_dist, (cx, cz)) else {
+                    continue;
                 };
-                let push = n * ((min_dist - dist) * 0.5);
+                let n = Vec3::new(nx, 0.0, nz);
+                let push = n * (depth * 0.5);
                 let mut a2 = a;
                 let mut b2 = b;
                 a2.pos -= push;
@@ -705,7 +794,13 @@ impl World {
             ]));
             eat(u32::from(p.misses) | (u32::from(p.tricks) << 8) | (u32::from(p.points) << 16));
             eat(p.finish_ticks);
+            eat(p.disqualified_ticks);
+            eat(p.laps.start);
+            eat(p.laps.best);
+            eat(p.laps.last);
+            eat(u32::from(p.laps.done) | (u32::from(p.laps.last_void) << 8));
         }
+        eat(u32::from(self.trial));
         h
     }
 }

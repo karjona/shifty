@@ -22,7 +22,7 @@ use std::collections::VecDeque;
 use protocol::token::JoinClaims;
 use protocol::{
     Event, EventBody, InputPacket, PROTOCOL_VERSION, RejectReason, RiderKind, RiderState,
-    ServerMsg, Snapshot, Welcome, truncate_utf8,
+    ServerMsg, SessionEnd, Snapshot, Welcome, truncate_utf8,
 };
 use serde::Serialize;
 use sim::bot::bot_input;
@@ -60,9 +60,14 @@ pub const LOADING_TIMEOUT_MS: u64 = GRID_TIMEOUT_TICKS as u64 * 1000 / TICK_HZ a
 /// A player silent for longer than this lets go of everything (no gas, no
 /// stick) instead of riding on with the last input the server had.
 pub const QUIET_INPUT_MS: u64 = 1_000;
-/// A time trial's results stay up this long at most (a forgotten tab):
-/// then its room is over, and done.
-pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
+/// A time trial session's results stay up this long (time enough for its
+/// screen to hear why it ended): then its room is over, and done.
+pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 30;
+/// A time trial session ends after this long with the player's input
+/// never changing (a pad left alone, a phone left on auto-gas)...
+pub const TRIAL_IDLE_TICKS: u32 = TICK_HZ * 60 * 3;
+/// ...or this long in all.
+pub const TRIAL_SESSION_TICKS: u32 = TICK_HZ * 60 * 60;
 /// A room whose plan is over lives on at most this long while people are
 /// still in it (looking at what the race paid, picking what's next).
 pub const AFTER_PLAN_TICKS: u32 = TICK_HZ * 60 * 5;
@@ -71,8 +76,8 @@ const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
 const INPUT_RING: usize = 128;
 
-/// Tilt points by finishing place. Riders who don't finish get the
-/// last place's points.
+/// Tilt points by finishing place. Riders who don't finish (the
+/// disqualified among them) get the last place's points.
 pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
 /// CPU riders' names, an initial and a surname, Costa Nevada's mix of
 /// Catalan, Spanish and Californian.
@@ -146,8 +151,8 @@ pub struct RoomConfig {
     pub bots: u8,
     /// People the lobby sent: the first race waits for them all to arrive.
     pub humans: u8,
-    /// A time trial in this season (0-3): one rider, no bots, runs recorded.
-    pub trial: Option<u8>,
+    /// A time trial session: one rider, no bots, laps recorded.
+    pub trial: bool,
 }
 
 impl RoomConfig {
@@ -157,19 +162,18 @@ impl RoomConfig {
             seed = (seed ^ u32::from(b)).wrapping_mul(0x0100_0193);
         }
         let plan = claims.room_plan();
-        // A time trial: one race, in clear, steady weather.
-        let trial = claims.trial.then(|| plan[0].conditions.season as u8);
+        let trial = claims.trial;
         Self {
             id: claims.room.clone(),
             plan,
             surface_kind: SurfaceKind::from_u8(claims.surface).unwrap_or(SurfaceKind::Flat),
             surface_seed: seed,
-            bots: if trial.is_some() {
+            bots: if trial {
                 0
             } else {
                 claims.bots.min((MAX_RIDERS - 1) as u8)
             },
-            humans: if trial.is_some() {
+            humans: if trial {
                 1
             } else {
                 claims.humans.min(MAX_HUMANS as u8)
@@ -192,6 +196,9 @@ pub struct ReportEntry {
     pub place: u8,
     pub time_ms: Option<u32>,
     pub trick_points: u16,
+    /// Out of the race for missing too many buoys or gates (placed behind
+    /// everyone else, no time).
+    pub disqualified: bool,
     /// Tilt points after this race.
     pub gp_points: Option<u16>,
 }
@@ -345,8 +352,12 @@ pub struct Room {
     over: bool,
     /// The tick the plan ended at.
     over_tick: u32,
-    /// A time trial's runs.
+    /// A time trial's laps.
     trial: Option<Trial>,
+    /// A time trial: the tick the player's input last changed (or a retry
+    /// came), and the input it changed to.
+    active_tick: u32,
+    active_input: Input,
     pub stats: RoomStats,
 }
 
@@ -366,7 +377,9 @@ impl Room {
     pub fn new(config: RoomConfig) -> Self {
         let world = World::for_event(config.plan[0], config.surface_kind, config.surface_seed);
         let mut room = Self {
-            trial: config.trial.map(|season| Trial::new(&config.id, season)),
+            trial: config.trial.then(|| Trial::new(&config.id)),
+            active_tick: 0,
+            active_input: Input::default(),
             world,
             seats: [Seat::Empty; MAX_RIDERS],
             players: Default::default(),
@@ -388,12 +401,14 @@ impl Room {
         }
         room.apply_setups();
         room.world.hold_results = room.holds_results();
+        room.world.disqualify = room.trial.is_none();
+        room.world.trial = room.trial.is_some();
         room
     }
 
-    /// The race on now keeps its results up (until a retry, or the room
-    /// closes): a time trial's, and the last race of the plan. Clients hold
-    /// the same races' results (`client_core::Client`).
+    /// The race on now keeps its results up (until the room closes): a time
+    /// trial session's, and the last race of the plan. Clients hold the same
+    /// races' results (`client_core::Client`).
     fn holds_results(&self) -> bool {
         self.trial.is_some() || self.event_index + 1 >= self.config.plan.len()
     }
@@ -514,6 +529,7 @@ impl Room {
         if self.over {
             return Err(RejectReason::Over);
         }
+        self.active_tick = self.world.tick;
         let mut out = Outbox::default();
         let existing = self
             .players
@@ -770,6 +786,7 @@ impl Room {
                 place: st.place,
                 time_ms: finished.then(|| st.progress.finish_ticks * 1000 / TICK_HZ),
                 trick_points: st.progress.points,
+                disqualified: st.progress.disqualified(),
                 gp_points: gp.then_some(entrant.points),
             });
         }
@@ -874,6 +891,26 @@ impl Room {
             self.apply_setups();
         }
         self.world.hold_results = self.holds_results();
+        self.world.disqualify = self.trial.is_none();
+        self.world.trial = self.trial.is_some();
+    }
+
+    /// Ends a time trial session that has gone without input too long, or
+    /// run its longest: on to its results, and its screen told why.
+    fn end_session(&mut self) {
+        if self.trial.is_none() || self.world.race.phase == Phase::Results {
+            return;
+        }
+        let tick = self.world.tick;
+        let reason = if tick >= TRIAL_SESSION_TICKS {
+            SessionEnd::Hour
+        } else if tick.wrapping_sub(self.active_tick) >= TRIAL_IDLE_TICKS {
+            SessionEnd::Idle
+        } else {
+            return;
+        };
+        self.world.end_session();
+        self.broadcast_event(&EventBody::SessionOver { reason }, None);
     }
 
     /// Validate and buffer a packet of inputs. Never trusts the client: values
@@ -894,8 +931,10 @@ impl Room {
         p.ack_events(packet.event_ack);
         // Readiness only moves on (packets can arrive out of order).
         p.ready = p.ready.max(packet.ready);
-        if let Some(trial) = &mut self.trial {
-            trial.retries(packet.retry);
+        if let Some(trial) = &mut self.trial
+            && trial.retries(packet.retry)
+        {
+            self.active_tick = server_tick;
         }
         p.echo_client_time = packet.client_time;
         p.echo_received_ms = now_ms;
@@ -912,6 +951,10 @@ impl Room {
                 continue;
             }
             let fresh = tick > prev_highest;
+            if fresh && self.trial.is_some() && *input != self.active_input {
+                self.active_input = *input;
+                self.active_tick = server_tick;
+            }
             if fresh {
                 let margin = i64::from(tick) - i64::from(server_tick);
                 worst = Some(worst.map_or(margin, |w| w.min(margin)));
@@ -940,6 +983,7 @@ impl Room {
         if let Some(trial) = &mut self.trial {
             trial.before_step(&mut self.world);
         }
+        self.end_session();
         let next = self.world.tick.wrapping_add(1);
         let mut inputs: Inputs = [None; MAX_RIDERS];
         for slot in 0..MAX_RIDERS {
@@ -1188,6 +1232,51 @@ mod tests {
             Some(RejectReason::Started)
         );
         assert!(room.join(3, &ana, 0, now).is_ok());
+    }
+
+    #[test]
+    fn a_disqualified_rider_is_reported_last_with_last_places_points() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        assert!(room.world().disqualify);
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        race_on(&mut room, &mut now, &[(1, Some(0))]);
+        let slot = room.slot_of(1).unwrap();
+        let mut r = room.world.riders[slot].unwrap();
+        r.race.misses = sim::race::tuning::MAX_MISSES;
+        room.world.riders[slot] = Some(r);
+        run(&mut room, &mut now, 1, &[(1, Some(0))]);
+        assert!(room.world().riders[slot].unwrap().race.disqualified());
+        let reports = idle_until(&mut room, &mut now, |r| {
+            r.world().course == CourseId::Mountain
+        });
+        let [report] = &reports[..] else {
+            panic!("one race, one report: {reports:?}")
+        };
+        let mine = report
+            .entries
+            .iter()
+            .find(|e| e.pid.as_deref() == Some("ana"))
+            .unwrap();
+        assert!(mine.disqualified);
+        assert_eq!((mine.place, mine.time_ms), (4, None));
+        assert_eq!(mine.gp_points, Some(GP_POINTS[3]));
+        assert!(
+            report
+                .entries
+                .iter()
+                .filter(|e| e.pid.is_none())
+                .all(|e| !e.disqualified)
+        );
+    }
+
+    #[test]
+    fn a_time_trial_never_disqualifies() {
+        let mut ana = claims("ana", vec![0], 0);
+        ana.trial = true;
+        let room = Room::new(RoomConfig::from_claims(&ana));
+        assert!(!room.world().disqualify);
     }
 
     #[test]

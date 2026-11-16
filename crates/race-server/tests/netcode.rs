@@ -4,6 +4,7 @@
 use client_core::{Client, Phase};
 use protocol::token::{JoinClaims, RaceClaims};
 use protocol::{ClientMsg, InputPacket, ServerMsg};
+use race_server::record::RunReport;
 use race_server::room::{ConnId, Room, RoomConfig};
 use sim::bot::bot_input;
 use sim::math::Pcg32;
@@ -84,6 +85,8 @@ struct Harness {
     next_tick_at: f64,
     /// When set, every rider as the server has them after each tick.
     server_log: Option<Vec<(u32, [Option<Rider>; MAX_RIDERS])>>,
+    /// Time trial laps the room reported.
+    runs: Vec<RunReport>,
 }
 
 fn claims(pid: &str, bots: u8, surface: SurfaceKind, race: RaceClaims) -> JoinClaims {
@@ -127,7 +130,19 @@ impl Harness {
 
     /// A room racing one race as asked for.
     fn racing(race: RaceClaims, bots: u8, surface: SurfaceKind) -> Self {
-        let room = Room::new(RoomConfig::from_claims(&claims("x", bots, surface, race)));
+        Self::with(claims("x", bots, surface, race))
+    }
+
+    /// A time trial session on one circuit as asked for.
+    fn trial(race: RaceClaims, surface: SurfaceKind) -> Self {
+        Self::with(JoinClaims {
+            trial: true,
+            ..claims("x", 0, surface, race)
+        })
+    }
+
+    fn with(claims: JoinClaims) -> Self {
+        let room = Room::new(RoomConfig::from_claims(&claims));
         Self {
             frame_ms: 8,
             stall: None,
@@ -136,6 +151,7 @@ impl Harness {
             now: 1000.0,
             next_tick_at: 1000.0,
             server_log: None,
+            runs: Vec::new(),
         }
     }
 
@@ -200,6 +216,7 @@ impl Harness {
             while now >= self.next_tick_at {
                 self.next_tick_at += tick_ms;
                 let out = self.room.step(now as u64);
+                self.runs.extend(out.runs);
                 if let Some(log) = &mut self.server_log {
                     log.push((self.room.tick(), self.room.world().riders));
                 }
@@ -782,6 +799,114 @@ fn finished_riders_are_predicted_exactly_whatever_their_players_press() {
     );
 }
 
+/// Rides the course passing every buoy on its wrong side.
+fn missing_every_buoy(w: &sim::World, slot: usize) -> Input {
+    let Some(r) = w.riders[slot] else {
+        return Input::default();
+    };
+    let course = w.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = if gate >= 1 {
+        let b = &course.buoys[gate - 1];
+        match b.keep {
+            sim::course::Keep::Right => b.offset + 4.0,
+            sim::course::Keep::Left => b.offset - 4.0,
+        }
+    } else {
+        0.0
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = (-sim::math::angle_diff(r.yaw, desired) * 2.5).clamp(-1.0, 1.0);
+    Input::from_analog(steer, 1.0, 0.0, 0)
+}
+
+#[test]
+fn a_disqualification_is_predicted_and_announced_once() {
+    let cond = NetConditions {
+        latency_ms: 80.0,
+        jitter_ms: 10.0,
+        loss: 0.02,
+    };
+    // Player b idles on the grid (so the race goes on) and watches a.
+    let mut h = Harness::new(0, SurfaceKind::Flat);
+    h.add_peer("a", cond);
+    h.add_peer("b", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    let a = h.peers[0].client.slot().expect("joined");
+    let out = |h: &Harness| h.room.world().riders[a].is_some_and(|r| r.race.disqualified());
+    let mut announced: Vec<Vec<(u8, u32)>> = vec![Vec::new(); 2];
+    let mut note = |h: &mut Harness| {
+        for (i, p) in h.peers.iter_mut().enumerate() {
+            for e in p.client.take_events() {
+                if let sim::race::EventKind::Disqualified { ticks } = e.kind {
+                    announced[i].push((e.slot, ticks));
+                }
+            }
+        }
+    };
+    for _ in 0..200 {
+        if out(&h) {
+            break;
+        }
+        h.drive(500.0, |i, c, _| {
+            if i == 0 {
+                missing_every_buoy(c.predicted_world(), a)
+            } else {
+                Input::default()
+            }
+        });
+        note(&mut h);
+    }
+    let r = h.room.world().riders[a].unwrap();
+    assert!(out(&h), "never disqualified: {r:?}");
+    assert_eq!(r.race.misses, sim::race::tuning::MAX_MISSES);
+    assert!(h.room.world().on_autopilot(a));
+    // Out of the race, a mashes the stick while both screens predict it.
+    h.run(500.0, |_, _| Input::default());
+    note(&mut h);
+    let before = h.peers[0].client.stats();
+    let mut rng = Pcg32::new(5);
+    h.drive(4000.0, |i, _, _| {
+        if i == 1 {
+            return Input::default();
+        }
+        Input::from_analog(
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            (rng.next_u32() & 0xFF) as u8,
+        )
+    });
+    note(&mut h);
+    assert_eq!(h.room.world().race.phase, RacePhase::Racing);
+    let s = h.peers[0].client.stats();
+    assert_eq!(s.mispredictions - before.mispredictions, 0, "{s:?}");
+    let server = h.room.world().riders[a].unwrap().race;
+    for (i, p) in h.peers.iter().enumerate() {
+        let predicted = p.client.predicted_world().riders[a].unwrap().race;
+        assert_eq!(predicted.disqualified_ticks, server.disqualified_ticks);
+        assert_eq!(
+            announced[i],
+            [(a as u8, server.disqualified_ticks)],
+            "screen {i}"
+        );
+    }
+    // Last, behind b who never left the grid.
+    let order: Vec<u8> = h
+        .room
+        .world()
+        .standings()
+        .iter()
+        .map(|st| st.slot)
+        .collect();
+    assert_eq!(order.last(), Some(&(a as u8)));
+}
+
 #[test]
 fn a_screen_frozen_while_it_loads_keeps_its_seat_for_the_grid_wait() {
     let mut h = Harness::new(1, SurfaceKind::Flat);
@@ -996,4 +1121,135 @@ fn a_reloaded_screen_rejoins_its_seat_and_predicts_on() {
             < f64::from(s.snapshots - before.snapshots) * 0.1,
         "{s:?}"
     );
+}
+
+#[test]
+fn a_time_trial_session_is_predicted_lap_after_lap_through_a_void_lap_a_retry_and_a_reload() {
+    let cond = NetConditions {
+        latency_ms: 90.0,
+        jitter_ms: 12.0,
+        loss: 0.03,
+    };
+    let mut h = Harness::trial(race_in(CourseId::Oval, 0, 0, 0), SurfaceKind::Swells);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    assert!(h.peers[0].client.trial());
+    h.start_race();
+    let slot = h.peers[0].client.slot().expect("joined");
+    let laps = |h: &Harness| h.room.world().riders[slot].expect("rider").race.laps;
+    let mut announced: Vec<(u8, u32, bool)> = Vec::new();
+    let note = |h: &mut Harness, announced: &mut Vec<(u8, u32, bool)>| {
+        for e in h.peers[0].client.take_events() {
+            if let sim::race::EventKind::LapTime {
+                lap, ticks, clean, ..
+            } = e.kind
+            {
+                announced.push((lap, ticks, clean));
+            }
+        }
+    };
+    let riding = |_: usize, c: &Client, _: f64| bot_input(c.predicted_world(), slot);
+    // Two clean laps, the bot's line.
+    while laps(&h).done < 2 {
+        h.drive(500.0, riding);
+        note(&mut h, &mut announced);
+    }
+    // A lap missing every buoy: void.
+    while laps(&h).done < 3 {
+        h.drive(500.0, |_, c, _| {
+            missing_every_buoy(c.predicted_world(), slot)
+        });
+        note(&mut h, &mut announced);
+    }
+    let l = laps(&h);
+    assert!(l.last_void, "{l:?}");
+    // Back on the line, then a retry mid-lap: the countdown on the grid, the lap dropped.
+    h.drive(15_000.0, riding);
+    assert_ne!(laps(&h).start, 0);
+    h.peers[0].client.retry();
+    h.drive(1000.0, riding);
+    assert_eq!(h.room.world().race.phase, RacePhase::Countdown);
+    assert_eq!(laps(&h).start, 0);
+    assert_eq!(laps(&h).done, 3);
+    // Mid-lap, the tab reloads: a new screen picks the session up from a snapshot.
+    while laps(&h).start == 0 {
+        h.drive(500.0, riding);
+    }
+    h.drive(8000.0, riding);
+    note(&mut h, &mut announced);
+    let old = h.peers[0].conn;
+    h.room.disconnect(old, h.now as u64);
+    h.peers[0].client = Client::new("token");
+    h.peers[0].conn = 41;
+    h.peers[0].up = Link::new(cond, 310);
+    h.peers[0].down = Link::new(cond, 311);
+    h.run(2500.0, |_, _| Input::default());
+    assert_eq!(h.peers[0].client.slot(), Some(slot));
+    let seen = h.peers[0].client.predicted_world().riders[slot]
+        .expect("rider")
+        .race
+        .laps;
+    let server = laps(&h);
+    assert_eq!(
+        (seen.start, seen.done, seen.best, seen.last, seen.last_void),
+        (
+            server.start,
+            server.done,
+            server.best,
+            server.last,
+            server.last_void
+        ),
+        "the lap clock and the session from a snapshot"
+    );
+    assert_ne!(server.start, 0, "the lap goes on");
+    while laps(&h).done < 5 {
+        h.drive(500.0, riding);
+        note(&mut h, &mut announced);
+    }
+    let before = h.peers[0].client.stats();
+    h.drive(3000.0, riding);
+    let s = h.peers[0].client.stats();
+    assert!(
+        f64::from(s.mispredictions - before.mispredictions)
+            < f64::from(s.snapshots - before.snapshots) * 0.1,
+        "{s:?}"
+    );
+
+    // Every lap announced once, as the server timed it; the void one void.
+    let numbers: Vec<u8> = announced.iter().map(|a| a.0).collect();
+    assert_eq!(numbers, [1, 2, 3, 4, 5], "{announced:?}");
+    assert!(announced[0].2 && announced[1].2 && !announced[2].2);
+    assert_eq!(laps(&h).done, 5);
+    // Only clean laps that bettered the session went to the lobby.
+    assert!(!h.runs.is_empty());
+    let mut best = u32::MAX;
+    for r in &h.runs {
+        assert!(r.time_ms < best, "{:?}", h.runs);
+        best = r.time_ms;
+    }
+    assert_eq!(best, laps(&h).best * 1000 / TICK_HZ);
+    assert_eq!(h.room.world().race.phase, RacePhase::Racing);
+}
+
+#[test]
+fn a_time_trial_session_closed_for_idling_reaches_the_screen() {
+    let cond = NetConditions {
+        latency_ms: 70.0,
+        jitter_ms: 10.0,
+        loss: 0.05,
+    };
+    let mut h = Harness::trial(race_in(CourseId::Oval, 0, 0, 0), SurfaceKind::Swells);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    let slot = h.peers[0].client.slot().expect("joined");
+    h.drive(5000.0, |_, c, _| bot_input(c.predicted_world(), slot));
+    assert_eq!(h.peers[0].client.session_over(), None);
+    // Hands off for three minutes: the room closes the session and says why.
+    let idle = race_server::room::TRIAL_IDLE_TICKS as f64 * 1000.0 / f64::from(TICK_HZ);
+    h.run(idle + 2000.0, |_, _| Input::default());
+    assert_eq!(h.room.world().race.phase, RacePhase::Results);
+    let c = &h.peers[0].client;
+    assert_eq!(c.session_over(), Some(protocol::SessionEnd::Idle));
+    assert_eq!(c.predicted_world().race.phase, RacePhase::Results);
 }

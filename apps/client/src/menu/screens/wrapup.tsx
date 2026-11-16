@@ -1,7 +1,7 @@
 // What comes after a race: a paper panel over the race, which runs on
 // television behind it (or over a Tilt's podium). Your place, big; the race
 // in its conditions, or the Tilt's final standings and its champion, or a
-// time trial's run among the ghosts it raced; what it paid, as the lobby's
+// time trial session's best lap among the ghosts it raced; what it paid, as the lobby's
 // ledger has it (it arrives a moment after the race ends), counting up into
 // your credits; and what's next, the first of it focused. The same panel
 // says what went wrong when joining or racing does.
@@ -9,8 +9,8 @@ import "../wrapup.css";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { playCue } from "../../audio/end.ts";
-import type { Season } from "../../game/conditions.ts";
-import type { RaceEnd, Trouble } from "../../game/race.ts";
+import type { Conditions } from "../../game/conditions.ts";
+import type { RaceEnd, TrialEnd, Trouble } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { formatTime, ordinal } from "../../ui/hud.ts";
 import { LAUREL_BOX, LAUREL_LEAVES, LEAF_PATH, laurelStems, leafTransform } from "../../ui/laurel.ts";
@@ -30,19 +30,12 @@ const PAY_GIVE_UP_MS = 180_000;
 const ROW_MS = 320;
 const ROLL_MS = 1100;
 
-/** A time trial's run among the ghosts it raced. */
-export interface TrialSummary {
+/** A time trial session at its end: its circuit in its conditions, and your rank on the board after it. */
+export interface TrialSummary extends TrialEnd {
   course: number;
-  season: Season;
-  /** Your time (ticks; 0: not finished) and the sim's rate. */
-  ticks: number;
-  hz: number;
-  ghosts: { label: string; ticks: number }[];
-  /** "New record", "New personal best", or null. */
-  callout: string | null;
-  /** What the run beat: 2 the record, 1 your best, 0 nothing. */
-  beat: number;
-  name: string;
+  conditions: Conditions;
+  /** Your rank on the board and how many have a time on it (null: no time on it, practice, or not known). */
+  rank: { rank: number; total: number } | null;
 }
 
 export type Summary = { kind: "race"; end: RaceEnd } | { kind: "trial"; trial: TrialSummary };
@@ -61,11 +54,12 @@ type Pay =
   | { state: "late" }
   | { state: "paid"; rows: { label: string; delta: number }[]; before: number; after: number };
 
-/** What the match paid you, from the lobby's ledger, as rows: place, style, the Tilt bonus. */
+/** What the match paid you, from the lobby's ledger, as rows: place (or a disqualification's), style, the Tilt bonus. */
 function payRows(
   pay: MatchPay,
   races: number,
   place: number,
+  disqualified: boolean,
   t: ReturnType<typeof useT>,
 ): { rows: { label: string; delta: number }[]; total: number } {
   const sum = (reason: string) => pay.paid.filter((p) => p.reason === reason).reduce((s, p) => s + p.delta, 0);
@@ -73,7 +67,12 @@ function payRows(
   const rows: { label: string; delta: number }[] = [];
   if (placeRaces > 0)
     rows.push({
-      label: races > 1 ? t.end.rows.places(placeRaces) : t.end.rows.place(ordinal(place)),
+      label:
+        races > 1
+          ? t.end.rows.places(placeRaces)
+          : disqualified
+            ? t.end.rows.disqualified
+            : t.end.rows.place(ordinal(place)),
       delta: sum("race"),
     });
   if (sum("style") > 0) rows.push({ label: t.end.rows.style, delta: sum("style") });
@@ -90,6 +89,7 @@ function usePay(
   match: string | null,
   races: number,
   place: number,
+  disqualified: boolean,
   course: number,
 ): { pay: Pay; bestBefore: number | null } {
   const t = useT();
@@ -113,7 +113,7 @@ function usePay(
       const complete = got !== null && got.reported.includes(races - 1);
       if (got && complete) {
         setBestBefore(got.bestBefore);
-        const { rows, total } = payRows(got, races, place, t);
+        const { rows, total } = payRows(got, races, place, disqualified, t);
         queryClient.setQueryData(meQuery.queryKey, (m) =>
           m?.rider ? { ...m, rider: { ...m.rider, credits: got.credits } } : m,
         );
@@ -135,7 +135,7 @@ function usePay(
       live = false;
       if (timer) clearTimeout(timer);
     };
-  }, [mode, match, races, place, course, queryClient, t]);
+  }, [mode, match, races, place, disqualified, course, queryClient, t]);
   return { pay, bestBefore };
 }
 
@@ -201,6 +201,8 @@ function Head({
   hero,
   heroSub,
   rank = 0,
+  out = false,
+  stack = false,
 }: {
   kicker: string;
   title: string;
@@ -211,18 +213,22 @@ function Head({
   heroSub?: string;
   /** 1 to 3: the place stands on the podium's base, the first crowned with laurel. */
   rank?: number;
+  /** Disqualified: the place reads so in red. */
+  out?: boolean;
+  /** The hero under the title, not beside it (a time is wide: no laurel round it). */
+  stack?: boolean;
 }) {
   return (
-    <header className="end-head">
+    <header className={`end-head${stack ? " stack" : ""}`}>
       <div className="end-what">
         <span className="board-label">{kicker}</span>
         <b className="end-title">{title}</b>
         {sub && <span className="end-sub">{sub}</span>}
         {callout && <p className="board-callout">{callout}</p>}
       </div>
-      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : ""}`}>
+      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : out ? " dq" : ""}`}>
         <b>
-          {rank === 1 && <Laurel />}
+          {rank === 1 && !stack && <Laurel />}
           {hero}
         </b>
         {heroSub && <span>{heroSub}</span>}
@@ -272,9 +278,20 @@ function RaceHead({ end }: { end: RaceEnd }) {
       kicker={t.results.title}
       title={circuitTitle(end.course)}
       sub={conditionsLine(end.conditions)}
-      hero={end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : t.results.dnf}
-      heroSub={end.finishTicks > 0 ? formatTime(end.finishTicks, end.tickHz) : undefined}
+      hero={
+        end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : end.disqualified ? t.results.dsq : t.results.dnf
+      }
+      heroSub={
+        end.finishTicks > 0
+          ? formatTime(end.finishTicks, end.tickHz)
+          : end.disqualified
+            ? end.sport === "jetski"
+              ? t.hud.outBuoys(end.misses)
+              : t.hud.outGates(end.misses)
+            : undefined
+      }
       rank={end.finishTicks > 0 ? end.place : 0}
+      out={end.disqualified}
     />
   );
 }
@@ -296,10 +313,10 @@ function TiltStandings({ end }: { end: RaceEnd }) {
   );
 }
 
-/** A time trial's run among the ghosts it raced, by time. */
+/** A time trial session's best lap among the ghosts it raced, by time. */
 function TrialRows({ trial }: { trial: TrialSummary }) {
   const t = useT();
-  const mine = trial.ticks > 0 ? trial.ticks : Infinity;
+  const mine = trial.best > 0 ? trial.best : Infinity;
   const rows = [
     ...trial.ghosts.map((g) => ({ name: g.label, ticks: g.ticks, me: false })),
     { name: trial.name, ticks: mine, me: true },
@@ -317,7 +334,7 @@ function TrialRows({ trial }: { trial: TrialSummary }) {
           <Name name={r.name} />
           <span className="c-time">
             {!Number.isFinite(r.ticks)
-              ? t.results.dnf
+              ? t.trial.noLap
               : r.ticks === best
                 ? formatTime(r.ticks, trial.hz)
                 : `+${((r.ticks - best) / trial.hz).toFixed(2)}`}
@@ -325,6 +342,21 @@ function TrialRows({ trial }: { trial: TrialSummary }) {
         </div>
       ))}
     </section>
+  );
+}
+
+/** How the session went: laps ridden, your rank on the board, and why it ended when the room closed it. */
+function TrialLines({ trial }: { trial: TrialSummary }) {
+  const t = useT();
+  const parts = [t.trial.laps(trial.laps)];
+  if (trial.practice) parts.push(t.trial.practice);
+  else if (trial.rank) parts.push(`${t.trial.board} · ${t.trial.rank(trial.rank.rank, trial.rank.total)}`);
+  const ended = trial.ended === "idle" || trial.ended === "hour" ? t.trial.ended[trial.ended] : null;
+  return (
+    <>
+      <p className="end-note">{parts.join(" · ")}</p>
+      {ended && <p className="end-note">{ended}</p>}
+    </>
   );
 }
 
@@ -405,7 +437,7 @@ function EndHints({ actions, back }: { actions: EndAction[]; back: EndAction }) 
   );
 }
 
-/** The end of a room's plan (or a time trial's run): over the race, or over the podium. */
+/** The end of a room's plan (or a time trial's session): over the race, or over the podium. */
 export function WrapUp({
   summary,
   mode,
@@ -428,7 +460,14 @@ export function WrapUp({
   const t = useT();
   const end = summary.kind === "race" ? summary.end : null;
   const races = end?.eventCount ?? 1;
-  const { pay, bestBefore } = usePay(mode, match, races, end?.place ?? 0, end?.course ?? -1);
+  const { pay, bestBefore } = usePay(
+    mode,
+    match,
+    races,
+    end?.place ?? 0,
+    end?.disqualified ?? false,
+    end?.course ?? -1,
+  );
   const trial = summary.kind === "trial" ? summary.trial : null;
   const verdict = verdictOf(summary, bestBefore, t);
   const won = verdict?.win ?? false;
@@ -438,19 +477,24 @@ export function WrapUp({
   return (
     <div className="end-layer" data-nav-scope="">
       <section className={`end-panel${end?.podium ? " tilt" : ""}`} aria-label={t.end.continue}>
-        {verdict && <p className={`end-verdict${verdict.win ? " win" : ""}`}>{verdict.text}</p>}
+        {verdict && (
+          <p className={`end-verdict${verdict.win ? " win" : ""}${verdict.out ? " out" : ""}`}>{verdict.text}</p>
+        )}
         {end && <RaceHead end={end} />}
         {trial && (
           <Head
             kicker={t.trial.title}
             title={circuitTitle(trial.course)}
-            sub={t.seasons[trial.season]}
-            hero={trial.ticks > 0 ? formatTime(trial.ticks, trial.hz) : t.results.dnf}
+            sub={conditionsLine(trial.conditions)}
+            hero={trial.best > 0 ? formatTime(trial.best, trial.hz) : t.trial.noLap}
+            heroSub={t.trial.yourBest}
             rank={trial.beat === 2 ? 1 : 0}
+            stack
           />
         )}
         {end?.podium && <TiltStandings end={end} />}
         {trial && <TrialRows trial={trial} />}
+        {trial && <TrialLines trial={trial} />}
         <Paid pay={pay} />
         {error && <p className="end-error">{error}</p>}
         <Actions actions={actions} back={back} busy={busy} />
@@ -463,14 +507,15 @@ export function WrapUp({
 /**
  * The line a result is called out with: a race won or a podium place, the
  * Tilt won or its podium, a time trial's new record or best, your best
- * finish on a circuit (the lobby's records); null for an ordinary result.
- * `win`: it is a first place.
+ * finish on a circuit (the lobby's records), or a disqualification; null
+ * for an ordinary result. `win`: it is a first place; `out`: you were
+ * disqualified.
  */
 function verdictOf(
   summary: Summary,
   bestBefore: number | null,
   t: ReturnType<typeof useT>,
-): { text: string; win: boolean } | null {
+): { text: string; win: boolean; out?: boolean } | null {
   const v = t.end.verdicts;
   if (summary.kind === "trial") {
     const beat = summary.trial.beat;
@@ -481,6 +526,7 @@ function verdictOf(
     const i = end.podium.riders.findIndex((r) => r.me);
     return i === 0 ? { text: v.tiltWin, win: true } : i > 0 && i < 3 ? { text: v.tiltPodium, win: false } : null;
   }
+  if (end.disqualified) return { text: v.disqualified, win: false, out: true };
   if (end.finishTicks <= 0 || end.place <= 0) return null;
   if (end.place === 1) return { text: v.win, win: true };
   if (end.place <= 3) return { text: v.podium, win: false };

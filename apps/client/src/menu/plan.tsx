@@ -23,6 +23,7 @@ import {
 } from "@shifty/rider";
 import { circuitName } from "../game/conditions.ts";
 import { useT } from "../i18n/index.ts";
+import { loadModels } from "../render/env/models.ts";
 import { Picker } from "./ui.tsx";
 
 /** The picker's "draw" value. */
@@ -52,12 +53,26 @@ export function fitSpec(spec: RaceSpec): RaceSpec {
   return out;
 }
 
+/** Whether a plan may race on the mountain: a Tilt always does, one race when its circuit or season allows it. */
+export function mayRideSnow(plan: PlanRequest): boolean {
+  if (plan.tilt) return true;
+  const c = plan.race.course === undefined ? undefined : circuit(plan.race.course);
+  if (c) return c.sport === "snow";
+  const season = plan.race.season === undefined ? undefined : SEASONS[plan.race.season];
+  return season === undefined || SPORT_SEASONS.snow.includes(season);
+}
+
+/** Starts downloading the scenery a plan may race on, in the background (nothing waits on it, nothing shows it). */
+export function prefetchScenery(plan: PlanRequest): void {
+  if (mayRideSnow(plan)) void loadModels("snow", null);
+}
+
 /** The sports that ride a season, in the menus' words. */
 export function seasonSports(season: Season): CircuitSport[] {
   return (["jetski", "snow"] as const).filter((s) => SPORT_SEASONS[s].includes(season));
 }
 
-/** The plan as the host set it, a row per choice ("Random" for what's left to the draw), and the bots. */
+/** The plan as the host set it, a row per choice ("Draw" for what's left to the draw), and the bots. */
 export function PlanRows({ plan, bots }: { plan: PlanRequest; bots: number }) {
   const t = useT();
   const rows: [string, string][] = [[t.room.event, plan.tilt ? t.play.events.gp : t.play.events.race]];
@@ -66,10 +81,10 @@ export function PlanRows({ plan, bots }: { plan: PlanRequest; bots: number }) {
     const c = r.course === undefined ? undefined : circuit(r.course);
     const season = r.season === undefined ? undefined : SEASONS[r.season];
     rows.push(
-      [t.room.circuit, c ? circuitName(c.id, c.sport) : t.room.drawn],
-      [t.room.season, season ? t.seasons[season] : t.room.drawn],
-      [t.room.weather, r.weather === undefined ? t.room.drawn : t.weathers[WEATHERS[r.weather]!]],
-      [t.room.time, season && r.time !== undefined ? t.timesOfDay[namedTime(season, r.time)] : t.room.drawn],
+      [t.room.circuit, c ? circuitName(c.id, c.sport) : t.room.draw],
+      [t.room.season, season ? t.seasons[season] : t.room.draw],
+      [t.room.weather, r.weather === undefined ? t.room.draw : t.weathers[WEATHERS[r.weather]!]],
+      [t.room.time, season && r.time !== undefined ? t.timesOfDay[namedTime(season, r.time)] : t.room.draw],
     );
   }
   rows.push([t.room.bots, String(bots)]);
@@ -84,6 +99,88 @@ export function PlanRows({ plan, bots }: { plan: PlanRequest; bots: number }) {
     </dl>
   );
 }
+
+/** A race's rows a `SpecPickers` can show. */
+export type SpecField = "course" | "season" | "weather" | "time";
+
+/**
+ * Pickers for one race's circuit, season, weather and time of day (the
+ * `fields` asked for, in that order), offering only what fits the rest of
+ * the spec: seasons the circuit's sport rides, weathers every season still
+ * in play brings, the season's named times (none until a season is
+ * picked). With `draw` each row offers "Draw" first, which leaves it out of
+ * the spec; without it a row whose value is left out shows its first option.
+ */
+export function SpecPickers({
+  spec,
+  onChange,
+  fields,
+  draw = true,
+}: {
+  spec: RaceSpec;
+  onChange: (spec: RaceSpec) => void;
+  fields: readonly SpecField[];
+  draw?: boolean;
+}) {
+  const t = useT();
+  const set = (patch: Partial<Record<keyof RaceSpec, number>>) => {
+    const next: RaceSpec = { ...spec };
+    for (const k of ["course", "season", "weather", "turns", "time"] as const) {
+      const v = patch[k];
+      if (v === DRAW) delete next[k];
+      else if (v !== undefined) next[k] = v;
+    }
+    onChange(fitSpec(next));
+  };
+  const first = draw ? [{ value: DRAW, label: t.room.draw }] : [];
+  const season = spec.season === undefined ? undefined : SEASONS[spec.season];
+  const rows: Record<SpecField, { label: string; options: { value: number; label: string }[] }> = {
+    course: {
+      label: t.room.circuit,
+      options: CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) })),
+    },
+    season: {
+      label: t.room.season,
+      options: seasonsOf({ course: spec.course }).map((s) => ({ value: SEASONS.indexOf(s), label: t.seasons[s] })),
+    },
+    weather: {
+      label: t.room.weather,
+      options: weathersOf({ course: spec.course, season: spec.season }).map((w) => ({
+        value: WEATHERS.indexOf(w),
+        label: t.weathers[w],
+      })),
+    },
+    time: {
+      label: t.room.time,
+      options: season ? TIMES_OF_DAY.map((n) => ({ value: timeOf(season, n), label: t.timesOfDay[n] })) : [],
+    },
+  };
+  return (
+    <>
+      {fields.map((f) => {
+        const row = rows[f];
+        const options = [...first, ...row.options];
+        if (options.length === 0) return null;
+        return (
+          <Picker<number>
+            key={f}
+            label={row.label}
+            options={options}
+            value={spec[f] ?? (draw ? DRAW : options[0]!.value)}
+            onChange={(v) => set({ [f]: v })}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** The rows `PlanPickers` shows for one race. */
+const PLAN_FIELDS: Record<"event" | "circuit" | "all", readonly SpecField[]> = {
+  event: [],
+  circuit: ["course"],
+  all: ["course", "season", "weather", "time"],
+};
 
 /**
  * The plan's pickers: the Tilt or one race, and for one race its circuit
@@ -100,18 +197,6 @@ export function PlanPickers({
   fields: "event" | "circuit" | "all";
 }) {
   const t = useT();
-  const spec = plan.tilt ? {} : plan.race;
-  const set = (patch: Partial<Record<keyof RaceSpec, number>>) => {
-    const next: RaceSpec = { ...spec };
-    for (const k of ["course", "season", "weather", "turns", "time"] as const) {
-      const v = patch[k];
-      if (v === DRAW) delete next[k];
-      else if (v !== undefined) next[k] = v;
-    }
-    onChange({ tilt: false, race: fitSpec(next) });
-  };
-  const draw = { value: DRAW, label: t.room.draw };
-  const season = spec.season === undefined ? undefined : SEASONS[spec.season];
   return (
     <>
       <Picker<"gp" | "race">
@@ -121,49 +206,14 @@ export function PlanPickers({
           { value: "race", label: t.play.events.race },
         ]}
         value={plan.tilt ? "gp" : "race"}
-        onChange={(v) => onChange(v === "gp" ? TILT : { tilt: false, race: plan.tilt ? {} : spec })}
+        onChange={(v) => onChange(v === "gp" ? TILT : { tilt: false, race: plan.tilt ? {} : plan.race })}
       />
-      {fields !== "event" && !plan.tilt && (
-        <Picker<number>
-          label={t.room.circuit}
-          options={[draw, ...CIRCUITS.map((c) => ({ value: c.id, label: circuitName(c.id, c.sport) }))]}
-          value={spec.course ?? DRAW}
-          onChange={(course) => set({ course })}
+      {!plan.tilt && (
+        <SpecPickers
+          spec={plan.race}
+          onChange={(race) => onChange({ tilt: false, race })}
+          fields={PLAN_FIELDS[fields]}
         />
-      )}
-      {fields === "all" && !plan.tilt && (
-        <>
-          <Picker<number>
-            label={t.room.season}
-            options={[
-              draw,
-              ...seasonsOf({ course: spec.course }).map((s) => ({ value: SEASONS.indexOf(s), label: t.seasons[s] })),
-            ]}
-            value={spec.season ?? DRAW}
-            onChange={(s) => set({ season: s })}
-          />
-          <Picker<number>
-            label={t.room.weather}
-            options={[
-              draw,
-              ...weathersOf({ course: spec.course, season: spec.season }).map((w) => ({
-                value: WEATHERS.indexOf(w),
-                label: t.weathers[w],
-              })),
-            ]}
-            value={spec.weather ?? DRAW}
-            onChange={(weather) => set({ weather })}
-          />
-          <Picker<number>
-            label={t.room.time}
-            options={[
-              draw,
-              ...(season ? TIMES_OF_DAY.map((n) => ({ value: timeOf(season, n), label: t.timesOfDay[n] })) : []),
-            ]}
-            value={spec.time ?? DRAW}
-            onChange={(time) => set({ time })}
-          />
-        </>
       )}
     </>
   );

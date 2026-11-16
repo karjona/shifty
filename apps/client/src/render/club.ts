@@ -3,9 +3,10 @@
 // signal mast, palms and a jetty with moored boats in front, and the
 // clubhouse behind. It is part of the bay wherever the bay is drawn (the
 // fly-over, races, the podium's backdrop): from afar a few batches of
-// static scenery; with the mode select up (`setDetail`), also its small
-// props, interiors and people, and what moves (boats rocking at their
-// moorings, a gull, a fan, a waiter and members lifting a glass). Its art is
+// static scenery and the jetty's boats rocking at their moorings (solid in
+// the sim, like the jetty); with the mode select up (`setDetail`), also its
+// small props, interiors and people, and what moves (a gull, a fan, a
+// waiter and members lifting a glass). Its art is
 // modelled in art/scene/club.py (public/env/club.glb), its lettering set at
 // runtime (env/signs.ts); the paving's pattern is a shader. With the detail
 // on, the sea in front of it glints.
@@ -289,13 +290,16 @@ export class ClubArt {
     this.far.add(...look.meshes(model.far));
     this.trailer = model.anchors.get("ride")?.[0]?.matrix ?? null;
     const movers: { move: (m: Mover, t: number) => void; mover: Mover }[] = [];
+    /** The boats at the jetty: shown always (riders bump into them; see `sim::course`), rocking whenever they are drawn. */
+    const afloat: typeof movers = [];
     const count = new Map<string, number>();
     const animated = (a: EnvAnim) => {
       const group = new THREE.Group();
       group.matrixAutoUpdate = false;
       group.matrix.copy(a.matrix);
       group.add(...look.meshes(a.parts));
-      this.near.add(group);
+      const moored = a.name === "boat";
+      (moored ? g : this.near).add(group);
       const index = count.get(a.name) ?? 0;
       count.set(a.name, index + 1);
       // Figures come as two poses to swap between: `sit0.a` and `sit0.b`.
@@ -307,9 +311,18 @@ export class ClubArt {
         move = serving(pose[3] === "a", to.sub(new THREE.Vector3().setFromMatrixPosition(a.matrix)));
       }
       if (move)
-        movers.push({ move, mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index } });
+        (moored ? afloat : movers).push({
+          move,
+          mover: { group, rest: a.matrix.clone(), index: pose ? Number(pose[2] || 0) : index },
+        });
     };
     for (const a of model.anims) animated(a);
+    const hull = afloat[0]?.mover.group.children.find((o): o is THREE.Mesh => o instanceof THREE.Mesh);
+    if (hull)
+      hull.onBeforeRender = () => {
+        const t = LOOK.time.value;
+        for (const m of afloat) m.move(m.mover, t);
+      };
     // The glints are in every picture taken with the detail on: drawing them moves what moves.
     const sparkle = glints();
     sparkle.onBeforeRender = () => {

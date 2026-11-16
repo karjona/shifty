@@ -6,8 +6,8 @@
 
 use client_core::{Client, Phase};
 use serde_json::json;
-use sim::course::{Keep, LandKind, Line, Sport, tuning as course_tuning};
-use sim::mountain::{Feature, LipKind, ObstacleKind, Run};
+use sim::course::{BoatKind, Gate, Keep, LandKind, Line, Sport, tuning as course_tuning};
+use sim::mountain::{EdgeKind, Feature, LipKind, Mark, ObstacleKind, Run};
 use sim::race::{EventKind, tuning as race_tuning};
 use sim::{CourseId, Input, MAX_RIDERS, SurfaceKind, World};
 use wasm_bindgen::prelude::*;
@@ -39,8 +39,50 @@ pub const STATS_FIELDS: [&str; 17] = [
     "targetLead",
 ];
 
+/// Dev: rides the course passing every buoy on its wrong side (on a run,
+/// outside every gate).
+fn missing_input(world: &World, slot: usize) -> Input {
+    let Some(r) = world.riders[slot] else {
+        return Input::default();
+    };
+    let course = world.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = match (course.gate(gate), course.run()) {
+        // On a run: outside the gate's poles, on the side with room.
+        (Gate::Buoy(g), Some(run)) => {
+            let g = run.gates[g];
+            let out = g.span * 0.5 + 2.0;
+            if g.offset + out < run.width_at(g.s).half {
+                g.offset + out
+            } else {
+                g.offset - out
+            }
+        }
+        _ => match gate.checked_sub(1).and_then(|b| course.buoys.get(b)) {
+            Some(b) => match b.keep {
+                Keep::Right => b.offset + 4.0,
+                Keep::Left => b.offset - 4.0,
+            },
+            None => 0.0,
+        },
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = sim::math::clamp(-sim::math::angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+    // (On the snow, skating off the flat when slow.)
+    let lean = if course.run().is_some() && r.speed() < 5.0 {
+        1.0
+    } else {
+        0.0
+    };
+    Input::from_analog(steer, 1.0, lean, 0)
+}
+
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 28] = [
+pub const RACE_FIELDS: [&str; 37] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -69,6 +111,15 @@ pub const RACE_FIELDS: [&str; 28] = [
     "weather",
     "turns",
     "time",
+    "disqualifiedTicks",
+    "maxMisses",
+    "trial",
+    "lapTicks",
+    "lapsDone",
+    "bestLap",
+    "lastLap",
+    "lastVoid",
+    "sessionOver",
 ];
 
 /// Layout of the weather buffer (f32), for the look: the race's weather at
@@ -181,9 +232,16 @@ impl WasmClient {
         self.inner.set_ready(u8::try_from(event).ok());
     }
 
-    /// Time trial: start the run over from the countdown.
+    /// Time trial: start the lap over from the countdown.
     pub fn retry(&mut self) {
         self.inner.retry();
+    }
+
+    /// Time trial: leave the session on purpose (a goodbye goes out with
+    /// the next packets); the race runs on here alone, on its results.
+    #[wasm_bindgen(js_name = leaveSession)]
+    pub fn leave_session(&mut self) {
+        self.inner.leave_session();
     }
 
     /// The room is a time trial (once joined).
@@ -392,6 +450,23 @@ impl WasmClient {
             f64::from(world.conditions.weather as u8),
             f64::from(world.conditions.turns as u8),
             f64::from(world.conditions.time),
+            f64::from(p.disqualified_ticks),
+            if world.disqualify {
+                f64::from(race_tuning::MAX_MISSES)
+            } else {
+                0.0
+            },
+            f64::from(u8::from(world.trial)),
+            if p.laps.start != 0 {
+                f64::from(world.tick.wrapping_sub(p.laps.start))
+            } else {
+                -1.0
+            },
+            f64::from(p.laps.done),
+            f64::from(p.laps.best),
+            f64::from(p.laps.last),
+            f64::from(u8::from(p.laps.last_void)),
+            f64::from(self.inner.session_over().map_or(0, |r| r as u8)),
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -410,7 +485,8 @@ impl WasmClient {
         serde_json::Value::Array(list).to_string()
     }
 
-    /// Race order as JSON: `[{slot, place, lap, finishTicks, misses, tricks, points}]`.
+    /// Race order as JSON: `[{slot, place, lap, finishTicks,
+    /// disqualifiedTicks, misses, tricks, points}]`.
     #[wasm_bindgen(js_name = standingsJson)]
     pub fn standings_json(&self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -423,6 +499,7 @@ impl WasmClient {
                     "place": st.place,
                     "lap": st.progress.lap,
                     "finishTicks": st.progress.finish_ticks,
+                    "disqualifiedTicks": st.progress.disqualified_ticks,
                     "misses": st.progress.misses,
                     "tricks": st.progress.tricks,
                     "points": st.progress.points,
@@ -434,7 +511,8 @@ impl WasmClient {
 
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
-    /// `finish` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
+    /// `finish` (`ticks`), `lapTime` (a time trial's lap ended: `lap`,
+    /// `ticks`, `clean`, `best`), `disqualified` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
     /// `grab`, `stunt`, `grabTicks`, `points`, `sketchy`), `sketchy` (a
     /// plain jump landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
@@ -455,6 +533,23 @@ impl WasmClient {
                 }
                 EventKind::Finish { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
+                }
+                EventKind::LapTime {
+                    lap,
+                    ticks,
+                    clean,
+                    best,
+                } => json!({
+                    "tick": e.tick,
+                    "slot": e.slot,
+                    "kind": "lapTime",
+                    "lap": lap,
+                    "ticks": ticks,
+                    "clean": clean,
+                    "best": best,
+                }),
+                EventKind::Disqualified { ticks } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "disqualified", "ticks": ticks })
                 }
                 EventKind::Trick { trick: t, sketchy } => json!({
                     "tick": e.tick,
@@ -544,13 +639,21 @@ impl WasmClient {
     }
 
     /// Dev: what a bot would do in my place right now, as analog
-    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`).
+    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`). `miss`: on
+    /// the water, ride past every buoy on its wrong side instead (on a run,
+    /// outside every gate), for `?autopilot=miss`, to see misses add up to a
+    /// disqualification.
     #[wasm_bindgen(js_name = autoInput)]
-    pub fn auto_input(&self) -> Vec<f32> {
+    pub fn auto_input(&self, miss: bool) -> Vec<f32> {
         let Some(slot) = self.inner.slot() else {
             return vec![0.0; 4];
         };
-        let i = sim::bot::bot_input(self.inner.predicted_world(), slot);
+        let world = self.inner.predicted_world();
+        let i = if miss {
+            missing_input(world, slot)
+        } else {
+            sim::bot::bot_input(world, slot)
+        };
         vec![
             i.steer_f(),
             i.throttle_f(),
@@ -579,9 +682,20 @@ impl WasmClient {
     }
 }
 
+fn edge_name(kind: EdgeKind) -> &'static str {
+    match kind {
+        EdgeKind::Bank => "bank",
+        EdgeKind::Trees => "trees",
+        EdgeKind::Netting => "netting",
+        EdgeKind::Rock => "rock",
+    }
+}
+
 /// The run, for drawing it: its centre line every 4 m (with half width,
-/// walls and riding limit), gates, obstacles and what is built on it
-/// (tables, natural lips, spines).
+/// walls, riding limit and what bounds it on each side), the start, the
+/// checkpoints and the gates (each with its place among the course's gates,
+/// `gate`), obstacles, what is built on it (tables, natural lips, spines),
+/// its cliffs and the rock walls along its edges.
 fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serde_json::Value {
     let length = run.length();
     let mut path = Vec::new();
@@ -592,9 +706,75 @@ fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serd
         path.push(json!({
             "s": s, "x": f.x, "z": f.z, "yaw": f.yaw,
             "half": w.half, "wall": w.wall, "limit": run.limit(s),
+            "limitL": run.limit_on(s, false), "limitR": run.limit_on(s, true),
+            "edgeL": edge_name(run.edge_at(s, false)), "edgeR": edge_name(run.edge_at(s, true)),
             "y": run.height(f.x, f.z),
         }));
         s += 4.0;
+    }
+    // Where each mark stands among the course's gates (0 is the start).
+    let place = |mark: Mark| {
+        run.marks()
+            .iter()
+            .position(|&m| m == mark)
+            .map_or(0, |i| i + 1)
+    };
+    let gates: Vec<serde_json::Value> = run
+        .gates
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let f = run.centerline(g.s);
+            let (x, z) = f.at_offset(g.offset);
+            json!({
+                "s": g.s, "offset": g.offset, "x": x, "z": z, "y": run.height(x, z),
+                "yaw": f.yaw, "half": g.span * 0.5, "gate": place(Mark::Gate(i)),
+            })
+        })
+        .collect();
+    let cliffs: Vec<serde_json::Value> = run
+        .cliffs
+        .iter()
+        .map(|k| {
+            let f = run.centerline(k.s);
+            let g = run.centerline(k.s + k.face);
+            json!({
+                "s": k.s, "face": k.face, "x": f.x, "z": f.z, "yaw": f.yaw,
+                "top": run.height(f.x, f.z), "bottom": run.height(g.x, g.z),
+                "half": run.width_at(k.s).half,
+            })
+        })
+        .collect();
+    // Rock walls: each stretch of an edge that is rock, and how high its face
+    // stands over the run's edge.
+    let mut walls = Vec::new();
+    for right in [false, true] {
+        let mut from: Option<f32> = None;
+        let mut height: f32 = 0.0;
+        let mut s = 0.0;
+        while s <= length {
+            let rock = run.edge_at(s, right) == EdgeKind::Rock;
+            if rock {
+                let f = run.centerline(s);
+                let w = run.width_at(s);
+                let side = if right { 1.0 } else { -1.0 };
+                let (ex, ez) = f.at_offset(side * w.half);
+                let (tx, tz) = f.at_offset(side * (w.half + w.wall));
+                height = height.max(run.height(tx, tz) - run.height(ex, ez));
+                from.get_or_insert(s);
+            }
+            if let Some(start) = from
+                && (!rock || s + 2.0 > length)
+            {
+                walls.push(json!({
+                    "from": start, "to": s, "side": if right { 1 } else { -1 },
+                    "height": height.max(2.0),
+                }));
+                from = None;
+                height = 0.0;
+            }
+            s += 2.0;
+        }
     }
     let gate = |s: f32| {
         let f = run.centerline(s);
@@ -688,7 +868,14 @@ fn run_json(c: &sim::Course, run: &Run, rocks: &[sim::conditions::Rock]) -> serd
         "finishS": run.finish_s,
         "finish": gate(run.finish_s),
         "startGate": gate(c.start_s),
-        "checkpoints": run.checkpoints.iter().map(|&s| gate(s)).collect::<Vec<_>>(),
+        "checkpoints": run.checkpoints.iter().enumerate().map(|(i, &s)| {
+            let mut g = gate(s);
+            g["gate"] = json!(place(Mark::Checkpoint(i)));
+            g
+        }).collect::<Vec<_>>(),
+        "gates": gates,
+        "cliffs": cliffs,
+        "walls": walls,
         "path": path,
         "obstacles": obstacles,
         "tables": tables,
@@ -760,8 +947,23 @@ fn course_json_on(world: &World) -> String {
                         LandKind::Mole => "mole",
                         LandKind::Stack => "stack",
                         LandKind::Arch => "arch",
+                        LandKind::Jetty => "jetty",
                     };
                     json!({ "ax": l.a.0, "az": l.a.1, "bx": l.b.0, "bz": l.b.1, "radius": l.radius, "kind": kind })
+                })
+                .collect();
+            let boats: Vec<serde_json::Value> = c
+                .boats
+                .iter()
+                .map(|b| {
+                    let kind = match b.kind {
+                        BoatKind::Llaut => "llaut",
+                        BoatKind::Trawler => "trawler",
+                        BoatKind::Yacht => "yacht",
+                        BoatKind::Inflatable => "inflatable",
+                        BoatKind::Sailboat => "sailboat",
+                    };
+                    json!({ "x": b.x, "z": b.z, "yaw": b.yaw, "length": b.length, "beam": b.beam, "kind": kind, "seed": b.seed })
                 })
                 .collect();
             // The centre line every 2 m, with how sharply it turns there.
@@ -791,6 +993,7 @@ fn course_json_on(world: &World) -> String {
             out["buoys"] = json!(buoys);
             out["ramps"] = json!(ramps);
             out["land"] = json!(land);
+            out["boats"] = json!(boats);
             out["path"] = json!(path);
         }
         Line::Run(run) => out["run"] = run_json(c, run, world.cover_rocks()),

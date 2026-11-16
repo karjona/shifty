@@ -62,15 +62,19 @@ import { type RunScenery, runScenery } from "./runs.ts";
 import { type Models, loadModels } from "./env/models.ts";
 import { waitNow } from "../loading.ts";
 import { type Steps, buildNow, buildSliced } from "./slices.ts";
-import { Forest, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
+import { Forest, ForestSight, type Tree, forestShade, plantForest } from "./mountain-forest.ts";
 import { type Building, Built, buildingAt, buildingPlan, liftEnds } from "./mountain-built.ts";
 import { farLandscape, landscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
 import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
 import { alpineRanges } from "./mountain-ranges.ts";
-import { rockWalls } from "./mountain-walls.ts";
+import { cliffFaces, rockWalls } from "./mountain-walls.ts";
+import { SnowGates } from "./snow-gates.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
+
+/** What bounds a run on one side (`sim::mountain::EdgeKind`). */
+export type EdgeKind = "bank" | "trees" | "netting" | "rock";
 
 export interface RunPoint {
   s: number;
@@ -78,10 +82,15 @@ export interface RunPoint {
   y: number;
   z: number;
   yaw: number;
-  /** Half width of the groomed run, its walls, and how far riders can go. */
+  /** Half width of the groomed run, its walls, and how far riders can go (on the wider side, the left and the right). */
   half: number;
   wall: number;
   limit: number;
+  limitL: number;
+  limitR: number;
+  /** What bounds the run on its left and its right. */
+  edgeL: EdgeKind;
+  edgeR: EdgeKind;
 }
 
 export interface GateData {
@@ -92,6 +101,40 @@ export interface GateData {
   yaw: number;
   half: number;
   limit: number;
+  /** Its place among the course's gates (0: the start). */
+  gate: number;
+}
+
+/** A gate to pass between its poles: its centre (`offset` from the centre line), the run's heading there, half the gap, and its place among the course's gates. */
+export interface RunGateData {
+  s: number;
+  offset: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  half: number;
+  gate: number;
+}
+
+/** A cliff across the run: its lip at `s` on the centre line, its face `face` m long, from `top` down to `bottom`. */
+export interface CliffData {
+  s: number;
+  face: number;
+  x: number;
+  z: number;
+  yaw: number;
+  top: number;
+  bottom: number;
+  half: number;
+}
+
+/** A rock wall along one side of the run (`side`: 1 the right), from `from` to `to`, its face about `height` m over the run's edge. */
+export interface RockWallData {
+  from: number;
+  to: number;
+  side: 1 | -1;
+  height: number;
 }
 
 export interface ObstacleData {
@@ -140,6 +183,9 @@ export interface RunData {
   startGate: GateData;
   finish: GateData;
   checkpoints: GateData[];
+  gates: RunGateData[];
+  cliffs: CliffData[];
+  walls: RockWallData[];
   /** The centre line every 4 m. */
   path: RunPoint[];
   obstacles: ObstacleData[];
@@ -207,6 +253,11 @@ const FOG_NEAR = 45;
 const FOG_FAR = 330;
 const CLEAR_NEAR = 80;
 const CLEAR_FAR = 4000;
+/** The chase camera stays this far (m) inside a run's riding limit, and looks for its nearest point this many points either way first. */
+const EYE_INSET = 1.5;
+const EYE_SEARCH = 12;
+/** A line of sight passes this far clear of a rock or a lift tower (m). */
+const SIGHT_ROOM = 0.6;
 /** The forest is cut back this far either side of the chairlift's line (m). */
 const LIFT_SWATHE = 8;
 /** No trees stand within this of the middle of the grid (m). */
@@ -521,6 +572,8 @@ export class Mountain implements Environment {
   readonly topSpeed = 32;
 
   private run: RunData;
+  /** The run's point nearest the chase camera last frame (see `keepEye`). */
+  private eyeIndex = 0;
   private terrain: Terrain;
   private fog: THREE.Fog | null = null;
   private background = new THREE.Color();
@@ -555,8 +608,11 @@ export class Mountain implements Environment {
   private trails = new CarveTrails();
   private forest: Forest | null = null;
   private trees: Tree[] = [];
+  /** The forest's lines of sight, made when a camera first asks. */
+  private forestSight: ForestSight | null = null;
   private buildings: Building[] = [];
   private built: Built | null = null;
+  private gates: SnowGates | null = null;
   private life: MountainLife | null = null;
   /** What stands on the mountain (built once its models are in). */
   private props = new THREE.Group();
@@ -662,6 +718,8 @@ export class Mountain implements Environment {
       PALETTE[this.conditions.season].accent,
     );
     this.props.add(this.built.group);
+    this.gates = new SnowGates(run.gates, (x, z) => this.ground(x, z));
+    this.group.add(this.gates.group);
     yield;
     // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
     const plain = new Set<THREE.Mesh>();
@@ -732,6 +790,63 @@ export class Mountain implements Environment {
     fog.near = fog.near * (CLEAR_NEAR / FOG_NEAR) * weather ** 1.3;
     MOUNTAIN.fogNear.value = fog.near;
     MOUNTAIN.fogFar.value = fog.far;
+  }
+
+  /**
+   * Keeps the chase camera inside the riding width, short of the edge by
+   * `EYE_INSET`: trees lean in over the edge, and netting and rock walls
+   * would stand between the camera and its rider.
+   */
+  keepEye(eye: { x: number; z: number }): void {
+    const path = this.run.path;
+    // Near where it was last frame: the camera moves a few metres a frame at most.
+    let best = Infinity;
+    let index = this.eyeIndex;
+    const from = Math.max(0, index - EYE_SEARCH);
+    const to = Math.min(path.length - 1, index + EYE_SEARCH);
+    for (let i = from; i <= to; i++) {
+      const p = path[i]!;
+      const d = (p.x - eye.x) ** 2 + (p.z - eye.z) ** 2;
+      if (d < best) {
+        best = d;
+        index = i;
+      }
+    }
+    if (index === from || index === to) {
+      for (let i = 0; i < path.length; i++) {
+        const p = path[i]!;
+        const d = (p.x - eye.x) ** 2 + (p.z - eye.z) ** 2;
+        if (d < best) {
+          best = d;
+          index = i;
+        }
+      }
+    }
+    this.eyeIndex = index;
+    const p = path[index]!;
+    const rx = -Math.cos(p.yaw);
+    const rz = Math.sin(p.yaw);
+    const off = (eye.x - p.x) * rx + (eye.z - p.z) * rz;
+    const room = Math.max(0, (off > 0 ? p.limitR : p.limitL) - EYE_INSET);
+    const kept = Math.max(-room, Math.min(room, off));
+    eye.x += rx * (kept - off);
+    eye.z += rz * (kept - off);
+  }
+
+  sight(eye: THREE.Vector3, at: THREE.Vector3, frame = 0): boolean {
+    this.forestSight ??= new ForestSight(this.trees);
+    if (!this.forestSight.clear(eye, at, frame)) return false;
+    const dx = at.x - eye.x;
+    const dz = at.z - eye.z;
+    const flat2 = dx * dx + dz * dz;
+    for (const o of this.run.obstacles) {
+      // The run's pines are in the forest.
+      if (o.kind === "pine" || flat2 < 1e-6) continue;
+      const along = Math.max(0, Math.min(1, ((o.x - eye.x) * dx + (o.z - eye.z) * dz) / flat2));
+      if (eye.y + (at.y - eye.y) * along > o.y + o.height) continue;
+      if (Math.hypot(eye.x + dx * along - o.x, eye.z + dz * along - o.z) < o.radius + SIGHT_ROOM) return false;
+    }
+    return true;
   }
 
   ground(x: number, z: number): number {
@@ -1159,7 +1274,7 @@ export class Mountain implements Environment {
     };
   }
 
-  /** Red netting along both edges of the run (not in the gully, whose walls hold you in). */
+  /** Red netting along the run's edges wherever the sim's edge is netting. */
   private buildFences(): void {
     const tex = nettingTexture();
     const mat = fadingInk(
@@ -1183,7 +1298,8 @@ export class Mountain implements Environment {
       const pts = new Float32Array(this.run.path.length * 2);
       const tops: [number, number][] = [];
       this.run.path.forEach((p, i) => {
-        const o = (p.limit + 0.5) * side;
+        // Where the sim's netting stops riders.
+        const o = ((side > 0 ? p.limitR : p.limitL) + 0.15) * side;
         const x = p.x - Math.cos(p.yaw) * o;
         const z = p.z + Math.sin(p.yaw) * o;
         pts.set([x, z], i * 2);
@@ -1193,7 +1309,9 @@ export class Mountain implements Environment {
       let u = 0;
       let open = false;
       this.run.path.forEach((p, i) => {
-        const fenced = this.scenery.fenced(p.s, p.half, this.run.finishS);
+        // (No netting down a cliff's face.)
+        const dropping = this.run.cliffs.some((c) => p.s > c.s - 3 && p.s < c.s + c.face + 6);
+        const fenced = (side > 0 ? p.edgeR : p.edgeL) === "netting" && !dropping;
         const [x, z] = tops[i]!;
         const y = ys[i]!;
         if (!fenced) {
@@ -1224,7 +1342,12 @@ export class Mountain implements Environment {
   private buildRocks(models: Models): void {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
-    for (const mesh of rockWalls(this.run, this.scenery.walls, heights)) this.props.add(mesh);
+    const walls = [
+      ...this.scenery.walls,
+      ...this.run.walls.map((w) => ({ from: w.from, to: w.to, side: w.side, height: Math.max(3, w.height), out: 0 })),
+    ];
+    for (const mesh of rockWalls(this.run, walls, heights)) this.props.add(mesh);
+    for (const mesh of cliffFaces(this.run, this.run.cliffs, heights)) this.props.add(mesh);
     const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
     if (patches) this.props.add(patches);
   }
@@ -1252,6 +1375,7 @@ export class Mountain implements Environment {
     this.precipitation.update(this.look.rain, this.look.snow);
     MOUNTAIN.snowing.value = this.look.snow;
     this.built?.update(f.t);
+    this.gates?.update(f.t, f.dt, f.riders, f.nextBuoy);
     const snowy = Math.min(1, Math.max(0, (f.eye.y - LOOK.snowLine.value + 30) / 40)) * LOOK.snowCover.value;
     this.life?.update(f.eye, f.t, f.dt, snowy, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);

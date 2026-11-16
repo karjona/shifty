@@ -78,6 +78,13 @@ const LOOK_TO = new THREE.Vector3(0.8, 1.75, 0);
 const FOV_FROM = 40;
 const FOV_TO = 47;
 
+/** How far the risen camera drifts from side to side (m). */
+const DRIFT = 0.35;
+
+/** The gate's left pylon in the podium's frame (art/scene/podium.py: PYLON_X, ARCH_Z), its outer face, from
+ * halfway up to its top. */
+const PYLON = [3, 4, 5, 5.7].map((y) => new THREE.Vector3(-1.74 - 0.26, y, -1.62));
+
 const POSES: ((a: Body, t: number) => Pose)[] = [championPose, clapPose, wavePose];
 
 const easeOut = (k: number) => 1 - (1 - k) ** 3;
@@ -163,13 +170,33 @@ export class Podium implements Stage {
     });
     this.scene.update(t);
     // Once risen, the camera drifts a little from side to side.
-    const drift = Math.sin(t * 0.21) * 0.35 * k;
+    const drift = Math.sin(t * 0.21) * DRIFT * k;
     this.eye.lerpVectors(EYE_FROM, EYE_TO, k);
     this.eye.x += drift;
     this.look.lerpVectors(LOOK_FROM, LOOK_TO, k);
     this.group.localToWorld(this.eye);
     this.group.localToWorld(this.look);
     engine.world.renderFrom(this.eye, this.look, now / 1000, dt, FOV_FROM + (FOV_TO - FOV_FROM) * k);
+  }
+
+  /**
+   * Where the gate's left pylon stands on screen once the camera has risen,
+   * as a share of the picture's width (the least over the camera's drift),
+   * for a picture `aspect` wide: the champion's name keeps left of it.
+   */
+  gateLeft(aspect: number): number {
+    const camera = new THREE.PerspectiveCamera(FOV_TO, aspect, 0.1, 100);
+    const p = new THREE.Vector3();
+    let least = 1;
+    for (const drift of [-DRIFT, DRIFT]) {
+      camera.position.copy(EYE_TO);
+      camera.position.x += drift;
+      this.group.localToWorld(camera.position);
+      camera.lookAt(this.group.localToWorld(p.copy(LOOK_TO)));
+      camera.updateMatrixWorld();
+      for (const at of PYLON) least = Math.min(least, (this.group.localToWorld(p.copy(at)).project(camera).x + 1) / 2);
+    }
+    return least;
   }
 
   stop(): void {

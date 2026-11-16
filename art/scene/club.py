@@ -108,16 +108,14 @@ def landing(sc):
             sc.place("bench", T(seat[0], STAGE, seat[1]) @ RY(facing))
     for x, z in ((17.4, 3.5), (18.6, 9.5)):
         sc.place("lamp-post", T(x, STAGE if z < 4 else 0.0, z))
-    # A jetty off the quay's edge, steps down to it, and boats rocking at their moorings: only seen from the
-    # terrace (riders cross that water, and nothing stands in it for them to hit).
-    sc.level = NEAR
+    # A jetty off the quay's edge, steps down to it, and boats rocking at their moorings. The sim has them too
+    # (sim::course, the bay's jetty and its sailboats): riders bump into what they see.
     sc.add(box(1.8, 0.16, 12.0, P.WOOD_PALE).at(-1.5, -4.0, -29.8))
     for k in range(3):
         sc.add(box(1.8, 0.2, 0.4, P.STONE).at(-1.5, -3.4 - 0.2 * k, -23.2 - 0.4 * k))
     for z in np.arange(-35.5, -23.5, 2.4):
         for x in (-2.35, -0.65):
             sc.add(kit.rod((x, -8.0, z), (x, -3.6, z), 0.11, 6, P.WOOD_DARK))
-    sc.level = 0
     moored = (
         (P.sailboat(6.0, 7.6), T(0.6, -5.2, -27.5) @ RY(math.pi / 2)),
         (P.sailboat(5.2, 6.6, 0xF2E8D0, 0x2F7D5B, flag=0x2B3FD0), T(-3.6, -5.2, -32.0) @ RY(-math.pi / 2)),

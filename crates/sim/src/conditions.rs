@@ -497,15 +497,30 @@ pub struct Rock {
 }
 
 /// Rocks on a run this far apart along it (m), about.
-const ROCK_GAP: (f32, f32) = (55.0, 105.0);
+const ROCK_GAP: (f32, f32) = (45.0, 90.0);
 /// No rocks this close to the start, the finish, a checkpoint (m), or
 /// another obstacle (m, beyond both radii).
 const ROCK_CLEAR_GATE: f32 = 25.0;
 const ROCK_CLEAR_OBSTACLE: f32 = 6.0;
+/// Nor within this far along the run (m) of an obstacle in the same line.
+const ROCK_CLEAR_LINE: f32 = 25.0;
 /// Rocks stand inside this fraction of the run's half width, and leave at
 /// least this much room (m) to the run's edge.
 const ROCK_SPREAD: f32 = 0.65;
-const ROCK_ROOM: f32 = 5.0;
+const ROCK_ROOM: f32 = 2.0;
+/// No rocks in the way into a run's gate: from this far before it (m) to
+/// `ROCK_GATE_AFTER` past it, within `ROCK_GATE_SIDE` m of its poles.
+const ROCK_GATE_BEFORE: f32 = 25.0;
+const ROCK_GATE_AFTER: f32 = 30.0;
+const ROCK_GATE_SIDE: f32 = 1.5;
+
+/// Whether a rock at `(s, offset)` stands in the way into one of a run's gates.
+fn in_a_gate(run: &Run, s: f32, offset: f32, radius: f32) -> bool {
+    run.gates.iter().any(|g| {
+        (g.s - ROCK_GATE_BEFORE..g.s + ROCK_GATE_AFTER).contains(&s)
+            && (offset - g.offset).abs() < g.span * 0.5 + ROCK_GATE_SIDE + radius
+    })
+}
 
 /// The rocks a thin cover leaves poking through on a course's run, placed
 /// once per run (none on the water). Fall only: see `World::cover_rocks`.
@@ -528,22 +543,28 @@ fn place_rocks(run: &Run, start_s: f32) -> Vec<Rock> {
         .into_iter()
         .chain(run.checkpoints.iter().copied())
         .collect();
-    let mut s = start_s + 80.0;
+    let mut s = start_s + 120.0;
     while s < run.finish_s - 50.0 {
-        let half = run.width_at(s).half.min(run.limit(s) - ROCK_ROOM).max(0.0);
+        let edge = run.limit_on(s, false).min(run.limit_on(s, true));
+        let half = run.width_at(s).half.min(edge - ROCK_ROOM).max(0.0);
         let offset = rng.range(-ROCK_SPREAD, ROCK_SPREAD) * half;
         let radius = rng.range(0.5, 0.85);
         let height = rng.range(0.35, 0.6);
         let (x, z) = run.centerline(s).at_offset(offset);
         let near_gate = gates.iter().any(|&g| (g - s).abs() < ROCK_CLEAR_GATE);
-        // Off the built features (tables, rollers, kickers): flat snow only.
-        let on_feature = (-3..=3).any(|i| run.features_at(s + i as f32 * 5.0, offset).abs() > 0.05);
+        // Off the built features (tables, rollers, kickers), and not where
+        // riders still fly off one.
+        let on_feature = (-12..=3).any(|i| run.jumps_at(s + i as f32 * 5.0, offset).abs() > 0.05);
         let crowded = run.obstacles().iter().any(|o| {
             let (dx, dz) = (o.x - x, o.z - z);
             let clear = o.radius + radius + ROCK_CLEAR_OBSTACLE;
             dx * dx + dz * dz < clear * clear
+        }) || run.obstacles.iter().any(|o| {
+            // Never one in line with a trunk or a tower just down the run.
+            (o.s - s).abs() < ROCK_CLEAR_LINE
+                && (o.offset - offset).abs() < o.radius + radius + ROCK_CLEAR_OBSTACLE * 0.5
         });
-        if near_gate || on_feature || crowded {
+        if near_gate || on_feature || crowded || in_a_gate(run, s, offset, radius) {
             s += 10.0;
             continue;
         }
@@ -1032,7 +1053,12 @@ mod tests {
         let join = |v: &[u8]| v.iter().map(u8::to_string).collect::<Vec<_>>().join(" ");
         let mut lines = Vec::new();
         for &c in CourseId::ALL {
-            lines.push(format!("circuit {} {}", c as u8, sport(c.sport())));
+            lines.push(format!(
+                "circuit {} {} {}",
+                c as u8,
+                sport(c.sport()),
+                c.course().revision
+            ));
         }
         for s in [Sport::Jetski, Sport::Snowboard] {
             let seasons: Vec<u8> = s.seasons().iter().map(|&x| x as u8).collect();
@@ -1193,7 +1219,8 @@ mod tests {
             assert!(rocks.len() >= 8, "{course:?}: {} rocks", rocks.len());
             assert_eq!(rocks, cover_rocks(course));
             for k in rocks {
-                assert!(k.offset.abs() + k.obstacle.radius < run.limit(k.s) - 3.0);
+                assert!(k.offset.abs() + k.obstacle.radius < run.limit(k.s) - ROCK_ROOM * 0.5);
+                assert!(!in_a_gate(run, k.s, k.offset, k.obstacle.radius));
                 assert!((k.s - c.start_s).abs() > ROCK_CLEAR_GATE);
                 assert!(
                     run.checkpoints
@@ -1201,7 +1228,7 @@ mod tests {
                         .all(|&g| (g - k.s).abs() > ROCK_CLEAR_GATE)
                 );
                 // Off anything built; a bowl's dish or a gully's floor is just snow.
-                assert!(run.features_at(k.s, k.offset).abs() <= 0.05);
+                assert!(run.jumps_at(k.s, k.offset).abs() <= 0.05);
             }
             let fall = World::for_event(
                 Event {

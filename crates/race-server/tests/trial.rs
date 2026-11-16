@@ -1,15 +1,18 @@
-//! Time trials: one rider, the run recorded to the finish, the results held
-//! until a retry, and a retry straight to the countdown.
+//! Time trial sessions: one rider lapping alone, every lap that ranks
+//! recorded for the lobby, a retry straight to the countdown, and a session
+//! the room closes when the player's input stops changing or after an hour.
 
-use protocol::InputPacket;
 use protocol::ghost::{Ghost, frames_for};
 use protocol::token::{JoinClaims, RaceClaims};
+use protocol::{EventBody, InputPacket, ServerMsg, SessionEnd};
 use race_server::record::RunReport;
-use race_server::room::{Room, RoomConfig, TRIAL_RESULTS_TICKS};
-use sim::race::tuning::RESULTS_TICKS;
-use sim::{CourseId, Phase, Season, SurfaceKind, TICK_HZ, Weather};
+use race_server::room::{
+    Room, RoomConfig, TRIAL_IDLE_TICKS, TRIAL_RESULTS_TICKS, TRIAL_SESSION_TICKS,
+};
+use sim::race::EventKind;
+use sim::{CourseId, Input, Phase, Season, SurfaceKind, TICK_HZ, Weather};
 
-fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
+fn claims(pid: &str, course: CourseId, season: u8, weather: Weather) -> JoinClaims {
     JoinClaims {
         v: 1,
         aud: "test".into(),
@@ -25,8 +28,9 @@ fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
         races: vec![RaceClaims {
             course: Some(course as u8),
             season: Some(season),
-            weather: Some(Weather::Storm as u8),
-            ..RaceClaims::default()
+            weather: Some(weather as u8),
+            turns: Some(Weather::Storm as u8),
+            time: Some(70),
         }],
         seed: 7,
         look: protocol::token::b64(&[4, 5, 6]),
@@ -36,33 +40,34 @@ fn claims(pid: &str, course: CourseId, season: u8) -> JoinClaims {
     }
 }
 
-struct Run {
+struct Session {
     room: Room,
     now: u64,
     retries: u8,
+    /// Reliable events the screen has been sent, by id.
+    events: std::collections::BTreeMap<u16, EventBody>,
 }
 
-impl Run {
-    fn new(course: CourseId, season: u8) -> Self {
-        let ana = claims("ana", course, season);
+impl Session {
+    fn new(course: CourseId, season: u8, weather: Weather) -> Self {
+        let ana = claims("ana", course, season, weather);
         let mut room = Room::new(RoomConfig::from_claims(&ana));
         room.join(1, &ana, 0, 0).expect("joins");
         Self {
             room,
             now: 0,
             retries: 0,
+            events: std::collections::BTreeMap::new(),
         }
     }
 
-    /// One tick, the screen ready and riding like a bot (or idle).
-    fn tick(&mut self, ride: bool) -> Vec<RunReport> {
+    fn slot(&self) -> usize {
+        self.room.slot_of(1).expect("seated")
+    }
+
+    /// One tick, the screen ready and sending `input`.
+    fn tick_with(&mut self, input: Input) -> Vec<RunReport> {
         self.now += 16;
-        let slot = self.room.slot_of(1).expect("seated");
-        let input = if ride {
-            sim::bot::bot_input(self.room.world(), slot)
-        } else {
-            sim::Input::default()
-        };
         let packet = InputPacket {
             event_ack: 0,
             last_snapshot_tick: 0,
@@ -73,12 +78,30 @@ impl Run {
             inputs: vec![input],
         };
         self.room.handle_inputs(1, &packet, self.now);
-        self.room.step(self.now).runs
+        let out = self.room.step(self.now);
+        for (_, bytes) in &out.packets {
+            if let Ok(ServerMsg::Snapshot(snap)) = ServerMsg::decode(bytes) {
+                for e in snap.events {
+                    self.events.insert(e.id, e.body);
+                }
+            }
+        }
+        out.runs
+    }
+
+    /// One tick, riding like a bot (or idle).
+    fn tick(&mut self, ride: bool) -> Vec<RunReport> {
+        let input = if ride {
+            sim::bot::bot_input(self.room.world(), self.slot())
+        } else {
+            Input::default()
+        };
+        self.tick_with(input)
     }
 
     fn until(&mut self, ride: bool, done: impl Fn(&Room) -> bool) -> Vec<RunReport> {
         let mut runs = Vec::new();
-        for _ in 0..TICK_HZ * 60 * 7 {
+        for _ in 0..TICK_HZ * 60 * 10 {
             runs.extend(self.tick(ride));
             if done(&self.room) {
                 return runs;
@@ -90,99 +113,238 @@ impl Run {
     fn phase(&self) -> Phase {
         self.room.world().race.phase
     }
+
+    fn laps(&self) -> sim::race::Laps {
+        self.room.world().riders[self.slot()]
+            .expect("rider")
+            .race
+            .laps
+    }
+}
+
+fn decode(report: &RunReport) -> Ghost {
+    Ghost::decode(&base64_decode(&report.ghost)).expect("a good ghost")
 }
 
 #[test]
-fn a_run_to_the_finish_is_recorded_and_the_results_wait_for_a_retry() {
-    let mut run = Run::new(CourseId::Mountain, 2);
-    // Clear and steady whatever the ticket says.
-    let c = run.room.world().conditions;
+fn every_lap_that_ranks_is_reported_with_its_ghost() {
+    let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
+    // The weather picked, held steady.
+    let c = s.room.world().conditions;
     assert_eq!(
-        (c.season, c.weather, c.turns),
-        (Season::Winter, Weather::Clear, Weather::Clear)
+        (c.season, c.weather, c.turns, c.time),
+        (Season::Summer, Weather::Clear, Weather::Clear, 70)
     );
+    assert!(s.room.world().trial && !s.room.world().disqualify);
     // No bots in a time trial, and nobody else gets in.
-    assert_eq!(run.room.world().riders.iter().flatten().count(), 1);
-    let bea = JoinClaims {
-        pid: "bea".into(),
-        ..claims("bea", CourseId::Mountain, 2)
-    };
-    assert!(run.room.join(2, &bea, 0, 0).is_err());
-
-    run.until(false, |r| r.world().race.phase == Phase::Intro);
-    let runs = run.until(true, |r| r.world().race.phase == Phase::Results);
-    let [report] = &runs[..] else {
-        panic!("one run, one report: {runs:?}")
-    };
-    assert_eq!(
-        (report.room.as_str(), report.run, report.pid.as_str()),
-        ("t_trial", 1, "ana")
-    );
-    assert_eq!(
-        (report.course, report.season),
-        (CourseId::Mountain as u8, 2)
-    );
-    let bytes = base64_decode(&report.ghost);
-    let ghost = Ghost::decode(&bytes).expect("a good ghost");
-    assert_eq!(report.time_ms, ghost.finish_ticks * 1000 / TICK_HZ);
-    assert_eq!(ghost.frames.len(), frames_for(ghost.finish_ticks));
-    assert_eq!(ghost.look, vec![4, 5, 6]);
+    assert_eq!(s.room.world().riders.iter().flatten().count(), 1);
     assert!(
-        ghost.splits.len() > 1,
-        "checkpoints and the finish: {:?}",
-        ghost.splits
-    );
-    // The first frame is the grid spot.
-    let spot = run.room.world().course().grid_spot(0);
-    assert!((ghost.frames[0].pos.x - spot.x).abs() < 0.01);
-
-    // The results stay up...
-    for _ in 0..RESULTS_TICKS + 120 {
-        run.tick(false);
-    }
-    assert_eq!(run.phase(), Phase::Results);
-    // ...until a retry: straight to the countdown, everyone on the grid.
-    run.retries += 1;
-    run.tick(false);
-    assert_eq!(run.phase(), Phase::Countdown);
-    let r = run.room.world().riders[0].unwrap();
-    assert!(r.race.racing && !r.race.finished());
-    assert!(
-        run.room
-            .join(1, &claims("ana", CourseId::Mountain, 2), 0, run.now)
-            .is_ok()
+        s.room
+            .join(2, &claims("bea", CourseId::Oval, 0, Weather::Clear), 0, 0)
+            .is_err()
     );
 
-    // A forgotten tab: the results stay up only so long.
-    run.until(true, |r| r.world().race.phase == Phase::Results);
-    for _ in 0..TRIAL_RESULTS_TICKS - 60 {
-        run.tick(false);
+    let runs = s.until(true, |r| {
+        r.world()
+            .riders
+            .iter()
+            .flatten()
+            .any(|r| r.race.laps.done >= 3)
+    });
+    let laps = s.laps();
+    assert_eq!(laps.done, 3);
+    // Lap 1 is the session's first best; later ones only when faster.
+    assert!(!runs.is_empty() && runs.len() <= 3, "{runs:?}");
+    let mut last = u32::MAX;
+    for report in &runs {
+        assert_eq!(
+            (report.room.as_str(), report.pid.as_str()),
+            ("t_trial", "ana")
+        );
+        assert_eq!(
+            (
+                report.course,
+                report.season,
+                report.revision,
+                report.weather
+            ),
+            (0, 0, 1, 0)
+        );
+        assert!(report.time_ms < last, "each report beats the one before");
+        last = report.time_ms;
+        let ghost = decode(report);
+        assert_eq!(report.time_ms, ghost.finish_ticks * 1000 / TICK_HZ);
+        assert_eq!(ghost.frames.len(), frames_for(ghost.finish_ticks));
+        assert_eq!(ghost.look, vec![4, 5, 6]);
+        assert_eq!(ghost.revision, 1);
+        let buoys = s.room.world().course().buoys.len();
+        assert_eq!(ghost.splits.len(), buoys + 1, "every buoy and the line");
     }
-    assert!(!run.room.is_over());
-    for _ in 0..120 {
-        run.tick(false);
-    }
-    assert!(run.room.is_over());
+    assert_eq!(runs.last().unwrap().time_ms, laps.best * 1000 / TICK_HZ);
+    assert_eq!(
+        runs.iter().map(|r| r.run).collect::<Vec<_>>(),
+        runs.iter()
+            .map(|r| r.run)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        "each lap reported names itself"
+    );
 }
 
 #[test]
-fn a_run_given_up_is_not_recorded() {
-    let mut run = Run::new(CourseId::Oval, 0);
-    run.until(false, |r| r.world().race.phase == Phase::Racing);
-    for _ in 0..TICK_HZ * 10 {
-        assert!(run.tick(true).is_empty());
-    }
-    run.retries = run.retries.wrapping_add(1);
-    run.tick(true);
-    assert_eq!(run.phase(), Phase::Countdown);
-    let runs = run.until(true, |r| r.world().race.phase == Phase::Results);
+fn practice_weather_is_timed_and_never_reported() {
+    let mut s = Session::new(CourseId::Mountain, 2, Weather::Snow);
+    let c = s.room.world().conditions;
+    assert_eq!((c.weather, c.turns), (Weather::Snow, Weather::Snow));
+    let runs = s.until(true, |r| {
+        r.world()
+            .riders
+            .iter()
+            .flatten()
+            .any(|r| r.race.laps.done >= 1)
+    });
+    assert!(runs.is_empty(), "{runs:?}");
+    let laps = s.laps();
+    assert!(laps.best > 0 && laps.best == laps.last);
+}
+
+#[test]
+fn a_run_goes_back_to_the_top_and_a_retry_starts_any_lap_over() {
+    let mut s = Session::new(CourseId::Mountain, 2, Weather::Clear);
+    let runs = s.until(true, |r| {
+        r.world().race.phase == Phase::Countdown
+            && r.world()
+                .riders
+                .iter()
+                .flatten()
+                .any(|r| r.race.laps.done == 1)
+    });
     let [report] = &runs[..] else {
-        panic!("only the finished run: {runs:?}")
+        panic!("the run, reported: {runs:?}")
     };
-    assert_eq!(report.run, 2);
-    let ghost = Ghost::decode(&base64_decode(&report.ghost)).unwrap();
-    // Three laps: two lap lines, then the finish.
-    assert_eq!(ghost.splits.len(), 3);
+    let ghost = decode(report);
+    // The first frame is the grid spot.
+    let spot = s.room.world().course().grid_spot(s.slot());
+    assert!((ghost.frames[0].pos.x - spot.x).abs() < 0.01);
+    assert_eq!(s.laps().done, 1);
+    // Back at the top: the next lap's countdown, then the run.
+    s.until(true, |r| r.world().race.phase == Phase::Racing);
+    for _ in 0..TICK_HZ * 10 {
+        s.tick(true);
+    }
+    // A retry mid-run: straight to the countdown, the lap dropped.
+    s.retries += 1;
+    s.tick(true);
+    assert_eq!(s.phase(), Phase::Countdown);
+    let laps = s.laps();
+    assert_eq!((laps.start, laps.done), (0, 1));
+    // A slower lap is not reported; the session goes on.
+    let more = s.until(true, |r| {
+        r.world()
+            .riders
+            .iter()
+            .flatten()
+            .any(|r| r.race.laps.done >= 2)
+    });
+    assert!(more.len() <= 1);
+    if let [better] = &more[..] {
+        assert!(better.time_ms < report.time_ms);
+    }
+}
+
+/// The session-over events the player's screen was sent.
+fn session_over(s: &Session) -> Vec<SessionEnd> {
+    s.events
+        .values()
+        .filter_map(|b| match b {
+            EventBody::SessionOver { reason } => Some(*reason),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_session_ends_after_three_minutes_without_a_change_of_input() {
+    let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
+    s.until(true, |r| r.world().race.phase == Phase::Racing);
+    // Riding keeps it going...
+    for _ in 0..TICK_HZ * 30 {
+        s.tick(true);
+    }
+    // ...hands off, it ends three minutes later.
+    for _ in 0..TRIAL_IDLE_TICKS - 2 {
+        s.tick(false);
+    }
+    assert_eq!(s.phase(), Phase::Racing);
+    assert!(session_over(&s).is_empty());
+    // (A snapshot every other tick carries the news.)
+    for _ in 0..4 {
+        s.tick(false);
+    }
+    assert_eq!(s.phase(), Phase::Results);
+    assert_eq!(session_over(&s), [SessionEnd::Idle]);
+    // Nothing starts it again; the room closes a little later.
+    s.retries += 1;
+    s.tick(true);
+    assert_eq!(s.phase(), Phase::Results);
+    for _ in 0..TRIAL_RESULTS_TICKS {
+        s.tick(true);
+    }
+    assert!(s.room.is_over() && s.room.is_done());
+}
+
+#[test]
+fn a_session_with_the_input_held_still_ends_too() {
+    // A phone left on auto-gas: the same throttle, never a change.
+    let gas = Input::from_analog(0.0, 1.0, 0.0, 0);
+    let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
+    s.until(true, |r| r.world().race.phase == Phase::Racing);
+    for _ in 0..TICK_HZ * 30 {
+        s.tick(true);
+    }
+    for _ in 0..TRIAL_IDLE_TICKS - 2 {
+        s.tick_with(gas);
+    }
+    assert_eq!(s.phase(), Phase::Racing);
+    // A retry is a sign of life.
+    s.retries += 1;
+    s.tick_with(gas);
+    for _ in 0..TRIAL_IDLE_TICKS - 120 {
+        s.tick_with(gas);
+    }
+    assert_ne!(s.phase(), Phase::Results);
+    for _ in 0..130 {
+        s.tick_with(gas);
+    }
+    assert_eq!(s.phase(), Phase::Results);
+    assert_eq!(session_over(&s), [SessionEnd::Idle]);
+}
+
+#[test]
+fn a_session_ends_after_an_hour_whatever_the_player_does() {
+    let mut s = Session::new(CourseId::Oval, 0, Weather::Clear);
+    while s.room.tick() < TRIAL_SESSION_TICKS - 1 {
+        s.tick(true);
+        assert_ne!(s.phase(), Phase::Results);
+    }
+    for _ in 0..3 {
+        s.tick(true);
+    }
+    assert_eq!(s.phase(), Phase::Results);
+    assert_eq!(session_over(&s), [SessionEnd::Hour]);
+    let laps = s.laps();
+    assert_eq!(laps.start, 0, "the lap under way is dropped");
+    assert!(laps.done > 50, "{laps:?}");
+    // Any lap counted is in the sim's own events: none since.
+    let w = s.room.world().clone();
+    let mut copy = w.clone();
+    let events = copy.step(&[None; sim::MAX_RIDERS]);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::LapTime { .. }))
+    );
 }
 
 fn base64_decode(s: &str) -> Vec<u8> {

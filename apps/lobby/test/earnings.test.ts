@@ -11,7 +11,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client } from "pg";
 import { ensureDatabase } from "../../../scripts/dev-db.ts";
 import { type DbHandle, openDb } from "../src/db/client.ts";
-import { match, matchPlayer, player, user } from "../src/db/schema.ts";
+import { eq } from "drizzle-orm";
+import { match, matchPlayer, player, raceResult, user } from "../src/db/schema.ts";
 import { type ResultReport, storeReport } from "../src/results.ts";
 import { liveMatch } from "../src/matches.ts";
 import { GRAND_PRIX_BONUS, PLACE_CREDITS, matchPay } from "../src/rewards.ts";
@@ -57,6 +58,7 @@ const entry = (pid: string | null, place: number, trickPoints = 0) => ({
   timeMs: 90_000,
   trickPoints,
   gpPoints: null,
+  disqualified: false,
 });
 
 const report = (room: string, event: number, eventCount: number, entries: ResultReport["entries"]): ResultReport => ({
@@ -126,6 +128,17 @@ void test("your best place on a circuit counts the matches before this one", asy
   await storeReport(handle.db, report("m_second", 0, 1, [entry("dan", 2), entry(null, 1)]));
   assert.equal((await matchPay(handle.db, "m_second", "dan", 0))?.bestBefore, 4);
   assert.equal((await matchPay(handle.db, "m_second", "dan", 1))?.bestBefore, null);
+});
+
+void test("a disqualification is stored and is never your best place on a circuit", async () => {
+  await makePlayer("ivo");
+  await makeMatch("m_out", "room", "race", ["ivo"]);
+  await makeMatch("m_after", "room", "race", ["ivo"]);
+  const dq = { ...entry("ivo", 2), timeMs: null, disqualified: true };
+  await storeReport(handle.db, report("m_out", 0, 1, [entry(null, 1), dq]));
+  const [row] = await handle.db.select().from(raceResult).where(eq(raceResult.matchId, "m_out"));
+  assert.equal(row?.disqualified, true);
+  assert.equal((await matchPay(handle.db, "m_after", "ivo", 0))?.bestBefore, null);
 });
 
 void test("a matchmaking race under way offers its players a ticket back, until its plan is over", async () => {

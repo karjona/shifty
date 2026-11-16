@@ -7,16 +7,19 @@
 //! the race, and a results screen. All of it is sim state, so clients
 //! predict it like everything else and the server's copy is the official
 //! one. Through the finish a rider's race is over: it rides on autopilot
-//! (see `World::on_autopilot`) and scores nothing more.
+//! (see `World::on_autopilot`) and scores nothing more. So is the race of a
+//! rider disqualified for missing `MAX_MISSES` buoys or gates (see
+//! `disqualify`), placed behind everyone else.
 //!
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
-//! order (on a loop the start line is also the finish). In summer, passing a
-//! buoy on the correct side fills the speed meter one step (a passive
-//! top-speed bonus) and passing it on the wrong side empties it, and so does
-//! a bail. In winter there is no meter. Tricks never make you faster: they
+//! order (on a loop the start line is also the finish). On the water,
+//! passing a buoy on the correct side fills the speed meter one step (a
+//! passive top-speed bonus) and passing it on the wrong side empties it, and
+//! so does a bail. On the snow there is no meter: a run's gates are passed
+//! between their poles. A buoy or a gate missed counts as a miss. Tricks never make you faster: they
 //! score points (half for a sketchy landing).
 
-use crate::course::{Course, Gate, Keep};
+use crate::course::{Course, Gate};
 
 pub mod tuning {
     use crate::TICK_HZ;
@@ -32,6 +35,12 @@ pub mod tuning {
     /// Movement along the course bigger than this in one tick is a teleport,
     /// not a gate crossing.
     pub const MAX_GATE_STEP: f32 = 20.0;
+    /// Misses (buoys or gates passed on the wrong side) that disqualify a
+    /// rider.
+    pub const MAX_MISSES: u8 = 5;
+    /// A time trial on a run: after the finish the rider rides out this
+    /// long, then goes back to the top for the next lap's countdown.
+    pub const RUN_OUT_TICKS: u32 = TICK_HZ * 4;
 }
 
 use tuning::*;
@@ -118,11 +127,66 @@ pub struct Progress {
     pub points: u16,
     /// Race ticks at the finish; 0 = not finished.
     pub finish_ticks: u32,
+    /// Race ticks when the rider was disqualified; 0 = not disqualified.
+    pub disqualified_ticks: u32,
+    /// A time trial's laps (all zero outside one).
+    pub laps: Laps,
+}
+
+/// A time trial's laps (see `World::trial`): the lap under way, and the
+/// session's laps so far. A retry, or a run's way back to the top, ends
+/// the lap under way and keeps the rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Laps {
+    /// World tick the lap under way began at (0: none under way). On a
+    /// loop a lap runs from one crossing of the start line to the next; on
+    /// a run, from the start signal to the finish.
+    pub start: u32,
+    /// Laps ended in the session, clean or void.
+    pub done: u8,
+    /// The session's best clean lap, and the last lap ended (ticks; 0:
+    /// none yet).
+    pub best: u32,
+    pub last: u32,
+    /// The last lap missed a buoy or gate: it doesn't count.
+    pub last_void: bool,
+}
+
+impl Laps {
+    /// What a lap ending at world tick `tick` makes of the session: its
+    /// time, and whether it is clean and the session's best so far.
+    fn end(&mut self, tick: u32, misses: u8) -> (u32, bool, bool) {
+        let ticks = tick.wrapping_sub(self.start).max(1);
+        let clean = misses == 0;
+        let best = clean && (self.best == 0 || ticks < self.best);
+        self.done = self.done.saturating_add(1);
+        self.last = ticks;
+        self.last_void = !clean;
+        if best {
+            self.best = ticks;
+        }
+        self.start = 0;
+        (ticks, clean, best)
+    }
+
+    /// The session so far, with no lap under way.
+    pub fn kept(self) -> Self {
+        Self { start: 0, ..self }
+    }
 }
 
 impl Progress {
     pub fn finished(&self) -> bool {
         self.finish_ticks != 0
+    }
+
+    pub fn disqualified(&self) -> bool {
+        self.disqualified_ticks != 0
+    }
+
+    /// The rider's race is over: through the finish, or disqualified.
+    pub fn done(&self) -> bool {
+        self.finished() || self.disqualified()
     }
 
     /// Top speed multiplier from the meter.
@@ -186,6 +250,20 @@ pub enum EventKind {
     Finish {
         ticks: u32,
     },
+    /// A time trial's lap `lap` of the session ended after `ticks`:
+    /// `clean` (no buoy or gate missed: it counts), and the session's best
+    /// so far.
+    LapTime {
+        lap: u8,
+        ticks: u32,
+        clean: bool,
+        best: bool,
+    },
+    /// Disqualified after `ticks` race ticks for missing `MAX_MISSES`
+    /// buoys or gates.
+    Disqualified {
+        ticks: u32,
+    },
     /// Landed a trick (`sketchy`: not cleanly, for half the points).
     Trick {
         trick: Trick,
@@ -207,7 +285,9 @@ pub struct SimEvent {
 }
 
 /// Checks whether a rider moving from `s_prev` to `s_now` (at `offset`)
-/// passed its next gate, and applies the result.
+/// passed its next gate, and applies the result. In a time trial (`trial`)
+/// a loop has no last lap: every crossing of the start line ends a lap and
+/// starts the next, and a lap with a miss is void.
 #[allow(clippy::too_many_arguments)]
 pub fn pass_gates(
     course: &Course,
@@ -217,6 +297,7 @@ pub fn pass_gates(
     s_now: f32,
     offset: f32,
     race: &Race,
+    trial: bool,
     tick: u32,
     events: &mut Vec<SimEvent>,
 ) {
@@ -235,7 +316,7 @@ pub fn pass_gates(
     }
     p.next_gate = ((gate + 1) % course.gate_count()) as u8;
     let slot = slot as u8;
-    let live = race.phase == Phase::Racing && p.racing && !p.finished();
+    let live = race.phase == Phase::Racing && p.racing && !p.done();
     let finish = |p: &mut Progress, events: &mut Vec<SimEvent>| {
         p.finish_ticks = race.elapsed(tick).max(1);
         events.push(SimEvent {
@@ -258,6 +339,17 @@ pub fn pass_gates(
                         kind: EventKind::Lap { lap: 1 },
                     });
                 }
+            } else if trial {
+                if p.laps.start != 0 {
+                    end_lap(p, slot, tick, events);
+                }
+                p.lap = p.lap.saturating_add(1);
+                p.laps.start = tick;
+                p.misses = 0;
+                events.push(SimEvent {
+                    slot,
+                    kind: EventKind::Lap { lap: p.lap },
+                });
             } else if p.lap >= course.laps {
                 finish(p, events);
             } else {
@@ -271,6 +363,9 @@ pub fn pass_gates(
         Gate::Finish => {
             if live && p.lap >= 1 {
                 finish(p, events);
+                if trial && p.laps.start != 0 {
+                    end_lap(p, slot, tick, events);
+                }
             }
         }
         Gate::Checkpoint(index) => events.push(SimEvent {
@@ -278,18 +373,13 @@ pub fn pass_gates(
             kind: EventKind::Checkpoint { index: index as u8 },
         }),
         Gate::Buoy(index) => {
-            let buoy = &course.buoys[index];
-            let ok = match buoy.keep {
-                Keep::Right => offset < buoy.offset,
-                Keep::Left => offset > buoy.offset,
-            };
-            if ok {
-                p.meter = (p.meter + 1).min(METER_MAX);
-            } else {
-                p.meter = 0;
-                if live {
-                    p.misses = p.misses.saturating_add(1);
-                }
+            let ok = course.passes_mark(index, offset);
+            // The snow has no meter: a missed gate only counts.
+            if course.sport.has_meter() {
+                p.meter = if ok { (p.meter + 1).min(METER_MAX) } else { 0 };
+            }
+            if !ok && live {
+                p.misses = p.misses.saturating_add(1);
             }
             events.push(SimEvent {
                 slot,
@@ -301,6 +391,20 @@ pub fn pass_gates(
             });
         }
     }
+}
+
+/// Ends a time trial's lap under way at world tick `tick`.
+fn end_lap(p: &mut Progress, slot: u8, tick: u32, events: &mut Vec<SimEvent>) {
+    let (ticks, clean, best) = p.laps.end(tick, p.misses);
+    events.push(SimEvent {
+        slot,
+        kind: EventKind::LapTime {
+            lap: p.laps.done,
+            ticks,
+            clean,
+            best,
+        },
+    });
 }
 
 /// Applies a landing to the race. A bail empties the meter. Tricks (and
@@ -340,13 +444,34 @@ pub fn landed(
     } else {
         trick
     };
-    if p.racing && race.phase == Phase::Racing && !p.finished() {
+    if p.racing && race.phase == Phase::Racing && !p.done() {
         p.tricks = p.tricks.saturating_add(1);
         p.points = p.points.saturating_add(trick.points);
     }
     events.push(SimEvent {
         slot,
         kind: EventKind::Trick { trick, sketchy },
+    });
+}
+
+/// Disqualifies a rider still in the race once it has missed
+/// `MAX_MISSES` buoys or gates: its race ends at `tick`.
+pub fn disqualify(
+    p: &mut Progress,
+    race: &Race,
+    slot: usize,
+    tick: u32,
+    events: &mut Vec<SimEvent>,
+) {
+    if race.phase != Phase::Racing || !p.racing || p.done() || p.misses < MAX_MISSES {
+        return;
+    }
+    p.disqualified_ticks = race.elapsed(tick).max(1);
+    events.push(SimEvent {
+        slot: slot as u8,
+        kind: EventKind::Disqualified {
+            ticks: p.disqualified_ticks,
+        },
     });
 }
 
