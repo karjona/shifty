@@ -302,6 +302,14 @@ impl Client {
         self.retries = self.retries.wrapping_add(1);
     }
 
+    /// Leaving on purpose: tells the race server, so the seat goes at once
+    /// (a connection that just goes keeps it a while for a comeback).
+    pub fn bye(&mut self) {
+        if self.phase == Phase::Joined {
+            self.send(&ClientMsg::Bye);
+        }
+    }
+
     /// The room is a time trial.
     pub fn trial(&self) -> bool {
         self.trial

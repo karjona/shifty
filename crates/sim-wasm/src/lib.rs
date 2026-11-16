@@ -164,6 +164,11 @@ impl WasmClient {
         }
     }
 
+    /// Leaving on purpose: a goodbye goes out with the next packets (see `takeOutgoing`).
+    pub fn bye(&mut self) {
+        self.inner.bye();
+    }
+
     #[wasm_bindgen(js_name = handlePacket)]
     pub fn handle_packet(&mut self, bytes: &[u8], now_ms: f64) {
         self.inner.handle_packet(bytes, now_ms);

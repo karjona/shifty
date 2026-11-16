@@ -68,6 +68,10 @@ pub struct JoinClaims {
     /// rider alone (no bots), every run recorded, restarted on request.
     #[serde(default, skip_serializing_if = "is_false")]
     pub trial: bool,
+    /// Back into a race already under way: the token seats the player in
+    /// the room if it is still running, and never starts it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub rejoin: bool,
 }
 
 /// One race of a plan as asked for (`sim::conditions::EventSpec` in wire
@@ -338,6 +342,7 @@ mod tests {
             look: b64(&[1, 0, 2, 3]),
             setups: vec![[3, 3, 3, 3], [6, 2, 2, 2]],
             trial: false,
+            rejoin: false,
         }
     }
 
