@@ -9,6 +9,18 @@ import { FIELD, MAX_HUMANS, NoRaceServer, matchEnded, matchRider, startMatch } f
 import { type PlanRequest, parsePlan } from "@shifty/rider";
 import { type JoinTicket, legacyPlan, mintTicket, type TicketServer } from "./tickets.ts";
 import { RACE_TTL_MS, actingHost } from "./room-host.ts";
+import {
+  type Away,
+  ROOM_AWAY_MS,
+  type RoomMember,
+  type ShownMember,
+  closedOnPurpose,
+  goneAway,
+  keptFor,
+  nextExpiry,
+  shownMembers,
+  stillAway,
+} from "./away.ts";
 
 /** The race a room started: its plan and seed are what rejoin tickets carry. */
 export interface StartedRace {
@@ -32,6 +44,10 @@ export interface RoomSettings {
   hostAway?: number;
   /** When the room learned its last race was over. */
   raceEndedAt?: number;
+  /** When an empty room is forgotten (absent while anyone is here). */
+  forgetAt?: number;
+  /** Members whose socket dropped, kept a while for them to come back (see away.ts). */
+  away?: Away<RoomMember>[];
 }
 
 /** Stored settings (rooms saved by older lobbies name an `event`, and their race no seed). */
@@ -43,18 +59,15 @@ function readSettings(v: RoomSettings | undefined): RoomSettings | null {
   return { ...v, plan, race };
 }
 
-interface Member {
-  userId: string;
-  handle: string;
-  ready: boolean;
-  joinedAt: number;
-}
+/** A member on their socket: `leaving` once they said they are going (their close lets go at once). */
+type Member = RoomMember & { leaving?: boolean };
 
 export type RoomClientMsg =
   | { t: "settings"; plan: PlanRequest; bots: number }
   | { t: "ready"; ready: boolean }
   | { t: "start" }
-  | { t: "rejoin" };
+  | { t: "rejoin" }
+  | { t: "leave" };
 
 export type RoomServerMsg =
   | {
@@ -63,7 +76,8 @@ export type RoomServerMsg =
       hostId: string;
       plan: PlanRequest;
       bots: number;
-      members: { userId: string; handle: string; ready: boolean }[];
+      /** Everyone in the room (`look`: their rider, base64url appearance bytes; `away`: reconnecting). */
+      members: ShownMember[];
       racing: string[];
     }
   | { t: "ticket"; ticket: JoinTicket }
@@ -92,7 +106,14 @@ function memberOf(ws: WebSocket): Member | null {
     typeof m.handle === "string" &&
     typeof m.ready === "boolean" &&
     typeof m.joinedAt === "number"
-    ? { userId: m.userId, handle: m.handle, ready: m.ready, joinedAt: m.joinedAt }
+    ? {
+        userId: m.userId,
+        handle: m.handle,
+        ready: m.ready,
+        joinedAt: m.joinedAt,
+        look: typeof m.look === "string" ? m.look : "",
+        leaving: m.leaving === true,
+      }
     : null;
 }
 
@@ -116,6 +137,8 @@ function parseMessage(data: string): RoomClientMsg | null {
       return { t: "start" };
     case "rejoin":
       return { t: "rejoin" };
+    case "leave":
+      return { t: "leave" };
     default:
       return null;
   }
@@ -140,8 +163,17 @@ export class RoomLobby extends DurableObject<Env> {
   /** Creates the room; false if the code is already in use. */
   async create(code: string, hostId: string, plan: PlanRequest, bots: number): Promise<boolean> {
     if (await this.load()) return false;
-    await this.save({ code, hostId, plan, bots: clampBots(bots), createdAt: Date.now(), race: null });
-    await this.ctx.storage.setAlarm(Date.now() + EMPTY_TTL_MS);
+    const now = Date.now();
+    await this.save({
+      code,
+      hostId,
+      plan,
+      bots: clampBots(bots),
+      createdAt: now,
+      race: null,
+      forgetAt: now + EMPTY_TTL_MS,
+    });
+    await this.schedule();
     return true;
   }
 
@@ -168,6 +200,22 @@ export class RoomLobby extends DurableObject<Env> {
     return this.sockets(except)
       .flatMap((ws) => memberOf(ws) ?? [])
       .toSorted((a, b) => a.joinedAt - b.joinedAt);
+  }
+
+  /** Members still away at `now` (see away.ts). */
+  private awayNow(s: RoomSettings, except?: WebSocket): Away<RoomMember>[] {
+    const here = new Set(this.members(except).map((m) => m.userId));
+    return stillAway(s.away ?? [], here, Date.now(), ROOM_AWAY_MS);
+  }
+
+  /** The alarm for the next thing due: someone away running out, or an empty room being forgotten. */
+  private async schedule(): Promise<void> {
+    const s = this.settings;
+    const due = [s ? nextExpiry(s.away ?? [], ROOM_AWAY_MS) : null, s?.forgetAt ?? null].filter(
+      (t): t is number => t !== null,
+    );
+    if (due.length > 0) await this.ctx.storage.setAlarm(Math.min(...due));
+    else await this.ctx.storage.deleteAlarm();
   }
 
   /** Who hosts now (see room-host.ts). */
@@ -199,16 +247,33 @@ export class RoomLobby extends DurableObject<Env> {
         ws.close(4000, "replaced");
       }
     }
-    const others = this.members().filter((m) => m.userId !== userId);
+    // Places held for members away count as taken.
+    const away = this.awayNow(s);
+    const others =
+      this.members().filter((m) => m.userId !== userId).length + away.filter((a) => a.userId !== userId).length;
     this.ctx.acceptWebSocket(server);
-    if (others.length >= MAX_HUMANS) {
+    if (others >= MAX_HUMANS) {
       server.send(JSON.stringify({ t: "error", error: "full" } satisfies RoomServerMsg));
       server.close(4001, "room is full");
       return new Response(null, { status: 101, webSocket: client });
     }
-    server.serializeAttachment({ userId, handle, ready: false, joinedAt } satisfies Member);
-    if (userId === s.hostId && s.hostAway !== undefined) await this.save({ ...s, hostAway: undefined });
-    await this.ctx.storage.deleteAlarm();
+    // Back within the grace of a drop: their place and their ready, as they were.
+    const kept = keptFor(away, userId, Date.now(), ROOM_AWAY_MS);
+    const look = request.headers.get("x-shifty-look") ?? "";
+    server.serializeAttachment({
+      userId,
+      handle,
+      ready: kept?.ready ?? false,
+      joinedAt: kept?.joinedAt ?? joinedAt,
+      look,
+    } satisfies Member);
+    await this.save({
+      ...s,
+      hostAway: userId === s.hostId ? undefined : s.hostAway,
+      away: away.filter((a) => a.userId !== userId),
+      forgetAt: undefined,
+    });
+    await this.schedule();
     this.broadcast();
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -223,7 +288,7 @@ export class RoomLobby extends DurableObject<Env> {
       hostId: this.host(s, except),
       plan: s.plan,
       bots: s.bots,
-      members: this.members(except).map(({ userId, handle, ready }) => ({ userId, handle, ready })),
+      members: shownMembers(this.members(except), s.away ?? [], Date.now()),
       racing: race,
     };
     const text = JSON.stringify(msg);
@@ -261,6 +326,12 @@ export class RoomLobby extends DurableObject<Env> {
         break;
       case "start":
         await this.start(ws, me, s);
+        return;
+      case "leave":
+        // Going on purpose: their place goes with them.
+        ws.serializeAttachment({ ...me, leaving: true });
+        ws.close(1000, "left");
+        await this.webSocketClose(ws, 1000);
         return;
       case "rejoin": {
         const race = (await this.withLiveRace(s)).race;
@@ -328,16 +399,30 @@ export class RoomLobby extends DurableObject<Env> {
     this.broadcast();
   }
 
-  override async webSocketClose(ws: WebSocket): Promise<void> {
+  override async webSocketClose(ws: WebSocket, code = 1006): Promise<void> {
     const s = await this.load();
     if (!s) return;
+    const now = Date.now();
     const left = memberOf(ws);
     const rest = this.members(ws);
+    const gone = left !== null && !rest.some((m) => m.userId === left.userId);
+    let next = { ...s, away: this.awayNow(s, ws) };
     // The host keeps the room while away (see room-host.ts).
-    if (left?.userId === s.hostId && !rest.some((m) => m.userId === s.hostId)) {
-      await this.save({ ...s, hostAway: Date.now() });
+    if (gone && left.userId === s.hostId) next.hostAway = now;
+    // A drop (not a leave) keeps their place a while for their screen to reconnect.
+    if (gone && !left.leaving && !closedOnPurpose(code)) {
+      const member: RoomMember = {
+        userId: left.userId,
+        handle: left.handle,
+        ready: left.ready,
+        joinedAt: left.joinedAt,
+        look: left.look,
+      };
+      next = { ...next, away: goneAway(next.away, left.userId, member, now) };
     }
-    if (rest.length === 0) await this.ctx.storage.setAlarm(Date.now() + EMPTY_TTL_MS);
+    if (rest.length === 0) next.forgetAt = now + EMPTY_TTL_MS;
+    await this.save(next);
+    await this.schedule();
     this.broadcast(ws);
   }
 
@@ -346,8 +431,18 @@ export class RoomLobby extends DurableObject<Env> {
   }
 
   override async alarm(): Promise<void> {
-    if (this.sockets().length > 0) return;
-    this.settings = null;
-    await this.ctx.storage.deleteAll();
+    const s = await this.load();
+    if (!s) return;
+    const away = this.awayNow(s);
+    const empty = this.sockets().length === 0;
+    if (empty && away.length === 0 && s.forgetAt !== undefined && Date.now() >= s.forgetAt) {
+      this.settings = null;
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    // Someone's grace ran out: the others see them gone.
+    await this.save({ ...s, away });
+    await this.schedule();
+    this.broadcast();
   }
 }
