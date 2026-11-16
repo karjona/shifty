@@ -23,6 +23,8 @@ export class AutoResolution {
   scale = 1;
   private floor = 0.5;
   private ceil = 1;
+  /** Where a new screen starts, between `floor` and `ceil`. */
+  private start = 1;
   private gaps: number[] = [];
   /** What the last step was, and the frame time (mean gap, ms) before it. */
   private trial: { kind: "down" | "up"; from: number; before: number } | null = null;
@@ -31,17 +33,21 @@ export class AutoResolution {
   private upAt = 0;
   private downAt = 0;
 
-  /** Sets the range for the window's size: at most `maxPixels`, at least `minHeight` pixels tall. */
-  bounds(width: number, height: number, ratio: number, maxPixels: number, minHeight: number): void {
+  /**
+   * Sets the range for the window's size: at most `maxPixels`, at least `minHeight` pixels tall, starting
+   * from at most `startRatio` device pixels per CSS pixel.
+   */
+  bounds(width: number, height: number, ratio: number, maxPixels: number, minHeight: number, startRatio = ratio): void {
     const full = width * height * ratio * ratio;
     this.ceil = Math.min(1, Math.sqrt(maxPixels / Math.max(1, full)));
     this.floor = Math.min(this.ceil, minHeight / Math.max(1, height * ratio));
+    this.start = Math.min(this.ceil, Math.max(this.floor, startRatio / ratio));
     this.scale = Math.min(this.ceil, Math.max(this.floor, this.scale));
   }
 
-  /** Starts over at the most pixels (a new screen, or a new window size). */
+  /** Starts over (a new screen, or a new window size). */
   reset(): void {
-    this.scale = this.ceil;
+    this.scale = this.start;
     this.gaps = [];
     this.trial = null;
     this.backoff = BACKOFF_FROM;

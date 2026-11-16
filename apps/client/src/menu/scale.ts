@@ -1,22 +1,20 @@
 // The menus and the race HUD are laid out on a 1920×1080 canvas; this scales
 // them to fit the window (CSS `zoom`: --ui-zoom for the HUD, --menu-zoom for
 // the menus). A short window (a phone on its side) is a phone screen, marked
-// `data-compact` on the root element: the HUD gets a canvas about 640 tall,
-// and the menus the phone canvas, drawn at one fixed scale (PHONE_ZOOM) and
-// as large as the window at that scale, so type and tap targets keep the
-// same size on every phone (phone.css lays the screens out on it). The
-// screen's safe areas (the Dynamic Island, the home indicator) come as menu
-// canvas lengths in --safe-top, --safe-right, --safe-bottom and --safe-left.
+// `data-compact` on the root element: the menus and the HUD are drawn at one
+// fixed scale (PHONE_ZOOM) on a canvas as large as the window at that scale,
+// so type and tap targets keep the same size on every phone (phone.css lays
+// them out on it). The screen's safe areas (the Dynamic Island, the home
+// indicator) come as canvas lengths in --safe-top, --safe-right,
+// --safe-bottom and --safe-left.
 let zoom = 1;
 let menuZoom = 1;
 
 /** Below this many CSS pixels tall, the window is a phone screen. */
 const COMPACT_BELOW = 600;
-/** The HUD's canvas height on a phone screen. */
-const COMPACT_HEIGHT = 640;
 /**
- * The menus' scale on a phone screen: the canvas's 24 px body type is 14.4
- * CSS pixels, its 76 px rows and buttons 45.6 (a finger's tap target).
+ * The scale on a phone screen: the canvas's 24 px body type is 14.4 CSS
+ * pixels, its 76 px rows and buttons 45.6 (a finger's tap target).
  */
 export const PHONE_ZOOM = 0.6;
 
@@ -40,9 +38,9 @@ function safeAreas(): Record<(typeof SIDES)[number], number> {
 
 const fit = () => {
   const compact = innerHeight < COMPACT_BELOW;
-  const z = compact ? innerHeight / COMPACT_HEIGHT : Math.max(0.4, Math.min(innerWidth / 1920, innerHeight / 1080));
+  const z = compact ? PHONE_ZOOM : Math.max(0.4, Math.min(innerWidth / 1920, innerHeight / 1080));
   zoom = Number(z.toFixed(4));
-  menuZoom = compact ? PHONE_ZOOM : zoom;
+  menuZoom = zoom;
   const root = document.documentElement;
   root.style.setProperty("--ui-zoom", String(zoom));
   root.style.setProperty("--menu-zoom", String(menuZoom));
