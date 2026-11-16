@@ -4,10 +4,10 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { setClubParty } from "../../game/backdrops.ts";
+import { setClubParty, setClubRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
-import { type Appearance, type PlanRequest, TILT, parsePlan } from "@shifty/rider";
+import { type Appearance, type PlanRequest, TILT, circuit, parsePlan } from "@shifty/rider";
 import { lobbySocket, lookOf, meQuery, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
@@ -76,8 +76,15 @@ export function RoomScreen() {
   const t = useT();
   const navigate = useNavigate();
   const { code } = route.useParams();
-  const me = useSuspenseQuery(meQuery).data?.user.id ?? null;
+  const { data: account } = useSuspenseQuery(meQuery);
+  const me = account?.user.id ?? null;
+  const appearance = account?.rider?.appearance ?? null;
   const [room, setRoom] = useState<RoomState | null>(null);
+  // You on the terrace (also when the room is opened straight from a link), dressed for its race.
+  const sport = room && !room.plan.tilt && circuit(room.plan.race.course ?? -1)?.sport === "snow" ? "winter" : "summer";
+  useEffect(() => {
+    if (appearance) setClubRider(appearance, sport);
+  }, [appearance, sport]);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
