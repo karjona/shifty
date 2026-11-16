@@ -17,7 +17,17 @@ import { SEASONS } from "@shifty/rider";
 import { type RaceEnd, RaceSession, type Trouble, readPlan } from "../../game/race.ts";
 import { SeasonCard } from "../../game/season-change.ts";
 import { useT } from "../../i18n/index.ts";
-import { ApiError, type PendingRace, meQuery, playSingle, raceMode, setRequeue, takePendingRace } from "../api.ts";
+import {
+  ApiError,
+  type PendingRace,
+  forgetRace,
+  leftMatch,
+  meQuery,
+  playSingle,
+  raceMode,
+  setRequeue,
+  takePendingRace,
+} from "../api.ts";
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { MenuIcon } from "../icons.tsx";
 import { nav, pointing } from "../nav.ts";
@@ -99,8 +109,10 @@ function RaceRun({
   const [error, setError] = useState<string | null>(null);
   const { device } = useDevice();
 
-  // Out of a race the browser's back doesn't come back to it: every way out replaces it.
+  // Out of a race the browser's back doesn't come back to it: every way out replaces it,
+  // and a reload doesn't either.
   const back = () => {
+    forgetRace();
     if (!race) {
       void navigate({ to: "/play", replace: true });
       return;
@@ -108,7 +120,9 @@ function RaceRun({
     if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params, replace: true });
     else void navigate({ to: "/play", search: race.back.search, replace: true });
   };
+  const goBack = useEffectEvent(() => back());
   const planOver = useEffectEvent((data: RaceEnd) => {
+    forgetRace();
     setMenu(false);
     setConfirm(null);
     setEnd(data);
@@ -123,6 +137,8 @@ function RaceRun({
     }
     if (outdated) {
       void card?.hide();
+      // A race kept through a reload, from an earlier release: nothing to go back to.
+      if (race.rejoin) goBack();
       return undefined;
     }
     let s: RaceSession | null = null;
@@ -229,8 +245,19 @@ function RaceRun({
     }
   };
 
-  const changeMode = () => void navigate({ to: "/play", search: { mode }, replace: true });
-  const mainMenu = () => void navigate({ to: "/", replace: true });
+  const changeMode = () => {
+    forgetRace();
+    void navigate({ to: "/play", search: { mode }, replace: true });
+  };
+  const mainMenu = () => {
+    forgetRace();
+    void navigate({ to: "/", replace: true });
+  };
+  /** Leaving on purpose (confirmed where it costs something): the match isn't offered back. */
+  const quit = () => {
+    if (race && online) leftMatch(race.ticket.room);
+    back();
+  };
   const toRoom = () => back();
 
   // What leaving costs now: a Tilt under way, or a race you are still in.
@@ -244,7 +271,7 @@ function RaceRun({
           : null;
   const leave = () => {
     if (cost && confirm === null) setConfirm(cost);
-    else back();
+    else quit();
   };
 
   const endShown = end !== null && (end.podium === null || afterPodium);
@@ -339,7 +366,7 @@ function RaceRun({
     );
   };
 
-  if (outdated)
+  if (outdated && !race?.rejoin)
     return (
       <div className="screen race-screen">
         <TroublePanel
@@ -427,13 +454,13 @@ function RaceRun({
             <Button kind="primary" glyph="back" onClick={() => setConfirm(null)} autoFocus>
               {t.race.leaving.stay}
             </Button>
-            <Button kind="danger" onClick={back}>
+            <Button kind="danger" onClick={quit}>
               {t.race.leaving.leave}
             </Button>
           </div>
         </div>
       )}
-      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} />}
+      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} rejoin={race?.rejoin === true} />}
       {endShown && end && wrapUp({ kind: "race", end })}
       {trialShown && trialPanel && wrapUp({ kind: "trial", trial: trialPanel })}
     </div>
@@ -456,10 +483,26 @@ function Help({ view, inMenu }: { view: View; inMenu: boolean }) {
   );
 }
 
-/** What went wrong, and the way back (a room's: where its race can be rejoined while it runs). */
-function Problem({ trouble, back, room }: { trouble: Trouble; back: () => void; room: boolean }) {
+/**
+ * What went wrong, and the way back (a room's: where its race can be
+ * rejoined while it runs). Coming back to a race (`rejoin`), a turned-down
+ * ticket means the way back in is closed.
+ */
+function Problem({
+  trouble,
+  back,
+  room,
+  rejoin,
+}: {
+  trouble: Trouble;
+  back: () => void;
+  room: boolean;
+  rejoin: boolean;
+}) {
   const t = useT();
-  const { title, body } = useTroubleText(trouble);
+  const text = useTroubleText(trouble);
+  const closed = rejoin && trouble.kind === "rejected" && trouble.reason !== "version" && trouble.reason !== "full";
+  const { title, body } = closed ? t.race.trouble.rejoin : text;
   const version = trouble.kind === "rejected" && trouble.reason === "version";
   const backAction: EndAction = { label: room ? t.end.backToRoom : t.common.back, run: back, glyph: "back" };
   return (

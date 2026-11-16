@@ -1040,6 +1040,11 @@ export class RaceSession implements Stage {
     this.seasonChange?.cancel();
     this.sfx.stop();
     void this.card?.hide();
+    // Leaving on purpose says goodbye (the seat goes at once); a reload or a closed tab doesn't.
+    if (this.client && this.transport) {
+      this.client.bye();
+      this.sendOutgoing(this.client, this.transport);
+    }
     this.transport?.close();
     this.client?.free();
     this.client = null;

@@ -289,6 +289,7 @@ export const es: Messages = {
     partySoon: "Muy pronto: forma un grupo con los nombres de tus amigos.",
     createRoom: "Crear una sala",
     joinRoom: "Entrar en una sala",
+    liveRace: "Tienes una carrera en marcha",
     roomCode: "Código de la sala",
     join: "Entrar",
     noRoom: "No hay ninguna sala con ese código.",
@@ -429,6 +430,10 @@ export const es: Messages = {
       lost: {
         title: "Se ha perdido el servidor de carreras",
         body: "La conexión se ha cortado y la carrera sigue sin ti.",
+      },
+      rejoin: {
+        title: "No se ha podido volver a la carrera",
+        body: "Puede que haya terminado o que el servidor de carreras haya liberado tu plaza.",
       },
     },
   },

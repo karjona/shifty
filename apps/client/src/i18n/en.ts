@@ -289,6 +289,8 @@ export const en = {
     partySoon: "Soon: form a party with your friends' handles.",
     createRoom: "Create a room",
     joinRoom: "Join a room",
+    /** A matchmaking race the player is still in (they closed the tab). */
+    liveRace: "You have a race under way",
     roomCode: "Room code",
     join: "Join",
     noRoom: "There's no room with that code.",
@@ -420,6 +422,10 @@ export const en = {
         body: "Races need WebTransport: please use a recent Chrome, Edge, Firefox or Safari.",
       },
       lost: { title: "Lost the race server", body: "The connection dropped, and the race goes on without you." },
+      rejoin: {
+        title: "Couldn't get back into the race",
+        body: "It may have ended, or the race server has let your seat go.",
+      },
     },
   },
   hud: {

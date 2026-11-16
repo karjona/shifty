@@ -313,3 +313,17 @@
     color: inherit;
   }
 }
+
+/* The mode select: a matchmaking race still under way, offered back. */
+.live-race {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 16px var(--pad);
+  animation: rise 420ms var(--ease) both;
+}
+.live-race b {
+  font-size: var(--fs-body);
+  font-weight: 760;
+}

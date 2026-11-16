@@ -6,6 +6,7 @@ import {
   type Setups,
   defaultSetups,
   parseAppearance,
+  parsePlan,
   parseSetup,
   SPORTS,
 } from "@shifty/rider";
@@ -308,7 +309,11 @@ export interface PendingRace {
   trial?: TrialRace;
   /** Single player: the plan picked, raced again by Play again. */
   plan?: PlanRequest;
+  /** Back into a race already under way (after a reload, or from the lobby's offer). */
+  rejoin?: boolean;
 }
+
+const MODES: readonly Mode[] = ["trial", "single", "room", "matchmaking"];
 
 /** The mode a race was started from. */
 export function raceMode(race: PendingRace): Mode {
@@ -366,13 +371,103 @@ export function takeRequeue(): boolean {
 
 let pending: PendingRace | null = null;
 
-/** Hands a ticket to the race screen. */
+/** The race this tab is in, kept through a reload. */
+const RACE_KEY = "shifty.race";
+/** The last online match left on purpose (the mode select doesn't offer it back). */
+const LEFT_KEY = "shifty.left";
+
+/** Hands a ticket to the race screen (and keeps it for a reload of this tab). */
 export function setPendingRace(race: PendingRace): void {
   pending = race;
+  try {
+    sessionStorage.setItem(RACE_KEY, JSON.stringify({ ...race, rejoin: undefined }));
+  } catch {
+    // Without storage a reload just doesn't come back to the race.
+  }
 }
 
+/** The race to show: the one just handed over, or the one this tab was in before a reload. */
 export function takePendingRace(): PendingRace | null {
-  const r = pending;
+  const r = pending ?? keptRace();
   pending = null;
   return r;
 }
+
+/** This tab is done with its race: a reload doesn't come back to it. */
+export function forgetRace(): void {
+  try {
+    sessionStorage.removeItem(RACE_KEY);
+  } catch {
+    // Nothing kept.
+  }
+}
+
+/** The race this tab was in, checked (its ticket is only ever trusted by the race server). */
+function keptRace(): PendingRace | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(sessionStorage.getItem(RACE_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+  if (!isObj(v)) return null;
+  let ticket: JoinTicket;
+  try {
+    ticket = parseJoinTicket(v.ticket);
+  } catch {
+    return null;
+  }
+  const b = isObj(v.back) ? v.back : {};
+  const params = isObj(b.params) ? b.params : {};
+  const search = isObj(b.search) ? b.search : {};
+  const mode = MODES.find((m) => m === search.mode);
+  const back: PendingRace["back"] | null =
+    b.to === "/room/$code" && typeof params.code === "string"
+      ? { to: "/room/$code", params: { code: params.code } }
+      : b.to === "/play" && mode
+        ? { to: "/play", search: { mode } }
+        : null;
+  if (!back) return null;
+  const t = isObj(v.trial) ? v.trial : null;
+  const trial: TrialRace | undefined = t
+    ? {
+        course: num(t, "course"),
+        season: num(t, "season"),
+        ghosts: list(t.ghosts).flatMap((g) =>
+          typeof g.id === "string" ? [{ id: g.id, label: str(g, "label"), timeMs: num(g, "timeMs") }] : [],
+        ),
+        best: typeof t.best === "number" ? t.best : null,
+        record: typeof t.record === "number" ? t.record : null,
+      }
+    : undefined;
+  return { ticket, back, trial, plan: parsePlan(v.plan) ?? undefined, rejoin: true };
+}
+
+/** Leaving an online match on purpose: it isn't offered back. */
+export function leftMatch(match: string): void {
+  try {
+    localStorage.setItem(LEFT_KEY, match);
+  } catch {
+    // It may be offered back; rejoining is harmless.
+  }
+}
+
+/** A matchmaking race you are still in, with a ticket back into it (null: none). */
+export async function fetchLiveRace(): Promise<{ match: string; ticket: JoinTicket } | null> {
+  try {
+    const o = await call("/api/me/live");
+    if (typeof o.match !== "string") return null;
+    let left: string | null = null;
+    try {
+      left = localStorage.getItem(LEFT_KEY);
+    } catch {
+      left = null;
+    }
+    return o.match === left ? null : { match: o.match, ticket: parseJoinTicket(o.ticket) };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+export const liveRaceQuery = queryOptions({ queryKey: ["live-race"], queryFn: fetchLiveRace, staleTime: 5_000 });

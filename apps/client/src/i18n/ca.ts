@@ -289,6 +289,7 @@ export const ca: Messages = {
     partySoon: "Molt aviat: forma un grup amb els noms dels teus amics.",
     createRoom: "Crea una sala",
     joinRoom: "Entra en una sala",
+    liveRace: "Tens una cursa en marxa",
     roomCode: "Codi de la sala",
     join: "Entra",
     noRoom: "No hi ha cap sala amb aquest codi.",
@@ -421,6 +422,10 @@ export const ca: Messages = {
       lost: {
         title: "S'ha perdut el servidor de curses",
         body: "La connexió s'ha tallat i la cursa continua sense tu.",
+      },
+      rejoin: {
+        title: "No s'ha pogut tornar a la cursa",
+        body: "Potser s'ha acabat, o el servidor de curses ha alliberat la teva plaça.",
       },
     },
   },
