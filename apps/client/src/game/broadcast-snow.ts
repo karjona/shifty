@@ -232,19 +232,26 @@ export function snowRigs(
     rate: (w) =>
       w.me && w.me.speed > 2 && along.of(w.me) < finish - UP_THE_RUN ? { slot: w.me.slot, score: 0.9 } : null,
     begin(_w, r) {
-      sideS = along.of(r) + 40 + r.speed * 1.6;
-      sideOf = -sideOf;
-      // Just past the run's edge (behind its netting, among its trees), on
-      // the side that is not rock if one is; over the wall where both are.
-      // Clear of the run's own pines and towers.
+      const from = along.of(r);
+      sideS = from + 30 + r.speed;
+      // On the outside of the way the run bends between the rider and the
+      // camera, so the edge's trees, netting and rock stay out of the shot.
+      const at = (s: number) =>
+        run.path[Math.max(0, Math.min(run.path.length - 1, Math.round((s - run.path[0]!.s) / 4)))]!;
+      let turn = at(sideS).yaw - at(from).yaw;
+      if (turn > Math.PI) turn -= Math.PI * 2;
+      if (turn < -Math.PI) turn += Math.PI * 2;
+      sideOf = Math.abs(turn) > 0.05 ? (turn > 0 ? 1 : -1) : -sideOf;
+      // At the run's edge, under the boughs of the trees beside it and
+      // clear of its rock walls. Clear of the run's own pines and towers.
       for (let tries = 0; tries < 4; tries++) {
         const i = Math.max(0, Math.min(run.path.length - 1, Math.round((sideS - run.path[0]!.s) / 4)));
         const p = run.path[i]!;
-        const edge = (side: number) => (side > 0 ? p.edgeR : p.edgeL);
-        if (edge(sideOf) === "rock") sideOf = -sideOf;
         const limit = sideOf > 0 ? p.limitR : p.limitL;
-        const walled = edge(sideOf) === "rock";
-        sideEye.copy(on(sideS, sideOf * (limit + 1.2), walled ? 6 : 2.2));
+        // (Crouched low under the trees' boughs and the rock's overhangs.)
+        const edge = sideOf > 0 ? p.edgeR : p.edgeL;
+        const low = edge === "trees" || edge === "rock";
+        sideEye.copy(on(sideS, sideOf * (limit - (low ? 1.6 : 1.2)), low ? 0.9 : 1.7));
         if (!run.obstacles.some((o) => Math.hypot(o.x - sideEye.x, o.z - sideEye.z) < o.radius + 4)) break;
         sideS += 10;
       }

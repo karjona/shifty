@@ -72,7 +72,13 @@ fn missing_input(world: &World, slot: usize) -> Input {
         .at_offset(target);
     let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
     let steer = sim::math::clamp(-sim::math::angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
-    Input::from_analog(steer, 1.0, 0.0, 0)
+    // (On the snow, skating off the flat when slow.)
+    let lean = if course.run().is_some() && r.speed() < 5.0 {
+        1.0
+    } else {
+        0.0
+    };
+    Input::from_analog(steer, 1.0, lean, 0)
 }
 
 /// Layout of the race buffer (f64), for the HUD.
@@ -594,15 +600,16 @@ impl WasmClient {
 
     /// Dev: what a bot would do in my place right now, as analog
     /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`). `miss`: on
-    /// the water, ride past every buoy on its wrong side instead (for
-    /// `?autopilot=miss`, to see misses add up to a disqualification).
+    /// the water, ride past every buoy on its wrong side instead (on a run,
+    /// outside every gate), for `?autopilot=miss`, to see misses add up to a
+    /// disqualification.
     #[wasm_bindgen(js_name = autoInput)]
     pub fn auto_input(&self, miss: bool) -> Vec<f32> {
         let Some(slot) = self.inner.slot() else {
             return vec![0.0; 4];
         };
         let world = self.inner.predicted_world();
-        let i = if miss && world.course().looped() {
+        let i = if miss {
             missing_input(world, slot)
         } else {
             sim::bot::bot_input(world, slot)

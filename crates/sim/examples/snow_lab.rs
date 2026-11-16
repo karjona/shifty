@@ -373,7 +373,7 @@ fn race(event: Event, seed: u32, print: bool) -> f32 {
             let v: Vec<f32> = t.split(',').filter_map(|x| x.parse().ok()).collect();
             (v.len() == 3).then(|| (v[0] as usize, v[1], v[2]))
         }) && print
-            && ticks % 6 == 0
+            && ticks.is_multiple_of(6)
             && let (Some(r), Some(run)) = (w.riders[slot], w.course().run())
         {
             let (s, off) = run.project(r.pos.x, r.pos.z);
