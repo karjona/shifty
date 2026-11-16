@@ -4,6 +4,9 @@
 // the wind by the clock. Rain is thin streaks along its fall, snow small
 // discs that sway; both shrink away close to the lens and fade in the fog.
 // How much falls is a uniform: the quads past it collapse to nothing.
+// Through a long lens the box moves out along the view, toward what the
+// camera looks at, so what falls is seen at the distance the shot is
+// about and never as giant streaks across the lens.
 import * as THREE from "three/webgpu";
 import {
   Fn,
@@ -25,6 +28,26 @@ import {
 import { LOOK } from "./look.ts";
 import { UNREFLECTED, inkNode, inkOnlyInPass } from "./material.ts";
 import { PIXEL_AT_1M } from "./rider.ts";
+
+/** Where the boxes are centred: the camera, or out along a long lens's view (see `aimPrecipitation`). */
+const CENTRE = uniform(new THREE.Vector3());
+/** A field of view this wide (degrees) or wider keeps the boxes on the camera. */
+const WIDE_FOV = 50;
+/** Half the boxes' size, about (m): how far they move out per step of zoom past `WIDE_FOV`. */
+const BOX_HALF = 20;
+const forward = new THREE.Vector3();
+
+/**
+ * Centres the rain and snow for this frame's camera: on it at a normal
+ * field of view, and out along the view toward `look` (never past it) as
+ * the lens narrows, by as much as the zoom magnifies.
+ */
+export function aimPrecipitation(camera: THREE.PerspectiveCamera, look: THREE.Vector3): void {
+  const zoom = Math.tan((WIDE_FOV * Math.PI) / 360) / Math.tan((camera.fov * Math.PI) / 360);
+  const out = Math.min(Math.max(0, (zoom - 1) * BOX_HALF), camera.position.distanceTo(look));
+  camera.getWorldDirection(forward);
+  CENTRE.value.copy(camera.position).addScaledVector(forward, out);
+}
 
 interface PrecipLook {
   count: number;
@@ -114,12 +137,12 @@ class Fall {
         ? vec3(sin(t.mul(1.3).add(seedA.x.mul(40))), 0, sin(t.mul(1.1).add(seedA.z.mul(40)))).mul(look.sway)
         : vec3(0);
       const home = seedA.xyz.mul(box).add(drift.mul(t)).add(sway);
-      const local = fract(home.sub(cameraPosition).div(box)).sub(0.5).mul(box);
-      const at = cameraPosition.add(local);
+      const local = fract(home.sub(CENTRE).div(box)).sub(0.5).mul(box);
+      const at = CENTRE.add(local);
       const toCam = normalize(cameraPosition.sub(at));
       const along = flakes ? vec3(0, 1, 0) : normalize(drift);
       const side = normalize(cross(along, toCam));
-      const dist = local.length();
+      const dist = at.distance(cameraPosition);
       // Never thinner than about a pixel, and nothing right at the lens; past the amount, nothing at all.
       const shown = smoothstep(1.2, 3.5, dist)
         .mul(seedA.w.lessThan(amount).select(1, 0))
