@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use sim::bot::{SnowBot, bot_input, snowboard_input};
+use sim::bot::{SNOW_SEATS, SnowBot, Tier, bot_input, snowboard_input};
 use sim::conditions::{Conditions, Event, Season, TimeOfDay, Weather};
 use sim::course::Line;
 use sim::input::buttons;
@@ -530,6 +530,20 @@ fn conditions(lab: &Lab, seed: u32, home: f32) {
     );
 }
 
+/// A seat's bot's tier: 0 fast, 1 middling, 2 slow.
+fn kind(slot: usize) -> usize {
+    match SNOW_SEATS[slot].0 {
+        Tier::Fast => 0,
+        Tier::Middling => 1,
+        Tier::Slow => 2,
+    }
+}
+
+/// A seat with a fast bot in it.
+fn fast_seat() -> usize {
+    (0..SNOW_SEATS.len()).find(|&s| kind(s) == 0).unwrap_or(0)
+}
+
 /// A spread of conditions for every season a run is ridden in.
 fn spread(course: CourseId) -> Vec<Event> {
     let mut out = Vec::new();
@@ -617,7 +631,7 @@ fn solo_landings(event: Event, bot: SnowBot) -> (f32, u32, u32) {
 /// What tricks cost a bot alone at the fastest bots' pace, in every
 /// condition of the spread.
 fn tricks(only: Option<CourseId>) {
-    let fast = SnowBot::of(2).pace;
+    let fast = SnowBot::of(fast_seat()).pace;
     let mut cost = Vec::new();
     for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
         for event in spread(lab.course) {
@@ -653,12 +667,9 @@ fn tricks(only: Option<CourseId>) {
 
 /// Who wins, by kind of bot, across a spread of conditions on each run.
 fn kinds(only: Option<CourseId>) {
-    const KINDS: [&str; 3] = [
-        "slow trickster (slot%3=0)",
-        "clean (slot%3=1)",
-        "fast trickster (slot%3=2)",
-    ];
+    const KINDS: [&str; 3] = ["fast", "middling", "slow"];
     let mut wins = [0u32; 3];
+    let mut trick_wins = [0u32; 2];
     let mut races = 0u32;
     let mut gap = [Vec::<f32>::new(), Vec::new(), Vec::new()];
     let mut best_gap = Vec::<f32>::new();
@@ -692,7 +703,7 @@ fn kinds(only: Option<CourseId>) {
                 }
             }
             // What tricks cost a bot riding at the fastest bots' pace.
-            let fast = SnowBot::of(2).pace;
+            let fast = SnowBot::of(fast_seat()).pace;
             let (clean, _) = solo(
                 event,
                 SnowBot {
@@ -720,7 +731,7 @@ fn kinds(only: Option<CourseId>) {
                 }
                 for e in w.step(&inputs) {
                     if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
-                        falls[usize::from(e.slot) % 3] += 1;
+                        falls[kind(usize::from(e.slot))] += 1;
                         if let (Some(r), Some(run)) =
                             (w.riders[usize::from(e.slot)], w.course().run())
                         {
@@ -755,10 +766,11 @@ fn kinds(only: Option<CourseId>) {
             races += 1;
             let standings = w.standings();
             let winner = usize::from(standings[0].slot);
-            wins[winner % 3] += 1;
+            wins[kind(winner)] += 1;
+            trick_wins[usize::from(SNOW_SEATS[winner].1)] += 1;
             let mut line = Vec::new();
             for st in &standings {
-                let k = usize::from(st.slot) % 3;
+                let k = kind(usize::from(st.slot));
                 let p = st.progress;
                 misses[k] += u32::from(p.misses);
                 most_misses = most_misses.max(p.misses);
@@ -800,6 +812,10 @@ fn kinds(only: Option<CourseId>) {
             points[k]
         );
     }
+    println!(
+        "wins: tricksters {}, bots that never trick {}",
+        trick_wins[1], trick_wins[0]
+    );
     println!(
         "winner median {:+.1}% vs alone flat out; most gates one bot missed in a race: {most_misses}",
         median(&mut best_gap)

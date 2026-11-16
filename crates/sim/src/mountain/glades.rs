@@ -256,7 +256,7 @@ const GATES: &[GateDef] = &[
     gate(295.0, 5.5, 7.0),
     gate(395.0, -7.5, 7.0),
     gate(455.0, -7.5, 7.0),
-    gate(618.0, -1.0, 8.0),
+    gate(632.0, -0.5, 8.0),
     // The glades: on the fast line between the trees.
     gate(700.0, 2.0, 7.0),
     gate(812.0, -1.5, 7.0),

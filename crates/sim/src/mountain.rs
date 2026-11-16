@@ -1261,7 +1261,7 @@ pub static RUN: Run = Run::new(
         },
         Feature::Table {
             s: 1870.0,
-            offset: -4.5,
+            offset: -3.5,
             half_width: 3.0,
             height: 1.2,
             ramp: 6.0,
@@ -1505,7 +1505,7 @@ mod tests {
 
     #[test]
     fn the_first_run_never_changes() {
-        assert_eq!(fingerprint(&RUN), 0x1571_a12d_e77f_f0a1);
+        assert_eq!(fingerprint(&RUN), 0xe7fa_b387_df0a_3d58);
     }
 
     #[test]

@@ -384,15 +384,38 @@ pub struct SnowBot {
     pub trickster: bool,
 }
 
+/// Each seat's snowboard bot: its tier and whether it tricks. Bots fill
+/// the seats from the last one down, so a field of any size has fast,
+/// middling and slow bots in it, tricksters and not; on a narrow run the
+/// grid counts, so a fast bot starts in each row.
+pub const SNOW_SEATS: [(Tier, bool); crate::MAX_RIDERS] = [
+    (Tier::Middling, true),
+    (Tier::Slow, false),
+    (Tier::Fast, true),
+    (Tier::Middling, true),
+    (Tier::Slow, true),
+    (Tier::Middling, false),
+    (Tier::Slow, false),
+    (Tier::Fast, false),
+];
+
 impl SnowBot {
-    /// The bot in a seat.
+    /// The bot in a seat: its tier's pace, and whether it tricks.
     pub fn of(slot: usize) -> Self {
-        Self {
-            pace: 0.84 + (slot % 3) as f32 * 0.08,
-            trickster: slot % 3 != 1,
-        }
+        let (tier, trickster) = SNOW_SEATS[slot % crate::MAX_RIDERS];
+        let pace = match tier {
+            Tier::Fast => SNOW_FAST,
+            Tier::Middling => SNOW_MIDDLING,
+            Tier::Slow => SNOW_SLOW,
+        };
+        Self { pace, trickster }
     }
 }
+
+/// Each tier's pace on the snow (how fast it takes the bends, how much it tucks).
+const SNOW_FAST: f32 = 1.0;
+const SNOW_MIDDLING: f32 = 0.92;
+const SNOW_SLOW: f32 = 0.84;
 
 /// Slower than this (m/s) on the snow, a bot skates whatever the bend.
 const STUCK_SPEED: f32 = 3.0;
