@@ -187,7 +187,7 @@ export class RunMap implements CourseMap {
       minZ = Math.min(minZ, p.z);
       maxZ = Math.max(maxZ, p.z);
     }
-    const pad = 30;
+    const pad = 60;
     const spread = Math.min(RUN_SPREAD_MAX, Math.max(1, (RUN_ASPECT * (maxZ - minZ)) / Math.max(1, maxX - minX)));
     const mid = (minX + maxX) / 2;
     const side = (x: number) => mid + (x - mid) * spread;
@@ -214,13 +214,15 @@ export class RunMap implements CourseMap {
     const tick = (g: { x: number; z: number; yaw: number; half: number }, cls: string) => {
       const rx = -Math.cos(g.yaw);
       const rz = Math.sin(g.yaw);
+      // (Across the map's ribbon, which is drawn wider than the run.)
+      const reach = Math.max(g.half + 8, 46 / spread);
       node(
         "line",
         {
-          x1: side(g.x - rx * (g.half + 8)),
-          y1: g.z - rz * (g.half + 8),
-          x2: side(g.x + rx * (g.half + 8)),
-          y2: g.z + rz * (g.half + 8),
+          x1: side(g.x - rx * reach),
+          y1: g.z - rz * reach,
+          x2: side(g.x + rx * reach),
+          y2: g.z + rz * reach,
           class: cls,
         },
         this.svg,
@@ -231,9 +233,9 @@ export class RunMap implements CourseMap {
     tick(run.finish, "start");
     this.gates = run.gates.map((g) => ({ x: side(g.x), z: g.z }));
     this.gates.forEach((g, i) =>
-      node("circle", { cx: g.x, cy: g.z, r: 9, class: `gate ${i % 2 === 0 ? "red" : "blue"}` }, this.svg),
+      node("circle", { cx: g.x, cy: g.z, r: 15, class: `gate ${i % 2 === 0 ? "red" : "blue"}` }, this.svg),
     );
-    this.nextRing = node("circle", { r: 20, class: "next" }, this.svg);
+    this.nextRing = node("circle", { r: 30, class: "next" }, this.svg);
     this.nextRing.style.display = "none";
   }
 
@@ -249,7 +251,11 @@ export class RunMap implements CourseMap {
       seen.add(r.slot);
       let dot = this.dots.get(r.slot);
       if (!dot) {
-        dot = node("circle", { r: 16, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" }, this.svg);
+        dot = node(
+          "circle",
+          { r: r.isMe ? 30 : 22, fill: SLOT_COLORS[r.slot % SLOT_COLORS.length] ?? "#fff" },
+          this.svg,
+        );
         this.dots.set(r.slot, dot);
       }
       dot.setAttribute("cx", this.side(r.x).toFixed(1));

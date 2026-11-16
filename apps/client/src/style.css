@@ -579,21 +579,21 @@ html {
 }
 #minimap .run-edge {
   fill: none;
-  stroke: rgb(29 27 23 / 0.6);
-  stroke-width: 56;
+  stroke: #1d1b17;
+  stroke-width: 96;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 #minimap .run-snow {
   fill: none;
-  stroke: #fff;
-  stroke-width: 34;
+  stroke: #f3ede1;
+  stroke-width: 76;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 #minimap .checkpoint {
-  stroke: #e8402a;
-  stroke-width: 8;
+  stroke: rgb(29 27 23 / 0.45);
+  stroke-width: 6;
 }
 #minimap.run .start {
   stroke-width: 10;
@@ -605,8 +605,9 @@ html {
   fill: #2456c8;
 }
 #minimap.run .next {
-  stroke-width: 7;
+  stroke-width: 9;
 }
 #minimap.run circle.me {
-  stroke-width: 7;
+  stroke: #1d1b17;
+  stroke-width: 9;
 }
