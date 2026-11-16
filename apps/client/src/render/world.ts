@@ -167,6 +167,8 @@ const DIP_DAMPING = 10;
 const DEFAULT_SKY = 0xa8d8f0;
 /** A rider and their shadow fit in a sphere this big around them (m). */
 const RIDER_REACH = 4.5;
+/** Another rider this near the chase camera (m, from the eye to their middle) would fill the view: left out. */
+const CAMERA_CLEAR = 1.9;
 /** Riders further from the camera than this (m) are drawn without their outline. */
 const OUTLINE_FAR = 45;
 /** Riders further from the camera than this (m) are left out of reflections. */
@@ -212,6 +214,7 @@ export class World {
   private viewProjection = new THREE.Matrix4();
   /** Around a rider: the figure, and the shadow it throws. */
   private bounds = new THREE.Sphere(new THREE.Vector3(), RIDER_REACH);
+  private near = new THREE.Vector3();
   private seen = new Set<number>();
   /** Smoothed chase state: heading followed, rider height, distance behind, airborne blend, horizon tilt. */
   private camHeading = 0;
@@ -526,7 +529,13 @@ export class World {
       this.seen.add(r.slot);
       const model = this.rider(env, r.slot);
       model.update(r, dt);
-      const shown = r.isMe || this.inView(model.mesh.position);
+      const crowding =
+        !shot &&
+        this.near
+          .copy(model.mesh.position)
+          .setY(r.y + 0.9)
+          .distanceTo(this.camera.position) < CAMERA_CLEAR;
+      const shown = r.isMe || (this.inView(model.mesh.position) && !crowding);
       model.mesh.visible = shown;
       if (shown) {
         this.detail(model.mesh, r, focus);
