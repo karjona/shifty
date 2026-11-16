@@ -21,6 +21,12 @@
 //! The centre line is built from pieces (straights and arcs joined
 //! smoothly), so any position projects exactly onto `(s, offset)`.
 //!
+//! What bounds the run is real on each side ([`EdgeKind`]): a bank that
+//! rises (ride up it and it throws you back), trees standing at the edge,
+//! netting that catches you, or a rock wall you scrape along. Gates (two
+//! poles, [`GateDef`]) are passed between; a cliff band ([`Cliff`]) is a
+//! face nobody rides.
+//!
 //! The runs: [`MOUNTAIN`] (the mountain run, from the summit to the village)
 //! and [`glades::GLADES`] (the glades, from the ridge to the lake).
 
@@ -48,8 +54,29 @@ pub mod tuning {
     pub const VALLEY_FLAT: f32 = 50.0;
     pub const VALLEY_RISE: f32 = 0.45;
     pub const VALLEY_SOFT: f32 = 60.0;
-    /// Riders can ride this far up a wall (at most half of it).
+    /// Riders can ride this far up a bank (at most half of it).
     pub const WALL_RIDE: f32 = 3.0;
+    /// How far past the groomed half riders reach where trees, netting or
+    /// rock stand at the edge.
+    pub const TREES_RIDE: f32 = 1.0;
+    pub const NETTING_RIDE: f32 = 1.5;
+    pub const ROCK_RIDE: f32 = 0.0;
+    /// Where the edge changes kind, how far either side of the change its
+    /// reach eases from one to the other.
+    pub const EDGE_EASE: f32 = 8.0;
+    /// At the edge: how much of an impact counts toward knocking you down
+    /// (banks and netting give), speed lost along it per m/s of impact, and
+    /// speed kept per tick in contact (netting catches you, rock scrapes,
+    /// boughs brush).
+    pub const BANK_IMPACT: f32 = 0.6;
+    pub const NETTING_IMPACT: f32 = 0.3;
+    pub const EDGE_FRICTION: f32 = 0.5;
+    pub const ROCK_FRICTION: f32 = 1.0;
+    pub const NETTING_KEEP: f32 = 0.96;
+    pub const ROCK_KEEP: f32 = 0.985;
+    pub const TREES_KEEP: f32 = 0.99;
+    /// Bounced back off an edge: this much of the speed into it.
+    pub const EDGE_BOUNCE: f32 = 0.3;
     /// The run's walls always rise at least this far above its edge: where
     /// the mountain falls away beside the run (a bench across a slope), a
     /// berm holds riders in, and fades into the slope over `BERM_FADE`.
@@ -182,6 +209,74 @@ pub enum Feature {
     },
 }
 
+/// What bounds the run on one side.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeKind {
+    /// The snow rises: ride up it and it throws you back.
+    Bank,
+    /// Trees stand at the edge: hit them hard and you go down.
+    Trees,
+    /// Netting: it catches you and slows you, and never knocks you down.
+    Netting,
+    /// A rock wall: you scrape along it, and a hard hit knocks you down.
+    Rock,
+}
+
+impl EdgeKind {
+    /// How far past the groomed half riders reach on this side, beside
+    /// walls `wall` wide.
+    pub fn ride(self, wall: f32) -> f32 {
+        match self {
+            Self::Bank => (wall * 0.5).min(WALL_RIDE),
+            Self::Trees => TREES_RIDE,
+            Self::Netting => NETTING_RIDE,
+            Self::Rock => ROCK_RIDE,
+        }
+    }
+}
+
+/// What bounds the run on its left and its right, from arc length `s` on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edge {
+    pub s: f32,
+    pub left: EdgeKind,
+    pub right: EdgeKind,
+}
+
+/// A gate: two poles `span` apart across the run, centred at `offset`, at
+/// arc length `s`. Crossing `s` between them passes it; outside, it is
+/// missed. The poles are not solid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GateDef {
+    pub s: f32,
+    pub offset: f32,
+    pub span: f32,
+}
+
+impl GateDef {
+    /// Whether crossing at `offset` passes between the poles.
+    pub fn passed(&self, offset: f32) -> bool {
+        (offset - self.offset).abs() <= self.span * 0.5
+    }
+}
+
+/// A cliff band across the run: its lip at arc length `s`, its face
+/// `face` m long (along the run), as steep as the slope bands make it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cliff {
+    pub s: f32,
+    pub face: f32,
+}
+
+/// What is met down the run between the start and the finish, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// Checkpoint `i` of [`Run::checkpoints`].
+    Checkpoint(usize),
+    /// Gate `i` of [`Run::gates`].
+    Gate(usize),
+}
+
 /// What stands on the run. To the sim all of it is solid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObstacleKind {
@@ -226,9 +321,15 @@ pub struct Run {
     pub checkpoints: &'static [f32],
     pub finish_s: f32,
     pub obstacles: &'static [ObstacleDef],
+    /// What bounds it, side by side.
+    pub edges: &'static [Edge],
+    /// The gates, in order down the run.
+    pub gates: &'static [GateDef],
+    pub cliffs: &'static [Cliff],
     pub seed: u32,
     geometry: OnceLock<Geometry>,
     placed: OnceLock<Vec<Obstacle>>,
+    marks: OnceLock<Vec<Mark>>,
 }
 
 #[derive(Debug)]
@@ -338,6 +439,9 @@ impl Run {
         checkpoints: &'static [f32],
         finish_s: f32,
         obstacles: &'static [ObstacleDef],
+        edges: &'static [Edge],
+        gates: &'static [GateDef],
+        cliffs: &'static [Cliff],
         seed: u32,
     ) -> Self {
         Self {
@@ -351,10 +455,34 @@ impl Run {
             checkpoints,
             finish_s,
             obstacles,
+            edges,
+            gates,
+            cliffs,
             seed,
             geometry: OnceLock::new(),
             placed: OnceLock::new(),
+            marks: OnceLock::new(),
         }
+    }
+
+    /// The checkpoints and gates, in the order they are met.
+    pub fn marks(&self) -> &[Mark] {
+        self.marks.get_or_init(|| {
+            let mut marks: Vec<(f32, Mark)> = self
+                .checkpoints
+                .iter()
+                .enumerate()
+                .map(|(i, &s)| (s, Mark::Checkpoint(i)))
+                .chain(
+                    self.gates
+                        .iter()
+                        .enumerate()
+                        .map(|(i, g)| (g.s, Mark::Gate(i))),
+                )
+                .collect();
+            marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+            marks.into_iter().map(|(_, m)| m).collect()
+        })
     }
 
     fn geo(&self) -> &Geometry {
@@ -523,11 +651,65 @@ impl Run {
         )
     }
 
-    /// How far from the centre line riders can go: the run plus a little way
-    /// up its walls.
-    pub fn limit(&self, s: f32) -> f32 {
+    /// What bounds the run at `s` on its right (`right`) or its left.
+    pub fn edge_at(&self, s: f32, right: bool) -> EdgeKind {
+        let i = self.edges.partition_point(|e| e.s <= s).max(1) - 1;
+        let e = self.edges[i];
+        if right { e.right } else { e.left }
+    }
+
+    /// How far from the centre line riders can go on one side: the run plus
+    /// a little way up its bank, or to the trees, netting or rock beside it
+    /// (eased where the edge changes kind).
+    pub fn limit_on(&self, s: f32, right: bool) -> f32 {
         let w = self.width_at(s);
-        w.half + (w.wall * 0.5).min(WALL_RIDE)
+        let kind = |e: &Edge| if right { e.right } else { e.left };
+        let mut ride = kind(&self.edges[0]).ride(w.wall);
+        for e in &self.edges[1..] {
+            if s < e.s - EDGE_EASE {
+                break;
+            }
+            let t = smoothstep(e.s - EDGE_EASE, e.s + EDGE_EASE, s);
+            ride += (kind(e).ride(w.wall) - ride) * t;
+        }
+        w.half + ride
+    }
+
+    /// How far from the centre line riders can go on the wider side.
+    pub fn limit(&self, s: f32) -> f32 {
+        self.limit_on(s, false).max(self.limit_on(s, true))
+    }
+
+    /// Keeps a body of `radius` at `pos` (moving at `vel`) between the run's
+    /// edges: it rides back off a bank, is caught by netting, brushes along
+    /// trees and scrapes along rock. Returns the impact that counts toward
+    /// knocking it down (m/s into the edge, less for what gives).
+    pub fn hold_in(&self, pos: &mut Vec3, vel: &mut Vec3, radius: f32) -> Option<f32> {
+        let (s, offset) = self.project(pos.x, pos.z);
+        let right = offset > 0.0;
+        let limit = self.limit_on(s, right) - radius;
+        if offset.abs() <= limit {
+            return None;
+        }
+        let (rx, rz) = self.centerline(s).right();
+        let sign = if right { -1.0 } else { 1.0 };
+        let (nx, nz) = (rx * sign, rz * sign);
+        let kind = self.edge_at(s, right);
+        let friction = if kind == EdgeKind::Rock {
+            ROCK_FRICTION
+        } else {
+            EDGE_FRICTION
+        };
+        let impact = slide(pos, vel, nx, nz, offset.abs() - limit, friction);
+        let (keep, counts) = match kind {
+            EdgeKind::Bank => (1.0, BANK_IMPACT),
+            EdgeKind::Netting => (NETTING_KEEP, NETTING_IMPACT),
+            EdgeKind::Trees => (TREES_KEEP, 1.0),
+            EdgeKind::Rock => (ROCK_KEEP, 1.0),
+        };
+        vel.x *= keep;
+        vel.z *= keep;
+        Some(impact * counts)
     }
 
     /// The valley where the run is at arc length `s`.
@@ -574,8 +756,21 @@ impl Run {
 
     /// Height of what is built on (or dug into) the run at `(s, offset)`.
     pub fn features_at(&self, s: f32, offset: f32) -> f32 {
+        self.built_at(s, offset, true)
+    }
+
+    /// Height of what is built on the run at `(s, offset)`, leaving out what
+    /// is dug into it (gullies, bowls): its jumps, rollers and spines.
+    pub fn jumps_at(&self, s: f32, offset: f32) -> f32 {
+        self.built_at(s, offset, false)
+    }
+
+    fn built_at(&self, s: f32, offset: f32, dug: bool) -> f32 {
         let mut h = 0.0;
         for f in self.features {
+            if !dug && matches!(f, Feature::Gully { .. } | Feature::Bowl { .. }) {
+                continue;
+            }
             h += match *f {
                 Feature::Table {
                     s: s0,
@@ -748,6 +943,29 @@ impl Run {
     }
 }
 
+/// Moves `pos` by `depth` along `(nx, nz)` (out of an edge) and takes the
+/// speed into it away, bouncing a little and losing `friction` m/s along
+/// it per m/s of impact. Returns the speed of the impact.
+fn slide(pos: &mut Vec3, vel: &mut Vec3, nx: f32, nz: f32, depth: f32, friction: f32) -> f32 {
+    pos.x += nx * depth;
+    pos.z += nz * depth;
+    let vn = vel.x * nx + vel.z * nz;
+    if vn >= 0.0 {
+        return 0.0;
+    }
+    let tx = vel.x - nx * vn;
+    let tz = vel.z - nz * vn;
+    let t = sqrt(tx * tx + tz * tz);
+    let keep = if t > 1e-4 {
+        1.0 - (friction * -vn).min(t) / t
+    } else {
+        0.0
+    };
+    vel.x = tx * keep - nx * vn * EDGE_BOUNCE;
+    vel.z = tz * keep - nz * vn * EDGE_BOUNCE;
+    -vn
+}
+
 impl Geometry {
     fn seg(&self, s: f32) -> &Seg {
         let i = self.segs.partition_point(|g| g.s0 <= s);
@@ -878,11 +1096,23 @@ const fn turn(radius: f32, degrees: f32) -> Piece {
     Piece::Turn { radius, degrees }
 }
 
+const fn edge(s: f32, left: EdgeKind, right: EdgeKind) -> Edge {
+    Edge { s, left, right }
+}
+
+const fn gate(s: f32, offset: f32, span: f32) -> GateDef {
+    GateDef { s, offset, span }
+}
+
+use EdgeKind::{Bank, Netting, Rock, Trees};
+
 /// The mountain run: ~2 km from the summit lift station down to the village.
-/// A flat start, a steep start ramp onto a wide open slope (sweeping turns,
-/// rollers, a big table), tree-lined S-turns past the chairlift, a bench
-/// that ends in a cliff drop, a winding gully, more open slope with side
-/// kickers and a second table, and a final pitch to the finish.
+/// A flat start, a steep start ramp onto an open slope fenced with netting
+/// (sweeping turns, rollers, a big table, the chairlift's towers at its
+/// edge), tree-lined S-turns, a bench that ends in a cliff, a winding gully
+/// between rock walls, more open slope with side kickers and a second
+/// table, and a final pitch to the finish. It breathes: 22 m wide at most,
+/// 13 m through the trees, 10 m in the gully.
 pub static RUN: Run = Run::new(
     (0.0, 0.0, 0.0),
     &[
@@ -916,19 +1146,30 @@ pub static RUN: Run = Run::new(
         Piece::Straight(260.0),
     ],
     &[
-        w(0.0, 11.0, 6.0),
-        w(60.0, 16.0, 8.0),
-        w(120.0, 20.0, 10.0),
-        w(700.0, 20.0, 10.0),
-        w(730.0, 13.0, 8.0),
-        w(960.0, 13.0, 8.0),
-        w(990.0, 15.0, 8.0),
-        w(1100.0, 15.0, 8.0),
-        w(1120.0, 8.0, 9.0),
-        w(1350.0, 8.0, 9.0),
-        w(1380.0, 18.0, 10.0),
-        w(1750.0, 20.0, 10.0),
-        w(2150.0, 25.0, 10.0),
+        w(0.0, 8.0, 6.0),
+        w(45.0, 8.0, 6.0),
+        w(100.0, 11.0, 8.0),
+        w(330.0, 11.0, 8.0),
+        w(360.0, 8.5, 7.0),
+        w(470.0, 8.5, 7.0),
+        w(500.0, 10.0, 8.0),
+        w(690.0, 10.0, 8.0),
+        w(715.0, 6.5, 5.0),
+        w(990.0, 6.5, 5.0),
+        w(1010.0, 8.0, 6.0),
+        w(1058.0, 8.0, 6.0),
+        w(1068.0, 10.0, 7.0),
+        w(1100.0, 10.0, 7.0),
+        w(1120.0, 5.0, 2.5),
+        w(1350.0, 5.0, 2.5),
+        w(1375.0, 9.0, 8.0),
+        w(1500.0, 10.0, 8.0),
+        w(1750.0, 10.0, 8.0),
+        w(1780.0, 8.0, 7.0),
+        w(1950.0, 9.0, 8.0),
+        w(2040.0, 10.0, 8.0),
+        w(2070.0, 14.0, 10.0),
+        w(2150.0, 18.0, 10.0),
     ],
     420.0,
     &[
@@ -939,12 +1180,14 @@ pub static RUN: Run = Run::new(
         slope(100.0, 0.32),
         slope(1000.0, 0.30),
         slope(1030.0, 0.10),
-        slope(1060.0, 0.10),
-        slope(1062.0, 1.10),
-        slope(1068.0, 1.10),
-        slope(1070.0, 0.45),
-        slope(1100.0, 0.45),
-        slope(1120.0, 0.26),
+        // The cliff: off the bench's lip, a face of rock, a steep landing.
+        slope(1058.6, 0.10),
+        slope(1059.0, 4.0),
+        slope(1060.6, 4.0),
+        slope(1061.0, 0.7),
+        slope(1090.0, 0.7),
+        slope(1110.0, 0.45),
+        slope(1125.0, 0.26),
         slope(1700.0, 0.30),
         slope(1720.0, 0.36),
         slope(1950.0, 0.36),
@@ -985,14 +1228,14 @@ pub static RUN: Run = Run::new(
         },
         Feature::Table {
             s: 1520.0,
-            offset: -9.0,
-            half_width: 4.0,
+            offset: -5.5,
+            half_width: 3.0,
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
         Feature::Table {
             s: 1620.0,
@@ -1007,46 +1250,84 @@ pub static RUN: Run = Run::new(
         },
         Feature::Table {
             s: 1800.0,
-            offset: 8.0,
-            half_width: 4.0,
+            offset: 4.5,
+            half_width: 3.0,
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
         Feature::Table {
             s: 1870.0,
-            offset: -8.0,
-            half_width: 4.0,
+            offset: -3.5,
+            half_width: 3.0,
             height: 1.2,
             ramp: 6.0,
             table: 2.0,
-            landing: 14.0,
-            dig: 1.0,
-            recover: 8.0,
+            landing: 24.0,
+            dig: 1.5,
+            recover: 10.0,
         },
     ],
     &[250.0, 520.0, 800.0, 1050.0, 1290.0, 1560.0, 1850.0],
     2050.0,
     &[
-        // Chairlift towers up the open slope.
-        tower(380.0, 15.0),
-        tower(480.0, 14.0),
-        tower(580.0, 15.0),
-        tower(680.0, 14.0),
-        // Lone pines in the tree section.
-        pine(760.0, 9.5),
-        pine(812.0, -10.0),
-        pine(866.0, 8.0),
-        pine(915.0, -9.0),
-        pine(940.0, 10.5),
+        // Chairlift towers at the open slope's edge.
+        tower(380.0, 7.6),
+        tower(480.0, 7.8),
+        tower(580.0, 9.0),
+        tower(680.0, 9.0),
+        // Pines standing in the S-turns, close to the edge.
+        pine(745.0, -5.2),
+        pine(812.0, 5.2),
+        pine(866.0, 4.8),
+        pine(905.0, -5.2),
+        pine(950.0, 5.0),
         // Rocks along the open slopes.
-        rock(1400.0, 14.0, 1.5),
-        rock(1700.0, -15.0, 1.8),
-        rock(1760.0, 16.0, 1.2),
+        rock(1400.0, -7.2, 1.2),
+        rock(1705.0, -8.2, 1.3),
+        rock(1765.0, 8.0, 1.0),
     ],
+    &[
+        edge(0.0, Bank, Bank),
+        edge(45.0, Netting, Netting),
+        edge(700.0, Trees, Trees),
+        edge(995.0, Netting, Netting),
+        edge(1112.0, Rock, Rock),
+        edge(1362.0, Netting, Netting),
+        edge(1760.0, Trees, Netting),
+        edge(1990.0, Netting, Netting),
+    ],
+    &[
+        // The open slope: off the line one side, then the other.
+        gate(160.0, -4.0, 8.0),
+        gate(215.0, 4.0, 8.0),
+        gate(405.0, -1.0, 8.0),
+        gate(500.0, 3.5, 8.0),
+        gate(565.0, -3.5, 8.0),
+        gate(635.0, 3.5, 8.0),
+        // The S-turns: on the fast line.
+        gate(712.0, 1.5, 7.0),
+        gate(780.0, 2.0, 7.0),
+        gate(850.0, -2.0, 7.0),
+        gate(916.0, 1.5, 7.0),
+        gate(975.0, 0.0, 8.0),
+        // The gully.
+        gate(1165.0, 1.0, 7.0),
+        gate(1245.0, -1.0, 7.0),
+        gate(1330.0, 0.0, 7.0),
+        // The open slope below, and the final pitch.
+        gate(1415.0, 3.0, 8.0),
+        gate(1598.0, 1.5, 8.0),
+        gate(1740.0, -1.5, 8.0),
+        gate(1975.0, -1.0, 8.0),
+    ],
+    &[Cliff {
+        s: 1058.6,
+        face: 2.4,
+    }],
     0x5_EA50,
 );
 
@@ -1128,7 +1409,8 @@ mod tests {
 
     /// Walk across and along the run in small steps: no steps in the snow.
     /// Where riders go, nothing steeper than a gully wall; beyond, walls may
-    /// be steeper.
+    /// be steeper, and rock steeper still. Along the centre line only a
+    /// cliff's face falls away.
     fn continuous(run: &Run) {
         let mut s = 0.0;
         while s < run.length() {
@@ -1140,7 +1422,14 @@ mod tests {
             while off <= 45.0 {
                 let (x, z) = (f.x + rx * off, f.z + rz * off);
                 let h = run.height(x, z);
-                let steepest = if off.abs() <= ride { 1.6 } else { 3.0 };
+                // Rock walls stand steeper than snow.
+                let steepest = if off.abs() <= ride {
+                    1.6
+                } else if run.edge_at(s, off > 0.0) == EdgeKind::Rock {
+                    6.0
+                } else {
+                    3.0
+                };
                 if let Some(p) = prev {
                     assert!(
                         (h - p).abs() < 0.25 * steepest,
@@ -1157,7 +1446,12 @@ mod tests {
         while s < run.length() + 20.0 {
             let f = run.centerline(s);
             let h = run.height(f.x, f.z);
-            assert!((h - prev).abs() < 0.1 * 1.5, "s {s}: {prev} -> {h}");
+            // Off a cliff's lip, the face falls away.
+            let face = run
+                .cliffs
+                .iter()
+                .any(|c| (c.s - 0.5..c.s + c.face + 0.5).contains(&s));
+            assert!(face || (h - prev).abs() < 0.1 * 1.5, "s {s}: {prev} -> {h}");
             prev = h;
             s += 0.1;
         }
@@ -1211,7 +1505,7 @@ mod tests {
 
     #[test]
     fn the_first_run_never_changes() {
-        assert_eq!(fingerprint(&RUN), 0xaedb_f188_b704_ade5);
+        assert_eq!(fingerprint(&RUN), 0xe7fa_b387_df0a_3d58);
     }
 
     #[test]
@@ -1251,10 +1545,10 @@ mod tests {
         let f = run.centerline(100.0);
         let (wx, wz) = f.at_offset(run.width_at(100.0).half + 5.0);
         assert!(run.height(wx, wz) > run.height(f.x, f.z) + 4.0);
-        // A wide bowl whose sides rise.
-        assert!(run.width_at(400.0).half > 20.0);
+        // A bowl whose sides rise.
+        assert!(run.width_at(400.0).half > 10.0);
         let f = run.centerline(300.0);
-        let (sx, sz) = f.at_offset(-20.0);
+        let (sx, sz) = f.at_offset(-12.0);
         assert!(run.height(sx, sz) > run.height(f.x, f.z) + 1.5);
         // Pines in the glades.
         let pines = run
@@ -1269,6 +1563,158 @@ mod tests {
             let (x, z) = f.at_offset(off);
             run.height(x, z)
         };
-        assert!(at(-2.0) > (at(-11.0) + at(7.0)) * 0.5 + 1.5);
+        assert!(at(0.0) > (at(-7.0) + at(7.0)) * 0.5 + 1.0);
+    }
+
+    /// Everything a gate's span covers near it: a takeoff, a landing or the
+    /// air off a table, a lip or a cliff.
+    fn jump_near(run: &Run, g: &GateDef) -> Option<String> {
+        let (lo, hi) = (g.offset - g.span * 0.5, g.offset + g.span * 0.5);
+        for f in run.features {
+            let (s0, end, c, half) = match *f {
+                Feature::Table {
+                    s,
+                    offset,
+                    half_width,
+                    ramp,
+                    table,
+                    landing,
+                    ..
+                } => (s, s + ramp + table + landing, offset, half_width),
+                Feature::Lip {
+                    s,
+                    offset,
+                    half_width,
+                    ramp,
+                    height,
+                    ..
+                } => (s, s + ramp + 30.0 * height, offset, half_width),
+                _ => continue,
+            };
+            let across = lo < c + half + 2.5 && hi > c - half - 2.5;
+            if across && (s0 - 15.0..end + 5.0).contains(&g.s) {
+                return Some(format!("{f:?}"));
+            }
+        }
+        run.cliffs
+            .iter()
+            .find(|c| (c.s - 40.0..c.s + 60.0).contains(&g.s))
+            .map(|c| format!("{c:?}"))
+    }
+
+    #[test]
+    fn gates_stand_across_the_run_clear_of_the_jumps() {
+        for run in RUNS {
+            assert!((14..=18).contains(&run.gates.len()), "{}", run.gates.len());
+            let mut last = 0.0;
+            for g in run.gates {
+                assert!(g.s > last && g.s < run.finish_s - 10.0, "{g:?}");
+                last = g.s;
+                assert!((6.0..=9.0).contains(&g.span), "{g:?}");
+                let half = run.width_at(g.s).half;
+                assert!(
+                    g.offset.abs() + g.span * 0.5 <= half + 0.01,
+                    "{g:?} in {half}"
+                );
+                assert!(
+                    jump_near(run, g).is_none(),
+                    "{g:?} by {:?}",
+                    jump_near(run, g)
+                );
+                // Nothing stands in the way into it.
+                for o in run.obstacles {
+                    let before = g.s - o.s;
+                    let inside = (o.offset - g.offset).abs() < g.span * 0.5 + o.radius;
+                    assert!(!((-3.0..8.0).contains(&before) && inside), "{g:?}: {o:?}");
+                }
+            }
+            // The first once riders have spread from the start.
+            assert!(run.gates[0].s > 150.0);
+            // In order among the checkpoints.
+            assert_eq!(run.marks().len(), run.gates.len() + run.checkpoints.len());
+        }
+    }
+
+    #[test]
+    fn gates_are_passed_between_their_poles() {
+        let g = GateDef {
+            s: 10.0,
+            offset: 2.0,
+            span: 8.0,
+        };
+        assert!(g.passed(2.0) && g.passed(-1.9) && g.passed(5.9));
+        assert!(!g.passed(-2.1) && !g.passed(6.1));
+    }
+
+    #[test]
+    fn the_runs_are_narrow_and_breathe() {
+        for run in RUNS {
+            let mut s = run.marks().first().map_or(0.0, |_| 120.0);
+            let (mut narrowest, mut widest) = (f32::MAX, 0.0f32);
+            while s < run.finish_s {
+                let half = run.width_at(s).half;
+                narrowest = narrowest.min(half);
+                widest = widest.max(half);
+                assert!(half <= 12.0, "{s}: {half}");
+                s += 5.0;
+            }
+            assert!(narrowest <= 5.0 && widest >= 10.0, "{narrowest} {widest}");
+        }
+    }
+
+    #[test]
+    fn edges_hold_riders_as_they_look() {
+        let run = &RUN;
+        // Into the gully's rock wall at speed: a hard hit. Glancing along
+        // it: scraped, not knocked down.
+        let at = |s: f32, off: f32| {
+            let f = run.centerline(s);
+            let (x, z) = f.at_offset(off);
+            (Vec3::new(x, run.height(x, z), z), f)
+        };
+        assert_eq!(run.edge_at(1200.0, true), EdgeKind::Rock);
+        let (mut pos, f) = at(1200.0, run.limit_on(1200.0, true) + 0.2);
+        let (fx, fz) = f.forward();
+        let (rx, rz) = f.right();
+        let mut vel = Vec3::new(fx * 15.0 + rx * 12.0, 0.0, fz * 15.0 + rz * 12.0);
+        let hard = run.hold_in(&mut pos, &mut vel, 0.45).unwrap();
+        assert!(hard > 10.0, "{hard}");
+        let (mut pos, _) = at(1200.0, run.limit_on(1200.0, true) + 0.2);
+        let mut vel = Vec3::new(fx * 20.0 + rx * 2.0, 0.0, fz * 20.0 + rz * 2.0);
+        let glance = run.hold_in(&mut pos, &mut vel, 0.45).unwrap();
+        assert!(
+            glance < 3.0 && vel.horizontal().length() < 20.0,
+            "{glance} {vel:?}"
+        );
+        // Netting on the open slope gives: a hard hit hardly counts.
+        assert_eq!(run.edge_at(300.0, false), EdgeKind::Netting);
+        let (mut pos, f) = at(300.0, -run.limit_on(300.0, false) - 0.2);
+        let (rx, rz) = f.right();
+        let mut vel = Vec3::new(-rx * 20.0, 0.0, -rz * 20.0);
+        let caught = run.hold_in(&mut pos, &mut vel, 0.45).unwrap();
+        assert!(caught < 8.0, "{caught}");
+        // Rock and trees stand close; banks ride up a way.
+        assert!(run.limit_on(1200.0, true) - run.width_at(1200.0).half < 1.0);
+        assert!(run.limit_on(10.0, true) - run.width_at(10.0).half > 2.0);
+        // The limit eases where the edge changes.
+        let mut s = 0.0;
+        let mut prev = run.limit_on(s, true);
+        while s < run.length() {
+            let l = run.limit_on(s, true);
+            assert!((l - prev).abs() < 0.2, "{s}: {prev} -> {l}");
+            prev = l;
+            s += 0.5;
+        }
+    }
+
+    #[test]
+    fn the_cliff_is_a_face_nobody_rides() {
+        let run = &RUN;
+        let c = run.cliffs[0];
+        let f = run.centerline(c.s);
+        let g = run.centerline(c.s + c.face);
+        let drop = run.height(f.x, f.z) - run.height(g.x, g.z);
+        assert!(drop > 6.0, "{drop}");
+        assert!(drop / c.face > 2.5, "{drop} over {}", c.face);
     }
 }

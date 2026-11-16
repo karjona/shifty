@@ -20,7 +20,7 @@ use crate::capsule::{Segment, apart, separate};
 use crate::circuit::{Circuit, Corner};
 use crate::conditions::Conditions;
 use crate::math::{PI, Pcg32, TAU, Vec3, atan2, clamp, cos, sin, sqrt};
-use crate::mountain::{GLADES, MOUNTAIN, Obstacle, Run};
+use crate::mountain::{GLADES, MOUNTAIN, Mark, Obstacle, Run};
 use crate::surface::{SeaState, Shelter, Surface, SurfaceKind};
 
 /// The sport a course is raced in. It picks the physics, the rules and how
@@ -309,13 +309,15 @@ pub struct Stadium {
     pub outer_limit: f32,
 }
 
-/// The gates of a course, met in order: the start line, then buoys or
-/// checkpoints, then (on an open run) the finish line. On a loop the start
-/// line is also the finish.
+/// The gates of a course, met in order: the start line, then buoys (or, on
+/// a run, its checkpoints and gates by where they stand), then (on an open
+/// run) the finish line. On a loop the start line is also the finish.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Gate {
     Start,
-    /// Buoy `i` of `Course::buoys`.
+    /// Buoy `i` of `Course::buoys`; on a run, gate `i` of its gates (two
+    /// poles to pass between). Missing one counts like a buoy passed on the
+    /// wrong side.
     Buoy(usize),
     /// Checkpoint `i` of the run: a line across it, which you can't miss.
     Checkpoint(usize),
@@ -363,10 +365,8 @@ pub mod tuning {
     pub const WALL_BOUNCE: f32 = 0.3;
     /// Speed kept along a wall after hitting it.
     pub const WALL_FRICTION: f32 = 0.85;
-    /// On a run: speed lost along a wall per m/s of impact, and how much of
-    /// an impact against the run's edge counts (fences give).
+    /// On a run: speed lost along an obstacle per m/s of impact.
     pub const SLIDE_FRICTION: f32 = 0.5;
-    pub const SOFT_WALL: f32 = 0.6;
     pub const RIDER_RADIUS: f32 = 0.9;
     /// A jetski's hull for bumps, from the rider's position: the stern and
     /// the bow along it (m), and half its beam.
@@ -1016,7 +1016,7 @@ impl Course {
     pub fn gate_count(&self) -> usize {
         match &self.line {
             Line::Stadium(_) | Line::Loop(_) => self.buoys.len() + 1,
-            Line::Run(run) => run.checkpoints.len() + 2,
+            Line::Run(run) => run.marks().len() + 2,
         }
     }
 
@@ -1026,14 +1026,33 @@ impl Course {
         }
         match &self.line {
             Line::Stadium(_) | Line::Loop(_) => Gate::Buoy(i - 1),
-            Line::Run(run) if i <= run.checkpoints.len() => Gate::Checkpoint(i - 1),
-            Line::Run(_) => Gate::Finish,
+            Line::Run(run) => match run.marks().get(i - 1) {
+                Some(&Mark::Checkpoint(c)) => Gate::Checkpoint(c),
+                Some(&Mark::Gate(g)) => Gate::Buoy(g),
+                None => Gate::Finish,
+            },
+        }
+    }
+
+    /// Whether crossing buoy (or, on a run, gate) `i`'s line at `offset`
+    /// passes it on the correct side (or between its poles).
+    pub fn passes_mark(&self, i: usize, offset: f32) -> bool {
+        match self.line {
+            Line::Run(run) => run.gates[i].passed(offset),
+            Line::Stadium(_) | Line::Loop(_) => {
+                let buoy = &self.buoys[i];
+                match buoy.keep {
+                    Keep::Right => offset < buoy.offset,
+                    Keep::Left => offset > buoy.offset,
+                }
+            }
         }
     }
 
     pub fn gate_s(&self, i: usize) -> f32 {
         match (self.gate(i), &self.line) {
             (Gate::Start, _) => self.start_s,
+            (Gate::Buoy(g), Line::Run(run)) => run.gates[g].s,
             (Gate::Buoy(b), _) => self.buoys[b].s,
             (Gate::Checkpoint(c), Line::Run(run)) => run.checkpoints[c],
             (Gate::Finish, Line::Run(run)) => run.finish_s,
@@ -1136,15 +1155,8 @@ impl Course {
                 }
             }
             Line::Run(run) => {
-                let (s, offset) = run.project(pos.x, pos.z);
-                let limit = run.limit(s) - radius;
-                if offset.abs() > limit {
-                    let (rx, rz) = run.centerline(s).right();
-                    let sign = if offset > 0.0 { -1.0 } else { 1.0 };
-                    let depth = offset.abs() - limit;
-                    // Fences and netting give: glancing along them costs
-                    // little, and hits count for less.
-                    note(slide(pos, vel, rx * sign, rz * sign, depth) * SOFT_WALL);
+                if let Some(impact) = run.hold_in(pos, vel, radius) {
+                    note(impact);
                 }
                 if let Some(impact) =
                     collide_obstacles(pos, vel, run.obstacles().iter().copied(), radius, false)

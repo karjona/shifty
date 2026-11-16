@@ -12,13 +12,14 @@
 //! `disqualify`), placed behind everyone else.
 //!
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
-//! order (on a loop the start line is also the finish). In summer, passing a
-//! buoy on the correct side fills the speed meter one step (a passive
-//! top-speed bonus) and passing it on the wrong side empties it, and so does
-//! a bail. In winter there is no meter. Tricks never make you faster: they
+//! order (on a loop the start line is also the finish). On the water,
+//! passing a buoy on the correct side fills the speed meter one step (a
+//! passive top-speed bonus) and passing it on the wrong side empties it, and
+//! so does a bail. On the snow there is no meter: a run's gates are passed
+//! between their poles. A buoy or a gate missed counts as a miss. Tricks never make you faster: they
 //! score points (half for a sketchy landing).
 
-use crate::course::{Course, Gate, Keep};
+use crate::course::{Course, Gate};
 
 pub mod tuning {
     use crate::TICK_HZ;
@@ -372,18 +373,13 @@ pub fn pass_gates(
             kind: EventKind::Checkpoint { index: index as u8 },
         }),
         Gate::Buoy(index) => {
-            let buoy = &course.buoys[index];
-            let ok = match buoy.keep {
-                Keep::Right => offset < buoy.offset,
-                Keep::Left => offset > buoy.offset,
-            };
-            if ok {
-                p.meter = (p.meter + 1).min(METER_MAX);
-            } else {
-                p.meter = 0;
-                if live {
-                    p.misses = p.misses.saturating_add(1);
-                }
+            let ok = course.passes_mark(index, offset);
+            // The snow has no meter: a missed gate only counts.
+            if course.sport.has_meter() {
+                p.meter = if ok { (p.meter + 1).min(METER_MAX) } else { 0 };
+            }
+            if !ok && live {
+                p.misses = p.misses.saturating_add(1);
             }
             events.push(SimEvent {
                 slot,

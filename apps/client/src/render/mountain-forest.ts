@@ -127,6 +127,9 @@ const CHUNK_POINTS = 28;
 const FAR_CELL = 320;
 /** A stretch of the near forest further than this from the camera (m) is drawn as its trees from far off. */
 const DETAIL_FAR = 170;
+/** Where trees bound the run, their trunks stand this far past the riding limit (m), with a gap in the row at this share of the run's points. */
+const EDGE_TRUNK = 0.35;
+const EDGE_GAPS = 0.25;
 /** A tree's longest boughs end at least this far beyond the riding limit (m). */
 const EDGE_ROOM = 1.2;
 /** A tree's shade is thrown no further than this (m). */
@@ -180,7 +183,7 @@ function pick(kinds: Kind[], r: number): number {
   return kinds.length - 1;
 }
 
-/** The closest point of the run's centre line (its points every few metres). */
+/** The closest point of the run's centre line (its points every few metres), and the riding limit on that side. */
 function nearest(run: RunData, x: number, z: number): { dist: number; limit: number; index: number } {
   let best = Infinity;
   let index = 0;
@@ -192,7 +195,9 @@ function nearest(run: RunData, x: number, z: number): { dist: number; limit: num
       index = i;
     }
   }
-  return { dist: Math.sqrt(best), limit: run.path[index]!.limit, index };
+  const p = run.path[index]!;
+  const right = (x - p.x) * -Math.cos(p.yaw) + (z - p.z) * Math.sin(p.yaw) > 0;
+  return { dist: Math.sqrt(best), limit: right ? p.limitR : p.limitL, index };
 }
 
 /**
@@ -222,6 +227,20 @@ export function plantForest(site: ForestSite): Tree[] {
     const section = scenery.forest(p.s);
     const rx = -Math.cos(p.yaw);
     const rz = Math.sin(p.yaw);
+    // Where trees bound the run, a row of trunks stands right at the edge
+    // riders are stopped at.
+    for (const side of [-1, 1]) {
+      if ((side > 0 ? p.edgeR : p.edgeL) !== "trees" || rand() < EDGE_GAPS) continue;
+      const out = (side > 0 ? p.limitR : p.limitL) + EDGE_TRUNK + rand() * 0.6;
+      const along = (rand() - 0.5) * 2;
+      spots.push({
+        x: p.x + rx * side * out + Math.sin(p.yaw) * along,
+        z: p.z + rz * side * out + Math.cos(p.yaw) * along,
+        kind: SOLID[solid++ % SOLID.length]!,
+        scale: 0.8 + rand() * 0.25,
+        solid: true,
+      });
+    }
     for (const side of [-1, 1]) {
       const tries = Math.round(2.2 * section + rand());
       for (let k = 0; k < tries; k++) {

@@ -172,6 +172,8 @@ export class Hud {
   private split: { html: string; until: number } | null = null;
   /** Time trial: the ghosts the splits read against (none yet: your time alone). Null outside a time trial. */
   trial: GhostSplits[] | null = null;
+  /** On a run, how many checkpoints it has (its gates are among the course's gates too). */
+  checkpoints: number | null = null;
   /** Time trial: the lap the splits count in (its start tick), and its splits so far (ticks into it). */
   private lapStart = -1;
   private lapSplits: number[] = [];
@@ -241,10 +243,10 @@ export class Hud {
       if (race.trial && (e.kind === "lap" || e.kind === "finish")) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "", "good", true);
-        else this.popup(m.missedBuoy, "bad");
+        else this.popup(race.looped ? m.missedBuoy : m.missedGate, "bad");
       } else if (e.kind === "checkpoint") {
         if (race.racing && race.phase === RACING) {
-          this.popup(m.checkpoint((e.index ?? 0) + 1, Math.max(0, race.gates - 2)), "good");
+          this.popup(m.checkpoint((e.index ?? 0) + 1, this.checkpoints ?? Math.max(0, race.gates - 2)), "good");
         }
       } else if (e.kind === "lap") {
         if ((e.lap ?? 0) > 1) this.popup((e.lap ?? 0) === race.laps ? m.finalLap : m.lap(e.lap ?? 0), "big");

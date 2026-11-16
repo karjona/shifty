@@ -4,10 +4,11 @@
 //! exactly by running it too.
 
 use crate::DT;
+use crate::conditions::Rock;
 use crate::course::{Course, Keep, Line};
 use crate::input::{Input, buttons};
 use crate::jetski as jet;
-use crate::math::{TAU, angle_diff, atan2, clamp, sqrt};
+use crate::math::{TAU, angle_diff, atan2, clamp, smoothstep, sqrt};
 use crate::mountain::{Feature, Run};
 use crate::snowboard::tuning as snow;
 use crate::world::{Rider, World};
@@ -16,7 +17,7 @@ use crate::world::{Rider, World};
 pub fn bot_input(world: &World, slot: usize) -> Input {
     match world.course().line {
         Line::Stadium(_) | Line::Loop(_) => jetski_input(world, slot),
-        Line::Run(run) => snowboard_input(world, run, slot),
+        Line::Run(run) => snowboard_input(world, run, slot, SnowBot::of(slot)),
     }
 }
 
@@ -375,6 +376,47 @@ fn stunt_stick(id: u8) -> (f32, f32) {
     }
 }
 
+/// How a snowboard bot rides: how hard it pushes (`pace`, 1 = flat out)
+/// and whether it goes for tricks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SnowBot {
+    pub pace: f32,
+    pub trickster: bool,
+}
+
+/// Each seat's snowboard bot: its tier and whether it tricks. Bots fill
+/// the seats from the last one down, so a field of any size has fast,
+/// middling and slow bots in it, tricksters and not; on a narrow run the
+/// grid counts, so a fast bot starts in each row.
+pub const SNOW_SEATS: [(Tier, bool); crate::MAX_RIDERS] = [
+    (Tier::Middling, true),
+    (Tier::Slow, false),
+    (Tier::Fast, true),
+    (Tier::Middling, true),
+    (Tier::Slow, true),
+    (Tier::Middling, false),
+    (Tier::Slow, false),
+    (Tier::Fast, false),
+];
+
+impl SnowBot {
+    /// The bot in a seat: its tier's pace, and whether it tricks.
+    pub fn of(slot: usize) -> Self {
+        let (tier, trickster) = SNOW_SEATS[slot % crate::MAX_RIDERS];
+        let pace = match tier {
+            Tier::Fast => SNOW_FAST,
+            Tier::Middling => SNOW_MIDDLING,
+            Tier::Slow => SNOW_SLOW,
+        };
+        Self { pace, trickster }
+    }
+}
+
+/// Each tier's pace on the snow (how fast it takes the bends, how much it tucks).
+const SNOW_FAST: f32 = 0.97;
+const SNOW_MIDDLING: f32 = 0.92;
+const SNOW_SLOW: f32 = 0.84;
+
 /// Slower than this (m/s) on the snow, a bot skates whatever the bend.
 const STUCK_SPEED: f32 = 3.0;
 
@@ -384,36 +426,41 @@ const STUCK_SPEED: f32 = 3.0;
 /// pop and let go at the lip; in the air they spin a 360 when there is time
 /// for it, and grab otherwise. Past the finish they pull up in the finish
 /// area (see `finish_area_input`).
-fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
+pub fn snowboard_input(world: &World, run: &Run, slot: usize, bot: SnowBot) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
     };
-    let (s, _) = run.project(r.pos.x, r.pos.z);
+    let (s, off) = run.project(r.pos.x, r.pos.z);
     if s > run.finish_s {
         return finish_area_input(world, run, slot, &r, s);
     }
     let speed = r.speed();
     let half = run.width_at(s).half;
-    let pace = 0.86 + (slot % 3) as f32 * 0.05;
-    let trickster = slot % 3 != 1;
-    let mut lane = clamp(
-        ((slot % 4) as f32 - 1.5) * 0.3 * half,
-        -half + 2.0,
-        half - 2.0,
-    );
+    let SnowBot { pace, trickster } = bot;
+    // Nearly stopped, aim close by: a short way round whatever is in front.
+    let look = if speed < STUCK_SPEED {
+        3.0
+    } else {
+        6.0 + speed * 0.4
+    };
+    let rocks = world.cover_rocks();
+    let mut lane = snow_line(run, rocks, slot, s + look);
 
-    // The next table or lip: line up with it, load a pop, let go at the lip.
+    // The next table or lip on its line: a trickster loads a pop and lets
+    // go at the lip.
     let mut jump = false;
     for f in run.features {
+        // Only where the landing is long enough for a popped jump.
         let (s0, offset, half_width, ramp) = match *f {
             Feature::Table {
                 s,
                 offset,
                 half_width,
                 ramp,
+                landing,
                 ..
-            }
-            | Feature::Lip {
+            } if landing >= POP_LANDING => (s, offset, half_width, ramp),
+            Feature::Lip {
                 s,
                 offset,
                 half_width,
@@ -423,17 +470,14 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
             _ => continue,
         };
         let to_lip = s0 + ramp - s;
-        if !(0.0..60.0).contains(&to_lip) {
+        if !trickster || !(0.0..60.0).contains(&to_lip) {
             continue;
         }
-        if !trickster {
-            continue;
+        let on_line = (snow_line(run, rocks, slot, s0 + ramp) - offset).abs() < half_width - 1.0;
+        if on_line {
+            jump = to_lip > speed * DT * 1.5 && to_lip < speed * POP_LOAD;
+            break;
         }
-        if half_width.is_finite() {
-            lane = offset;
-        }
-        jump = to_lip > speed * DT * 1.5 && to_lip < speed * 0.6 + 1.0;
-        break;
     }
 
     // Round a spine, on the side the lane is on.
@@ -458,33 +502,13 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
         }
     }
 
-    // Steer round whatever stands in the line ahead (to the side nearer
-    // the middle of the run).
-    let rocks = world
-        .cover_rocks()
-        .iter()
-        .map(|k| (k.s, k.offset, k.obstacle.radius));
-    for (os, offset, radius) in run
-        .obstacles
-        .iter()
-        .map(|o| (o.s, o.offset, o.radius))
-        .chain(rocks)
-    {
-        let ahead = os - s;
-        let clear = radius + 2.5;
-        if (0.0..50.0).contains(&ahead) && (offset - lane).abs() < clear {
-            lane = if offset > 0.0 {
-                offset - clear
-            } else {
-                offset + clear
-            };
-        }
-    }
+    let near = look + DODGE_AHEAD;
     // Among trees, dodging one can lead into the next: then the nearest
     // lane clear of every trunk (and rock) close ahead.
     let blocked = |l: f32| {
         let near = |os: f32, offset: f32, radius: f32| {
-            (0.0..TREE_LOOK).contains(&(os - s)) && (offset - l).abs() < radius + TREE_CLEAR
+            (0.0..near.min(TREE_LOOK)).contains(&(os - s))
+                && (offset - l).abs() < radius + TREE_CLEAR
         };
         run.obstacles.iter().any(|o| near(o.s, o.offset, o.radius))
             || world
@@ -507,44 +531,67 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
         }
     }
 
-    // Nearly stopped, aim close by: a short way round whatever is in front.
-    let look = if speed < STUCK_SPEED {
-        3.0
-    } else {
-        8.0 + speed * 0.5
-    };
-    let (tx, tz) = run.centerline(s + look).at_offset(lane);
+    // Aim past the line by some of how far off it the bot is, to catch up.
+    let behind = snow_line(run, rocks, slot, s) - off;
+    let room = half - 1.0;
+    let mut aim = clamp(lane + CATCH_UP * behind, -room, room);
+    let mut look = look;
+    // Held up against something: round it, on the side the bot is on.
+    if speed < STUCK_SPEED {
+        let against = run
+            .obstacles
+            .iter()
+            .map(|o| (o.s, o.offset, o.radius))
+            .chain(rocks.iter().map(|k| (k.s, k.offset, k.obstacle.radius)))
+            .find(|&(os, offset, radius)| {
+                (-1.0..4.0).contains(&(os - s)) && (offset - off).abs() < radius + 1.2
+            });
+        if let Some((os, offset, radius)) = against {
+            let side = if off >= offset { 1.0 } else { -1.0 };
+            aim = clamp(offset + side * (radius + 1.8), -room, room);
+            look = (os - s).max(0.0) + 3.0;
+        }
+    }
+    let (tx, tz) = run.centerline(s + look).at_offset(aim);
     let desired = atan2(tx - r.pos.x, tz - r.pos.z);
     let heading = if speed > 3.0 {
         atan2(r.vel.x, r.vel.z)
     } else {
         r.yaw
     };
-    let steer = clamp(-angle_diff(heading, desired) * 2.0, -1.0, 1.0);
+    let steer = clamp(-angle_diff(heading, desired) * 3.0, -1.0, 1.0);
 
-    // Speed: the tightest bend in the next stretch sets how fast to go.
+    // Speed: the tightest bend of the line in the next stretch (the run's
+    // and its own weave through the gates) sets how fast to go.
     let ahead = 20.0 + speed * 1.5;
     let mut bend: f32 = 0.0;
     let mut d = 10.0;
     while d <= ahead {
         let a = run.centerline(s + d - 10.0).yaw;
         let b = run.centerline(s + d + 10.0).yaw;
-        bend = bend.max(angle_diff(a, b).abs() / 20.0);
+        let line = |t: f32| snow_line(run, rocks, slot, t);
+        let weave = line(s + d - 10.0) - 2.0 * line(s + d) + line(s + d + 10.0);
+        bend = bend.max(angle_diff(a, b).abs() / 20.0 + weave.abs() / 100.0);
         d += 10.0;
     }
-    let safe = if bend > 1e-3 {
-        sqrt(snow::CARVE_GRIP * 0.85 / bend) * pace
-    } else {
-        f32::MAX
+    // The fastest a carve makes that bend, standing tall and tucked.
+    let carve = |grip: f32| {
+        if bend > 1e-3 {
+            sqrt(grip * 0.85 / bend) * pace
+        } else {
+            f32::MAX
+        }
     };
+    let safe = carve(snow::CARVE_GRIP);
+    let tucked = carve(snow::CARVE_GRIP * (1.0 - snow::TUCK_TURN_LOSS));
     let lean = if speed > safe + 1.5 {
         -clamp((speed - safe) / 4.0, 0.3, 1.0)
     } else if speed < STUCK_SPEED {
         // Nearly stopped (back up after a fall, held up by a rock): skate on.
         1.0
-    } else if speed < safe - 2.0 && bend < 1.0 / 250.0 {
-        // Tuck only where it is open: tucked, you carve wider.
-        pace
+    } else if speed < tucked - 2.0 {
+        // Tuck wherever a tucked carve still makes the bends ahead.
+        pace.min(1.0)
     } else {
         0.0
     };
@@ -571,10 +618,113 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
     Input::from_analog(0.0, 0.0, 0.0, 0)
 }
 
+/// The offset a bot rides at arc length `t`: its line through the gates
+/// (see [`gate_line`]), swinging round whatever stands on it (on the side
+/// the line is on, or toward the middle of the run), easing out after the
+/// gate before it if there is one, and kept inside the run.
+pub fn snow_line(run: &Run, rocks: &[Rock], slot: usize, t: f32) -> f32 {
+    let base = gate_line(run, slot, t);
+    let mut swing: f32 = 0.0;
+    let obstacles = run
+        .obstacles
+        .iter()
+        .map(|o| (o.s, o.offset, o.radius))
+        .chain(rocks.iter().map(|k| (k.s, k.offset, k.obstacle.radius)));
+    for (os, offset, radius) in obstacles {
+        if !(os - DODGE_BEFORE..os + DODGE_AFTER).contains(&t) {
+            continue;
+        }
+        let there = gate_line(run, slot, os);
+        let clear = radius + DODGE_CLEAR;
+        if (offset - there).abs() >= clear {
+            continue;
+        }
+        let right = if (there - offset).abs() > 0.3 {
+            there > offset
+        } else {
+            offset < 0.0
+        };
+        let by = if right {
+            offset + clear
+        } else {
+            offset - clear
+        } - there;
+        // Not before passing a gate in the way.
+        let from = run
+            .gates
+            .iter()
+            .filter(|g| (os - DODGE_BEFORE..os).contains(&g.s))
+            .map(|g| g.s + 2.0)
+            .fold(os - DODGE_BEFORE, f32::max);
+        let k = if t < os {
+            smoothstep(from, os - 3.0, t)
+        } else {
+            smoothstep(os + DODGE_AFTER, os + 2.0, t)
+        };
+        if (by * k).abs() > swing.abs() {
+            swing = by * k;
+        }
+    }
+    let room = run.width_at(t).half - 1.2;
+    clamp(base + swing, -room, room)
+}
+
+/// A bot swings round an obstacle on its line from this far before it (m),
+/// back over `DODGE_AFTER` m past it, this far clear of it (beyond its
+/// radius).
+const DODGE_BEFORE: f32 = 35.0;
+const DODGE_AFTER: f32 = 12.0;
+const DODGE_CLEAR: f32 = 2.2;
+
+/// The offset a bot's line through the gates passes at arc length `t`:
+/// through each gate on its own way through it (off the gate's centre by
+/// its seat, inside the poles), easing from one gate to the next, and on its
+/// own lane before the first gate and after the last.
+fn gate_line(run: &Run, slot: usize, t: f32) -> f32 {
+    let seat = (slot % 4) as f32 - 1.5;
+    let half = run.width_at(t).half;
+    let own = clamp(seat * 0.3 * half, -half + 2.0, half - 2.0);
+    let aim = |g: &crate::mountain::GateDef| {
+        let room = (g.span * 0.5 - GATE_MARGIN).max(0.0);
+        g.offset + clamp(seat * 0.5, -room, room)
+    };
+    let i = run.gates.partition_point(|g| g.s <= t);
+    let before = i.checked_sub(1).map(|j| &run.gates[j]);
+    match (before, run.gates.get(i)) {
+        (Some(a), Some(b)) if b.s - a.s <= GATE_LINK => {
+            aim(a) + (aim(b) - aim(a)) * smoothstep(a.s, b.s, t)
+        }
+        (a, b) => {
+            let from = a.map_or(own, |a| {
+                own + (aim(a) - own) * smoothstep(a.s + GATE_EASE, a.s, t)
+            });
+            b.map_or(from, |b| {
+                from + (aim(b) - from) * smoothstep(b.s - GATE_EASE, b.s, t)
+            })
+        }
+    }
+}
+
+/// Bots pass a gate at least this far inside its poles (m); gates closer
+/// than `GATE_LINK` m are ridden as one line, and the line eases onto (and
+/// off) a gate over `GATE_EASE` m.
+const GATE_MARGIN: f32 = 1.6;
+const GATE_LINK: f32 = 130.0;
+const GATE_EASE: f32 = 60.0;
+
 /// Among trees: how far ahead (m) bots look for trunks in their lane, how
 /// far from a trunk (beyond its radius) a lane is clear, and the step
 /// between lanes tried.
 const TREE_LOOK: f32 = 40.0;
+/// Bots steer round an obstacle once it is this far past where they aim (m).
+const DODGE_AHEAD: f32 = 12.0;
+/// Tricksters load a pop for this long before a lip (s): a short pop, for
+/// air enough to trick without flying far past the landing.
+const POP_LOAD: f32 = 0.2;
+/// Tricksters pop off tables whose landing is at least this long (m).
+const POP_LANDING: f32 = 30.0;
+/// How much of its distance off its line a bot aims past it.
+const CATCH_UP: f32 = 0.3;
 const TREE_CLEAR: f32 = 1.6;
 const LANE_STEP: f32 = 0.5;
 

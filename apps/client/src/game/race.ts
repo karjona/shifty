@@ -298,6 +298,8 @@ export class RaceSession implements Stage {
   private wrongWay = new WrongWay();
   private mapRoot: HTMLDivElement;
   private minimap: CourseMap | null = null;
+  /** On a run: each of its gates' place among the course's gates. */
+  private runGates: number[] | null = null;
   private env: Environment | null = null;
   private names = new Map<number, string>();
   private riders = new Map<number, RosterName>();
@@ -667,6 +669,15 @@ export class RaceSession implements Stage {
     return dt;
   }
 
+  /** The buoy (or, on a run, the gate) to pass next, from the next of the course's gates. */
+  private nextMark(looped: boolean, nextGate: number): number | null {
+    if (looped) return nextGate >= 1 ? nextGate - 1 : null;
+    const gates = this.runGates;
+    if (!gates) return null;
+    const i = gates.findIndex((g) => g >= Math.max(1, nextGate));
+    return i < 0 ? null : i;
+  }
+
   private readRiders(): RiderView[] {
     const client = this.client;
     const engine = this.engine;
@@ -783,6 +794,7 @@ export class RaceSession implements Stage {
     this.input.sport = course.sport;
     this.sfx.setCourse(course, client.topSpeed());
     this.hud.tags.sport = course.sport;
+    this.hud.checkpoints = course.sport === "snow" ? course.run.checkpoints.length : null;
     this.mapRoot.replaceChildren();
     if (!render) return;
     this.ready = false;
@@ -830,6 +842,7 @@ export class RaceSession implements Stage {
     this.env = env;
     this.minimap =
       course.sport === "snow" ? new RunMap(this.mapRoot, course.run) : new Minimap(this.mapRoot, course.bay);
+    this.runGates = course.sport === "snow" ? course.run.gates.map((g) => g.gate) : null;
     engine.world.setEnvironment(env);
     const fields = weatherFields();
     const here: WeatherHere = { ...NO_WEATHER };
@@ -1034,7 +1047,7 @@ export class RaceSession implements Stage {
     }
 
     const riders = this.readRiders();
-    const nextBuoy = race.looped && race.nextGate >= 1 ? race.nextGate - 1 : null;
+    const nextBuoy = this.nextMark(race.looped, race.nextGate);
     if (render) {
       const tick = client.renderTick();
       const intro = this.intro?.frame(race, current && this.ready, this.covered, tick, now) ?? null;

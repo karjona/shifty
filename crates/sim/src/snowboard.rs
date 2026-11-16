@@ -1096,6 +1096,70 @@ mod tests {
         assert!(falls <= MAX_RIDERS / 2, "{falls} falls");
     }
 
+    /// Every bot finishes every run in every season, through a spread of
+    /// weathers and seeds, and none is ever held still for long (against a
+    /// trunk, a rock, a wall or the run's edge).
+    #[test]
+    fn no_bot_is_ever_stuck_on_a_run() {
+        use crate::conditions::{Conditions, Event, Season, Weather};
+        for course in [CourseId::Mountain, CourseId::Glades] {
+            for season in [Season::Fall, Season::Winter, Season::Spring] {
+                let rough = [Weather::Storm, Weather::Snow, Weather::Rain, Weather::Windy]
+                    .into_iter()
+                    .find(|&w| season.has(w))
+                    .unwrap_or(Weather::Clear);
+                for (seed, weather) in [(1, Weather::Clear), (6, rough)] {
+                    let conditions = Conditions {
+                        weather,
+                        turns: weather,
+                        ..Conditions::clear(season)
+                    };
+                    let event = Event { course, conditions };
+                    let mut w = World::for_event(event, SurfaceKind::Flat, seed);
+                    for slot in 0..MAX_RIDERS {
+                        w.spawn(slot);
+                    }
+                    w.start_intro();
+                    let mut inputs: Inputs = [None; MAX_RIDERS];
+                    let mut still = [0u32; MAX_RIDERS];
+                    let mut longest = [0u32; MAX_RIDERS];
+                    for _ in 0..60 * 60 * 4 {
+                        for (slot, i) in inputs.iter_mut().enumerate() {
+                            *i = Some(bot_input(&w, slot));
+                        }
+                        w.step(&inputs);
+                        for (slot, r) in w.riders.iter().enumerate() {
+                            let r = r.unwrap();
+                            let p = r.race;
+                            let held = w.race.phase == Phase::Racing
+                                && !p.finished()
+                                && !p.disqualified()
+                                && !r.bailing()
+                                && r.speed() < 1.0;
+                            still[slot] = if held { still[slot] + 1 } else { 0 };
+                            longest[slot] = longest[slot].max(still[slot]);
+                        }
+                        if w.race.phase == Phase::Results {
+                            break;
+                        }
+                    }
+                    let what = format!("{course:?} {season:?} {weather:?} seed {seed}");
+                    assert_eq!(w.race.phase, Phase::Results, "{what}: the race never ended");
+                    for (slot, r) in w.riders.iter().enumerate() {
+                        let p = r.unwrap().race;
+                        assert!(p.finished(), "{what}: bot {slot} never finished: {r:?}");
+                        assert!(p.misses < 3, "{what}: bot {slot} missed {} gates", p.misses);
+                        assert!(
+                            longest[slot] < 60 * 3,
+                            "{what}: bot {slot} held still {} ticks",
+                            longest[slot]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn bots_race_down_the_run_and_the_room_starts_over() {
         let mut w = World::on_course(CourseId::Mountain, SurfaceKind::Flat, 0);

@@ -482,6 +482,7 @@ export const en = {
     wrongWay: "WRONG WAY",
     maxPower: "MAX POWER",
     missedBuoy: "MISSED BUOY",
+    missedGate: "MISSED GATE",
     checkpoint: (i: number, n: number) => `CHECKPOINT ${i}/${n}`,
     finalLap: "FINAL LAP",
     lap: (n: number) => `LAP ${n}`,

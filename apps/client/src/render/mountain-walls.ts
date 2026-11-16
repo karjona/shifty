@@ -11,7 +11,7 @@ import { CelMaterial, inkId } from "./cel/material.ts";
 import { fadingInk, snowLoad } from "./mountain-look.ts";
 import { runAt, runPoint } from "./mountain-props.ts";
 import { rockMaterial } from "./mountain-rocks.ts";
-import type { RunData } from "./mountain.ts";
+import type { CliffData, RunData } from "./mountain.ts";
 import type { RockWalls } from "./runs.ts";
 
 /** Rock's tones as its faces are painted (linear): tops, then faces from light to deep. */
@@ -185,7 +185,7 @@ export function rockWalls(
   const hanging = new Shape();
   const rand = rng(8128);
   for (const wall of walls) {
-    for (const side of [-1, 1]) {
+    for (const side of wall.side ? [wall.side] : [-1, 1]) {
       // The buttresses: each a few metres of the wall.
       const parts: {
         s0: number;
@@ -222,7 +222,8 @@ export function rockWalls(
       const feet = parts.map((b, i) => {
         const at = (s: number, extra: number) => {
           const p = runPoint(run, s);
-          const q = runAt(run, s, side * (p.limit + wall.out + b.jog + extra));
+          const limit = side > 0 ? p.limitR : p.limitL;
+          const q = runAt(run, s, side * (limit + wall.out + b.jog + extra));
           return [q.x, q.z] as const;
         };
         const f = [at(b.s0, 0), at(b.s1, 0), at(b.s1, DEEP), at(b.s0, DEEP)];
@@ -281,4 +282,46 @@ export function rockWalls(
     }
   }
   return [rock.mesh(rockMaterial()), hanging.mesh(icicleMaterial())].filter((m) => m !== null);
+}
+
+/**
+ * A cliff's face across the run: rock from its lip down to its foot, a little
+ * proud of the snow's steep face, in columns of a few metres, out past the
+ * run's edges into the slope either side.
+ */
+export function cliffFaces(
+  run: RunData,
+  cliffs: readonly CliffData[],
+  heights: (points: Float32Array) => Float32Array,
+): THREE.Mesh[] {
+  const rock = new Shape();
+  const rand = rng(4242);
+  for (const c of cliffs) {
+    const reach = runPoint(run, c.s).limit + 10;
+    const cols: number[] = [];
+    for (let o = -reach; o < reach; o += 2 + rand() * 2) cols.push(o);
+    cols.push(reach);
+    // The ground at the lip and at the foot under each column's edge.
+    const pts = new Float32Array(cols.length * 4);
+    cols.forEach((o, i) => {
+      const top = runAt(run, c.s - 0.4, o);
+      const foot = runAt(run, c.s + c.face + 0.8, o);
+      pts.set([top.x, top.z, foot.x, foot.z], i * 4);
+    });
+    const ys = heights(pts);
+    const f = runPoint(run, c.s);
+    const fwd: P = [Math.sin(f.yaw), 0.2, Math.cos(f.yaw)];
+    for (let i = 0; i + 1 < cols.length; i++) {
+      const proud = 0.25 + rand() * 0.5;
+      const at = (k: number, top: boolean): P => {
+        const o = cols[i + k]!;
+        const q = runAt(run, top ? c.s - 0.4 : c.s + c.face + 0.8, o);
+        const y = ys[(i + k) * 2 + (top ? 0 : 1)]!;
+        return [q.x + fwd[0] * proud, top ? y + 0.15 : y - 0.6, q.z + fwd[2] * proud];
+      };
+      const tone = FACES[Math.floor(rand() * FACES.length)]!;
+      rock.quad(at(0, false), at(1, false), at(1, true), at(0, true), fwd, tone);
+    }
+  }
+  return [rock.mesh(rockMaterial())].filter((m) => m !== null);
 }

@@ -598,6 +598,15 @@ html {
 #minimap.run .start {
   stroke-width: 10;
 }
+#minimap .gate.red {
+  fill: #d8342a;
+}
+#minimap .gate.blue {
+  fill: #2456c8;
+}
+#minimap.run .next {
+  stroke-width: 7;
+}
 #minimap.run circle.me {
   stroke-width: 7;
 }
