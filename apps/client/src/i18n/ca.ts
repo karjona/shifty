@@ -369,7 +369,6 @@ export const ca: Messages = {
         "Aterra amb la planxa plana, a favor del pendent, i deixa anar el grab abans!",
       ],
     },
-    lost: (why: string) => `Connexió perduda: ${why}`,
     rejected: (why: string) => `No pots entrar: ${why}`,
     reasons: {
       version: "el joc s'ha actualitzat, torna a carregar la pàgina",
@@ -429,7 +428,7 @@ export const ca: Messages = {
     go: "JA!",
     spectating: "D'espectador · la propera cursa, aviat",
     wrongWay: "SENTIT CONTRARI",
-    maxPower: "✓ POTÈNCIA MÀXIMA",
+    maxPower: "POTÈNCIA MÀXIMA",
     missedBuoy: "BOIA FALLADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VOLTA",

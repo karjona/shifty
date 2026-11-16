@@ -40,11 +40,23 @@ pub const SNAPSHOT_INTERVAL: u32 = 2;
 pub const MAX_INPUT_LEAD_TICKS: u32 = 60;
 /// Window (in ticks) over which the worst input lead is reported.
 const LEAD_WINDOW_TICKS: u32 = 30;
-/// Players silent for this long are removed.
+/// Players whose screen shows the race and sends nothing for this long are
+/// removed. It matches the connection's own idle timeout (see `tls.rs`): a
+/// player whose browser has gone (a closed lid, a phone that suspended it)
+/// is dropped by the connection, one whose page has stopped (hung) by the
+/// room, both after the same while.
 pub const IDLE_TIMEOUT_MS: u64 = 10_000;
 /// The grid waits at most this long for every screen to be ready; screens
 /// still loading then see the race wherever it is.
 pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
+/// A screen still loading the race (it hasn't said the course is on show)
+/// may go silent this long: building and compiling a course can hold a page
+/// for seconds while its connection lives on. The grid waits as long for it,
+/// so it keeps its seat for the whole wait.
+pub const LOADING_TIMEOUT_MS: u64 = GRID_TIMEOUT_TICKS as u64 * 1000 / TICK_HZ as u64;
+/// A player silent for longer than this lets go of everything (no gas, no
+/// stick) instead of riding on with the last input the server had.
+pub const QUIET_INPUT_MS: u64 = 1_000;
 /// A time trial's results stay up this long at most (a forgotten tab):
 /// then its room is over, and done.
 pub const TRIAL_RESULTS_TICKS: u32 = TICK_HZ * 60 * 15;
@@ -59,6 +71,54 @@ const INPUT_RING: usize = 128;
 /// Tilt points by finishing place. Riders who don't finish get the
 /// last place's points.
 pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
+/// CPU riders' names, an initial and a surname, Costa Nevada's mix of
+/// Catalan, Spanish and Californian.
+const BOT_NAMES: [&str; 32] = [
+    "N. Ferrer",
+    "A. Rovira",
+    "P. Navarro",
+    "M. Castell",
+    "B. Soler",
+    "C. Vidal",
+    "J. Serra",
+    "L. Pons",
+    "O. Ribas",
+    "N. Molina",
+    "M. Fuster",
+    "J. Bosch",
+    "H. Delgado",
+    "V. Marín",
+    "I. Campos",
+    "A. Esteve",
+    "L. Romero",
+    "M. Coll",
+    "R. Puig",
+    "O. Sala",
+    "D. Mercader",
+    "Q. Roca",
+    "T. Herrera",
+    "L. Vega",
+    "M. Luna",
+    "S. Reyes",
+    "C. Brooks",
+    "S. Tanaka",
+    "D. Costa",
+    "A. Prat",
+    "I. Mendoza",
+    "N. Hale",
+];
+
+/// A bot's name: the room's seed deals the table out, a name per seat, so
+/// no two in a room are alike and every screen (and a rejoin) agrees.
+fn bot_name(seed: u32, slot: usize) -> &'static str {
+    let mut names = BOT_NAMES;
+    let mut rng = sim::math::Pcg32::new(u64::from(seed));
+    for i in (1..names.len()).rev() {
+        names.swap(i, rng.next_u32() as usize % (i + 1));
+    }
+    names[slot % names.len()]
+}
+
 /// Bots' setups by seat (the same for every sport): a spread, so the field
 /// rides differently.
 const BOT_SETUPS: [[u8; 4]; 8] = [
@@ -395,7 +455,10 @@ impl Room {
         };
         let (name, look) = match (&self.players[slot], kind) {
             (Some(p), _) => (p.name.clone(), p.look.clone()),
-            (None, RiderKind::Bot) => (format!("Bot {}", slot + 1), Vec::new()),
+            (None, RiderKind::Bot) => (
+                bot_name(self.config.surface_seed, slot).to_owned(),
+                Vec::new(),
+            ),
             (None, RiderKind::Human) => return None,
         };
         Some(EventBody::RiderJoined {
@@ -444,16 +507,23 @@ impl Room {
         let slot = match existing {
             Some(slot) => {
                 let p = self.players[slot].as_mut().expect("seated");
-                if p.conn != conn {
+                let fresh = p.conn != conn;
+                if fresh {
                     out.close.push(p.conn);
                     p.conn = conn;
-                    // A new screen: it says again what it has loaded.
+                    // A new screen: it says again what it has loaded, and
+                    // learns the roster from the start.
                     p.ready = 0;
+                    p.events.clear();
+                    p.next_event_id = 0;
                     if let Some(trial) = &mut self.trial {
                         trial.seat(&claims.pid, &claims.look_bytes());
                     }
                 }
                 p.last_packet_ms = now_ms;
+                if fresh {
+                    self.send_roster(slot);
+                }
                 slot
             }
             None => {
@@ -509,24 +579,12 @@ impl Room {
                     ready: 0,
                 };
                 self.arrived += 1;
-                // The newcomer learns the whole roster, in slot order, and
-                // the Tilt table.
                 self.players[slot] = Some(player);
                 self.apply_setups();
                 if let Some(trial) = &mut self.trial {
                     trial.seat(&claims.pid, &claims.look_bytes());
                 }
-                let events: Vec<EventBody> = (0..MAX_RIDERS)
-                    .filter_map(|s| self.roster_event(s))
-                    .collect();
-                let standings = self.config.grand_prix().then(|| self.standings_event());
-                let player = self.players[slot].as_mut().expect("seated");
-                for e in events {
-                    player.push_event(e);
-                }
-                if let Some(t) = standings {
-                    player.push_event(t);
-                }
+                self.send_roster(slot);
                 if let Some(joined) = self.roster_event(slot) {
                     self.broadcast_event(&joined, Some(slot));
                 }
@@ -534,6 +592,22 @@ impl Room {
             }
         };
         Ok((self.welcome(slot, client_time), out))
+    }
+
+    /// A screen joining learns the whole roster, in slot order, and the
+    /// Tilt table.
+    fn send_roster(&mut self, slot: usize) {
+        let events: Vec<EventBody> = (0..MAX_RIDERS)
+            .filter_map(|s| self.roster_event(s))
+            .collect();
+        let standings = self.config.grand_prix().then(|| self.standings_event());
+        let player = self.players[slot].as_mut().expect("seated");
+        for e in events {
+            player.push_event(e);
+        }
+        if let Some(t) = standings {
+            player.push_event(t);
+        }
     }
 
     pub fn welcome(&self, slot: usize, client_time: u16) -> Welcome {
@@ -791,7 +865,13 @@ impl Room {
                     let p = self.players[slot].as_mut().expect("seated");
                     match p.inputs[next as usize % INPUT_RING].take() {
                         Some((t, input)) if t == next => inputs[slot] = Some(input),
-                        _ => self.stats.missed_inputs += 1, // repeat last input
+                        _ => {
+                            self.stats.missed_inputs += 1;
+                            // A late input repeats the last one; a screen gone quiet lets go.
+                            if now_ms.saturating_sub(p.last_packet_ms) > QUIET_INPUT_MS {
+                                inputs[slot] = Some(Input::default());
+                            }
+                        }
                     }
                 }
             }
@@ -821,12 +901,20 @@ impl Room {
             }
         }
 
-        // Idle players are removed.
+        // Idle players are removed (screens still loading this race get longer).
+        let shown = self.event_index as u8 + 1;
         let idle: Vec<ConnId> = self
             .players
             .iter()
             .flatten()
-            .filter(|p| now_ms.saturating_sub(p.last_packet_ms) > IDLE_TIMEOUT_MS)
+            .filter(|p| {
+                let limit = if p.ready >= shown {
+                    IDLE_TIMEOUT_MS
+                } else {
+                    LOADING_TIMEOUT_MS
+                };
+                now_ms.saturating_sub(p.last_packet_ms) > limit
+            })
             .map(|p| p.conn)
             .collect();
         for conn in idle {

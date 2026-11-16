@@ -15,7 +15,13 @@ import { type FrameInput, InputReader } from "../input.ts";
 import { type TrialRace, fetchBoard, fetchGhost } from "../menu/api.ts";
 import { holdLoading } from "../loading.ts";
 import { conditioned, type NetConditions } from "../net/conditioner.ts";
-import { connect, type JoinTicket, type Transport, WebTransportUnavailable } from "../net/transport.ts";
+import {
+  connect,
+  type JoinTicket,
+  type Transport,
+  type TransportClosed,
+  WebTransportUnavailable,
+} from "../net/transport.ts";
 import { Bay } from "../render/bay.ts";
 import { Cape } from "../render/cape.ts";
 import { Mountain } from "../render/mountain.ts";
@@ -75,16 +81,14 @@ export interface PlannedRace {
   conditions: Conditions;
 }
 
-/** What went wrong when the connection to the race server closed (`reason`: the transport's). */
-function closeTrouble(_reason: string): Trouble {
+/** What went wrong when the connection to the race server closed, or the server fell silent. */
+function closeTrouble(_reason: TransportClosed | "silent"): Trouble {
   return { kind: "lost" };
 }
 
 /** What went wrong when the race server couldn't be reached at all. */
 function connectTrouble(e: unknown): Trouble {
-  return {
-    kind: e instanceof WebTransportUnavailable && typeof WebTransport === "undefined" ? "unsupported" : "unreachable",
-  };
+  return { kind: e instanceof WebTransportUnavailable ? e.code : "unreachable" };
 }
 
 /** The races a ticket's room runs, in order (see `planOf`; empty if it can't be read). */
@@ -192,10 +196,9 @@ function parseRoster(json: string, seed: number): { names: Map<number, string>; 
     if (typeof e !== "object" || e === null) continue;
     const slot: unknown = Reflect.get(e, "slot");
     const name: unknown = Reflect.get(e, "name");
-    const bot: unknown = Reflect.get(e, "bot");
     const look: unknown = Reflect.get(e, "look");
     if (typeof slot !== "number" || typeof name !== "string") continue;
-    names.set(slot, bot === true ? `🤖 ${name}` : name);
+    names.set(slot, name);
     const bytes = Array.isArray(look) && look.every((b) => typeof b === "number") ? Uint8Array.from(look) : null;
     // Bots (and riders without a look) are dressed alike on every screen.
     looks.set(slot, (bytes && decodeAppearance(bytes)) ?? botAppearance(seed, slot));
@@ -275,7 +278,7 @@ export class RaceSession implements Stage {
   private event = "";
   private conditions: Conditions = homeConditions("jetski");
   private sport: "jetski" | "snow" = "jetski";
-  private closedReason = "";
+  private closedReason: TransportClosed | null = null;
   /** When the race server was last heard from (ms). */
   private heardAt = performance.now();
   private joined = false;
@@ -467,7 +470,13 @@ export class RaceSession implements Stage {
     void this.connect(engine).catch((e: unknown) => {
       this.joining(null);
       this.state.trouble = connectTrouble(e);
-      this.opts.status(e instanceof Error ? e.message : String(e));
+      this.opts.status(
+        e instanceof WebTransportUnavailable
+          ? messages().race.trouble[e.code].title
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
       void this.card?.hide();
       this.opts.onJoin?.(false);
     });
@@ -737,7 +746,7 @@ export class RaceSession implements Stage {
       this.opts.status(m.rejected(reason === "other" ? String(phase) : m.reasons[reason]));
     } else if (this.closedReason && !done) {
       this.state.trouble ??= closeTrouble(this.closedReason);
-      this.opts.status(m.lost(this.closedReason));
+      this.opts.status(m.trouble.lost.title);
     } else this.opts.status("");
     // A silent race server: a sign after a moment, lost after a while (the connection may take long to close).
     const silent = phase === 1 && !done && this.state.trouble === null ? now - this.heardAt : 0;
@@ -901,8 +910,7 @@ export class RaceSession implements Stage {
     this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
     // Its clock held while the race server is silent, or gone.
-    if (!this.state.stalled && this.state.trouble === null)
-      this.hud.update(race, (me?.speed ?? 0) * 3.6, me ? !me.grounded : false, gp);
+    if (!this.state.stalled && this.state.trouble === null) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
     this.board.update({
       race,
       mySlot: client.slot(),

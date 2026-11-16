@@ -8,6 +8,7 @@ import { devParams } from "../dev-params.ts";
 import { SUN_DIR, SUN_STRENGTH, UNREFLECTED } from "./cel/material.ts";
 import { resetLook } from "./cel/look.ts";
 import { CelPost } from "./cel/post.ts";
+import { aimPrecipitation } from "./cel/precip.ts";
 import { PIXEL_AT_1M, SHADOW_LIFT } from "./cel/rider.ts";
 import { NO_WEATHER, type WeatherHere } from "../game/conditions.ts";
 
@@ -288,6 +289,7 @@ export class World {
     SUN_DIR.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
     // Line widths are in pixels of a 1080p frame, whatever the resolution.
     PIXEL_AT_1M.value = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / 1080;
+    aimPrecipitation(this.camera, this.camLook);
     SHADOW_LIFT.value = this.riderLift;
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.cel.width.value = 1.6 * (size.y / 1080);

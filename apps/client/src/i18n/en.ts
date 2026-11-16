@@ -371,7 +371,6 @@ export const en = {
         "Land flat on the board, along the slope, and let go of the grab first!",
       ],
     },
-    lost: (why: string) => `Connection lost: ${why}`,
     rejected: (why: string) => `Can't join: ${why}`,
     reasons: {
       version: "the game was updated, please reload the page",
@@ -427,7 +426,7 @@ export const en = {
     go: "GO!",
     spectating: "Spectating · next race soon",
     wrongWay: "WRONG WAY",
-    maxPower: "✓ MAX POWER",
+    maxPower: "MAX POWER",
     missedBuoy: "MISSED BUOY",
     checkpoint: (i: number, n: number) => `CHECKPOINT ${i}/${n}`,
     finalLap: "FINAL LAP",
