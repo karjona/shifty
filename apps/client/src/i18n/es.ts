@@ -361,6 +361,7 @@ export const es: Messages = {
       reload: "Recargar",
     },
     joining: "Entrando en la carrera…",
+    waiting: "Esperando al servidor de carreras…",
     controls: "Controles",
     help: {
       jetski: [
@@ -403,7 +404,6 @@ export const es: Messages = {
         "Aterriza con la tabla plana, a favor de la pendiente, ¡y suelta el grab antes!",
       ],
     },
-    lost: (why: string) => `Conexión perdida: ${why}`,
     rejected: (why: string) => `No puedes entrar: ${why}`,
     reasons: {
       version: "el juego se ha actualizado, recarga la página",
@@ -414,13 +414,56 @@ export const es: Messages = {
       started: "este Tilt ya ha empezado",
       over: "esta carrera ya ha terminado",
     },
+    leaving: {
+      tilt: "¿Dejar el Tilt?",
+      race: "¿Dejar la carrera?",
+      tiltOnline:
+        "Un bot ocupa tu sitio el resto del año. Te quedas con lo que te han pagado las carreras que has terminado, pero no con el premio por acabar el Tilt.",
+      tiltSingle: "Tu año en Costa Nevada termina aquí.",
+      raceOnline: "Un bot ocupa tu sitio, y esta carrera no te pagará nada.",
+      raceSingle: "La carrera sigue sin ti.",
+      stay: "Quedarme",
+      leave: "Salir",
+    },
+    trouble: {
+      full: { title: "Esta sala está llena", body: "En una sala corren cuatro personas como mucho." },
+      started: {
+        title: "Este Tilt ya ha empezado",
+        body: "Nadie nuevo entra en un Tilt una vez empezada su primera carrera.",
+      },
+      over: { title: "Esta carrera ha terminado", body: "Ha acabado mientras llegabas." },
+      draining: {
+        title: "El servidor de carreras se está reiniciando",
+        body: "Está terminando sus carreras antes de una actualización. Prueba de nuevo en un momento.",
+      },
+      token: {
+        title: "No se ha podido entrar en la carrera",
+        body: "Tu billete para ella no ha funcionado. Prueba de nuevo desde el menú.",
+      },
+      kicked: {
+        title: "Has estado fuera demasiado tiempo",
+        body: "Tu pantalla no ha dado señales durante unos segundos, así que la carrera ha seguido sin ti.",
+      },
+      unreachable: {
+        title: "No se ha podido llegar al servidor de carreras",
+        body: "Las carreras necesitan UDP, y puede que tu red lo bloquee. Prueba con otra red.",
+      },
+      unsupported: {
+        title: "Este navegador no puede correr en línea",
+        body: "Las carreras necesitan WebTransport: usa un Chrome, Edge, Firefox o Safari recientes.",
+      },
+      lost: {
+        title: "Se ha perdido el servidor de carreras",
+        body: "La conexión se ha cortado y la carrera sigue sin ti.",
+      },
+    },
   },
   hud: {
     getReady: "PREPARADOS",
     go: "¡YA!",
     spectating: "De espectador · la próxima carrera, en breve",
     wrongWay: "SENTIDO CONTRARIO",
-    maxPower: "✓ POTENCIA MÁXIMA",
+    maxPower: "POTENCIA MÁXIMA",
     missedBuoy: "BOYA FALLADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VUELTA",
@@ -478,7 +521,34 @@ export const es: Messages = {
     final: "Final",
     next: "Próxima carrera en",
     podium: "Podio en",
-    back: "Volvemos en",
+    back: "Continuamos en",
+  },
+  end: {
+    continue: "Continuar",
+    tilt: "El Tilt",
+    points: (n: number) => `${n} ptos.`,
+    standings: "Clasificación final",
+    paid: "Lo que ha pagado",
+    waiting: "Esperando los resultados…",
+    late: "Lo que ha pagado aún no ha llegado. Llegará a tus créditos en breve.",
+    pays: {
+      single: "Las carreras de un jugador no pagan créditos.",
+      trial: "Las contrarrelojes no pagan créditos.",
+      alone: "Una sala privada solo paga las carreras con dos personas o más.",
+      nothing: "Esta carrera no ha pagado nada.",
+    },
+    rows: {
+      place: (place: string) => `${place} puesto`,
+      places: (n: number) => `Puestos · ${n} carreras`,
+      style: "Estilo",
+      bonus: "Tilt completado",
+    },
+    credits: "Créditos",
+    again: "Jugar otra vez",
+    findRace: "Buscar otra carrera",
+    backToRoom: "Volver a la sala",
+    changeMode: "Cambiar de modo",
+    mainMenu: "Menú principal",
   },
   podium: {
     card: "El Tilt",
@@ -502,6 +572,8 @@ export const es: Messages = {
     season: "Estación",
     yourBest: "Tu mejor",
     record: "Récord",
+    previousBest: "Tu mejor anterior",
+    previousRecord: "Récord anterior",
     noTime: "Aún sin tiempo",
     rank: (n: number, total: number) => `${n.toLocaleString("es")} de ${total.toLocaleString("es")}`,
     board: "Clasificación",

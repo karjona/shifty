@@ -17,8 +17,6 @@ use crate::room::{ConnId, RaceReport, Room, RoomConfig};
 
 /// Rooms with no humans for this long shut down.
 const EMPTY_ROOM_TTL: Duration = Duration::from_secs(30);
-/// A room whose plan is over closes this long after (its last snapshots).
-const OVER_LINGER: Duration = Duration::from_secs(5);
 /// Rooms that ended are remembered this long (longer than a join token
 /// lives), so tokens signed before the end can't start the plan again.
 const ENDED_MEMORY_SECS: u64 = 15 * 60;
@@ -49,7 +47,10 @@ pub struct RoomHandle {
 pub struct Metrics {
     pub rooms: AtomicUsize,
     pub connections: AtomicUsize,
+    /// People in rooms whose plan is still on (what heartbeats report).
     pub humans: AtomicUsize,
+    /// People still looking at a room whose plan is over.
+    pub watching: AtomicUsize,
     pub ticks: AtomicU64,
     /// Worst tick time in the last report window, microseconds.
     pub tick_us_max: AtomicU64,
@@ -92,7 +93,8 @@ impl Rooms {
     }
 
     /// Remembers that a room's plan is over, and lets its id go: a token
-    /// signed after the end starts the room afresh.
+    /// signed after the end starts the room afresh (the room itself runs on
+    /// for whoever is still in it, out of the count of rooms).
     fn ended(&self, room: &str, now_unix: u64) {
         self.rooms.lock().expect("rooms lock").remove(room);
         let mut ended = self.ended.lock().expect("ended lock");
@@ -166,8 +168,9 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
     let mut next = start + tick;
     let mut conns: HashMap<ConnId, mpsc::Sender<Bytes>> = HashMap::new();
     let mut empty_since = Some(Instant::now());
-    let mut over_since: Option<Instant> = None;
-    let mut humans = 0usize;
+    let mut ended = false;
+    // People in the room as last counted: racing its plan, or looking on after it.
+    let mut counted = (0usize, 0usize);
     let now_ms = |at: Instant| at.duration_since(start).as_millis() as u64;
     loop {
         tokio::time::sleep_until(next.into()).await;
@@ -245,25 +248,24 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
                 warn!(room = %room.config.id, "time trial run dropped (reporter backed up)");
             }
         }
-        let now_humans = room.human_count();
-        if now_humans != humans {
-            rooms
-                .metrics
-                .humans
-                .fetch_add(now_humans, Ordering::Relaxed);
-            rooms.metrics.humans.fetch_sub(humans, Ordering::Relaxed);
-            humans = now_humans;
+        let humans = room.human_count();
+        let now_counted = if room.is_over() {
+            (0, humans)
+        } else {
+            (humans, 0)
+        };
+        if now_counted != counted {
+            count_people(&rooms.metrics, counted, now_counted);
+            counted = now_counted;
         }
 
-        if room.is_over() {
-            let since = *over_since.get_or_insert_with(|| {
-                info!(room = %room.config.id, "plan over");
-                rooms.ended(&room.config.id, now_unix());
-                now
-            });
-            if now.duration_since(since) > OVER_LINGER {
-                break;
-            }
+        if room.is_over() && !ended {
+            ended = true;
+            info!(room = %room.config.id, humans, "plan over");
+            rooms.ended(&room.config.id, now_unix());
+        }
+        if room.is_done() {
+            break;
         }
         if room.human_count() == 0 {
             let since = *empty_since.get_or_insert(now);
@@ -274,6 +276,15 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
             empty_since = None;
         }
     }
+    count_people(&rooms.metrics, counted, (0, 0));
+}
+
+/// Moves a room's people in the metrics from `was` to `now` (racing, watching).
+fn count_people(m: &Metrics, was: (usize, usize), now: (usize, usize)) {
+    m.humans.fetch_add(now.0, Ordering::Relaxed);
+    m.humans.fetch_sub(was.0, Ordering::Relaxed);
+    m.watching.fetch_add(now.1, Ordering::Relaxed);
+    m.watching.fetch_sub(was.1, Ordering::Relaxed);
 }
 
 #[cfg(test)]

@@ -79,6 +79,12 @@ export interface StandingView {
 
 const COUNTDOWN = 1;
 const RACING = 2;
+const RESULTS = 3;
+
+/** A tick, drawn in ink (the HUD's own icon: a buoy passed, a lap done). */
+const CHECK =
+  '<svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path d="M4 12.5l5.2 5.2L20 6.8" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="square"/></svg>';
 
 /** 1st, 1.º, 1r: in the player's language. */
 export function ordinal(n: number): string {
@@ -150,11 +156,12 @@ export class Hud {
     this.popups = el("div", "popups", root);
   }
 
-  /** Show a short message in the middle of the screen. */
-  popup(text: string, tone: "good" | "bad" | "big" = "good"): void {
+  /** Show a short message in the middle of the screen (`check`: with a tick before it). */
+  popup(text: string, tone: "good" | "bad" | "big" = "good", check = false): void {
     const p = document.createElement("div");
     p.className = `popup ${tone}`;
-    p.textContent = text;
+    if (check) p.innerHTML = CHECK;
+    if (text) p.append(text);
     this.popups.append(p);
     setTimeout(() => p.remove(), tone === "big" ? 2200 : 1300);
     while (this.popups.childElementCount > 4) this.popups.firstElementChild?.remove();
@@ -176,7 +183,7 @@ export class Hud {
       } else if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
       if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish")) continue;
       if (e.kind === "buoy") {
-        if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "✓", "good");
+        if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "", "good", true);
         else this.popup(m.missedBuoy, "bad");
       } else if (e.kind === "checkpoint") {
         if (race.racing && race.phase === RACING) {
@@ -253,7 +260,20 @@ export class Hud {
     this.split = { html, until: performance.now() + SPLIT_MS };
   }
 
-  update(race: RaceView, speedKmh: number, airborne: boolean, gp: GrandPrixView | null = null): void {
+  /** What the HUD shows now, so the page is only written when it changes. */
+  private shown = { info: "", speed: "", meter: "", banner: "", bannerClass: "", time: "" };
+  /** The race clock's figure in the race info (it changes every frame, the rest seldom). */
+  private clock: HTMLElement | null = null;
+
+  /** Writes `html` into `target` if it differs from what `key` last wrote; whether it did. */
+  private write(target: HTMLElement, key: "info" | "speed" | "meter", html: string): boolean {
+    if (this.shown[key] === html) return false;
+    this.shown[key] = html;
+    target.innerHTML = html;
+    return true;
+  }
+
+  update(race: RaceView, speedKmh: number, gp: GrandPrixView | null = null): void {
     const m = messages().hud;
     const hz = race.tickHz;
     const left = Math.max(0, race.phaseLength - race.phaseTicks);
@@ -264,45 +284,59 @@ export class Hud {
     } else if (race.phase === RACING && race.phaseTicks < hz) banner = m.go;
     else if (race.phase === RACING && !race.racing) banner = m.spectating;
     if (race.wrongWay && race.phase !== COUNTDOWN) banner = m.wrongWay;
-    if (banner !== this.banner.textContent) {
+    if (banner !== this.shown.banner) {
+      this.shown.banner = banner;
       this.banner.textContent = banner;
       // Each number of the countdown lands on its own.
       this.banner.style.animation = "none";
       void this.banner.offsetWidth;
       this.banner.style.animation = "";
     }
-    this.banner.className = race.wrongWay
+    const bannerClass = race.wrongWay
       ? "wrong"
       : race.phase === COUNTDOWN || (race.phase === RACING && race.phaseTicks < hz)
         ? "count"
         : "";
+    if (bannerClass !== this.shown.bannerClass) {
+      this.shown.bannerClass = bannerClass;
+      this.banner.className = bannerClass;
+    }
+    // The results have the screen: what was popping up goes.
+    if (race.phase === RESULTS && this.popups.childElementCount > 0) this.popups.replaceChildren();
 
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
       const lap = Math.min(Math.max(race.lap, 1), race.laps);
       const score = `<div><span>${m.labels.score}</span> ${race.points}</div>`;
       const first = race.looped
-        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? "✓" : `${lap}/${race.laps}`}</div>${score}`
+        ? `<div><span>${m.labels.lap}</span> ${race.finishTicks > 0 ? CHECK : `${lap}/${race.laps}`}</div>${score}`
         : score;
       const split = this.split && performance.now() < this.split.until ? this.split.html : "";
       const event = gp ? `<div><span>${m.labels.race}</span> ${gp.index + 1}/${gp.count}</div>` : "";
-      this.info.innerHTML =
-        event +
-        first +
-        `<div><span>${m.labels.pos}</span> ${race.place}/${race.racers}</div>` +
-        `<div><span>${m.labels.time}</span> ${formatTime(time, hz)}</div>` +
-        split;
+      // A time trial is you alone: no place to show.
+      const pos = this.trial ? "" : `<div><span>${m.labels.pos}</span> ${race.place}/${race.racers}</div>`;
+      const clock = `<div><span>${m.labels.time}</span> <b class="hud-clock"></b></div>`;
+      if (this.write(this.info, "info", event + first + pos + clock + split)) {
+        this.clock = this.info.querySelector(".hud-clock");
+        this.shown.time = "";
+      }
+      const figure = formatTime(time, hz);
+      if (this.clock && figure !== this.shown.time) {
+        this.shown.time = figure;
+        this.clock.textContent = figure;
+      }
     } else {
-      this.info.innerHTML = "";
+      this.write(this.info, "info", "");
+      this.clock = null;
     }
 
-    this.speed.innerHTML = `${Math.round(speedKmh)}<small>km/h${airborne ? " ✈" : ""}</small>`;
+    this.write(this.speed, "speed", `${Math.round(speedKmh)}<small>km/h</small>`);
     if (race.looped) {
       let pips = "";
       for (let i = 0; i < race.meterMax; i++) pips += `<i class="${i < race.meter ? "on" : ""}"></i>`;
-      this.meter.innerHTML = `<span>${m.labels.power}</span>${pips}`;
+      this.write(this.meter, "meter", `<span>${m.labels.power}</span>${pips}`);
     } else {
-      this.meter.innerHTML = "";
+      this.write(this.meter, "meter", "");
     }
   }
 }

@@ -95,7 +95,12 @@ pub fn quic_server_config(m: &Material) -> Result<quinn::ServerConfig> {
     let tls: quinn::crypto::rustls::QuicServerConfig = tls.try_into()?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(tls));
     let mut t = quinn::TransportConfig::default();
-    t.max_idle_timeout(Some(Duration::from_secs(10).try_into()?));
+    // The browser's network stack answers our keep-alives even while its
+    // page is frozen (loading, a hidden tab), so this only ends connections
+    // whose browser has gone; the room drops frozen pages itself.
+    t.max_idle_timeout(Some(
+        Duration::from_millis(crate::room::IDLE_TIMEOUT_MS).try_into()?,
+    ));
     t.keep_alive_interval(Some(Duration::from_secs(2)));
     cfg.transport_config(Arc::new(t));
     Ok(cfg)

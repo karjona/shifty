@@ -210,10 +210,16 @@ export class PodiumCard {
     return new Promise((resolve) => setTimeout(resolve, CARD_FADE_MS));
   }
 
-  hide(): void {
-    if (this.gone) return;
+  /** Fades the card out; resolves once it is gone. */
+  hide(): Promise<void> {
+    if (this.gone) return Promise.resolve();
     this.gone = true;
     this.el.classList.remove("shown");
-    setTimeout(() => this.el.remove(), CARD_FADE_MS);
+    return new Promise((resolve) =>
+      setTimeout(() => {
+        this.el.remove();
+        resolve();
+      }, CARD_FADE_MS),
+    );
   }
 }

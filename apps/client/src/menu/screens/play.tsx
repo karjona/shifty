@@ -18,6 +18,7 @@ import {
   playTimeTrial,
   roomExists,
   setPendingRace,
+  takeRequeue,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
 import { type Picks, keepPicks, lastPicks } from "../picks.ts";
@@ -46,7 +47,8 @@ export function ModeSelect() {
   const setBots = (n: number) => keep({ bots: n });
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [searching, setSearching] = useState(false);
+  // Play again from the end of a matchmaking race goes straight back into the queue.
+  const [searching, setSearching] = useState(() => mode === "matchmaking" && takeRequeue());
   const [tuning, setTuning] = useState(false);
   const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
@@ -86,11 +88,11 @@ export function ModeSelect() {
       if (mode === "trial" && trial?.race) {
         const ticket = await playTimeTrial(trial.course, trial.season);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
-        await navigate({ to: "/race" });
+        await navigate({ to: "/race", replace: true });
       } else if (mode === "single") {
         const ticket = await playSingle(plan);
-        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
-        await navigate({ to: "/race" });
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } }, plan });
+        await navigate({ to: "/race", replace: true });
       } else {
         const code = await createRoom(plan, bots);
         await navigate({ to: "/room/$code", params: { code } });
@@ -291,7 +293,7 @@ function Searching({ onClose }: { onClose: () => void }) {
         ticket: parseJoinTicket(get("ticket")),
         back: { to: "/play", search: { mode: "matchmaking" } },
       });
-      void navigate({ to: "/race" });
+      void navigate({ to: "/race", replace: true });
     } else if (msg.t === "error") {
       done.current = true;
       toast(get("error") === "no_server" ? t.common.noServer : t.common.error, "error");
