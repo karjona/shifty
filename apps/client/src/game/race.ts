@@ -163,6 +163,8 @@ export interface RaceState {
   phase: number;
   /** The race (`sim::Phase`): 0 on the grid, 4 intro, 1 countdown, 2 racing, 3 results. */
   racePhase: number;
+  /** Through the countdown, the whole seconds left (the HUD calls "Get ready" above 3); 0 otherwise. */
+  countdown: number;
   sport: "jetski" | "snow";
   course: number;
   /** The race's season, weather and time of day (null before the first snapshot). */
@@ -314,6 +316,7 @@ export class RaceSession implements Stage {
   readonly state: RaceState = {
     phase: 0,
     racePhase: 0,
+    countdown: 0,
     sport: "jetski",
     course: -1,
     conditions: null,
@@ -838,6 +841,8 @@ export class RaceSession implements Stage {
     const race = this.readRace();
     Object.assign(this.state, {
       racePhase: race.phase,
+      countdown:
+        race.phase === COUNTDOWN ? Math.ceil(Math.max(0, race.phaseLength - race.phaseTicks) / race.tickHz) : 0,
       sport: this.sport,
       course: race.course,
       conditions: race.conditions,

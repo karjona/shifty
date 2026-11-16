@@ -84,6 +84,41 @@ interface View {
 /** What leaving costs now (null: nothing worth asking about). */
 type Cost = "tilt" | "race" | null;
 
+/** Where the race's controls stand: at the right while the grid waits, low at the left through the countdown. */
+type ControlsSpot = "waiting" | "countdown";
+
+/**
+ * Where the controls stand as a race starts, read every frame so they come
+ * and go with the race's phase: while the grid waits (the title card has
+ * the left), and through the countdown's numbers (the HUD's "Get ready"
+ * crosses the whole screen); never over a season card, the intro, or the
+ * race once it is on.
+ */
+function useControlsSpot(session: RaceSession | null, shown: boolean): ControlsSpot | null {
+  const [spot, setSpot] = useState<ControlsSpot | null>(null);
+  useEffect(() => {
+    if (!session || !shown) return undefined;
+    let frame = 0;
+    const read = () => {
+      const st = session.state;
+      const on = st.phase === 1 && st.trouble === null && st.onShow;
+      setSpot(
+        !on
+          ? null
+          : st.racePhase === GRID
+            ? "waiting"
+            : st.racePhase === COUNTDOWN && st.countdown > 0 && st.countdown <= 3
+              ? "countdown"
+              : null,
+      );
+      frame = requestAnimationFrame(read);
+    };
+    frame = requestAnimationFrame(read);
+    return () => cancelAnimationFrame(frame);
+  }, [session, shown]);
+  return session && shown ? spot : null;
+}
+
 function RaceRun({
   race,
   card,
@@ -193,6 +228,7 @@ function RaceRun({
   }, [session]);
 
   const trouble = end ? null : (view?.trouble ?? null);
+  const controls = useControlsSpot(session, !menu && end === null);
   const trial = race?.trial !== undefined;
   const trialResults = trial && view?.racePhase === RESULTS && trouble === null;
   const finalResults = (view?.finalResults ?? false) && end === null && trouble === null;
@@ -398,19 +434,10 @@ function RaceRun({
   return (
     <div className={`screen race-screen${endShown || trialShown ? " wrapped" : ""}`}>
       <div ref={hudRef} className="race-hud" />
-      {/* The controls while the grid waits (at the right: the title card has the left) and through the
-          countdown (low at the left); never over a season card or the intro. */}
-      {view &&
-        trouble === null &&
-        !menu &&
-        view.onShow &&
-        (view.racePhase === GRID || view.racePhase === COUNTDOWN) && (
-          <RaceControls
-            sport={view.sport}
-            device={view.device}
-            className={view.racePhase === GRID ? "waiting" : "countdown"}
-          />
-        )}
+      {/* A finger's thumbs are on the labelled buttons through the countdown. */}
+      {view && controls && !(controls === "countdown" && view.device === "touch") && (
+        <RaceControls sport={view.sport} device={view.device} className={controls} />
+      )}
       {!menu && trouble === null && !endShown && !trialShown && (
         <div className="race-menu-hint">
           {continueShown && (
