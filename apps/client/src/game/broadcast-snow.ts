@@ -72,6 +72,9 @@ export function snowRigs(
     const z = p.z + Math.sin(p.yaw) * offset;
     return new THREE.Vector3(x, ground(x, z) + up, z);
   };
+  /** The run's point nearest arc length `s`. */
+  const pathAt = (s: number) =>
+    run.path[Math.max(0, Math.min(run.path.length - 1, Math.round((s - run.path[0]!.s) / 4)))]!;
   // The snow in the way, sampled in one go.
   const probe = new Float32Array(32);
   const sightAt = new THREE.Vector3();
@@ -232,16 +235,14 @@ export function snowRigs(
     rate: (w) =>
       w.me && w.me.speed > 2 && along.of(w.me) < finish - UP_THE_RUN ? { slot: w.me.slot, score: 0.9 } : null,
     begin(_w, r) {
-      const from = along.of(r);
-      sideS = from + 30 + r.speed;
+      const riderS = along.of(r);
+      sideS = riderS + 30 + r.speed;
       // On the outside of the way the run bends between the rider and the
       // camera, so the edge's trees, netting and rock stay out of the shot.
-      const at = (s: number) =>
-        run.path[Math.max(0, Math.min(run.path.length - 1, Math.round((s - run.path[0]!.s) / 4)))]!;
-      let turn = at(sideS).yaw - at(from).yaw;
-      if (turn > Math.PI) turn -= Math.PI * 2;
-      if (turn < -Math.PI) turn += Math.PI * 2;
-      sideOf = Math.abs(turn) > 0.05 ? (turn > 0 ? 1 : -1) : -sideOf;
+      let bend = pathAt(sideS).yaw - pathAt(riderS).yaw;
+      if (bend > Math.PI) bend -= Math.PI * 2;
+      if (bend < -Math.PI) bend += Math.PI * 2;
+      sideOf = Math.abs(bend) > 0.05 ? (bend > 0 ? 1 : -1) : -sideOf;
       // At the run's edge, under the boughs of the trees beside it and
       // clear of its rock walls. Clear of the run's own pines and towers.
       for (let tries = 0; tries < 4; tries++) {
@@ -250,8 +251,8 @@ export function snowRigs(
         const limit = sideOf > 0 ? p.limitR : p.limitL;
         // (Crouched low under the trees' boughs and the rock's overhangs.)
         const edge = sideOf > 0 ? p.edgeR : p.edgeL;
-        const low = edge === "trees" || edge === "rock";
-        sideEye.copy(on(sideS, sideOf * (limit - (low ? 1.6 : 1.2)), low ? 0.9 : 1.7));
+        const crouch = edge === "trees" || edge === "rock";
+        sideEye.copy(on(sideS, sideOf * (limit - (crouch ? 1.6 : 1.2)), crouch ? 0.9 : 1.7));
         if (!run.obstacles.some((o) => Math.hypot(o.x - sideEye.x, o.z - sideEye.z) < o.radius + 4)) break;
         sideS += 10;
       }
