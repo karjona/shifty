@@ -64,10 +64,11 @@ export function ModeSelect() {
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/" }), !joining && !searching && !tuning);
 
-  const setMode = (m: Mode) => {
-    keep({ mode: m });
-    void navigate({ to: "/play", search: { mode: m }, replace: true });
-  };
+  const setMode = (m: Mode) => void navigate({ to: "/play", search: { mode: m }, replace: true });
+  // The mode on show is the one to come back to (a race's way back names it).
+  useEffect(() => {
+    if (mode !== lastPicks().mode) setPicks(keepPicks({ mode }));
+  }, [mode]);
 
   const fail = (e: unknown) => {
     toast(e instanceof ApiError && e.code === "no_server" ? t.common.noServer : t.common.error, "error");

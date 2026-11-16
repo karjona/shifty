@@ -80,11 +80,19 @@ export function TabBar<T extends string>({
     0,
     tabs.findIndex((t) => t.id === value),
   );
+  const bar = useRef<HTMLDivElement>(null);
   const step = (d: number) => onChange(tabs[(i + d + tabs.length) % tabs.length]!.id);
   useAction("prev", () => step(-1));
   useAction("next", () => step(1));
+  // With the focus on a tab, it follows the shoulder buttons to the tab they pick.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.getAttribute("role") === "tab" && bar.current?.contains(active)) {
+      bar.current.querySelector<HTMLElement>("[role='tab'][aria-selected='true']")?.focus({ preventScroll: true });
+    }
+  }, [value]);
   return (
-    <div className={`tabbar ${className}`} role="tablist">
+    <div ref={bar} className={`tabbar ${className}`} role="tablist">
       <Glyph action="prev" />
       {lead}
       {tabs.map((t) => (
