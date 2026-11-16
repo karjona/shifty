@@ -109,6 +109,8 @@ class Job implements Work {
   ended: number | null = null;
   done = 0;
   total = 0;
+  /** What it counts is bytes (a download), not pieces of work (shaders). */
+  bytes = false;
   readonly waits = new Set<Wait>();
   readonly step: Step;
 
@@ -227,15 +229,19 @@ export class Wait {
     const remembered = memory.ms[own] ?? memory.ms[family] ?? FIRST_GUESS[step];
     const counted = jobs.filter((j) => j.total > 0);
     if (counted.length === 0) return remembered;
-    // A download: what is left at the pace it goes (all told, once it is over).
+    // Counted: what is left at the pace it goes (all told, once it is over).
     const first = Math.min(...jobs.map((j) => j.start));
     const total = counted.reduce((s, j) => s + j.total, 0);
     const done = counted.reduce((s, j) => s + Math.min(j.done, j.total), 0);
     const over = jobs.every((j) => j.ended !== null);
     const elapsed = (over ? Math.max(...jobs.map((j) => j.ended ?? t)) : t) - first;
     if (over) return Math.max(1, elapsed);
-    const rate = done >= RATE_MIN_BYTES && elapsed > 50 ? done / elapsed : (memory.rate ?? FIRST_RATE);
-    return Math.max(1, elapsed + (total - done) / rate);
+    if (counted.some((j) => j.bytes)) {
+      const rate = done >= RATE_MIN_BYTES && elapsed > 50 ? done / elapsed : (memory.rate ?? FIRST_RATE);
+      return Math.max(1, elapsed + (total - done) / rate);
+    }
+    // Pieces of work (shaders) go at their own pace: once a tenth is done, it tells.
+    return done >= total * 0.1 && elapsed > 100 ? (elapsed * total) / done : remembered;
   }
 
   /** How far along `step` is (0-1). */
@@ -314,7 +320,7 @@ export class Wait {
       const took = Math.max(...jobs.map((j) => j.ended ?? t)) - Math.min(...jobs.map((j) => j.start));
       for (const key of this.keys(step)) memory.ms[key] = blend(memory.ms[key], took);
     }
-    const big = this.jobs.filter((j) => j.ended !== null && j.total >= RATE_MIN_BYTES && j.done >= j.total);
+    const big = this.jobs.filter((j) => j.bytes && j.ended !== null && j.total >= RATE_MIN_BYTES && j.done >= j.total);
     if (big.length > 0) {
       const bytes = big.reduce((s, j) => s + j.total, 0);
       const span = Math.max(...big.map((j) => j.ended!)) - Math.min(...big.map((j) => j.start));
@@ -470,6 +476,7 @@ export function download(
     return known.bytes;
   }
   const job = new Job(step);
+  job.bytes = true;
   if (wait) wait.adopt(job);
   const entry: { bytes: Promise<ArrayBuffer>; job: Job; keep: boolean } = {
     bytes: Promise.resolve(new ArrayBuffer(0)),

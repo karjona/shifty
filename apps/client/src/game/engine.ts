@@ -4,7 +4,7 @@
 import type * as THREE from "three/webgpu";
 import init, { type InitOutput } from "../wasm/sim.js";
 import simUrl from "../wasm/sim_bg.wasm?url";
-import { setWarmer } from "../render/warm.ts";
+import { countingCompiles, setWarmer } from "../render/warm.ts";
 import { AutoResolution } from "./resolution.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
@@ -103,19 +103,24 @@ export class Engine {
     this.view = loadViewSettings();
     this.applyScale();
     addEventListener("resize", () => {
-      if (this.view.scale === "auto") this.applyScale();
+      this.resized = true;
     });
   }
 
-  /** Puts the view's resolution on the renderer (automatic: from the top again). */
-  private applyScale(): void {
+  /** The window has changed size since the resolution was last fitted to it. */
+  private resized = false;
+
+  /** Puts the view's resolution on the renderer (automatic: from the top again, unless only the window's size
+   * changed: the scale it has found carries on, within the new size's range). */
+  private applyScale(fresh = true): void {
     const scale = this.view.scale;
     if (scale !== "auto") {
       this.world.setRenderScale(scale, scale < 1);
       return;
     }
     this.auto.bounds(innerWidth, innerHeight, devicePixelRatio, AUTO_MAX_PIXELS, AUTO_MIN_ROWS);
-    this.auto.reset();
+    if (fresh) this.auto.reset();
+    else this.auto.forget();
     this.world.setRenderScale(this.auto.scale, false);
   }
 
@@ -229,7 +234,7 @@ export class Engine {
     const run = this.warmed
       .then(() => {
         const compiling = begin("shaders", wait && !wait.closed ? wait : null);
-        return compile().finally(() => compiling.end());
+        return countingCompiles((done, total) => compiling.count(done, total), compile).finally(() => compiling.end());
       })
       .catch((e: unknown) => console.error(e))
       .finally(() => {
@@ -323,10 +328,17 @@ export class Engine {
       this.smoothSince = null;
       return;
     }
+    if (this.resized) {
+      // Once a frame however many times the window changed meanwhile, just before it is drawn.
+      this.resized = false;
+      this.rescale = null;
+      if (this.view.scale === "auto") this.applyScale(false);
+    }
     if (this.rescale !== null) {
       this.world.setRenderScale(this.rescale, false);
       this.rescale = null;
     }
+    this.world.followWindow();
     if (this.warming > 0) this.drawBetweenCompiles(now, dt);
     else this.draw(now, dt);
     const end = performance.now();

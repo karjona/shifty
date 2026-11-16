@@ -45,6 +45,7 @@ import {
   waveHeight,
 } from "./waves.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
+import { type Steps, buildNow } from "./slices.ts";
 
 /** The water grid follows the camera and reaches across the whole bay. */
 const WATER_SIZE = 1400;
@@ -109,6 +110,8 @@ export interface WaterScenery {
   readonly gulls: THREE.Vector3;
   /** The sea is hidden this far inside the land (m), where swells would show through low shores (null: past the bay's plain). */
   readonly inland: number | null;
+  /** Builds it, a piece at a time (see slices.ts). */
+  build(): Steps;
   /** Per frame: what floats rides the swell, and people wave at the riders. */
   update(waves: Float32Array, t: number, riders: readonly RiderView[]): void;
 }
@@ -130,17 +133,17 @@ export class Bay implements Environment {
   /** The sim's swells as given: each wave's height at the start (field 3) and at the end (field 7). */
   private waveTurn = new Float32Array(PARAMS_LEN);
   private turned = 0;
-  private course: CourseView;
+  private course!: CourseView;
   private water: THREE.Mesh | null = null;
   /** World xz of the water grid's centre (it follows the camera). */
   private waterOrigin = uniform(new THREE.Vector2());
   /** The full water; `null` in basic mode (see `buildWater`). */
   private sea: SeaWater | null = null;
   private wakeSources = new Map<number, WakeSource>();
-  private spray: Spray;
+  private spray!: Spray;
   private gulls: Gulls | null = null;
-  private cumulus = new Cumulus(new THREE.Vector3(0, 0, 300));
-  private precipitation = new Precipitation();
+  private cumulus!: Cumulus;
+  private precipitation!: Precipitation;
   private sun: THREE.DirectionalLight | null = null;
   private hemi: THREE.HemisphereLight | null = null;
   private background = new THREE.Color();
@@ -171,16 +174,35 @@ export class Bay implements Environment {
   /** Resolves once the club's art is in. */
   readonly ready: Promise<void> = Promise.resolve();
 
-  constructor(opts: BayOptions) {
+  private opts: BayOptions;
+  private built = false;
+
+  /** `sliced`: built later, a slice at a time, by whoever made it (see `build`); otherwise at once. */
+  constructor(opts: BayOptions, sliced = false) {
     // The club's art comes down while the rest is built.
     const club = opts.course.place === "bay" ? new ClubArt() : null;
+    this.opts = opts;
     this.conditions = opts.conditions ?? homeConditions("jetski");
     this.look = new ConditionsLook(this.conditions, opts.look ?? BAY_LOOK);
     this.topSpeed = opts.topSpeed;
     this.reflects = opts.water === "sea";
     this.scenery = opts.scenery ?? new BaySide(opts.course);
+    if (club) {
+      this.club = club;
+      this.ready = club.ready;
+    }
+    if (!sliced) buildNow(this.build());
+  }
+
+  /** Builds it (once), a piece at a time: its scenery, the water, the course (see slices.ts). */
+  *build(): Steps {
+    if (this.built) return;
+    this.built = true;
+    const opts = this.opts;
     this.spray = new Spray(opts.topSpeed);
     this.group.add(this.spray.group);
+    yield;
+    yield* this.scenery.build();
     this.group.add(this.scenery.group);
     if (opts.water === "sea") {
       this.sea = new SeaWater(WATER_SIZE, WATER_SEGMENTS, this.scenery.inland);
@@ -193,25 +215,30 @@ export class Bay implements Environment {
     this.waveTurn.set(opts.waves.subarray(0, PARAMS_LEN));
     this.waveParams.set(this.waveTurn);
     this.swells.setFromSim(this.waveParams);
+    yield;
     this.course = new CourseView(
       opts.course,
       this.conditions.season,
       crowdOf(this.conditions),
       sunlight(this.look.sun),
     );
+    yield* this.course.build();
     this.group.add(this.course.group);
-    this.sea?.setLand(opts.course.land);
+    if (this.sea) yield* this.sea.setLand(opts.course.land);
     this.spray.setShore(opts.course.land);
+    yield;
     celify(this.group);
     if (this.sea) this.sea.mesh.userData.noMerge = true;
     if (this.water) this.water.userData.noMerge = true;
+    yield;
     mergeStatic(this.group, { cell: 600, maxVertices: 4000 });
+    yield;
+    this.cumulus = new Cumulus(new THREE.Vector3(0, 0, 300));
+    yield* this.cumulus.build();
+    this.precipitation = new Precipitation();
+    yield;
     this.group.add(skyDome(), this.cumulus.mesh, this.precipitation.group);
-    if (club) {
-      this.club = club;
-      this.group.add(club.group);
-      this.ready = club.ready;
-    }
+    if (this.club) this.group.add(this.club.group);
     this.gulls = new Gulls(this.scenery.gulls);
     this.gulls.group.userData.weather = true;
     this.group.add(this.gulls.group);

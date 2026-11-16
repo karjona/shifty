@@ -50,6 +50,7 @@ import { Planting } from "./coast/trees.ts";
 import type { CourseData, LandData } from "./course.ts";
 import { landDistance, rng } from "./land.ts";
 import type { RiderView } from "./world.ts";
+import type { Steps } from "./slices.ts";
 import { COAST_SIERRA, farMaterial, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
 
 /** The cape under the sky: the bay's sun, snow down to the beach in winter and only on the sierra otherwise. */
@@ -280,13 +281,13 @@ const FAR = { x0: -1100, x1: 1100, z0: -1100, z1: 650, step: 16 };
  * `lower` sinks it (m) where another mesh lies over it; with `cliffs`,
  * the strip along a cliffed shore is left to the cliff's own mesh.
  */
-function groundMesh(
+function* groundMesh(
   ground: CoastGround,
   r: { x0: number; x1: number; z0: number; z1: number; step: number },
   skip: (x: number, z: number) => boolean,
   lower: (x: number, z: number) => number,
   cliffs: boolean,
-): THREE.BufferGeometry {
+): Steps<THREE.BufferGeometry> {
   const nx = Math.round((r.x1 - r.x0) / r.step) + 1;
   const nz = Math.round((r.z1 - r.z0) / r.step) + 1;
   const pos = new Float32Array(nx * nz * 3);
@@ -308,6 +309,7 @@ function groundMesh(
       c.toArray(col, k * 3);
       edge[k] = cliffs && g.cliff > -100 && g.cliff < CLIFF_TOP ? 1 : 0;
     }
+    if (j % 8 === 7) yield;
   }
   const index: number[] = [];
   const y = (i: number, j: number) => pos[(j * nx + i) * 3 + 1]!;
@@ -350,12 +352,13 @@ function planeAt(land: readonly LandData[], x: number, z: number): number {
  * The cliffs: every cliffed shore near the course traced from the land
  * and swept into rock, with boulders fallen at their feet.
  */
-function addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[]): void {
+function* addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[]): Steps {
   const cliffed = land.filter((l) => l.kind === "headland" || l.kind === "coast" || l.kind === "arch");
   const chains = traceShore((x, z) => ground.cliffs(x, z), { ...NEAR, cell: 2 });
+  yield;
   const kit = [boulderGeometry(13), boulderGeometry(29), boulderGeometry(41)];
   const r = random(5);
-  chains.forEach((chain, k) => {
+  for (const [k, chain] of chains.entries()) {
     // The town stands in front of the cliffs behind it: none there.
     for (const run of cutShore(chain.points, chain.closed, (p) => ground.quay(p.x, p.z) > 4)) {
       const shore: ShorePoint[] = run.points.map((p) => {
@@ -397,8 +400,9 @@ function addCliffs(shape: Shape, ground: CoastGround, land: readonly LandData[])
           );
         }
       }
+      yield;
     }
-  });
+  }
   for (const g of kit) g.dispose();
 }
 
@@ -632,20 +636,31 @@ export class CapeScenery implements WaterScenery {
   readonly gulls = new THREE.Vector3(-20, 0, 40);
   readonly inland = 2.5;
   readonly ground: CoastGround;
-  private fleet: Fleet;
-  private roamers: Roamer[];
+  private fleet!: Fleet;
+  private roamers: Roamer[] = [];
   private lanterns: Lantern[] = [];
   private crowd = new Crowd();
 
+  private course: CourseData;
+  private conditions: Conditions;
+
+  /** It is built by `build` (see slices.ts). */
   constructor(course: CourseData, conditions: Conditions) {
+    this.course = course;
+    this.conditions = conditions;
+    this.ground = new CoastGround(course.land);
+  }
+
+  /** Builds it, a piece at a time. */
+  *build(): Steps {
+    const { course, conditions, ground } = this;
     const season = conditions.season;
     const land = course.land;
-    const ground = (this.ground = new CoastGround(land));
     const soil = groundMaterial();
     const inNear = (x: number, z: number, margin: number) =>
       x > NEAR.x0 + margin && x < NEAR.x1 - margin && z > NEAR.z0 + margin && z < NEAR.z1 - margin;
     const near = new THREE.Mesh(
-      groundMesh(
+      yield* groundMesh(
         ground,
         NEAR,
         () => false,
@@ -654,8 +669,9 @@ export class CapeScenery implements WaterScenery {
       ),
       soil,
     );
+    yield;
     const far = new THREE.Mesh(
-      groundMesh(
+      yield* groundMesh(
         ground,
         FAR,
         (x, z) => inNear(x, z, FAR.step),
@@ -672,10 +688,11 @@ export class CapeScenery implements WaterScenery {
       m.userData.noMerge = true;
       this.group.add(m);
     }
+    yield;
 
     // The rock: cliffs, the arch over its legs, the stacks.
     const rock = new Shape();
-    addCliffs(rock, ground, land);
+    yield* addCliffs(rock, ground, land);
     addArch(
       rock,
       land.filter((l) => l.kind === "arch"),
@@ -683,7 +700,9 @@ export class CapeScenery implements WaterScenery {
     land
       .filter((l) => l.kind === "stack")
       .forEach((l, i) => addStack(rock, l.ax, l.az, l.radius, 14 + hash(300 + i * 17) * 13, 300 + i * 17));
+    yield;
     this.group.add(rock.mesh(rockMaterial()));
+    yield;
     for (const l of land.filter((k) => k.kind === "rock")) {
       const beacon = buildBeaconRock(l);
       this.lanterns.push(...beacon.lanterns);
@@ -723,7 +742,10 @@ export class CapeScenery implements WaterScenery {
     };
     const walkers = new Walkers();
     if (town)
-      this.group.add(buildTown(town, 1000, season, crowd, this.crowd, life, undefined, light, FISH_MARKET_AT).group);
+      this.group.add(
+        (yield* buildTown(town, 1000, season, crowd, this.crowd, life, undefined, light, FISH_MARKET_AT)).group,
+      );
+    yield;
     if (harbourMole) {
       // The open sea is to the south (+z) of the mole.
       const dx = harbourMole.bx - harbourMole.ax;
@@ -731,8 +753,10 @@ export class CapeScenery implements WaterScenery {
       this.lanterns.push(...mole.lanterns);
       this.group.add(mole.group);
     }
+    yield;
     this.fleet = new Fleet(berths(course, town, harbourMole));
     this.group.add(this.fleet.mesh);
+    yield;
     // Sails out past the point.
     const sails: [number, number][] = [
       [-700, 420],
@@ -763,6 +787,7 @@ export class CapeScenery implements WaterScenery {
     // (Too far off to show in the water.)
     for (const boat of this.roamers) boat.mesh.layers.set(UNREFLECTED);
     for (const boat of this.roamers) this.group.add(boat.mesh);
+    yield;
 
     const tower = watchtowerSpot(ground, land);
     if (tower) {
@@ -783,7 +808,7 @@ export class CapeScenery implements WaterScenery {
       // The lifeguard's flag: red in a storm or a hard wind, yellow out of season, green on a summer's day.
       const rough = [conditions.weather, conditions.turns].some((w) => w === "storm" || w === "windy");
       const flag = rough ? 0xd6402e : season === "summer" ? 0x2fb34a : 0xf2c14e;
-      addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, life, flag, r, shades, walkers);
+      yield* addBeach(works, site, BAR, LIFEGUARD, season, crowd, this.crowd, life, flag, r, shades, walkers);
       const palms = new Planting({ shadows: true, reflected: true });
       for (let z = site.from + 30; z < site.to - 20; z += 15 + r() * 6) {
         const p = site.at(z, 41);
@@ -791,8 +816,10 @@ export class CapeScenery implements WaterScenery {
         palms.add("palm", p.x, p.y, p.z, tall, 0.9 + r() * 0.2);
         shades.on.add(p.x, p.y, p.z, 2.4, tall * 0.9, shades.colour, shades.ground, 0.1);
       }
+      yield;
       this.group.add(palms.build(true));
     }
+    yield;
     // (Up the beach and on the headland: too far from the water to throw shadows on it or show in it.)
     const built = works.mesh(townMaterial(), "receive");
     built.layers.set(UNREFLECTED);
@@ -800,14 +827,20 @@ export class CapeScenery implements WaterScenery {
     const arms = this.crowd.build();
     if (arms) this.group.add(arms);
     this.group.add(...life.build());
-
+    yield;
     this.group.add(plants(ground, shades));
+    yield;
     const shade = shades.on.build(groundMaterial(true));
     if (shade) this.group.add(shade);
     const strollers = walkers.build();
     if (strollers) this.group.add(strollers);
+    yield;
     // The distance: foothills and the sierra behind the coast (north, -z), headlands and islets out to sea.
-    this.group.add(foothills(-1, 1000, 950, 3800, 300, 5), sierra(-1, COAST_SIERRA, 5400, 7), seaHorizon(-1, 9));
+    this.group.add(foothills(-1, 1000, 950, 3800, 300, 5));
+    yield;
+    this.group.add(yield* sierra(-1, COAST_SIERRA, 5400, 7));
+    yield;
+    this.group.add(seaHorizon(-1, 9));
   }
 
   update(waves: Float32Array, t: number, riders: readonly RiderView[]): void {
@@ -823,9 +856,10 @@ export class Cape extends Bay {
   /** The land's height (what hides a rider from a camera). */
   readonly land: CoastGround;
 
-  constructor(opts: BayOptions) {
+  /** `sliced`: built later, a slice at a time (see `Bay.build`). */
+  constructor(opts: BayOptions, sliced = false) {
     const scenery = new CapeScenery(opts.course, opts.conditions ?? homeConditions("jetski"));
-    super({ ...opts, scenery, look: CAPE_LOOK });
+    super({ ...opts, scenery, look: CAPE_LOOK }, sliced);
     this.land = scenery.ground;
   }
 }

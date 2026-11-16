@@ -13,6 +13,7 @@ import type { Life } from "./life.ts";
 import type { Grounding } from "./grounding.ts";
 import { type Crowd, type Walkers, addPerson } from "./people.ts";
 import { Local, type Shape, box, pick, place, post, turned } from "./shape.ts";
+import type { Steps } from "../slices.ts";
 
 /** Where the beach is: the point `inland` metres up the sand at `z` along the shore, and how far it runs. */
 export interface BeachSite {
@@ -250,7 +251,7 @@ function addHut(
  * say where the bar and the tower stand (z along the shore, metres up the
  * sand). `crowd` (0-1) is how many people are out.
  */
-export function addBeach(
+export function* addBeach(
   shape: Shape,
   site: BeachSite,
   bar: { z: number; inland: number },
@@ -266,7 +267,7 @@ export function addBeach(
   shades: { on: Grounding; colour: (x: number, z: number) => THREE.Color; ground: (x: number, z: number) => number },
   /** Those who walk along the water. */
   walkers: Walkers,
-): void {
+): Steps {
   const sea = site.seaward;
   const shade = { on: shades.on, colour: SAND_SHADE };
   const open = season === "summer" || season === "spring";
@@ -281,6 +282,7 @@ export function addBeach(
     addPerson(shape, seat.x, seat.y + 0.45, seat.z, sea, r, { pose: "sit", beach: true });
     T.box(0, 3.26, 1.35, 0.5, 0.45, 0.45, WHITE);
   }
+  yield;
   // Boardwalks from the promenade down to the bar and the tower.
   for (const z of [bar.z + 9, lifeguard.z - 6]) {
     for (let inland = 12; inland < 36; inland += 2) {
@@ -288,6 +290,7 @@ export function addBeach(
       shape.take(box(2.05, 0.08, 1.6), WOOD, place(p.x, p.y + 0.02, p.z, sea + Math.PI / 2), { uv: TILE.planks });
     }
   }
+  yield;
   // Umbrellas in rows, fewer out of season; people under them.
   // (Nobody puts an umbrella up in the rain.)
   const rows = crowd < 0.25 ? [] : season === "summer" ? [11, 17, 23, 29] : season === "winter" ? [] : [14, 24];
@@ -301,6 +304,7 @@ export function addBeach(
       const p = site.at(z + (r() - 0.5) * 1.5, inland + (r() - 0.5) * 1.5);
       addUmbrella(shape, p.x, p.y, p.z, sea, pick(CANOPIES, r), r);
       shades.on.add(p.x, p.y, p.z, 1.5, 2.2, shades.colour, shades.ground, 0.07);
+      yield;
       if (r() < crowd) {
         const L = new Local(shape, p.x, p.y, p.z, sea);
         const side = r() < 0.5 ? -1 : 1;
@@ -312,10 +316,13 @@ export function addBeach(
         }
       }
     }
+    yield;
   }
+  yield;
   // Along the water: walkers, and people who wave at the riders.
   const strollers = Math.round(26 * crowd);
   for (let i = 0; i < strollers; i++) {
+    if (i % 6 === 5) yield;
     const z = site.from + 10 + r() * (site.to - site.from - 16);
     const p = site.at(z, 1.5 + r() * 5);
     if (i % 3 === 0) wavers.add(shape, p.x, p.y, p.z, sea + (r() - 0.5) * 0.6, r, true, shade);
@@ -326,6 +333,7 @@ export function addBeach(
         shade,
       });
   }
+  yield;
   // A few walk the water's edge and back.
   const beats = Math.round(5 * Math.min(1, crowd * 1.3));
   for (let i = 0; i < beats; i++) {
@@ -348,9 +356,11 @@ export function addBeach(
       true,
     );
   }
+  yield;
   // Towels on the sand, with sunbathers.
   const towels = Math.round(18 * crowd);
   for (let i = 0; i < towels; i++) {
+    if (i % 6 === 5) yield;
     const z = site.from + 12 + r() * (site.to - site.from - 20);
     const p = site.at(z, 6 + r() * 4);
     const turn = sea + (r() - 0.5) * 0.8;
@@ -418,6 +428,7 @@ export function addBeach(
   }
   const passers = Math.round(10 * crowd);
   for (let i = 0; i < passers; i++) {
+    if (i % 6 === 5) yield;
     const p = site.at(site.from + 24 + r() * (site.to - site.from - 40), 39 + r() * 3);
     addPerson(shape, p.x, p.y, p.z, sea + (r() < 0.5 ? 1 : -1) * (Math.PI / 2), r, { pose: "walk" });
   }

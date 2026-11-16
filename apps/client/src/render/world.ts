@@ -172,6 +172,8 @@ const OUTLINE_FAR = 45;
 const REFLECT_FAR = 30;
 /** Riders further than this (m) from the camera's rider are outside the sun's shadow box. */
 const SHADOW_REACH = 45;
+/** Half the sun's shadow box while it warms up (see `warmShadows`): every course fits (m). */
+const WARM_BOX = 1800;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
 /** Shadow map texels up to this size (m) draw a rider's own shadows cleanly; over coarser ones riders skip them. */
@@ -255,7 +257,10 @@ export class World {
     this.setShadowBox();
     this.scene.add(this.hemi, this.sun, this.sun.target);
     this.cel = new CelPost(this.renderer, this.scene, this.camera);
-    addEventListener("resize", () => this.resize());
+    // (Taken up before the next frame is drawn: a drag fires many of these, and each resize reallocates.)
+    addEventListener("resize", () => {
+      this.sizeStale = true;
+    });
     this.resize();
   }
 
@@ -266,7 +271,11 @@ export class World {
     this.backend = "isWebGPUBackend" in backend && backend.isWebGPUBackend === true ? "webgpu" : "webgl2";
   }
 
+  /** The window has changed size since the canvas last followed it. */
+  private sizeStale = false;
+
   resize(): void {
+    this.sizeStale = false;
     const w = innerWidth;
     const h = innerHeight;
     this.renderer.setPixelRatio(devicePixelRatio * this.renderScale);
@@ -282,8 +291,14 @@ export class World {
     this.resize();
   }
 
+  /** Follows the window's size if it has changed (just before a frame is drawn: resizing clears the canvas). */
+  followWindow(): void {
+    if (this.sizeStale) this.resize();
+  }
+
   /** Draws the scene, inked. */
   draw(): void {
+    this.followWindow();
     SUN_STRENGTH.value = (this.sun.color.r + this.sun.color.g + this.sun.color.b) * this.sun.intensity;
     SUN_DIR.value.copy(this.sun.position).sub(this.sun.target.position).normalize();
     // Line widths are in pixels of a 1080p frame, whatever the resolution.
@@ -292,7 +307,40 @@ export class World {
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.cel.width.value = 1.6 * (size.y / 1080);
     this.sun.shadow.needsUpdate = true;
-    this.cel.render();
+    if (this.shadowWarmth > 0) {
+      this.shadowWarmth--;
+      this.drawWarmingShadows();
+    } else this.cel.render();
+  }
+
+  /** Frames still to draw with every caster in the shadow map (see `warmShadows`). */
+  private shadowWarmth = 0;
+
+  /**
+   * Draws the next couple of frames with the shadow box round the whole
+   * course and every rider casting: behind a cover, the shadow pass's
+   * shaders (which a warm-up's compile doesn't reach) are all made, and
+   * none is made mid-race as something new comes into the box.
+   */
+  warmShadows(frames = 2): void {
+    this.shadowWarmth = frames;
+  }
+
+  private drawWarmingShadows(): void {
+    const sun = this.sun;
+    const cam = sun.shadow.camera;
+    const box = { left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom, far: cam.far };
+    const at = sun.position.clone();
+    Object.assign(cam, { left: -WARM_BOX, right: WARM_BOX, top: WARM_BOX, bottom: -WARM_BOX, far: WARM_BOX * 4 });
+    cam.updateProjectionMatrix();
+    sun.position.copy(sun.target.position).addScaledVector(this.sunBack.copy(this.sunOffset).normalize(), WARM_BOX * 2);
+    try {
+      this.cel.render();
+    } finally {
+      Object.assign(cam, box);
+      cam.updateProjectionMatrix();
+      sun.position.copy(at);
+    }
   }
 
   /** Compiles what the scene (or `root`, about to join it) needs to be drawn (see `CelPost.compile`). */
@@ -535,7 +583,7 @@ export class World {
     const distance = this.camera.position.distanceTo(mesh.position) * zoom;
     const far = distance > OUTLINE_FAR;
     const reflected = distance < REFLECT_FAR;
-    const shadow = !focus || Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
+    const shadow = this.shadowWarmth > 0 || !focus || Math.hypot(r.x - focus.x, r.z - focus.z) < SHADOW_REACH;
     mesh.traverse((o) => {
       const data = o.userData as { outline?: boolean; castsShadow?: boolean; reflects?: boolean };
       if (data.outline) o.visible = !far;
