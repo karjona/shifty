@@ -311,7 +311,7 @@ export const en = {
     events: { gp: "The Tilt", race: "One race" },
     eventAbout: {
       gp: "A year in Costa Nevada: one race each season, on the water and on the mountain. Points for every race.",
-      race: "One race on the circuit you pick (or any), in whatever season, weather and time of day come up.",
+      race: "One race: pick its circuit, season, weather and time of day, or leave any of them to the draw.",
       pick: "One race: in the room, the host picks the circuit, the season, the weather and the time of day, or leaves them to chance.",
     },
     seasonSports: { water: "Water", mountain: "Mountain", either: "Water or mountain" },
@@ -348,7 +348,6 @@ export const en = {
     weather: "Weather",
     time: "Time of day",
     draw: "Draw",
-    drawn: "Random",
     bots: "Bots",
     start: "Start the race",
     waiting: "Waiting for the host to start.",

@@ -41,6 +41,7 @@ import {
 } from "./riders.ts";
 import { isRoomCode, newRoomCode } from "./rooms.ts";
 import type { ServerInfo } from "./servers.ts";
+import { singlePlan } from "./tickets.ts";
 import { VERSION } from "./version.ts";
 
 export { Matchmaker } from "./matchmaker.ts";
@@ -258,8 +259,7 @@ app.get("/api/content", async (c) => {
 app.post("/api/play/single", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
-  const body = await jsonBody(c.req.raw);
-  const plan = body.plan === undefined ? TILT : parsePlan(body.plan);
+  const plan = singlePlan((await jsonBody(c.req.raw)).plan);
   if (!plan) return c.json({ error: "bad_request" }, 400);
   try {
     const ticket = await startSingle(c.env, { userId: p.user.id, handle: p.player.handle }, plan);

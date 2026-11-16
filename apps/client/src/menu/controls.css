@@ -1,7 +1,7 @@
 /* The race's controls (see screens/controls.tsx): rows of the device's own
    buttons and what they do, on paper. While the grid waits it stands at the
-   right, clear of the title card; through the countdown low at the left; in
-   the race menu, beside the menu's panel. */
+   right, clear of the title card; through the countdown's numbers low at the
+   left; in the race menu, beside the menu's panel. */
 
 .race-controls {
   display: flex;
@@ -92,11 +92,13 @@
   animation: rise 420ms var(--ease) both;
 }
 
-/* Through the countdown: low at the left, over the speed and under the count's banner. */
+/* Through the countdown's numbers: low at the left, over the HUD's speed and
+   meter (128px tall above the bottom margin), clear of the count's figures
+   in the middle. */
 .race-controls.countdown {
   position: absolute;
   left: var(--margin-x);
-  bottom: 180px;
+  bottom: calc(var(--margin-y) + 128px + var(--gap));
   animation: rise 420ms var(--ease) both;
 }
 

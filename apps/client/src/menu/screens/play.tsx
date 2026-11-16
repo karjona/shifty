@@ -135,7 +135,7 @@ export function ModeSelect() {
           ) : (
             <Panel key={mode} className="mode-panel" label={t.play.modes[mode]}>
               <p className="mode-about">{t.play.about[mode]}</p>
-              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="circuit" />}
+              {mode === "single" && <PlanPickers plan={plan} onChange={setPlan} fields="all" />}
               {mode === "room" && (
                 <>
                   <PlanPickers plan={plan} onChange={setPlan} fields="event" />
