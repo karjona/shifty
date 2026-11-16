@@ -2258,6 +2258,10 @@ a {
   .creator {
     grid-template-columns: 1fr;
   }
+  /* One column down to the bottom: it ends above the hints' bar (bottom left). */
+  .screen:has(> .hints) > :is(.home, .mode-body, .creator) {
+    margin-bottom: calc(64px + var(--gap));
+  }
 }
 
 /* --- motion --- */
