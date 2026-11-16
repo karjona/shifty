@@ -235,13 +235,13 @@ html[data-bars] #boot .boot-swipe {
   }
 }
 
-/* Over a race waiting on its grid or running its intro (the controls' help
-   is up) while Safari's bars are: a swipe up now gives the race the whole
-   screen (once the controls are up, nothing moves the page). */
+/* Over a race waiting on its grid or running its intro while Safari's bars
+   are up: a swipe up now gives the race the whole screen (once the touch
+   controls are up, nothing moves the page). */
 #swipe {
   display: none;
 }
-html[data-bars]:has(.race-help:not(.in-menu)) #swipe {
+html[data-bars]:is(:has(.race-controls.waiting), :has(.intro-card.shown)) #swipe {
   position: fixed;
   z-index: 20;
   top: 8px;
