@@ -176,9 +176,10 @@ export class Wait {
     this.name = name;
   }
 
-  /** Starts a piece of work in `step`. */
-  begin(step: Step): Work {
+  /** Starts a piece of work in `step`; `bytes`: what it will count is bytes (a download). */
+  begin(step: Step, bytes = false): Work {
     const job = new Job(step);
+    job.bytes = bytes;
     if (!this.closed) this.adopt(job);
     ticking();
     return job;
@@ -524,6 +525,19 @@ export function download(
   downloads.set(url, entry);
   ticking();
   return entry.bytes;
+}
+
+/** How fast downloads come in now (bytes a millisecond): as the ones under way go, or as this browser remembers. */
+export function downloadRate(): number {
+  const t = now();
+  let done = 0;
+  let span = 0;
+  for (const { job } of downloads.values()) {
+    if (job.ended !== null) continue;
+    done += job.done;
+    span = Math.max(span, t - job.start);
+  }
+  return done >= RATE_MIN_BYTES / 2 && span > 50 ? done / span : (memory.rate ?? FIRST_RATE);
 }
 
 /** Counts `url` in `wait` too, if it is on its way. */

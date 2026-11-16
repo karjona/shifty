@@ -25,9 +25,10 @@ export function artUrl(path: string): string {
   return hash ? `${BASE}${path}?v=${hash}` : `${BASE}${path}`;
 }
 
-/** Downloads a file of the art, its bytes counted in `wait` (null: in the background). */
-export function fetchArt(path: string, wait: Wait | null): Promise<ArrayBuffer> {
-  return download(artUrl(path), wait, "art", Object.hasOwn(files, path) ? (files[path]?.[0] ?? 0) : 0);
+/** Downloads a file of the art, its bytes counted in `wait` (null: in the background). `ahead`: fetched for someone
+ * who will ask for it later, and kept for them. */
+export function fetchArt(path: string, wait: Wait | null, ahead = false): Promise<ArrayBuffer> {
+  return download(artUrl(path), wait, "art", Object.hasOwn(files, path) ? (files[path]?.[0] ?? 0) : 0, ahead);
 }
 
 /** Counts files of the art that are on their way (asked for by someone else) in `wait` too. */

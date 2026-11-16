@@ -5,7 +5,7 @@ import { ca } from "./i18n/ca.ts";
 import { en } from "./i18n/en.ts";
 import { es } from "./i18n/es.ts";
 import { initialLocale } from "./i18n/locale.ts";
-import { bootLoad, download, setWords, showBoot } from "./loading.ts";
+import { bootLoad, download, downloadRate, setWords, showBoot } from "./loading.ts";
 import { fitUi } from "./menu/scale.ts";
 
 /** Nothing waits longer than this (ms) for the boot screen's typeface before its words show. */
@@ -46,19 +46,27 @@ function plan(): [string, number][] {
   }
 }
 
-// The code comes down counted, and the game then loads it from the
-// browser's cache; the sim is kept for the engine, which asks for it next.
-// (On the dev server, which serves the modules one by one, it is timed.)
+// The sim comes down counted, kept for the engine (which asks for it
+// next). The game's code is the browser's own to fetch (a module fetched
+// any other way may be fetched twice): it is counted at the pace the
+// downloads under way go, by its size in the plan. (On the dev server,
+// which serves the modules one by one, it is timed.)
 const wait = bootLoad();
-const code = wait.begin("code");
-const files = plan().flatMap(([url, size]) => {
-  const sim = url.endsWith(".wasm");
-  const bytes = download(url, wait, "code", size, sim).then(
-    () => null,
-    () => null,
-  );
-  return sim ? [] : [bytes];
+const files = plan();
+for (const [url, size] of files)
+  if (url.endsWith(".wasm")) void download(url, wait, "code", size, true).catch(() => null);
+const bytes = files.reduce((sum, [url, size]) => (url.endsWith(".wasm") ? sum : sum + size), 0);
+const code = wait.begin("code", bytes > 0);
+const since = performance.now();
+let coming = true;
+const pace = () => {
+  if (!coming) return;
+  code.count(Math.min(bytes * 0.95, downloadRate() * (performance.now() - since)), bytes);
+  requestAnimationFrame(pace);
+};
+if (bytes > 0) pace();
+void import("./start.tsx").finally(() => {
+  coming = false;
+  if (bytes > 0) code.count(bytes, bytes);
+  code.end();
 });
-void Promise.all(files)
-  .then(() => import("./start.tsx"))
-  .finally(() => code.end());

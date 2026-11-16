@@ -9,6 +9,7 @@ import { booted, setWords } from "./loading.ts";
 import { messages, onLocale } from "./i18n/index.ts";
 import { installScreen } from "./touch/device.ts";
 import { Engine } from "./game/engine.ts";
+import { fetchArt } from "./render/art.ts";
 
 installSound();
 installScreen();
@@ -24,8 +25,11 @@ onLocale(() => {
     () => messages().common.loading,
   );
 });
-// Every screen draws over the engine: it starts at once, while the first screen finds out what to show.
+// Every screen draws over the engine: it starts at once, while the first screen finds out what to show. The
+// club's art comes down meanwhile too: the login flies over it, and the main menu gets it ready right after.
 void Engine.get().catch(() => {});
+if (!(import.meta.env.DEV && devParams.get("render") === "0"))
+  void fetchArt("env/club.glb", null, true).catch(() => {});
 
 // The quick race, the look checks, the podium and the sound board only exist on the dev server: builds
 // drop these branches and the modules with them (and vite.config.ts fails a
