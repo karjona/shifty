@@ -413,7 +413,7 @@ impl SnowBot {
 }
 
 /// Each tier's pace on the snow (how fast it takes the bends, how much it tucks).
-const SNOW_FAST: f32 = 1.0;
+const SNOW_FAST: f32 = 0.97;
 const SNOW_MIDDLING: f32 = 0.92;
 const SNOW_SLOW: f32 = 0.84;
 

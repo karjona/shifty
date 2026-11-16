@@ -1304,7 +1304,7 @@ pub static RUN: Run = Run::new(
         // The open slope: off the line one side, then the other.
         gate(160.0, -4.0, 8.0),
         gate(215.0, 4.0, 8.0),
-        gate(360.0, 1.5, 8.0),
+        gate(405.0, -1.0, 8.0),
         gate(500.0, 3.5, 8.0),
         gate(565.0, -3.5, 8.0),
         gate(635.0, 3.5, 8.0),
