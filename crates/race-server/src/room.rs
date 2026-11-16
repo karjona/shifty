@@ -71,8 +71,8 @@ const RATE_BURST: f64 = 40.0;
 const RATE_PER_SEC: f64 = 150.0;
 const INPUT_RING: usize = 128;
 
-/// Tilt points by finishing place. Riders who don't finish get the
-/// last place's points.
+/// Tilt points by finishing place. Riders who don't finish (the
+/// disqualified among them) get the last place's points.
 pub const GP_POINTS: [u16; MAX_RIDERS] = [10, 8, 6, 5, 4, 3, 2, 1];
 /// CPU riders' names, an initial and a surname, Costa Nevada's mix of
 /// Catalan, Spanish and Californian.
@@ -192,6 +192,9 @@ pub struct ReportEntry {
     pub place: u8,
     pub time_ms: Option<u32>,
     pub trick_points: u16,
+    /// Out of the race for missing too many buoys or gates (placed behind
+    /// everyone else, no time).
+    pub disqualified: bool,
     /// Tilt points after this race.
     pub gp_points: Option<u16>,
 }
@@ -388,6 +391,7 @@ impl Room {
         }
         room.apply_setups();
         room.world.hold_results = room.holds_results();
+        room.world.disqualify = room.trial.is_none();
         room
     }
 
@@ -770,6 +774,7 @@ impl Room {
                 place: st.place,
                 time_ms: finished.then(|| st.progress.finish_ticks * 1000 / TICK_HZ),
                 trick_points: st.progress.points,
+                disqualified: st.progress.disqualified(),
                 gp_points: gp.then_some(entrant.points),
             });
         }
@@ -874,6 +879,7 @@ impl Room {
             self.apply_setups();
         }
         self.world.hold_results = self.holds_results();
+        self.world.disqualify = self.trial.is_none();
     }
 
     /// Validate and buffer a packet of inputs. Never trusts the client: values
@@ -1188,6 +1194,51 @@ mod tests {
             Some(RejectReason::Started)
         );
         assert!(room.join(3, &ana, 0, now).is_ok());
+    }
+
+    #[test]
+    fn a_disqualified_rider_is_reported_last_with_last_places_points() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        assert!(room.world().disqualify);
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        race_on(&mut room, &mut now, &[(1, Some(0))]);
+        let slot = room.slot_of(1).unwrap();
+        let mut r = room.world.riders[slot].unwrap();
+        r.race.misses = sim::race::tuning::MAX_MISSES;
+        room.world.riders[slot] = Some(r);
+        run(&mut room, &mut now, 1, &[(1, Some(0))]);
+        assert!(room.world().riders[slot].unwrap().race.disqualified());
+        let reports = idle_until(&mut room, &mut now, |r| {
+            r.world().course == CourseId::Mountain
+        });
+        let [report] = &reports[..] else {
+            panic!("one race, one report: {reports:?}")
+        };
+        let mine = report
+            .entries
+            .iter()
+            .find(|e| e.pid.as_deref() == Some("ana"))
+            .unwrap();
+        assert!(mine.disqualified);
+        assert_eq!((mine.place, mine.time_ms), (4, None));
+        assert_eq!(mine.gp_points, Some(GP_POINTS[3]));
+        assert!(
+            report
+                .entries
+                .iter()
+                .filter(|e| e.pid.is_none())
+                .all(|e| !e.disqualified)
+        );
+    }
+
+    #[test]
+    fn a_time_trial_never_disqualifies() {
+        let mut ana = claims("ana", vec![0], 0);
+        ana.trial = true;
+        let room = Room::new(RoomConfig::from_claims(&ana));
+        assert!(!room.world().disqualify);
     }
 
     #[test]

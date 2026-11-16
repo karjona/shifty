@@ -3,7 +3,20 @@
 // cloth that flaps in it, and lamps that glow. A shape says how the wind
 // moves it through its `sway` weight (see shape.ts).
 import * as THREE from "three/webgpu";
-import { Fn, attribute, float, instanceIndex, normalLocal, positionLocal, sin, uniform, vec2, vec3 } from "three/tsl";
+import {
+  Fn,
+  attribute,
+  cos,
+  float,
+  instanceIndex,
+  normalLocal,
+  positionGeometry,
+  positionLocal,
+  sin,
+  uniform,
+  vec2,
+  vec3,
+} from "three/tsl";
 import { FOLIAGE, LOOK } from "../cel/look.ts";
 import { CelMaterial, UNREFLECTED, inkId, inklessBasic } from "../cel/material.ts";
 
@@ -137,6 +150,42 @@ export function clothMaterial(): CelMaterial {
       );
       const amp = weight.min(1.2).mul(speed.mul(0.012).add(0.07));
       return p.add(normalLocal.mul(wave.mul(amp))).sub(vec3(0, weight.mul(amp).mul(0.5), 0));
+    })();
+    return m;
+  });
+}
+
+/** A banner's ripples: two waves running along it (rad per metre, and how fast against the first). */
+const RIPPLE = { long: 1.5, short: 3.3, shortGain: 0.45, shortPace: 1.7 };
+
+/**
+ * A banner hung by its top edge, along its local x: `sway` is how far below
+ * that edge a vertex hangs (m). Ripples run along it and grow toward the free
+ * edge, and their flanks push the shade line, so its folds read in two tones.
+ */
+export function bannerMaterial(): CelMaterial {
+  return once("banner", () => {
+    const hang = attribute<"float">("sway", "float");
+    const speed = windNow().length();
+    const reach = hang.mul(speed.mul(0.022).add(0.09)).min(0.6);
+    const t = LOOK.time.mul(speed.mul(0.3).add(1.8));
+    const along = positionGeometry.x;
+    const long = along.mul(RIPPLE.long).sub(t).add(hang.mul(1.3));
+    const short = along.mul(RIPPLE.short).sub(t.mul(RIPPLE.shortPace)).sub(hang.mul(0.9)).add(1.7);
+    const slope = cos(long).add(cos(short).mul((RIPPLE.shortGain * RIPPLE.short) / RIPPLE.long));
+    const m = new CelMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      crease: 0,
+      silhouette: 0.6,
+      darkness: 0.7,
+      id: inkId("cloth"),
+      bias: slope.mul(hang.mul(2).min(1)).mul(speed.mul(0.02).add(0.3)),
+    });
+    m.positionNode = Fn(() => {
+      const wave = sin(long).add(sin(short).mul(RIPPLE.shortGain));
+      // The free edge lifts a little as it flies.
+      return positionLocal.add(normalLocal.mul(wave.mul(reach))).add(vec3(0, reach.mul(0.35), 0));
     })();
     return m;
   });

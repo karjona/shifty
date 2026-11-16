@@ -20,6 +20,12 @@ const entry = (pid: string | null, place: number, trickPoints = 0) => ({
   timeMs: 90_000,
   trickPoints,
   gpPoints: null,
+  disqualified: false,
+});
+const out = (pid: string | null, place: number, trickPoints = 0) => ({
+  ...entry(pid, place, trickPoints),
+  timeMs: null,
+  disqualified: true,
 });
 
 void test("matchmaking pays by place and style, even against bots", () => {
@@ -31,6 +37,20 @@ void test("matchmaking pays by place and style, even against bots", () => {
       ["race", PLACE_CREDITS[0]],
       ["style", STYLE_CAP],
     ],
+  );
+});
+
+void test("a disqualified rider is paid last place's credits and no style", () => {
+  const m = { id: "m_1", mode: "matchmaking", event: "summer" };
+  const field = [entry(null, 1), entry("b", 2), entry(null, 3), entry(null, 4), out("a", 5, 5000), out(null, 6)];
+  const p = payouts(report(field), m, new Set(["a", "b"]), 1);
+  assert.deepEqual(
+    p.filter((x) => x.userId === "a").map((x) => [x.reason, x.delta]),
+    [["race", PLACE_CREDITS[5]]],
+  );
+  assert.deepEqual(
+    p.filter((x) => x.userId === "b").map((x) => [x.reason, x.delta]),
+    [["race", PLACE_CREDITS[1]]],
   );
 });
 
@@ -93,4 +113,8 @@ void test("race reports carry the plan's length and the race's conditions", () =
   assert.deepEqual(parseReport(base), { ...base, eventCount: null, conditions: null });
   assert.equal(parseReport({ ...base, conditions: { season: 4, weather: 0, turns: 0, time: 72 } }), null);
   assert.equal(parseReport({ ...base, eventCount: 0 }), null);
+  const rider = { pid: "a", place: 8, timeMs: null, trickPoints: 10, gpPoints: 1 };
+  assert.equal(parseReport({ ...base, entries: [rider] })?.entries[0]?.disqualified, false);
+  assert.equal(parseReport({ ...base, entries: [{ ...rider, disqualified: true }] })?.entries[0]?.disqualified, true);
+  assert.equal(parseReport({ ...base, entries: [{ ...rider, disqualified: 1 }] }), null);
 });

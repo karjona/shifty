@@ -1,8 +1,9 @@
 // Race HUD: phase banner (countdown), lap / position / time, trick score,
-// the speed meter (summer), split times at checkpoints and the finish
+// the misses that count toward a disqualification, the speed meter (summer), split times at checkpoints and the finish
 // (against the first rider through; in a time trial, at laps too, against
 // the leading ghost), and short popups for buoys,
-// checkpoints, laps, tricks and the finish. Plain DOM: the state comes from
+// checkpoints, laps, tricks and the finish, and the verdict when misses
+// disqualify you. Plain DOM: the state comes from
 // the predicted world every frame. The standings and the results are the
 // scoreboard's (results.ts).
 
@@ -26,6 +27,10 @@ export interface RaceView {
   place: number;
   racers: number;
   misses: number;
+  /** Race ticks when you were disqualified (0: you weren't). */
+  disqualifiedTicks: number;
+  /** Misses that disqualify (0: none do, as in a time trial). */
+  maxMisses: number;
   tickHz: number;
   wrongWay: boolean;
   /** Trick points this race. */
@@ -41,7 +46,7 @@ export interface RaceView {
 export interface RaceEvent {
   tick: number;
   slot: number;
-  kind: "buoy" | "checkpoint" | "lap" | "finish" | "trick" | "sketchy" | "bail";
+  kind: "buoy" | "checkpoint" | "lap" | "finish" | "disqualified" | "trick" | "sketchy" | "bail";
   buoy?: number;
   ok?: boolean;
   meter?: number;
@@ -72,6 +77,8 @@ export interface StandingView {
   place: number;
   lap: number;
   finishTicks: number;
+  /** Race ticks when the rider was disqualified (0: it wasn't). */
+  disqualifiedTicks: number;
   misses: number;
   tricks: number;
   points: number;
@@ -100,6 +107,8 @@ export function formatTime(ticks: number, hz: number): string {
 
 /** How long a split time stays up (ms). */
 const SPLIT_MS = 4000;
+/** How long the verdict of a disqualification stays up (ms). */
+const VERDICT_MS = 4200;
 
 /** A time trial's ghost, as the splits read against it. */
 export interface GhostSplits {
@@ -135,6 +144,10 @@ export class Hud {
   private meter: HTMLDivElement;
   private gauges: HTMLDivElement;
   private popups: HTMLDivElement;
+  private verdict: HTMLDivElement;
+  private verdictTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Misses as the HUD last saw them (a warning goes up with the last one before you're out). */
+  private seenMisses = 0;
   /** Who passed each checkpoint (and the finish) in this race, and when (race ticks). */
   private passes = new Map<string, { slot: number; ticks: number }[]>();
   private passesRace = -1;
@@ -154,6 +167,27 @@ export class Hud {
     this.speed = el("div", "speed", bottom);
     this.meter = el("div", "meter", bottom);
     this.popups = el("div", "popups", root);
+    this.verdict = el("div", "verdict", root);
+    this.verdict.hidden = true;
+  }
+
+  /** The verdict over the race: you're out, and why (`misses` buoys or gates missed). */
+  private disqualified(race: RaceView): void {
+    const m = messages().hud;
+    this.popups.replaceChildren();
+    this.verdict.innerHTML =
+      `<b>${m.disqualified}</b>` +
+      `<span>${race.looped ? m.outBuoys(race.maxMisses) : m.outGates(race.maxMisses)}</span>`;
+    this.verdict.hidden = false;
+    this.verdict.classList.remove("going");
+    if (this.verdictTimer) clearTimeout(this.verdictTimer);
+    this.verdictTimer = setTimeout(() => {
+      this.verdict.classList.add("going");
+      this.verdictTimer = setTimeout(() => {
+        this.verdict.hidden = true;
+        this.verdictTimer = null;
+      }, 400);
+    }, VERDICT_MS);
   }
 
   /** Show a short message in the middle of the screen (`check`: with a tick before it). */
@@ -181,7 +215,7 @@ export class Hud {
         const split = e.kind === "checkpoint" || e.kind === "finish" || (e.kind === "lap" && (e.lap ?? 0) > 1);
         if (split && e.slot === mySlot && race.racing && race.phase === RACING) this.ghostSplit(e, race, this.trial);
       } else if ((e.kind === "checkpoint" || e.kind === "finish") && race.phase === RACING) this.pass(e, mySlot, race);
-      if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish")) continue;
+      if (e.slot !== mySlot || (race.autopilot && e.kind !== "finish" && e.kind !== "disqualified")) continue;
       if (e.kind === "buoy") {
         if (e.ok) this.popup(e.meter === race.meterMax ? m.maxPower : "", "good", true);
         else this.popup(m.missedBuoy, "bad");
@@ -193,6 +227,8 @@ export class Hud {
         if ((e.lap ?? 0) > 1) this.popup((e.lap ?? 0) === race.laps ? m.finalLap : m.lap(e.lap ?? 0), "big");
       } else if (e.kind === "finish") {
         this.popup(this.trial ? messages().trial.finish : m.finish(ordinal(race.place)), "big");
+      } else if (e.kind === "disqualified") {
+        this.disqualified(race);
       } else if (e.kind === "trick") {
         const name = trickName({
           spin: e.spin ?? 0,
@@ -273,6 +309,21 @@ export class Hud {
     return true;
   }
 
+  /**
+   * The misses that count toward a disqualification, against how many
+   * disqualify: quiet with none, more urgent as they add up (nothing
+   * where misses never disqualify, or once your race is over: the clock
+   * then reads your time, or the disqualification).
+   */
+  private missCell(race: RaceView): string {
+    if (race.maxMisses <= 0 || race.finishTicks > 0 || race.disqualifiedTicks > 0) return "";
+    const m = messages().hud;
+    const label = race.looped ? m.labels.missedBuoys : m.labels.missedGates;
+    const left = race.maxMisses - race.misses;
+    const level = race.misses === 0 ? "none" : left <= 1 ? "last" : left <= 2 ? "warn" : "some";
+    return `<div class="hud-miss ${level}"><span>${label}</span> <b>${race.misses}<small>/${race.maxMisses}</small></b></div>`;
+  }
+
   update(race: RaceView, speedKmh: number, gp: GrandPrixView | null = null): void {
     const m = messages().hud;
     const hz = race.tickHz;
@@ -303,6 +354,17 @@ export class Hud {
     }
     // The results have the screen: what was popping up goes.
     if (race.phase === RESULTS && this.popups.childElementCount > 0) this.popups.replaceChildren();
+    if (race.phase !== RACING && !this.verdict.hidden) {
+      if (this.verdictTimer) clearTimeout(this.verdictTimer);
+      this.verdictTimer = null;
+      this.verdict.hidden = true;
+    }
+    // The last miss before you're out is called out, whichever sport it was missed in.
+    const out = race.disqualifiedTicks > 0;
+    if (race.phase === RACING && race.racing && !out && race.maxMisses > 1 && race.misses > this.seenMisses) {
+      if (race.misses === race.maxMisses - 1) this.popup(m.lastChance, "bad");
+    }
+    this.seenMisses = race.phase === RACING ? race.misses : 0;
 
     if (race.racing && (race.phase === RACING || race.phase === COUNTDOWN)) {
       const time = race.finishTicks > 0 ? race.finishTicks : race.phase === RACING ? race.phaseTicks : 0;
@@ -318,11 +380,11 @@ export class Hud {
         ? ""
         : `<div class="hud-pos"><span>${m.labels.pos}</span> ${race.place}/${race.racers}</div>`;
       const clock = `<div class="hud-time"><span>${m.labels.time}</span> <b class="hud-clock"></b></div>`;
-      if (this.write(this.info, "info", event + first + pos + clock + split)) {
+      if (this.write(this.info, "info", event + first + pos + clock + this.missCell(race) + split)) {
         this.clock = this.info.querySelector(".hud-clock");
         this.shown.time = "";
       }
-      const figure = formatTime(time, hz);
+      const figure = out ? messages().results.dsq : formatTime(time, hz);
       if (this.clock && figure !== this.shown.time) {
         this.shown.time = figure;
         this.clock.textContent = figure;

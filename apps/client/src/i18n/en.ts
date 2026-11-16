@@ -489,7 +489,22 @@ export const en = {
     finish: (place: string) => `FINISH! ${place}`,
     sketchy: "SKETCHY",
     bail: "BAIL!",
-    labels: { lap: "LAP", score: "SCORE", pos: "POS", time: "TIME", split: "SPLIT", race: "RACE", power: "POWER" },
+    lastChance: "ONE MORE AND YOU'RE OUT",
+    /** The verdict over the race when misses disqualify you, and why. */
+    disqualified: "DISQUALIFIED",
+    outBuoys: (n: number) => `${n} buoys missed`,
+    outGates: (n: number) => `${n} gates missed`,
+    labels: {
+      lap: "LAP",
+      score: "SCORE",
+      pos: "POS",
+      time: "TIME",
+      split: "SPLIT",
+      race: "RACE",
+      power: "POWER",
+      missedBuoys: "BUOYS MISSED",
+      missedGates: "GATES MISSED",
+    },
     ordinal: (n: number) => {
       const s = ["th", "st", "nd", "rd"];
       const v = n % 100;
@@ -532,6 +547,8 @@ export const en = {
     racing: "Racing",
     lap: (lap: number, laps: number) => `Lap ${lap}/${laps}`,
     dnf: "DNF",
+    /** Disqualified (for missing too many buoys or gates). */
+    dsq: "DSQ",
     cols: { time: "Time", missed: "Missed", tricks: "Tricks", style: "Style", tilt: "Tilt", points: "Points" },
     tilt: "The Tilt",
     after: (i: number, n: number) => `After race ${i} of ${n}`,
@@ -556,6 +573,7 @@ export const en = {
       record: "New record",
       personalBest: "New personal best",
       best: (circuit: string) => `Your best finish on ${circuit}`,
+      disqualified: "Disqualified",
     },
     paid: "What it paid",
     waiting: "Waiting for the results…",
@@ -571,6 +589,7 @@ export const en = {
       places: (n: number) => `Places · ${n} races`,
       style: "Style",
       bonus: "The Tilt, finished",
+      disqualified: "Disqualified",
     },
     credits: "Credits",
     again: "Play again",

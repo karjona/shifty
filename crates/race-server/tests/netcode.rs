@@ -782,6 +782,114 @@ fn finished_riders_are_predicted_exactly_whatever_their_players_press() {
     );
 }
 
+/// Rides the course passing every buoy on its wrong side.
+fn missing_every_buoy(w: &sim::World, slot: usize) -> Input {
+    let Some(r) = w.riders[slot] else {
+        return Input::default();
+    };
+    let course = w.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = if gate >= 1 {
+        let b = &course.buoys[gate - 1];
+        match b.keep {
+            sim::course::Keep::Right => b.offset + 4.0,
+            sim::course::Keep::Left => b.offset - 4.0,
+        }
+    } else {
+        0.0
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = (-sim::math::angle_diff(r.yaw, desired) * 2.5).clamp(-1.0, 1.0);
+    Input::from_analog(steer, 1.0, 0.0, 0)
+}
+
+#[test]
+fn a_disqualification_is_predicted_and_announced_once() {
+    let cond = NetConditions {
+        latency_ms: 80.0,
+        jitter_ms: 10.0,
+        loss: 0.02,
+    };
+    // Player b idles on the grid (so the race goes on) and watches a.
+    let mut h = Harness::new(0, SurfaceKind::Flat);
+    h.add_peer("a", cond);
+    h.add_peer("b", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    let a = h.peers[0].client.slot().expect("joined");
+    let out = |h: &Harness| h.room.world().riders[a].is_some_and(|r| r.race.disqualified());
+    let mut announced: Vec<Vec<(u8, u32)>> = vec![Vec::new(); 2];
+    let mut note = |h: &mut Harness| {
+        for (i, p) in h.peers.iter_mut().enumerate() {
+            for e in p.client.take_events() {
+                if let sim::race::EventKind::Disqualified { ticks } = e.kind {
+                    announced[i].push((e.slot, ticks));
+                }
+            }
+        }
+    };
+    for _ in 0..200 {
+        if out(&h) {
+            break;
+        }
+        h.drive(500.0, |i, c, _| {
+            if i == 0 {
+                missing_every_buoy(c.predicted_world(), a)
+            } else {
+                Input::default()
+            }
+        });
+        note(&mut h);
+    }
+    let r = h.room.world().riders[a].unwrap();
+    assert!(out(&h), "never disqualified: {r:?}");
+    assert_eq!(r.race.misses, sim::race::tuning::MAX_MISSES);
+    assert!(h.room.world().on_autopilot(a));
+    // Out of the race, a mashes the stick while both screens predict it.
+    h.run(500.0, |_, _| Input::default());
+    note(&mut h);
+    let before = h.peers[0].client.stats();
+    let mut rng = Pcg32::new(5);
+    h.drive(4000.0, |i, _, _| {
+        if i == 1 {
+            return Input::default();
+        }
+        Input::from_analog(
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            rng.range(-1.0, 1.0),
+            (rng.next_u32() & 0xFF) as u8,
+        )
+    });
+    note(&mut h);
+    assert_eq!(h.room.world().race.phase, RacePhase::Racing);
+    let s = h.peers[0].client.stats();
+    assert_eq!(s.mispredictions - before.mispredictions, 0, "{s:?}");
+    let server = h.room.world().riders[a].unwrap().race;
+    for (i, p) in h.peers.iter().enumerate() {
+        let predicted = p.client.predicted_world().riders[a].unwrap().race;
+        assert_eq!(predicted.disqualified_ticks, server.disqualified_ticks);
+        assert_eq!(
+            announced[i],
+            [(a as u8, server.disqualified_ticks)],
+            "screen {i}"
+        );
+    }
+    // Last, behind b who never left the grid.
+    let order: Vec<u8> = h
+        .room
+        .world()
+        .standings()
+        .iter()
+        .map(|st| st.slot)
+        .collect();
+    assert_eq!(order.last(), Some(&(a as u8)));
+}
+
 #[test]
 fn a_screen_frozen_while_it_loads_keeps_its_seat_for_the_grid_wait() {
     let mut h = Harness::new(1, SurfaceKind::Flat);

@@ -3,7 +3,8 @@
 // checks, and on Continue to what comes after it. URL options: season (the
 // accent: summer, fall, winter, spring), riders (1-8), me (your place, 1-8;
 // 0 = none of them), seed (the bots' looks), place (1-8: after the podium,
-// the end of one race in that place instead of the Tilt's).
+// the end of one race in that place instead of the Tilt's), dq=1 (that race
+// ended disqualified).
 import { botAppearance, defaultAppearance } from "@shifty/rider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
@@ -65,6 +66,7 @@ export function podiumDev(params: URLSearchParams): void {
     season,
   };
   const place = Number(params.get("place") ?? 0);
+  const dq = params.get("dq") === "1";
   const end: RaceEnd = {
     podium: place > 0 ? null : data,
     course: 1,
@@ -72,8 +74,10 @@ export function podiumDev(params: URLSearchParams): void {
     conditions: { season, weather: "snow", turns: "clear", time: 84 },
     place: place > 0 ? place : me,
     racers: 8,
-    finishTicks: 5490 + place * 140,
+    finishTicks: dq ? 0 : 5490 + place * 140,
     tickHz: 60,
+    disqualified: dq,
+    misses: dq ? 5 : 1,
     points: 1200,
     eventCount: place > 0 ? 1 : 4,
   };

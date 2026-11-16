@@ -298,6 +298,8 @@ export const raceResult = pgTable(
     trickPoints: integer("trick_points").notNull().default(0),
     /** Tilt points after this race (Tilt rooms only). */
     gpPoints: integer("gp_points"),
+    /** Out of the race for missing too many buoys or gates: placed last, no time. */
+    disqualified: boolean("disqualified").notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [

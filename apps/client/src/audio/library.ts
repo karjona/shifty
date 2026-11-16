@@ -20,6 +20,8 @@ export type SoundName =
   | "buoyMiss"
   | "trick"
   | "wrongWay"
+  | "lastChance"
+  | "disqualified"
   | "splashSmall"
   | "splashBig"
   | "bailSplash"
@@ -390,6 +392,31 @@ const RECIPES: readonly Recipe[] = [
       const lp = b.filter("lowpass", 900, 0.7);
       b.tone({ type: "square", f: 233, attack: 0.005, hold: 0.09, decay: 0.06, amp: 1, to: lp });
       b.tone({ type: "square", f: 233, at: 0.17, attack: 0.005, hold: 0.09, decay: 0.06, amp: 1, to: lp });
+    },
+  },
+  {
+    name: "lastChance",
+    seconds: 0.55,
+    variants: 1,
+    peakDb: -20,
+    build: (b) => {
+      const lp = b.filter("lowpass", 1100, 0.7);
+      for (const at of [0, 0.12])
+        b.tone({ type: "square", f: 349, at, attack: 0.004, hold: 0.06, decay: 0.05, amp: 1, to: lp });
+      b.tone({ type: "square", f: 440, at: 0.25, attack: 0.004, hold: 0.1, decay: 0.14, amp: 1, to: lp });
+    },
+  },
+  {
+    name: "disqualified",
+    seconds: 1.3,
+    variants: 1,
+    peakDb: -17,
+    build: (b) => {
+      const lp = b.filter("lowpass", 1000, 0.7);
+      for (const [i, f] of [311, 262].entries())
+        b.tone({ type: "triangle", f, at: i * 0.19, attack: 0.005, hold: 0.11, decay: 0.1, amp: 1, to: lp });
+      b.tone({ type: "triangle", f: 196, at: 0.38, attack: 0.005, hold: 0.32, decay: 0.45, amp: 1, to: lp });
+      b.tone({ type: "square", f: 98, at: 0.38, attack: 0.01, hold: 0.3, decay: 0.4, amp: 0.3, to: lp });
     },
   },
   // The jetski.
