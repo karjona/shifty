@@ -48,6 +48,8 @@ export interface JoinClaims {
   humans?: number;
   /** A time trial: one race with its circuit and season picked, the rider alone, every run recorded. */
   trial?: true;
+  /** Back into a race under way: seats the player in its room if it still runs, never starts it. */
+  rejoin?: true;
 }
 
 /** The race server a ticket is for. */
@@ -133,6 +135,8 @@ export interface TicketRequest {
   humans?: number;
   /** A time trial (its plan: one race, its circuit and season picked). */
   trial?: boolean;
+  /** Back into a race under way (its room must still be running). */
+  rejoin?: boolean;
 }
 
 export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Date.now()): Promise<JoinTicket> {
@@ -153,6 +157,7 @@ export async function mintTicket(seedB64: string, req: TicketRequest, nowMs = Da
   if (req.rider?.setups.length) claims.setups = req.rider.setups;
   if (req.humans) claims.humans = req.humans;
   if (req.trial) claims.trial = true;
+  if (req.rejoin) claims.rejoin = true;
   return {
     token: await signJoinToken(seedB64, claims),
     room: req.room,

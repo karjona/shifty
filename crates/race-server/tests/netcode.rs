@@ -105,6 +105,7 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, race: RaceClaims) -> JoinCl
         // Lopsided setups, so prediction has to know each rider's.
         setups: vec![[6, 2, 2, 2], [2, 3, 6, 1]],
         trial: false,
+        rejoin: false,
     }
 }
 
@@ -947,4 +948,52 @@ fn after_the_last_results_the_world_runs_on_predicted_exactly_until_nobody_looks
     let conn = h.peers[0].conn;
     h.room.leave(conn);
     assert!(h.room.is_done());
+}
+
+#[test]
+fn a_reloaded_screen_rejoins_its_seat_and_predicts_on() {
+    let cond = NetConditions {
+        latency_ms: 60.0,
+        jitter_ms: 8.0,
+        loss: 0.02,
+    };
+    let mut h = Harness::new(3, SurfaceKind::Swells);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    h.run(4000.0, driving);
+    let slot = h.peers[0].client.slot().expect("joined");
+    let progress = h.room.world().riders[slot].expect("rider").race;
+    // The tab reloads: the old connection goes without a goodbye, and a new
+    // screen (a new client, a new connection) comes back a few seconds later.
+    let old = h.peers[0].conn;
+    h.room.disconnect(old, h.now as u64);
+    h.peers[0].client = Client::new("token");
+    h.peers[0].conn = 40;
+    h.peers[0].up = Link::new(cond, 300);
+    h.peers[0].down = Link::new(cond, 301);
+    h.peers[0].loaded = false;
+    h.run(3000.0, |_, _| Input::default());
+    let c = &h.peers[0].client;
+    assert_eq!(c.phase(), Phase::Joined);
+    assert_eq!(c.slot(), Some(slot), "the same seat");
+    // The same rider, its race carried on (it coasted while away).
+    let now = h.room.world().riders[slot].expect("rider").race;
+    assert!(
+        now.racing && now.lap >= progress.lap,
+        "{progress:?} -> {now:?}"
+    );
+    // The new screen knows everyone again, and predicts the bots exactly.
+    let seated = h.room.world().riders.iter().flatten().count();
+    assert_eq!(c.roster().iter().flatten().count(), seated);
+    h.peers[0].loaded = true;
+    let before = h.peers[0].client.stats();
+    h.run(4000.0, |_, _| Input::from_analog(0.1, 1.0, 0.0, 0));
+    let s = h.peers[0].client.stats();
+    assert!(s.snapshots - before.snapshots > 100, "{s:?}");
+    assert!(
+        f64::from(s.mispredictions - before.mispredictions)
+            < f64::from(s.snapshots - before.snapshots) * 0.1,
+        "{s:?}"
+    );
 }

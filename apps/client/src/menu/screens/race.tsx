@@ -17,17 +17,28 @@ import { SEASONS } from "@shifty/rider";
 import { type RaceEnd, RaceSession, type Trouble, readPlan } from "../../game/race.ts";
 import { SeasonCard } from "../../game/season-change.ts";
 import { useT } from "../../i18n/index.ts";
-import { ApiError, type PendingRace, meQuery, playSingle, raceMode, setRequeue, takePendingRace } from "../api.ts";
+import {
+  ApiError,
+  type PendingRace,
+  forgetRace,
+  leftMatch,
+  meQuery,
+  playSingle,
+  raceMode,
+  setRequeue,
+  takePendingRace,
+} from "../api.ts";
 import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
 import { MenuIcon } from "../icons.tsx";
 import { nav, pointing } from "../nav.ts";
-import { touchSettings } from "../../touch/device.ts";
 import { Button, Glyph } from "../ui.tsx";
+import { RaceControls } from "./controls.tsx";
 import { PodiumScreen } from "./podium.tsx";
 import { type EndAction, TroublePanel, type TrialSummary, WrapUp, useTroubleText } from "./wrapup.tsx";
 import { VERSION } from "../../version.ts";
 
 /** `sim::Phase`. */
+const GRID = 0;
 const COUNTDOWN = 1;
 const RACING = 2;
 const RESULTS = 3;
@@ -60,7 +71,9 @@ interface View {
   racePhase: number;
   sport: "jetski" | "snow";
   watching: boolean;
-  touch: boolean;
+  device: "keyboard" | "gamepad" | "touch";
+  /** This race's course is on screen, nothing covering it. */
+  onShow: boolean;
   finalResults: boolean;
   eventIndex: number;
   eventCount: number;
@@ -99,8 +112,10 @@ function RaceRun({
   const [error, setError] = useState<string | null>(null);
   const { device } = useDevice();
 
-  // Out of a race the browser's back doesn't come back to it: every way out replaces it.
+  // Out of a race the browser's back doesn't come back to it: every way out replaces it,
+  // and a reload doesn't either.
   const back = () => {
+    forgetRace();
     if (!race) {
       void navigate({ to: "/play", replace: true });
       return;
@@ -108,7 +123,9 @@ function RaceRun({
     if (race.back.to === "/room/$code") void navigate({ to: "/room/$code", params: race.back.params, replace: true });
     else void navigate({ to: "/play", search: race.back.search, replace: true });
   };
+  const goBack = useEffectEvent(() => back());
   const planOver = useEffectEvent((data: RaceEnd) => {
+    forgetRace();
     setMenu(false);
     setConfirm(null);
     setEnd(data);
@@ -123,6 +140,8 @@ function RaceRun({
     }
     if (outdated) {
       void card?.hide();
+      // A race kept through a reload, from an earlier release: nothing to go back to.
+      if (race.rejoin) goBack();
       return undefined;
     }
     let s: RaceSession | null = null;
@@ -157,7 +176,8 @@ function RaceRun({
               racePhase: st.racePhase,
               sport: st.sport,
               watching: st.watching,
-              touch: st.device === "touch",
+              device: st.device,
+              onShow: st.onShow,
               finalResults: st.finalResults,
               eventIndex: st.eventIndex,
               eventCount: st.eventCount,
@@ -198,6 +218,7 @@ function RaceRun({
         hz: run.hz,
         ghosts: run.ghosts,
         callout: run.callout,
+        beat: run.beat,
         name: run.name,
       });
     }, TRIAL_PANEL_MS);
@@ -228,8 +249,19 @@ function RaceRun({
     }
   };
 
-  const changeMode = () => void navigate({ to: "/play", search: { mode }, replace: true });
-  const mainMenu = () => void navigate({ to: "/", replace: true });
+  const changeMode = () => {
+    forgetRace();
+    void navigate({ to: "/play", search: { mode }, replace: true });
+  };
+  const mainMenu = () => {
+    forgetRace();
+    void navigate({ to: "/", replace: true });
+  };
+  /** Leaving on purpose (confirmed where it costs something): the match isn't offered back. */
+  const quit = () => {
+    if (race && online) leftMatch(race.ticket.room);
+    back();
+  };
   const toRoom = () => back();
 
   // What leaving costs now: a Tilt under way, or a race you are still in.
@@ -243,7 +275,7 @@ function RaceRun({
           : null;
   const leave = () => {
     if (cost && confirm === null) setConfirm(cost);
-    else back();
+    else quit();
   };
 
   const endShown = end !== null && (end.podium === null || afterPodium);
@@ -338,7 +370,7 @@ function RaceRun({
     );
   };
 
-  if (outdated)
+  if (outdated && !race?.rejoin)
     return (
       <div className="screen race-screen">
         <TroublePanel
@@ -363,9 +395,19 @@ function RaceRun({
   return (
     <div className={`screen race-screen${endShown || trialShown ? " wrapped" : ""}`}>
       <div ref={hudRef} className="race-hud" />
-      {view && trouble === null && !endShown && !trialShown && (BEFORE_COUNTDOWN.has(view.racePhase) || menu) && (
-        <Help view={view} inMenu={menu} />
-      )}
+      {/* The controls while the grid waits (at the right: the title card has the left) and through the
+          countdown (low at the left); never over a season card or the intro. */}
+      {view &&
+        trouble === null &&
+        !menu &&
+        view.onShow &&
+        (view.racePhase === GRID || view.racePhase === COUNTDOWN) && (
+          <RaceControls
+            sport={view.sport}
+            device={view.device}
+            className={view.racePhase === GRID ? "waiting" : "countdown"}
+          />
+        )}
       {!menu && trouble === null && !endShown && !trialShown && (
         <div className="race-menu-hint">
           {continueShown && (
@@ -398,7 +440,8 @@ function RaceRun({
         </div>
       )}
       {menu && !confirm && (
-        <div className="race-menu" data-nav-scope="">
+        <div className="race-menu with-controls" data-nav-scope="">
+          {view && <RaceControls sport={view.sport} device={view.device} />}
           <div className="panel">
             <h2 className="panel-title">{t.race.menu}</h2>
             <Button kind="primary" glyph="back" onClick={() => setMenu(false)} autoFocus>
@@ -426,39 +469,39 @@ function RaceRun({
             <Button kind="primary" glyph="back" onClick={() => setConfirm(null)} autoFocus>
               {t.race.leaving.stay}
             </Button>
-            <Button kind="danger" onClick={back}>
+            <Button kind="danger" onClick={quit}>
               {t.race.leaving.leave}
             </Button>
           </div>
         </div>
       )}
-      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} />}
+      {trouble && <Problem trouble={trouble} back={back} room={mode === "room"} rejoin={race?.rejoin === true} />}
       {endShown && end && wrapUp({ kind: "race", end })}
       {trialShown && trialPanel && wrapUp({ kind: "trial", trial: trialPanel })}
     </div>
   );
 }
 
-/** The controls, while the race waits to start and in the race menu. */
-function Help({ view, inMenu }: { view: View; inMenu: boolean }) {
+/**
+ * What went wrong, and the way back (a room's: where its race can be
+ * rejoined while it runs). Coming back to a race (`rejoin`), a turned-down
+ * ticket means the way back in is closed.
+ */
+function Problem({
+  trouble,
+  back,
+  room,
+  rejoin,
+}: {
+  trouble: Trouble;
+  back: () => void;
+  room: boolean;
+  rejoin: boolean;
+}) {
   const t = useT();
-  const lines = view.touch
-    ? t.race.helpTouch[view.sport === "jetski" && touchSettings().gas === "hold" ? "jetskiHold" : view.sport]
-    : t.race.help[view.sport];
-  return (
-    <div className={`race-help ${inMenu ? "in-menu" : ""}`}>
-      <b>{t.race.controls}</b>
-      {lines.map((line) => (
-        <span key={line}>{line}</span>
-      ))}
-    </div>
-  );
-}
-
-/** What went wrong, and the way back (a room's: where its race can be rejoined while it runs). */
-function Problem({ trouble, back, room }: { trouble: Trouble; back: () => void; room: boolean }) {
-  const t = useT();
-  const { title, body } = useTroubleText(trouble);
+  const text = useTroubleText(trouble);
+  const closed = rejoin && trouble.kind === "rejected" && trouble.reason !== "version" && trouble.reason !== "full";
+  const { title, body } = closed ? t.race.trouble.rejoin : text;
   const version = trouble.kind === "rejected" && trouble.reason === "version";
   const backAction: EndAction = { label: room ? t.end.backToRoom : t.common.back, run: back, glyph: "back" };
   return (

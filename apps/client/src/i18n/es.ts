@@ -289,6 +289,7 @@ export const es: Messages = {
     partySoon: "Muy pronto: forma un grupo con los nombres de tus amigos.",
     createRoom: "Crear una sala",
     joinRoom: "Entrar en una sala",
+    liveRace: "Tienes una carrera en marcha",
     roomCode: "Código de la sala",
     join: "Entrar",
     noRoom: "No hay ninguna sala con ese código.",
@@ -336,19 +337,28 @@ export const es: Messages = {
     joining: "Entrando en la carrera…",
     waiting: "Esperando al servidor de carreras…",
     controls: "Controles",
+    /** Keys as printed on them. */
+    keys: { space: "Espacio", shift: "Mayús" },
     help: {
-      jetski: [
-        "Stick: girar e inclinarte (tira hacia atrás en una cresta para volar) · RT acelerar · LT frenar",
-        "En el aire: A + stick giros y volteretas, X + stick tonel, B + stick una acrobacia. ¡Suéltala a tiempo para aterrizar!",
-        "Teclado: WASD conducir · flechas girar e inclinarte · Espacio giros · Mayús tonel · E acrobacias",
-        "Pasa las boyas rojas por tu derecha y las verdes por tu izquierda.",
-      ],
-      snow: [
-        "Stick: girar · arriba (o RT) agacharte · abajo (o LT) echarte atrás y frenar",
-        "Mantén A para cargar el salto y suéltalo en el borde · en el aire: X + stick giros y volteretas, B grabs",
-        "Teclado: WASD girar, agacharte, frenar · Espacio saltar · J / Mayús giros · K / E grab",
-        "Aterriza con la tabla plana, a favor de la pendiente, ¡y suelta el grab antes!",
-      ],
+      jetski: {
+        steer: "Girar e inclinarte: tira hacia atrás en una cresta para volar",
+        gas: "Acelerar · frenar",
+        spin: "En el aire: giros y volteretas",
+        roll: "En el aire: tonel",
+        stunt: "Una acrobacia (la dirección la elige); suéltala a tiempo para aterrizar",
+        tip: "Pasa las boyas rojas por tu derecha y las verdes por tu izquierda.",
+        keySteer: "Girar",
+        keyLean: "Inclinarte: tira hacia atrás en una cresta para volar",
+      },
+      snow: {
+        steer: "Girar · arriba agacharte · abajo echarte atrás y frenar",
+        jump: "Mantén para cargar el salto y suéltalo en el borde",
+        spin: "En el aire: giros y volteretas",
+        grab: "Grab (la dirección lo elige)",
+        tip: "Aterriza con la tabla plana, a favor de la pendiente, ¡y suelta el grab antes!",
+        keySteer: "Girar",
+        keyTuck: "Agacharte · echarte atrás y frenar",
+      },
     },
     /** The touch screen's buttons. */
     touch: {
@@ -429,6 +439,10 @@ export const es: Messages = {
         title: "Se ha perdido el servidor de carreras",
         body: "La conexión se ha cortado y la carrera sigue sin ti.",
       },
+      rejoin: {
+        title: "No se ha podido volver a la carrera",
+        body: "Puede que haya terminado o que el servidor de carreras haya liberado tu plaza.",
+      },
     },
   },
   hud: {
@@ -501,6 +515,15 @@ export const es: Messages = {
     tilt: "El Tilt",
     points: (n: number) => `${n} ptos.`,
     standings: "Clasificación final",
+    verdicts: {
+      win: "Carrera ganada",
+      podium: "En el podio",
+      tiltWin: "Ganas el Tilt",
+      tiltPodium: "En el podio del Tilt",
+      record: "Nuevo récord",
+      personalBest: "Tu mejor tiempo",
+      best: (circuit: string) => `Tu mejor puesto en ${circuit}`,
+    },
     paid: "Lo que ha pagado",
     waiting: "Esperando los resultados…",
     late: "Lo que ha pagado aún no ha llegado. Llegará a tus créditos en breve.",
