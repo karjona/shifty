@@ -126,6 +126,7 @@ impl HudEvent {
             (EventKind::Checkpoint { index: a }, EventKind::Checkpoint { index: b }) => a == b,
             (EventKind::Lap { lap: a }, EventKind::Lap { lap: b }) => a == b,
             (EventKind::Finish { .. }, EventKind::Finish { .. })
+            | (EventKind::Disqualified { .. }, EventKind::Disqualified { .. })
             | (EventKind::Trick { .. }, EventKind::Trick { .. })
             | (EventKind::Sketchy, EventKind::Sketchy)
             | (EventKind::Bail, EventKind::Bail) => true,
@@ -688,6 +689,7 @@ impl Client {
         });
         let mut world = self.base.clone();
         world.hold_results = self.holds_results();
+        world.disqualify = !self.trial;
         world.tick = s.tick;
         world.race = s.race;
         world.riders = riders;

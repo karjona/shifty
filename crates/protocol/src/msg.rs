@@ -22,7 +22,7 @@ use sim::{Conditions, CourseId, MAX_RIDERS, SurfaceKind};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const PROTOCOL_VERSION: u16 = 13;
+pub const PROTOCOL_VERSION: u16 = 14;
 /// Safe single-datagram payload size (WebTransport over QUIC, IPv6 paths).
 pub const MAX_DATAGRAM: usize = 1200;
 /// Most inputs one packet may carry (about half a second at 60 Hz).
@@ -306,6 +306,8 @@ pub enum ServerMsg {
 
 const FLAG_GROUNDED: u8 = 1;
 const FLAG_RACING: u8 = 2;
+/// Disqualified: the race ticks when follow (`Progress::disqualified_ticks`).
+const FLAG_DISQUALIFIED: u8 = 4;
 
 fn write_input(w: &mut Writer, i: &Input) {
     w.i8(i.steer);
@@ -333,6 +335,9 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     }
     if p.racing {
         flags |= FLAG_RACING;
+    }
+    if p.disqualified() {
+        flags |= FLAG_DISQUALIFIED;
     }
     w.u8(flags);
     w.i32(quant::pos_to_wire(r.pos.x));
@@ -362,6 +367,9 @@ fn write_rider(w: &mut Writer, s: &RiderState) {
     w.u8(p.tricks);
     w.u16(p.points);
     w.u32(p.finish_ticks);
+    if p.disqualified() {
+        w.u32(p.disqualified_ticks);
+    }
 }
 
 fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
@@ -403,6 +411,18 @@ fn read_rider(r: &mut Reader<'_>) -> Result<RiderState, DecodeError> {
         tricks: r.u8()?,
         points: r.u16()?,
         finish_ticks: r.u32()?,
+        disqualified_ticks: 0,
+    };
+    let race = Progress {
+        disqualified_ticks: if flags & FLAG_DISQUALIFIED != 0 {
+            match r.u32()? {
+                0 => return Err(DecodeError::Invalid("disqualified at 0")),
+                t => t,
+            }
+        } else {
+            0
+        },
+        ..race
     };
     Ok(RiderState {
         slot,
