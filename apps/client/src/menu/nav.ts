@@ -8,7 +8,8 @@
 //
 // The topmost `[data-nav-scope]` (a dialog) holds the focus while it is
 // open; up and down scroll its `[data-nav-scroll]` text when there is
-// nothing above or below to move to. An element with `data-nav-lr` (a picker) takes left and right for
+// nothing above or below to move to. Moving into a `[data-nav-region]`
+// from outside lands on its `[data-nav-entry]`. An element with `data-nav-lr` (a picker) takes left and right for
 // itself, as a `nav-lr` event with `detail` -1 or 1.
 import { uiSound } from "../audio/ui.ts";
 
@@ -209,7 +210,13 @@ class Nav {
     }
     // The focus styles read the way it came from (the fill wipes in from that side).
     document.documentElement.dataset.navDir = dir;
-    const next = nearest(active, dir, list);
+    let next = nearest(active, dir, list);
+    // Coming into a region from outside it lands on the region's way in.
+    const region = next?.closest("[data-nav-region]");
+    if (region && !region.contains(active)) {
+      const entry = region.querySelector<HTMLElement>("[data-nav-entry]");
+      if (entry && list.includes(entry)) next = entry;
+    }
     if (!next) {
       if (dir === "up" || dir === "down") this.scrollText(dir === "up" ? -1 : 1);
       return;

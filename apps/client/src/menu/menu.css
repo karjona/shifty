@@ -1354,17 +1354,85 @@ a {
   color: inherit;
 }
 
+/* Settings: the sections on the left, the open one's options beside them. */
 .settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 440px minmax(0, var(--col-r));
   align-items: start;
   gap: var(--gap);
 }
-.settings-col {
+.settings-options {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
   min-width: 0;
+}
+.settings-sections {
+  gap: 0;
+  padding: 8px var(--pad);
+  counter-reset: row;
+}
+.settings-sections .tab {
+  justify-content: flex-start;
+  height: var(--row);
+  padding: 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: var(--fs-nav);
+  font-weight: 700;
+  font-stretch: 100%;
+  letter-spacing: 0;
+  text-transform: none;
+  counter-increment: row;
+}
+.settings-sections .tab:last-child {
+  border-bottom: 0;
+}
+.settings-sections .tab > span {
+  position: relative;
+  z-index: 1;
+}
+.settings-sections .tab > span::before {
+  content: counter(row, decimal-leading-zero);
+  display: inline-block;
+  width: 48px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-stretch: 75%;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  vertical-align: 2px;
+}
+.settings-sections .tab::before {
+  inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
+  box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
+}
+/* The open section: a chevron pointing at its options. */
+.settings-sections .tab.on::after {
+  left: auto;
+  right: 4px;
+  top: 50%;
+  bottom: auto;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: solid currentColor;
+  border-width: 3px 3px 0 0;
+  background: none;
+  transform: rotate(45deg);
+  z-index: 1;
+  animation: none;
+}
+.settings-sections .tab:focus {
+  color: var(--on-accent);
+  border-bottom-color: transparent;
+}
+.settings-sections .tab:focus > span::before {
+  color: inherit;
+  opacity: 0.7;
+}
+.settings-options > * {
+  animation: slide-in 220ms var(--ease) both;
 }
 /* The menus' buttons, drawn like the hints: an action per row, the controller's and the keyboard's. */
 .controls {
@@ -2283,22 +2351,17 @@ a {
 .mode-side > *,
 .creator-side > *,
 .shop-panel,
-.settings-col > * {
+.settings-sections {
   animation: enter-right 460ms var(--ease) both;
 }
 .home-right > :nth-child(2),
 .mode-side > :nth-child(2),
-.creator-side > :nth-child(2),
-.settings > :nth-child(2) > * {
+.creator-side > :nth-child(2) {
   animation-delay: 70ms;
 }
 .home-right > :nth-child(3),
-.mode-side > :nth-child(3),
-.settings > :nth-child(3) > * {
+.mode-side > :nth-child(3) {
   animation-delay: 140ms;
-}
-.settings-col > :nth-child(2) {
-  animation-delay: 210ms;
 }
 .title-panel,
 .menu-tabs,

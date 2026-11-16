@@ -6,7 +6,7 @@ import { audio } from "../../audio/index.ts";
 import { preloadClub, setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { SEASONS, onSeasonShown, shownSeason } from "../../game/seasons.ts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useEffect, useReducer, useState, useSyncExternalStore } from "react";
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { type Locale, LOCALES, setLocale, useLocale, useT } from "../../i18n/index.ts";
 import { auth, type Banner, fetchContent, meQuery, type NewsPost } from "../api.ts";
 import { type GlyphAction, KeyGlyph, PadGlyph } from "../glyphs.tsx";
@@ -320,6 +320,13 @@ const SCALES = [0.5, 0.75, 1];
 const VOLUMES = Array.from({ length: 11 }, (_, i) => i / 10);
 const VOLUME_KINDS = ["master", "effects", "music"] as const;
 
+type Section = "general" | "sound" | "controls" | "account";
+
+/**
+ * Settings, in sections: the list on the left, the open section's options
+ * on the right. Up and down move along a column; left and right change a
+ * picker, as everywhere, and back returns from the options to the list.
+ */
 function SettingsTab() {
   const t = useT();
   const locale = useLocale();
@@ -336,6 +343,9 @@ function SettingsTab() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useLoading(busy);
+  const [section, setSection] = useState<Section>("general");
+  const [inside, setInside] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
 
   const signOut = async () => {
     setBusy(true);
@@ -367,75 +377,119 @@ function SettingsTab() {
     await navigate({ to: "/login" });
   };
 
+  const sections: { id: Section; label: string }[] = [
+    { id: "general", label: t.settings.general },
+    { id: "sound", label: t.settings.sound },
+    { id: "controls", label: t.settings.controls },
+    { id: "account", label: t.settings.account },
+  ];
+  // Back (B / ○ / Esc) from the options returns to the section's name in the list.
+  const back = () => list.current?.querySelector<HTMLElement>(`[data-section="${section}"]`)?.focus();
+  useAction("back", back, inside);
+
   return (
-    <main className="menu-body settings">
-      <div className="settings-col">
-        <Panel title={t.settings.general}>
-          <Picker<Locale>
-            label={t.settings.language}
-            options={LOCALES.map((l) => ({ value: l, label: t.languages[l] }))}
-            value={locale}
-            onChange={setLocale}
-          />
-          <Picker<number | "auto">
-            label={t.settings.scale}
-            options={[
-              { value: "auto", label: t.settings.scaleAuto },
-              ...SCALES.map((s) => ({ value: s, label: `${Math.round(s * 100)}%` })),
-            ]}
-            value={scale}
-            onChange={(s) => {
-              engine?.setScale(s);
-              changed();
+    <main className="menu-body settings" data-nav-region="">
+      <div ref={list} className="panel settings-sections" role="tablist" aria-orientation="vertical" data-nav-region="">
+        {sections.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            data-nav=""
+            data-section={s.id}
+            data-nav-entry={s.id === section ? "" : undefined}
+            aria-selected={s.id === section}
+            className={`tab ${s.id === section ? "on" : ""}`}
+            onClick={() => setSection(s.id)}
+            onFocus={() => {
+              // The keys and the stick open what they reach; the mouse opens what it clicks.
+              if (document.documentElement.dataset.navDir !== "pointer") setSection(s.id);
             }}
-          />
-          <Picker<"sea" | "basic">
-            label={t.settings.water}
-            options={[
-              { value: "sea", label: t.settings.waterSea },
-              { value: "basic", label: t.settings.waterBasic },
-            ]}
-            value={water}
-            onChange={(w) => {
-              engine?.setWater(w);
-              changed();
-            }}
-          />
-        </Panel>
-        <TouchPanels />
+          >
+            <span>{s.label}</span>
+          </button>
+        ))}
       </div>
-      <div className="settings-col">
-        <Panel title={t.settings.sound}>
-          {VOLUME_KINDS.map((kind) => (
-            <Picker<number>
-              key={kind}
-              label={t.settings.volume[kind]}
-              wrap={false}
-              options={VOLUMES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))}
-              value={Math.round(audio.volume(kind) * 10) / 10}
-              onChange={(v) => {
-                audio.setVolume(kind, v);
-                changed();
-              }}
-            />
-          ))}
-        </Panel>
-        <Panel title={t.settings.account}>
-          <p className="muted">{t.settings.signedInAs(me?.user.email ?? "")}</p>
-          <div className="row">
-            <Button onClick={() => void signOut()} disabled={busy}>
-              {t.settings.logout}
-            </Button>
-            <Button kind="danger" onClick={() => setDeleting(true)} disabled={busy}>
-              {t.settings.delete}
-            </Button>
-          </div>
-        </Panel>
-      </div>
-      <div className="settings-col">
-        <Panel title={t.settings.controls}>
-          <ControlsTable />
-        </Panel>
+      <div
+        className="settings-options"
+        key={section}
+        onFocus={() => setInside(true)}
+        onBlur={(e) => {
+          if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setInside(false);
+        }}
+      >
+        {section === "general" && (
+          <>
+            <Panel title={t.settings.general}>
+              <Picker<Locale>
+                label={t.settings.language}
+                options={LOCALES.map((l) => ({ value: l, label: t.languages[l] }))}
+                value={locale}
+                onChange={setLocale}
+              />
+              <Picker<number | "auto">
+                label={t.settings.scale}
+                options={[
+                  { value: "auto", label: t.settings.scaleAuto },
+                  ...SCALES.map((sc) => ({ value: sc, label: `${Math.round(sc * 100)}%` })),
+                ]}
+                value={scale}
+                onChange={(sc) => {
+                  engine?.setScale(sc);
+                  changed();
+                }}
+              />
+              <Picker<"sea" | "basic">
+                label={t.settings.water}
+                options={[
+                  { value: "sea", label: t.settings.waterSea },
+                  { value: "basic", label: t.settings.waterBasic },
+                ]}
+                value={water}
+                onChange={(w) => {
+                  engine?.setWater(w);
+                  changed();
+                }}
+              />
+            </Panel>
+            <TouchPanels />
+          </>
+        )}
+        {section === "sound" && (
+          <Panel title={t.settings.sound}>
+            {VOLUME_KINDS.map((kind) => (
+              <Picker<number>
+                key={kind}
+                label={t.settings.volume[kind]}
+                wrap={false}
+                options={VOLUMES.map((v) => ({ value: v, label: `${Math.round(v * 100)}%` }))}
+                value={Math.round(audio.volume(kind) * 10) / 10}
+                onChange={(v) => {
+                  audio.setVolume(kind, v);
+                  changed();
+                }}
+              />
+            ))}
+          </Panel>
+        )}
+        {section === "controls" && (
+          <Panel title={t.settings.controls}>
+            <ControlsTable />
+          </Panel>
+        )}
+        {section === "account" && (
+          <Panel title={t.settings.account}>
+            <p className="muted">{t.settings.signedInAs(me?.user.email ?? "")}</p>
+            <div className="row">
+              <Button onClick={() => void signOut()} disabled={busy}>
+                {t.settings.logout}
+              </Button>
+              <Button kind="danger" onClick={() => setDeleting(true)} disabled={busy}>
+                {t.settings.delete}
+              </Button>
+            </div>
+          </Panel>
+        )}
       </div>
       {deleting && (
         <Modal
