@@ -269,7 +269,7 @@ pub enum EventBody {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SessionEnd {
-    /// Nothing from the player's controls for a while.
+    /// The player's input didn't change for a while.
     Idle = 1,
     /// The session ran its longest.
     Hour = 2,
