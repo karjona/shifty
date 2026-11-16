@@ -1,8 +1,18 @@
 // The last picks on the mode select (the mode, each panel's plan, the bots,
-// the time trial's circuit and season), kept in this browser so they
+// the time trial's circuit, season, weather and time of day), kept in this browser so they
 // survive a race and a reload. The first time in, single player is one race
 // on the first circuit.
-import { CIRCUITS, type PlanRequest, SEASONS, type Season, TILT, parsePlan } from "@shifty/rider";
+import {
+  CIRCUITS,
+  type PlanRequest,
+  SEASONS,
+  STEPS_PER_DAY,
+  type Season,
+  TILT,
+  WEATHERS,
+  type Weather,
+  parsePlan,
+} from "@shifty/rider";
 import type { Mode } from "./api.ts";
 
 const KEY = "shifty.picks";
@@ -13,7 +23,8 @@ export interface Picks {
   single: PlanRequest;
   room: PlanRequest;
   bots: number;
-  trial: { course: number; season: Season };
+  /** The time trial: its circuit, season and weather, and its time of day (left out: drawn). */
+  trial: { course: number; season: Season; weather: Weather; time?: number };
 }
 
 const FIRST: Picks = {
@@ -21,7 +32,7 @@ const FIRST: Picks = {
   single: { tilt: false, race: { course: CIRCUITS[0]?.id ?? 0 } },
   room: TILT,
   bots: 3,
-  trial: { course: CIRCUITS[0]?.id ?? 0, season: "summer" },
+  trial: { course: CIRCUITS[0]?.id ?? 0, season: "summer", weather: "clear" },
 };
 
 let picks: Picks | null = null;
@@ -39,6 +50,8 @@ export function lastPicks(): Picks {
   const trial = get("trial");
   const course = typeof trial === "object" && trial !== null ? Reflect.get(trial, "course") : undefined;
   const season = typeof trial === "object" && trial !== null ? Reflect.get(trial, "season") : undefined;
+  const weather = typeof trial === "object" && trial !== null ? Reflect.get(trial, "weather") : undefined;
+  const time: unknown = typeof trial === "object" && trial !== null ? Reflect.get(trial, "time") : undefined;
   const bots = get("bots");
   picks = {
     mode: MODES.find((m) => m === get("mode")) ?? FIRST.mode,
@@ -48,6 +61,8 @@ export function lastPicks(): Picks {
     trial: {
       course: CIRCUITS.find((c) => c.id === course)?.id ?? FIRST.trial.course,
       season: SEASONS.find((s) => s === season) ?? FIRST.trial.season,
+      weather: WEATHERS.find((w) => w === weather) ?? FIRST.trial.weather,
+      ...(typeof time === "number" && Number.isInteger(time) && time >= 0 && time < STEPS_PER_DAY ? { time } : {}),
     },
   };
   return picks;

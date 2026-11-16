@@ -82,7 +82,12 @@ export interface TrialPlay extends Trial {
 }
 
 /** A time trial to ride, from a request: null if its circuit and season don't go together. */
-export function parseTrialPlay(v: { course?: unknown; season?: unknown; weather?: unknown; time?: unknown }): TrialPlay | null {
+export function parseTrialPlay(v: {
+  course?: unknown;
+  season?: unknown;
+  weather?: unknown;
+  time?: unknown;
+}): TrialPlay | null {
   const trial = parseTrial(v);
   if (!trial) return null;
   const spec = cleanSpec({ ...trial, weather: v.weather, time: v.time });

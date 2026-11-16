@@ -50,6 +50,7 @@ export function parseEvents(json: string): RaceEvent[] {
       kind !== "buoy" &&
       kind !== "checkpoint" &&
       kind !== "lap" &&
+      kind !== "lapTime" &&
       kind !== "finish" &&
       kind !== "disqualified" &&
       kind !== "trick" &&
@@ -75,6 +76,8 @@ export function parseEvents(json: string): RaceEvent[] {
       points: num(o, "points"),
       sketchy: o.sketchy === true,
       index: num(o, "index"),
+      clean: o.clean === true,
+      best: o.best === true,
     });
   }
   return out;

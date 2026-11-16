@@ -98,18 +98,18 @@ void test("a best of an older revision ranks nowhere, and the next clean lap rep
     timeMs: 20_000,
     ghost: Uint8Array.from([1, 2, 0]),
   });
-  const before = await loadBoard(handle.db, { course: 2, season: 1 }, "cai");
-  assert.equal(before.total, 0);
-  assert.equal(before.mine, null);
+  const old = await loadBoard(handle.db, { course: 2, season: 1 }, "cai");
+  assert.equal(old.total, 0);
+  assert.equal(old.mine, null);
   // The next lap replaces it, though slower.
   const next = lap("cai", 45_000, { course: 2, season: 1 });
   assert.deepEqual(await report(next), { stored: true, best: true });
-  const after = await loadBoard(handle.db, { course: 2, season: 1 }, "cai");
+  const now = await loadBoard(handle.db, { course: 2, season: 1 }, "cai");
   assert.deepEqual(
-    after.top.map((r) => [r.handle, r.timeMs]),
+    now.top.map((r) => [r.handle, r.timeMs]),
     [["cai#0003", 45_000]],
   );
-  assert.notEqual(after.mine?.ghost, "old_cai_best_0000000000");
+  assert.notEqual(now.mine?.ghost, "old_cai_best_0000000000");
   // From then on only faster laps do.
   assert.deepEqual(await report(lap("cai", 46_000, { course: 2, season: 1 })), { stored: true, best: false });
   assert.deepEqual(await report(lap("cai", 44_000, { course: 2, season: 1 })), { stored: true, best: true });

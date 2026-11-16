@@ -994,6 +994,10 @@
   padding: 10px 32px 12px;
   font-size: 24px;
 }
+/* A time trial's tag sits in the strip at the size of its labels. */
+:root[data-compact] #race-info > .hud-tag {
+  font-size: 22px;
+}
 /* A split comes in under the strip for its few seconds (high over the stick's half, where no thumb rests). */
 :root[data-compact] #race-info .split {
   order: 2;

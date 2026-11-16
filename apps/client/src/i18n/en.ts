@@ -503,6 +503,8 @@ export const en = {
       power: "POWER",
       missedBuoys: "BUOYS MISSED",
       missedGates: "GATES MISSED",
+      best: "BEST",
+      last: "LAST",
     },
     ordinal: (n: number) => {
       const s = ["th", "st", "nd", "rd"];
@@ -613,17 +615,18 @@ export const en = {
   },
   trial: {
     title: "Time trial",
-    about: (n: number) => `Clear, steady weather. Pick up to ${n} ghosts to chase.`,
+    about: (n: number) =>
+      `Lap after lap for as long as you like: your best clean lap counts. Clear weather ranks; any other is practice. Pick up to ${n} ghosts to chase.`,
     circuit: "Circuit",
     season: "Season",
-    yourBest: "Your best",
+    yourBest: "Your best lap",
     record: "Record",
     /** Ghosts the run just beat, on its results. */
     previousBest: "Your previous best",
     previousRecord: "Previous record",
     noTime: "No time yet",
     rank: (n: number, total: number) => `${n.toLocaleString("en")} of ${total.toLocaleString("en")}`,
-    board: "Leaderboard",
+    board: "Best laps",
     ghosts: (n: number, max: number) => `Ghosts ${n}/${max}`,
     empty: "Nobody has a time here yet. Set the first one!",
     boardError: "Couldn't load the leaderboard.",
@@ -631,7 +634,26 @@ export const en = {
     finish: "FINISH!",
     newBest: "NEW PERSONAL BEST!",
     newRecord: "NEW RECORD!",
-    retry: "Retry",
+    retry: "Restart lap",
+    /** The weather row's note when the pick isn't clear. */
+    practice: "Practice",
+    practiceNote: "Practice: timed, not ranked, no ghosts.",
+    /** The HUD: the lap under way missed a buoy or gate. */
+    void: "VOID",
+    lapVoid: "LAP VOID",
+    /** A lap ended: its time, void. */
+    voidLap: (time: string) => `${time} · VOID`,
+    /** The session's best lap so far. */
+    bestLap: "BEST LAP",
+    /** The splits read against your best lap of the session (practice). */
+    sessionBest: "Best lap",
+    laps: (n: number) => (n === 1 ? "1 lap" : `${n.toLocaleString("en")} laps`),
+    noLap: "No clean lap",
+    /** Why the session ended, when the room closed it. */
+    ended: {
+      idle: "The session closed after three minutes without riding.",
+      hour: "The session closed after an hour.",
+    },
   },
   privacy: {
     title: "Privacy",

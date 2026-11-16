@@ -5,15 +5,16 @@
 // or by Continue; then what comes after the race (wrapup.tsx) takes the
 // screen, over the race still running on television, or over a Tilt's
 // podium once the ceremony has played. Play again starts a single player
-// race straight from there, through the season card. A time trial ends on
-// the same panel, with Retry. Problems (the race server turning the ticket
+// race straight from there, through the season card. A time trial is a
+// session of laps: a lap starts over from the race menu or with Y / △ / P,
+// and the session ends on the same panel when the player leaves it (Leave
+// asks nothing) or the room closes it. Problems (the race server turning the ticket
 // down, going away, another release) get the same panel, with a way out.
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
-import { SEASONS } from "@shifty/rider";
 import { type RaceEnd, RaceSession, type Trouble, readPlan } from "../../game/race.ts";
 import { SeasonCard } from "../../game/season-change.ts";
 import { useT } from "../../i18n/index.ts";
@@ -22,8 +23,10 @@ import {
   type PendingRace,
   forgetRace,
   leftMatch,
+  fetchBoard,
   meQuery,
   playSingle,
+  playTimeTrial,
   raceMode,
   setRequeue,
   takePendingRace,
@@ -47,7 +50,7 @@ const RESULTS = 3;
 const BEFORE_COUNTDOWN = new Set([0, 4]);
 /** The last race's results show Continue after this long (ms), so a button held from the race doesn't skip them. */
 const CONTINUE_AFTER_MS = 2000;
-/** A time trial's run gets this long (ms) on the finish before its panel comes up. */
+/** A time trial session's panel comes up this long (ms) after it ends. */
 const TRIAL_PANEL_MS = 1200;
 /** The season card's fade in (see `.season-change` in menu.css). */
 const CARD_FADE_MS = 900;
@@ -244,31 +247,34 @@ function RaceRun({
     };
   }, [finalResults]);
 
-  // A time trial's run: its panel comes up a moment after the finish, and goes with a retry.
+  // A time trial session's end: its panel comes up a moment after, with your rank on the board once it's in.
   useEffect(() => {
     if (!trialResults || !session) return undefined;
+    let live = true;
     const id = setTimeout(() => {
       const run = session.trialEnd();
-      const tr = race?.trial;
-      if (!run || !tr) return;
-      setTrialPanel({
-        course: tr.course,
-        season: SEASONS[tr.season] ?? "summer",
-        ticks: run.ticks,
-        hz: run.hz,
-        ghosts: run.ghosts,
-        callout: run.callout,
-        beat: run.beat,
-        name: run.name,
-      });
+      const tr = session.trialRace();
+      const conditions = session.state.conditions;
+      if (!run || !tr || !conditions) return;
+      const summary: TrialSummary = { ...run, course: tr.course, conditions, rank: null };
+      setTrialPanel(summary);
+      if (run.practice || run.best === 0) return;
+      void fetchBoard(tr.course, tr.season)
+        .then((b) => {
+          if (live && b.mine) setTrialPanel({ ...summary, rank: { rank: b.mine.rank, total: b.total } });
+        })
+        .catch(() => {});
     }, TRIAL_PANEL_MS);
-    return () => clearTimeout(id);
-  }, [trialResults, session, race]);
+    return () => {
+      live = false;
+      clearTimeout(id);
+    };
+  }, [trialResults, session]);
 
+  /** A time trial: the lap under way starts over from the countdown. */
   const retry = () => {
     session?.retry();
     setMenu(false);
-    setTrialPanel(null);
   };
 
   /** Single player: the same pick again, straight in, through the season card. */
@@ -277,12 +283,13 @@ function RaceRun({
     setBusy(true);
     setError(null);
     try {
-      const ticket = await playSingle(race.plan ?? { tilt: true });
+      const trialRace = mode === "trial" ? (session?.trialRace() ?? race.trial) : undefined;
+      const ticket = trialRace ? await playTimeTrial(trialRace) : await playSingle(race.plan ?? { tilt: true });
       const first = readPlan(ticket.token)[0];
       const next = new SeasonCard(first?.conditions.season ?? "summer", true, first?.course ?? null);
       next.loading = true;
       await new Promise((resolve) => setTimeout(resolve, CARD_FADE_MS));
-      onAgain({ ...race, ticket }, next);
+      onAgain({ ...race, ticket, ...(trialRace ? { trial: trialRace } : {}) }, next);
     } catch (e) {
       setError(e instanceof ApiError && e.code === "no_server" ? t.common.noServer : t.common.error);
       setBusy(false);
@@ -314,7 +321,11 @@ function RaceRun({
           ? "race"
           : null;
   const leave = () => {
-    if (cost && confirm === null) setConfirm(cost);
+    if (trial) {
+      // A time trial session costs nothing to leave: it ends on its panel.
+      session?.leaveSession();
+      setMenu(false);
+    } else if (cost && confirm === null) setConfirm(cost);
     else quit();
   };
 
@@ -372,11 +383,6 @@ function RaceRun({
   const actions = (): { list: EndAction[]; back: EndAction } => {
     const changeAction: EndAction = { label: t.end.changeMode, run: changeMode };
     const menuAction: EndAction = { label: t.end.mainMenu, run: mainMenu };
-    if (mode === "trial")
-      return {
-        list: [{ label: t.trial.retry, run: retry, glyph: "play" }, changeAction, menuAction],
-        back: changeAction,
-      };
     if (mode === "room") {
       const toRoomAction: EndAction = { label: t.end.backToRoom, run: toRoom, glyph: "play" };
       return { list: [toRoomAction, changeAction, menuAction], back: toRoomAction };
@@ -453,7 +459,13 @@ function RaceRun({
               {t.end.continue}
             </button>
           )}
-          {view?.watching && !trialResults && (
+          {trial && !trialResults && view !== null && (view.racePhase === COUNTDOWN || view.racePhase === RACING) && (
+            <button type="button" tabIndex={-1} className="race-camera race-retry" onClick={retry}>
+              <Glyph action="play" />
+              {t.trial.retry}
+            </button>
+          )}
+          {view?.watching && !trial && (
             <button type="button" tabIndex={-1} className="race-camera" onClick={() => session?.nextCamera()}>
               <Glyph action="play" />
               {t.race.camera}

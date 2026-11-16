@@ -1,7 +1,7 @@
 // What comes after a race: a paper panel over the race, which runs on
 // television behind it (or over a Tilt's podium). Your place, big; the race
 // in its conditions, or the Tilt's final standings and its champion, or a
-// time trial's run among the ghosts it raced; what it paid, as the lobby's
+// time trial session's best lap among the ghosts it raced; what it paid, as the lobby's
 // ledger has it (it arrives a moment after the race ends), counting up into
 // your credits; and what's next, the first of it focused. The same panel
 // says what went wrong when joining or racing does.
@@ -9,8 +9,8 @@ import "../wrapup.css";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { playCue } from "../../audio/end.ts";
-import type { Season } from "../../game/conditions.ts";
-import type { RaceEnd, Trouble } from "../../game/race.ts";
+import type { Conditions } from "../../game/conditions.ts";
+import type { RaceEnd, TrialEnd, Trouble } from "../../game/race.ts";
 import { useT } from "../../i18n/index.ts";
 import { formatTime, ordinal } from "../../ui/hud.ts";
 import { LAUREL_BOX, LAUREL_LEAVES, LEAF_PATH, laurelStems, leafTransform } from "../../ui/laurel.ts";
@@ -30,19 +30,12 @@ const PAY_GIVE_UP_MS = 180_000;
 const ROW_MS = 320;
 const ROLL_MS = 1100;
 
-/** A time trial's run among the ghosts it raced. */
-export interface TrialSummary {
+/** A time trial session at its end: its circuit in its conditions, and your rank on the board after it. */
+export interface TrialSummary extends TrialEnd {
   course: number;
-  season: Season;
-  /** Your time (ticks; 0: not finished) and the sim's rate. */
-  ticks: number;
-  hz: number;
-  ghosts: { label: string; ticks: number }[];
-  /** "New record", "New personal best", or null. */
-  callout: string | null;
-  /** What the run beat: 2 the record, 1 your best, 0 nothing. */
-  beat: number;
-  name: string;
+  conditions: Conditions;
+  /** Your rank on the board and how many have a time on it (null: no time on it, practice, or not known). */
+  rank: { rank: number; total: number } | null;
 }
 
 export type Summary = { kind: "race"; end: RaceEnd } | { kind: "trial"; trial: TrialSummary };
@@ -317,10 +310,10 @@ function TiltStandings({ end }: { end: RaceEnd }) {
   );
 }
 
-/** A time trial's run among the ghosts it raced, by time. */
+/** A time trial session's best lap among the ghosts it raced, by time. */
 function TrialRows({ trial }: { trial: TrialSummary }) {
   const t = useT();
-  const mine = trial.ticks > 0 ? trial.ticks : Infinity;
+  const mine = trial.best > 0 ? trial.best : Infinity;
   const rows = [
     ...trial.ghosts.map((g) => ({ name: g.label, ticks: g.ticks, me: false })),
     { name: trial.name, ticks: mine, me: true },
@@ -338,7 +331,7 @@ function TrialRows({ trial }: { trial: TrialSummary }) {
           <Name name={r.name} />
           <span className="c-time">
             {!Number.isFinite(r.ticks)
-              ? t.results.dnf
+              ? t.trial.noLap
               : r.ticks === best
                 ? formatTime(r.ticks, trial.hz)
                 : `+${((r.ticks - best) / trial.hz).toFixed(2)}`}
@@ -346,6 +339,21 @@ function TrialRows({ trial }: { trial: TrialSummary }) {
         </div>
       ))}
     </section>
+  );
+}
+
+/** How the session went: laps ridden, your rank on the board, and why it ended when the room closed it. */
+function TrialLines({ trial }: { trial: TrialSummary }) {
+  const t = useT();
+  const parts = [t.trial.laps(trial.laps)];
+  if (trial.practice) parts.push(t.trial.practice);
+  else if (trial.rank) parts.push(`${t.trial.board} · ${t.trial.rank(trial.rank.rank, trial.rank.total)}`);
+  const ended = trial.ended === "idle" || trial.ended === "hour" ? t.trial.ended[trial.ended] : null;
+  return (
+    <>
+      <p className="end-note">{parts.join(" · ")}</p>
+      {ended && <p className="end-note">{ended}</p>}
+    </>
   );
 }
 
@@ -426,7 +434,7 @@ function EndHints({ actions, back }: { actions: EndAction[]; back: EndAction }) 
   );
 }
 
-/** The end of a room's plan (or a time trial's run): over the race, or over the podium. */
+/** The end of a room's plan (or a time trial's session): over the race, or over the podium. */
 export function WrapUp({
   summary,
   mode,
@@ -474,13 +482,15 @@ export function WrapUp({
           <Head
             kicker={t.trial.title}
             title={circuitTitle(trial.course)}
-            sub={t.seasons[trial.season]}
-            hero={trial.ticks > 0 ? formatTime(trial.ticks, trial.hz) : t.results.dnf}
+            sub={conditionsLine(trial.conditions)}
+            hero={trial.best > 0 ? formatTime(trial.best, trial.hz) : t.trial.noLap}
+            heroSub={t.trial.yourBest}
             rank={trial.beat === 2 ? 1 : 0}
           />
         )}
         {end?.podium && <TiltStandings end={end} />}
         {trial && <TrialRows trial={trial} />}
+        {trial && <TrialLines trial={trial} />}
         <Paid pay={pay} />
         {error && <p className="end-error">{error}</p>}
         <Actions actions={actions} back={back} busy={busy} />

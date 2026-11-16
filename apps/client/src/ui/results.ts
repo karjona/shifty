@@ -60,15 +60,8 @@ export interface BoardInput {
   gp: GrandPrixView | null;
   /** The plan's next race, if it is known (a Tilt between races). */
   next?: { course: number; conditions: Conditions } | null;
-  /** A time trial: your run placed among the ghosts', the results up until a retry (no countdown). */
-  trial?: TrialBoard;
-}
-
-/** A time trial's results: the ghosts raced (their names and times) and what the run set, if anything. */
-export interface TrialBoard {
-  ghosts: { label: string; ticks: number }[];
-  /** "New record", "New personal best", or null. */
-  callout: string | null;
+  /** A time trial: you alone, lapping; its end has a panel of its own (wrapup.tsx). */
+  trial?: boolean;
 }
 
 /** A rider's line in the Tilt standings. */
@@ -169,7 +162,8 @@ export class Scoreboard {
     // Your race is over through the finish, or out.
     const over = race.finishTicks > 0 ? race.finishTicks : race.disqualifiedTicks;
     const sinceOver = over > 0 ? race.phaseTicks - over : 0;
-    const watching = race.phase === RACING && (race.racing ? over > 0 && sinceOver >= TOWER_DELAY * hz : true);
+    const watching =
+      !input.trial && race.phase === RACING && (race.racing ? over > 0 && sinceOver >= TOWER_DELAY * hz : true);
     this.tower.hidden = !watching;
     if (watching) {
       const now = performance.now();
@@ -182,10 +176,8 @@ export class Scoreboard {
       this.towerKey = "";
     }
 
-    this.board.hidden = !results;
-    if (results && input.trial) {
-      this.renderTrial(input, input.standings(), input.trial);
-    } else if (results) {
+    this.board.hidden = !results || input.trial === true;
+    if (results && !input.trial) {
       const list = input.standings();
       const tilt = gp ? this.tiltRows(list, gp, race) : null;
       this.renderBoard(input, list, tilt);
@@ -232,53 +224,6 @@ export class Scoreboard {
     this.order = rows.map((r) => r.slot);
     if (updated && race.eventIndex >= race.eventCount - 1) this.finalRows = rows;
     return rows;
-  }
-
-  /** A time trial's results: your run among the ghosts you raced, by time. */
-  private renderTrial(input: BoardInput, list: StandingView[], trial: TrialBoard): void {
-    const { race, mySlot, riders } = input;
-    const m = messages().results;
-    const key = JSON.stringify([list, trial, mySlot, m.title]);
-    if (key === this.boardKey) return;
-    this.boardKey = key;
-    const hz = race.tickHz;
-    const mine = list.find((s) => s.slot === mySlot);
-    const rows = trial.ghosts.map((g) => ({
-      name: `<span class="c-name ghost">${escapeHtml(g.label)}</span>`,
-      ticks: g.ticks,
-      me: false,
-    }));
-    const myTicks = mine && mine.finishTicks > 0 ? mine.finishTicks : Infinity;
-    rows.push({ name: nameCell(mySlot, riders), ticks: myTicks, me: true });
-    // Ties go to whoever set the time first: the ghost.
-    rows.sort((a, b) => a.ticks - b.ticks || Number(a.me) - Number(b.me));
-    const best = rows[0]?.ticks ?? 0;
-    const place = rows.findIndex((r) => r.me) + 1;
-    const body = rows
-      .map((r, i) => {
-        const time = !Number.isFinite(r.ticks)
-          ? m.dnf
-          : r.ticks === best
-            ? formatTime(r.ticks, hz)
-            : gapText(r.ticks - best, hz);
-        return (
-          `<div class="board-row${r.me ? " me" : " ghost"}${Number.isFinite(r.ticks) ? "" : " out"}">` +
-          `<span class="c-place">${i + 1}</span>${r.name}<span class="c-time">${time}</span></div>`
-        );
-      })
-      .join("");
-    const season = messages().seasons[race.season];
-    const title = escapeHtml(circuitTitle(race.course));
-    const hero = Number.isFinite(myTicks)
-      ? `<div class="board-mine"><b>${ordinal(place)}</b><span>${formatTime(myTicks, hz)}</span></div>`
-      : `<div class="board-mine"><b>${m.dnf}</b></div>`;
-    const callout = trial.callout ? `<p class="board-callout">${escapeHtml(trial.callout)}</p>` : "";
-    this.board.innerHTML =
-      `<section class="board-panel board-race board-trial">` +
-      `<header class="board-head"><div><span class="board-label">${messages().trial.title}</span>` +
-      `<b class="board-title circuit">${title}</b><span class="board-sub">${season}</span>${callout}</div>${hero}</header>` +
-      `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span></div>${body}</section>`;
-    this.countdown = null;
   }
 
   private renderTower(input: BoardInput, list: StandingView[]): void {
@@ -425,7 +370,7 @@ export class Scoreboard {
       `<div class="board-cols"><span></span><span></span><span>${m.cols.time}</span>` +
       cols.map(([label]) => `<span>${label}</span>`).join("") +
       `</div>${rows}` +
-      (tilt || input.trial ? "" : `<footer class="board-foot">${next}<b class="board-left"></b></footer>`) +
+      (tilt ? "" : `<footer class="board-foot">${next}<b class="board-left"></b></footer>`) +
       `</section>`;
     // Moves once there are earlier results to compare with.
     const moves = tilt?.some((r) => r.move !== null) ?? false;
