@@ -17,31 +17,49 @@ import type { Engine, Stage } from "./engine.ts";
 import { quietly } from "../loading.ts";
 import { PALETTE, accentBetween, seasonAt, setAccent } from "./seasons.ts";
 import { parseCourse } from "../wasm-json.ts";
+import { loadModels } from "../render/env/models.ts";
+import { type Steps, buildNow, buildSliced } from "../render/slices.ts";
 
 export type BackdropKind = "flyover" | "shader" | "club";
 
-/** The summer bay without a race, shared by the fly-over and the club. */
-let menuBay: { bay: Bay; water: "sea" | "basic" } | null = null;
+/** The summer bay without a race, shared by the fly-over and the club: its builder, and when it is built. */
+let menuBay: { bay: Bay; water: "sea" | "basic"; steps: Steps; built: Promise<void> } | null = null;
 
+/** The menus' bay, being built a slice at a time (see `bayBuilt`). */
 function bay(engine: Engine): Bay {
-  if (menuBay?.water === engine.view.water) return menuBay.bay;
+  return menu(engine).bay;
+}
+
+function menu(engine: Engine): NonNullable<typeof menuBay> {
+  if (menuBay?.water === engine.view.water) return menuBay;
   const scenery = new Scenery(0, 1, 7);
   const course = parseCourse(scenery.courseJson());
   if (course.sport !== "jetski") throw new Error("the menu bay is a jetski course");
-  const b = new Bay({
-    water: engine.view.water,
-    topSpeed: scenery.topSpeed(),
-    waves: scenery.waveParams(),
-    course: course.bay,
-  });
+  const b = new Bay(
+    {
+      water: engine.view.water,
+      topSpeed: scenery.topSpeed(),
+      waves: scenery.waveParams(),
+      course: course.bay,
+    },
+    true,
+  );
   scenery.free();
-  menuBay = { bay: b, water: engine.view.water };
-  return b;
+  const steps = b.build();
+  menuBay = { bay: b, water: engine.view.water, steps, built: buildSliced(steps) };
+  return menuBay;
 }
 
-/** The summer bay of the menus (dev look tests use it too). */
+/** Resolves once the menus' bay is built (it is built a slice at a time, the page carrying on). */
+function bayBuilt(engine: Engine): Promise<void> {
+  return menu(engine).built;
+}
+
+/** The summer bay of the menus, built (at once, if it isn't yet); the podium and dev look tests use it too. */
 export function sharedBay(engine: Engine): Bay {
-  return bay(engine);
+  const m = menu(engine);
+  buildNow(m.steps);
+  return m.bay;
 }
 
 const SUMMER_ACCENT = PALETTE.summer.accent;
@@ -90,6 +108,10 @@ class Flyover implements Stage {
     if (!engine.render) return;
     engine.world.setEnvironment(bay(engine));
     engine.world.setSunOffset(30, 60, 15);
+  }
+
+  build(): Promise<void> {
+    return this.engine?.render ? bayBuilt(this.engine) : Promise.resolve();
   }
 
   compile(root?: THREE.Object3D): Promise<void> {
@@ -501,16 +523,21 @@ class Club implements Stage {
     this.preloaded = true;
     this.engine = engine;
     quietly(() => this.attach(engine));
-    await engine.warm(() => world.compile(), false);
+    await bayBuilt(engine);
+    await engine.warm(() => world.compile(), false, null);
     await Promise.race([this.loaded(), new Promise((resolve) => setTimeout(resolve, 15_000))]);
     // Your rider's art compiled for the stage on screen when it arrived: compile it for the terrace too.
-    await engine.warm(() => world.compile(this.group), false);
+    await engine.warm(() => world.compile(this.group), false, null);
     if (engine.current === this) return;
     this.group.removeFromParent();
     bay(engine).club?.setDetail(false);
     world.setShadowBox();
     // (Unless another stage now draws the world.)
     if (engine.current === host) world.clearEnvironment();
+  }
+
+  build(): Promise<void> {
+    return this.engine?.render ? bayBuilt(this.engine) : Promise.resolve();
   }
 
   compile(root?: THREE.Object3D): Promise<void> {
@@ -636,9 +663,11 @@ export function setClubCloseUp(on: boolean): void {
   (club ??= new Club()).setCloseUp(on);
 }
 
-/** Dresses your rider on the club's terrace. */
+/** Dresses your rider on the club's terrace (for the sport of the race about to be picked: the mountain's scenery
+ * comes down meanwhile when it is a run). */
 export function setClubRider(appearance: Appearance, sport: Sport): void {
   (club ??= new Club()).setYou(appearance, sport);
+  if (sport === "winter") void loadModels("snow", null);
 }
 
 /** Gets the club's terrace ready behind the screen on show, with your rider on it, so the mode select comes up at once. */

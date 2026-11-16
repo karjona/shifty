@@ -3,16 +3,19 @@
 // reloads between them, so going from a menu into a race is instant.
 import type * as THREE from "three/webgpu";
 import init, { type InitOutput } from "../wasm/sim.js";
-import { setWarmer } from "../render/warm.ts";
+import simUrl from "../wasm/sim_bg.wasm?url";
+import { countingCompiles, setWarmer } from "../render/warm.ts";
 import { AutoResolution } from "./resolution.ts";
 import { World } from "../render/world.ts";
 import { devParams } from "../dev-params.ts";
-import { booted, whileLoading } from "../loading.ts";
+import { type Wait, begin, bootLoad, booted, download, waitNow } from "../loading.ts";
 import { touchScreen } from "../touch/device.ts";
 
 /** Something on screen, drawn every frame. */
 export interface Stage {
   start(engine: Engine): void;
+  /** Resolves once its scene is built (built a slice at a time: nothing is drawn meanwhile). */
+  build?(): Promise<void>;
   /** Compiles the shaders its scene (or `root`, about to join it) needs (see `Engine.warm`). */
   compile?(root?: THREE.Object3D): Promise<void>;
   /** Resolves once what it shows has arrived and gone on (a rider's art). */
@@ -108,12 +111,16 @@ export class Engine {
     this.view = loadViewSettings();
     this.applyScale();
     addEventListener("resize", () => {
-      if (this.view.scale === "auto") this.applyScale();
+      this.resized = true;
     });
   }
 
-  /** Puts the view's resolution on the renderer (automatic: from the top again). */
-  private applyScale(): void {
+  /** The window has changed size since the resolution was last fitted to it. */
+  private resized = false;
+
+  /** Puts the view's resolution on the renderer (automatic: from the top again, unless only the window's size
+   * changed: the scale it has found carries on, within the new size's range). */
+  private applyScale(fresh = true): void {
     const scale = this.view.scale;
     if (scale !== "auto") {
       this.world.setRenderScale(scale, scale < 1);
@@ -121,7 +128,8 @@ export class Engine {
     }
     const start = touchScreen() ? AUTO_TOUCH_START_RATIO : devicePixelRatio;
     this.auto.bounds(innerWidth, innerHeight, devicePixelRatio, AUTO_MAX_PIXELS, AUTO_MIN_ROWS, start);
-    this.auto.reset();
+    if (fresh) this.auto.reset();
+    else this.auto.forget();
     this.world.setRenderScale(this.auto.scale, false);
   }
 
@@ -130,15 +138,20 @@ export class Engine {
   /** The engine, created on first use. */
   static get(): Promise<Engine> {
     Engine.booting ??= (async () => {
-      const wasm = await init().catch((e: unknown) => {
+      const wait = waitNow();
+      const wasm = await init({ module_or_path: download(simUrl, wait, "code") }).catch((e: unknown) => {
         booted();
         throw e;
       });
       const world = new World(document.querySelector<HTMLElement>("#app")!);
-      await world.init().catch((e: unknown) => {
-        booted();
-        throw e;
-      });
+      const starting = begin("scene", wait);
+      await world
+        .init()
+        .catch((e: unknown) => {
+          booted();
+          throw e;
+        })
+        .finally(() => starting.end());
       const engine = new Engine(wasm, world);
       if (import.meta.env.DEV && devParams.has("bench")) {
         const { installBench } = await import("./bench.ts");
@@ -146,7 +159,9 @@ export class Engine {
           engine.paused = paused;
         });
       }
-      setWarmer((root) => (engine.render ? engine.warm(() => engine.compile(root), false) : Promise.resolve()));
+      setWarmer((root, counted) =>
+        engine.render ? engine.warm(() => engine.compile(root), false, counted) : Promise.resolve(),
+      );
       if (!engine.render) booted();
       await world.renderer.setAnimationLoop((now: number) => engine.frame(now));
       return engine;
@@ -169,20 +184,34 @@ export class Engine {
 
   /**
    * Gets a stage that has just gone on ready: its shaders compiled (nothing
-   * is drawn meanwhile), what it shows in, and drawing smoothly. The loading
-   * sign is up until it shows; the boot screen comes off after.
+   * is drawn meanwhile), what it shows in, and drawing smoothly. The wait of
+   * the moment (the boot screen, or the loading sign once it takes long
+   * enough to notice) is up until it shows; the boot screen comes off after.
    */
   private async prepare(stage: Stage): Promise<void> {
     const late = new Promise<void>((resolve) => setTimeout(resolve, LOAD_MAX_MS));
-    const arriving = whileLoading(
-      (async () => {
-        if (this.render && stage.compile) await this.warm(() => stage.compile!());
-        await Promise.race([stage.loaded?.(), late]);
-      })(),
-    );
+    const wait = waitNow();
+    const arriving = (async () => {
+      if (this.render && stage.build) {
+        const building = begin("scene", wait);
+        this.holding++;
+        try {
+          await stage.build();
+        } finally {
+          this.holding--;
+          building.end();
+        }
+      }
+      if (this.render && stage.compile) await this.warm(() => stage.compile!(), true, wait);
+      await Promise.race([stage.loaded?.(), late]);
+    })();
     this.arriving = arriving.catch(() => {});
+    if (wait) void wait.during(arriving).catch(() => {});
     await arriving;
+    // Under the boot screen, drawing smoothly is part of the wait; elsewhere the screen is up and drawing.
+    const settling = wait === bootLoad() ? begin("settle", wait) : null;
     await this.settled();
+    settling?.end();
     booted();
   }
 
@@ -215,15 +244,19 @@ export class Engine {
    * time; the page (menus, timers, the netcode) carries on. With `hold`
    * (what is in the scene is new), nothing is drawn until it is done: the
    * canvas holds its last frame. Without (what compiles isn't in the scene
-   * yet), frames go on being drawn in between.
+   * yet), frames go on being drawn in between. `wait`: the wait it counts
+   * in (the one of the moment by default; null for none).
    */
-  warm(compile: () => Promise<void>, hold = true): Promise<void> {
+  warm(compile: () => Promise<void>, hold = true, wait: Wait | null = waitNow()): Promise<void> {
     this.warming++;
     if (hold) this.holding++;
+    // (Counted from when it is asked for: waiting its turn is part of it.)
+    const compiling = begin("shaders", wait);
     const run = this.warmed
-      .then(compile)
+      .then(() => countingCompiles((done, total) => compiling.count(done, total), compile))
       .catch((e: unknown) => console.error(e))
       .finally(() => {
+        compiling.end();
         this.warming--;
         if (hold) this.holding--;
       });
@@ -314,10 +347,17 @@ export class Engine {
       this.smoothSince = null;
       return;
     }
+    if (this.resized) {
+      // Once a frame however many times the window changed meanwhile, just before it is drawn.
+      this.resized = false;
+      this.rescale = null;
+      if (this.view.scale === "auto") this.applyScale(false);
+    }
     if (this.rescale !== null) {
       this.world.setRenderScale(this.rescale, false);
       this.rescale = null;
     }
+    this.world.followWindow();
     if (this.warming > 0) this.drawBetweenCompiles(now, dt);
     else this.draw(now, dt);
     const end = performance.now();

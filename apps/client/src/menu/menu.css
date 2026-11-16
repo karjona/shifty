@@ -1743,13 +1743,16 @@ a {
 .season-change.shown {
   opacity: 1;
 }
+/* The season's name: as big as the longest (Primavera) fits across, or the window's height allows; room under
+   it for its descenders (Spring's p and g). */
 .season-change b {
-  font-size: clamp(96px, 14vw, 260px);
-  line-height: 0.8;
+  font-size: clamp(64px, min(12vw, 30vh), 240px);
+  line-height: 0.9;
+  padding-bottom: 0.1em;
   font-weight: 900;
   font-stretch: 125%;
   font-style: italic;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.01em;
 }
 .season-change span {
   display: flex;

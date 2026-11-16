@@ -42,6 +42,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
+import type { Steps } from "./slices.ts";
 
 const CHOP_WAVES = 10;
 /** The reflection is rendered at this fraction of the screen resolution. */
@@ -324,8 +325,9 @@ export class SeaWater {
     this.mesh.add(mirror.target);
   }
 
-  /** Where the shores are, for the surf and the shallows: bakes the distance to the nearest one. */
-  setLand(land: LandData[]): void {
+  /** Where the shores are, for the surf and the shallows: bakes the distance to the nearest one, a few rows at a
+   * time. */
+  *setLand(land: LandData[]): Steps {
     const data = new Uint16Array(SHORE_RES * SHORE_RES);
     const texel = SHORE_SPAN / SHORE_RES;
     for (let j = 0; j < SHORE_RES; j++) {
@@ -336,6 +338,7 @@ export class SeaWater {
         for (const l of land) d = Math.min(d, landDistance(l, x, z));
         data[j * SHORE_RES + i] = THREE.DataUtils.toHalfFloat(d);
       }
+      if (j % 4 === 3) yield;
     }
     const field = new THREE.DataTexture(data, SHORE_RES, SHORE_RES, THREE.RedFormat, THREE.HalfFloatType);
     field.magFilter = THREE.LinearFilter;

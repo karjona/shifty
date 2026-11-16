@@ -18,6 +18,7 @@ import { Grounding, OVERHEAD, type Sunlight } from "./grounding.ts";
 import { type Crowd, Walkers, addPerson } from "./people.ts";
 import { Local, Shape, box, pick, place, post, random } from "./shape.ts";
 import { Planting } from "./trees.ts";
+import type { Steps } from "../slices.ts";
 
 /** The quay's top (m over the water). */
 export const QUAY_TOP = 2.2;
@@ -524,8 +525,9 @@ export interface Town {
   group: THREE.Group;
 }
 
-/** The town on the quay `l`, as it is in `season`, with as many people out as `crowd` (0-1) says. */
-export function buildTown(
+/** The town on the quay `l`, as it is in `season`, with as many people out as `crowd` (0-1) says, built a piece at
+ * a time (see slices.ts). */
+export function* buildTown(
   l: LandData,
   seed: number,
   season: Season,
@@ -538,7 +540,7 @@ export function buildTown(
   light: Sunlight = OVERHEAD,
   /** The landmark on its waterfront, if it has one. */
   landmark: Landmark | null = null,
-): Town {
+): Steps<Town> {
   const group = new THREE.Group();
   const q = quayOf(l);
   const r = random(seed);
@@ -590,6 +592,7 @@ export function buildTown(
     });
   }
 
+  yield;
   // The church stands on the upper terraces, its tower over the roofs.
   const churchAlong = q.len * 0.42;
   const churchInland = 79;
@@ -623,8 +626,9 @@ export function buildTown(
     }
   }
   // The houses, row by row, with streets between them.
-  ROWS.forEach((row, k) => {
-    if (row.inland + row.depth / 2 > l.radius * 2 - 6) return;
+  yield;
+  for (const [k, row] of ROWS.entries()) {
+    if (row.inland + row.depth / 2 > l.radius * 2 - 6) continue;
     const y = groundAt(row.inland - row.depth / 2);
     const span = reach(q, row.inland + (row.inland < l.radius ? -row.depth / 2 : row.depth / 2)) - 5;
     let a = -span;
@@ -667,9 +671,11 @@ export function buildTown(
         untilStreet = 30 + r() * 26;
       }
     }
-  });
+    yield;
+  }
   const shades = new Grounding(light);
   addPromenade(shape, q, r, season, crowd, wavers, free, shades);
+  yield;
   // A few walk the promenade up and down, between the lamps and the palms.
   const walkers = new Walkers();
   const lane = 3.7;
@@ -701,10 +707,13 @@ export function buildTown(
   uphill.take(post(0.75, 0.5, 13, 6), new THREE.Color(0xb86a4a), place(stack.x, groundAt(61), stack.z), {
     uv: TILE.white,
   });
+  yield;
   group.add(shape.mesh(townMaterial()));
+  yield;
   const upper = uphill.mesh(townMaterial(), "receive");
   upper.layers.set(UNREFLECTED);
   group.add(upper);
+  yield;
 
   // Palms along the promenade, cypresses by the church, pines behind the last roofs.
   const palms = new Planting({ shadows: true, reflected: true });
@@ -733,7 +742,9 @@ export function buildTown(
     const p = quayPoint(q, a, back + r() * 4);
     plants.add(r() < 0.3 ? "cypress" : "pine", p.x, groundAt(back) - 0.5, p.z, 8 + r() * 4, 0.88 + r() * 0.2);
   }
+  yield;
   group.add(palms.build(true), plants.build(true));
+  yield;
   const shade = shades.build();
   if (shade) group.add(shade);
   const strollers = walkers.build();

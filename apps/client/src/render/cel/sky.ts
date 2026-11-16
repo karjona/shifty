@@ -32,6 +32,7 @@ import {
 import { LOOK, cut0 } from "./look.ts";
 import { CelMaterial, SUN_DIR, UNREFLECTED, inkId, inklessBasic } from "./material.ts";
 import { noise4 } from "./noise.ts";
+import type { Steps } from "../slices.ts";
 
 /** The sun's disc and the ring round it, as cosines of their angles from its centre (2.1° and 5°). */
 const SUN_DISC = Math.cos((2.1 * Math.PI) / 180);
@@ -257,6 +258,9 @@ function cumulus(size: number, seed: number): THREE.BufferGeometry {
 /** How many cumulus a sky can hold. */
 const CUMULUS = 24;
 
+/** Each cloud's shape, made once (every sky is made of the same clouds, placed round its own circuit). */
+const made: THREE.BufferGeometry[] = [];
+
 /**
  * Cumulus in a ring round a circuit, far out (they never fog), all in one
  * batch: as many of them as the weather's cover asks for (each one grows
@@ -269,33 +273,11 @@ export class Cumulus {
   private cover = uniform(0.5);
   private tower = uniform(1);
 
-  /** `centre`: the ring's middle (x, z) and the height its clouds stand on (y). */
+  private centre: THREE.Vector3;
+
+  /** `centre`: the ring's middle (x, z) and the height its clouds stand on (y). Its clouds are made by `build`. */
   constructor(centre: THREE.Vector3) {
-    const r = rng(77);
-    const parts: THREE.BufferGeometry[] = [];
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < CUMULUS; i++) {
-      const a = (i / CUMULUS) * Math.PI * 2 + (r() - 0.5) * 0.3;
-      // More, bigger clouds over the sierra (north, +z) and out to sea.
-      const north = Math.max(0, Math.sin(a));
-      const dist = 2500 + r() * 800;
-      const size = 260 + r() * 300 + north * 260;
-      const geo = cumulus(size, 100 + i * 13);
-      const x = centre.x + Math.cos(a) * dist;
-      const z = centre.z + Math.sin(a) * dist;
-      const y = centre.y + 60 + r() * 220 + north * 100;
-      // Broadside to the circuit, its height varied.
-      m.makeRotationY(Math.atan2(centre.x - x, centre.z - z)).scale(new THREE.Vector3(1, 0.85 + r() * 0.35, 1));
-      geo.applyMatrix4(m);
-      // A fair day's clouds are spread all round the sky; the rest come with the clouds.
-      const rank = i % 3 !== 2 ? (((i * 7) % 16) / 16) * 0.5 : 0.5 + (((i * 5) % 8) / 8) * 0.5;
-      const n = geo.attributes.position!.count;
-      const at = new Float32Array(n * 4);
-      for (let k = 0; k < n; k++) at.set([x, y, z, rank], k * 4);
-      geo.setAttribute("cloud", new THREE.BufferAttribute(at, 4));
-      parts.push(geo);
-    }
-    const geo = mergeGeometries(parts);
+    this.centre = centre;
     const material = new CelMaterial({
       colorNode: LOOK.cloud.rgb,
       lit: new THREE.Color(1.02, 1.0, 0.97),
@@ -311,12 +293,44 @@ export class Cumulus {
     const grow = clamp(this.cover.sub(cloud.w).div(0.06), 0, 1);
     const s = grow.greaterThan(0.01).select(grow.mul(0.6).add(0.4), 0);
     material.positionNode = cloud.xyz.add(positionLocal.mul(vec3(s, s.mul(this.tower), s)));
-    this.mesh = new THREE.Mesh(geo, material);
+    this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
     this.mesh.name = "cumulus";
     // (Bright against the sky: a mirror image of them would show nothing in the water.)
     this.mesh.layers.set(UNREFLECTED);
     // (Placed in the shader: its bounds are the ring's.)
     this.mesh.frustumCulled = false;
+  }
+
+  /** Makes its clouds, one at a time (see slices.ts). */
+  *build(): Steps {
+    const centre = this.centre;
+    const r = rng(77);
+    const parts: THREE.BufferGeometry[] = [];
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < CUMULUS; i++) {
+      const a = (i / CUMULUS) * Math.PI * 2 + (r() - 0.5) * 0.3;
+      // More, bigger clouds over the sierra (north, +z) and out to sea.
+      const north = Math.max(0, Math.sin(a));
+      const dist = 2500 + r() * 800;
+      const size = 260 + r() * 300 + north * 260;
+      const geo = (made[i] ??= cumulus(size, 100 + i * 13)).clone();
+      const x = centre.x + Math.cos(a) * dist;
+      const z = centre.z + Math.sin(a) * dist;
+      const y = centre.y + 60 + r() * 220 + north * 100;
+      // Broadside to the circuit, its height varied.
+      m.makeRotationY(Math.atan2(centre.x - x, centre.z - z)).scale(new THREE.Vector3(1, 0.85 + r() * 0.35, 1));
+      geo.applyMatrix4(m);
+      // A fair day's clouds are spread all round the sky; the rest come with the clouds.
+      const rank = i % 3 !== 2 ? (((i * 7) % 16) / 16) * 0.5 : 0.5 + (((i * 5) % 8) / 8) * 0.5;
+      const n = geo.attributes.position!.count;
+      const at = new Float32Array(n * 4);
+      for (let k = 0; k < n; k++) at.set([x, y, z, rank], k * 4);
+      geo.setAttribute("cloud", new THREE.BufferAttribute(at, 4));
+      parts.push(geo);
+      yield;
+    }
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = mergeGeometries(parts);
   }
 
   /** Shows `cover` of the clouds (0-1; a fair day is about 0.6), `tower` as tall as built. */
