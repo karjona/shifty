@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { decodePng, distinctColours } from "./png.ts";
 
+/** Everyone's name in the race, as a screen has them. */
+const roster = (p: Page) => p.evaluate(() => Object.values(window.__shifty.names()).toSorted());
+
 const joined = (p: Page) => p.waitForFunction(() => window.__shifty?.phase() === 1, null, { timeout: 20_000 });
 /** The race is on: past the grid, the intro and the countdown (`sim::Phase::Racing`). */
 const racing = (p: Page) => p.waitForFunction(() => window.__shifty.race().phase === 2, null, { timeout: 30_000 });
@@ -40,7 +43,6 @@ test("two players race in one room", async ({ browser }) => {
 
   expect(await a.evaluate(() => window.__shifty.transport)).toBe("webtransport");
   // Both humans and both bots (an initial and a surname each) are in the roster, the same on both screens.
-  const roster = (p: Page) => p.evaluate(() => Object.values(window.__shifty.names()).toSorted());
   await expect.poll(() => roster(a)).toHaveLength(4);
   const names = await roster(a);
   expect(names.filter((n) => n !== "Ana" && n !== "Bea")).toEqual([
