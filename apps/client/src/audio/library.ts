@@ -12,6 +12,10 @@ export type SoundName =
   | "lap"
   | "finalLap"
   | "finish"
+  | "tally"
+  | "roll"
+  | "payout"
+  | "win"
   | "buoy"
   | "buoyMiss"
   | "trick"
@@ -273,6 +277,74 @@ const RECIPES: readonly Recipe[] = [
       }
       b.tone({ type: "triangle", f: 293.7, attack: 0.02, hold: 0.45, decay: 1.1, amp: 0.5 });
       b.bell(1760, 0, 0.35, 1.2, CHIME);
+    },
+  },
+  {
+    name: "tally",
+    seconds: 0.35,
+    variants: 1,
+    peakDb: -17,
+    build: (b) => {
+      // A line of the payout landing: a stamp on paper, then a small bar ringing.
+      b.noise({ type: "bandpass", f: 900, q: 1.2, decay: 0.03, amp: 0.7 });
+      b.tone({ f: 170, f1: 110, glide: 0.04, attack: 0.001, decay: 0.05, amp: 0.5 });
+      b.bell(1175, 0.012, 0.8, 0.22, CHIME);
+    },
+  },
+  {
+    name: "roll",
+    seconds: 0.07,
+    variants: 1,
+    peakDb: -24,
+    build: (b) => {
+      // One click of the credits counting up.
+      b.noise({ type: "highpass", f: 3200, decay: 0.004, amp: 0.4 });
+      b.tone({ type: "triangle", f: 1568, attack: 0.001, decay: 0.03, amp: 0.6 });
+    },
+  },
+  {
+    name: "payout",
+    seconds: 1.3,
+    variants: 1,
+    peakDb: -12,
+    build: (b) => {
+      // The credits land: a rising pair of bars, a bright bell over them and a shake of coins.
+      b.bell(1175, 0, 0.9, 0.45, CHIME);
+      b.bell(1568, 0.07, 1, 0.55, CHIME);
+      b.bell(2349, 0.14, 0.7, 0.9, BELL);
+      for (let i = 0; i < 7; i++) {
+        const at = 0.13 + i * 0.028 + b.rand() * 0.012;
+        b.bell(3300 + b.rand() * 2600, at, 0.16 * (1 - i / 9), 0.09, CHIME);
+      }
+      b.noise({ type: "highpass", f: 6000, at: 0.13, attack: 0.01, decay: 0.2, amp: 0.12 });
+    },
+  },
+  {
+    name: "win",
+    seconds: 3,
+    variants: 1,
+    peakDb: -8,
+    build: (b) => {
+      // A short fanfare: three brass notes up to a held chord, bells on its top.
+      const lp = b.filter("lowpass", 900, 0.8);
+      lp.frequency.setValueAtTime(900, b.time(0));
+      lp.frequency.exponentialRampToValueAtTime(2600, b.time(0.05));
+      lp.frequency.setValueAtTime(2600, b.time(0.36));
+      lp.frequency.exponentialRampToValueAtTime(4200, b.time(0.44));
+      lp.frequency.exponentialRampToValueAtTime(1600, b.time(1.5));
+      const brass = (f: number, at: number, hold: number, decay: number, amp: number) => {
+        b.tone({ type: "sawtooth", f: f * 1.003, at, attack: 0.015, hold, decay, amp, to: lp });
+        b.tone({ type: "sawtooth", f: f / 1.003, at, attack: 0.015, hold, decay, amp, to: lp });
+      };
+      brass(440, 0, 0.07, 0.12, 0.4);
+      brass(587.3, 0.12, 0.07, 0.12, 0.4);
+      brass(740, 0.24, 0.07, 0.14, 0.42);
+      for (const f of [587.3, 740, 880, 1174.7]) brass(f, 0.38, 0.6, 1.5, 0.28);
+      b.tone({ type: "triangle", f: 146.8, at: 0.38, attack: 0.02, hold: 0.6, decay: 1.5, amp: 0.5 });
+      b.tone({ type: "triangle", f: 293.7, at: 0.38, attack: 0.02, hold: 0.6, decay: 1.5, amp: 0.35 });
+      b.noise({ type: "highpass", f: 5000, at: 0.38, attack: 0.005, decay: 0.5, amp: 0.1 });
+      b.bell(2349, 0.38, 0.3, 1.6, CHIME);
+      b.bell(3520, 0.52, 0.16, 1.2, CHIME);
     },
   },
   {

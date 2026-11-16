@@ -157,7 +157,7 @@ function useCountUp(pay: Pay): { shown: number; credits: number | null } {
       if (due > rows) {
         rows = due;
         setShown(due);
-        playCue("tally");
+        playCue("tally", 1, due - 1);
       }
       if (t >= rollAt) {
         const k = Math.min(1, (t - rollAt) / ROLL_MS);
@@ -165,7 +165,7 @@ function useCountUp(pay: Pay): { shown: number; credits: number | null } {
         setCredits(Math.round(pay.before + (pay.after - pay.before) * eased));
         if (k < 1 && now - lastTick > 70) {
           lastTick = now;
-          playCue("tally", 0.5);
+          playCue("roll", 1, k * 5);
         }
         if (k >= 1) {
           playCue("payout");
