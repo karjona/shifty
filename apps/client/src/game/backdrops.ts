@@ -519,9 +519,8 @@ class Club implements Stage {
 
   loaded(): Promise<void> {
     const club = this.engine?.render ? bay(this.engine).ready : Promise.resolve();
-    return Promise.all([club, ...this.avatars.map((a) => a.ready), ...this.party.map((p) => p.avatar.ready)]).then(
-      () => {},
-    );
+    // (Your party steps on as each one's art comes in: the terrace doesn't wait for them.)
+    return Promise.all([club, ...this.avatars.map((a) => a.ready)]).then(() => {});
   }
 
   frame(now: number, dt: number): void {
