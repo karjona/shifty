@@ -37,6 +37,9 @@ pub mod tuning {
     /// Misses (buoys or gates passed on the wrong side) that disqualify a
     /// rider.
     pub const MAX_MISSES: u8 = 5;
+    /// A time trial on a run: after the finish the rider rides out this
+    /// long, then goes back to the top for the next lap's countdown.
+    pub const RUN_OUT_TICKS: u32 = TICK_HZ * 4;
 }
 
 use tuning::*;
@@ -125,6 +128,50 @@ pub struct Progress {
     pub finish_ticks: u32,
     /// Race ticks when the rider was disqualified; 0 = not disqualified.
     pub disqualified_ticks: u32,
+    /// A time trial's laps (all zero outside one).
+    pub laps: Laps,
+}
+
+/// A time trial's laps (see `World::trial`): the lap under way, and the
+/// session's laps so far. A retry, or a run's way back to the top, ends
+/// the lap under way and keeps the rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Laps {
+    /// World tick the lap under way began at (0: none under way). On a
+    /// loop a lap runs from one crossing of the start line to the next; on
+    /// a run, from the start signal to the finish.
+    pub start: u32,
+    /// Laps ended in the session, clean or void.
+    pub done: u8,
+    /// The session's best clean lap, and the last lap ended (ticks; 0:
+    /// none yet).
+    pub best: u32,
+    pub last: u32,
+    /// The last lap missed a buoy or gate: it doesn't count.
+    pub last_void: bool,
+}
+
+impl Laps {
+    /// What a lap ending at world tick `tick` makes of the session: its
+    /// time, and whether it is clean and the session's best so far.
+    fn end(&mut self, tick: u32, misses: u8) -> (u32, bool, bool) {
+        let ticks = tick.wrapping_sub(self.start).max(1);
+        let clean = misses == 0;
+        let best = clean && (self.best == 0 || ticks < self.best);
+        self.done = self.done.saturating_add(1);
+        self.last = ticks;
+        self.last_void = !clean;
+        if best {
+            self.best = ticks;
+        }
+        self.start = 0;
+        (ticks, clean, best)
+    }
+
+    /// The session so far, with no lap under way.
+    pub fn kept(self) -> Self {
+        Self { start: 0, ..self }
+    }
 }
 
 impl Progress {
@@ -202,6 +249,15 @@ pub enum EventKind {
     Finish {
         ticks: u32,
     },
+    /// A time trial's lap `lap` of the session ended after `ticks`:
+    /// `clean` (no buoy or gate missed: it counts), and the session's best
+    /// so far.
+    LapTime {
+        lap: u8,
+        ticks: u32,
+        clean: bool,
+        best: bool,
+    },
     /// Disqualified after `ticks` race ticks for missing `MAX_MISSES`
     /// buoys or gates.
     Disqualified {
@@ -228,7 +284,9 @@ pub struct SimEvent {
 }
 
 /// Checks whether a rider moving from `s_prev` to `s_now` (at `offset`)
-/// passed its next gate, and applies the result.
+/// passed its next gate, and applies the result. In a time trial (`trial`)
+/// a loop has no last lap: every crossing of the start line ends a lap and
+/// starts the next, and a lap with a miss is void.
 #[allow(clippy::too_many_arguments)]
 pub fn pass_gates(
     course: &Course,
@@ -238,6 +296,7 @@ pub fn pass_gates(
     s_now: f32,
     offset: f32,
     race: &Race,
+    trial: bool,
     tick: u32,
     events: &mut Vec<SimEvent>,
 ) {
@@ -279,6 +338,17 @@ pub fn pass_gates(
                         kind: EventKind::Lap { lap: 1 },
                     });
                 }
+            } else if trial {
+                if p.laps.start != 0 {
+                    end_lap(p, slot, tick, events);
+                }
+                p.lap = p.lap.saturating_add(1);
+                p.laps.start = tick;
+                p.misses = 0;
+                events.push(SimEvent {
+                    slot,
+                    kind: EventKind::Lap { lap: p.lap },
+                });
             } else if p.lap >= course.laps {
                 finish(p, events);
             } else {
@@ -292,6 +362,9 @@ pub fn pass_gates(
         Gate::Finish => {
             if live && p.lap >= 1 {
                 finish(p, events);
+                if trial && p.laps.start != 0 {
+                    end_lap(p, slot, tick, events);
+                }
             }
         }
         Gate::Checkpoint(index) => events.push(SimEvent {
@@ -322,6 +395,20 @@ pub fn pass_gates(
             });
         }
     }
+}
+
+/// Ends a time trial's lap under way at world tick `tick`.
+fn end_lap(p: &mut Progress, slot: u8, tick: u32, events: &mut Vec<SimEvent>) {
+    let (ticks, clean, best) = p.laps.end(tick, p.misses);
+    events.push(SimEvent {
+        slot,
+        kind: EventKind::LapTime {
+            lap: p.laps.done,
+            ticks,
+            clean,
+            best,
+        },
+    });
 }
 
 /// Applies a landing to the race. A bail empties the meter. Tricks (and
