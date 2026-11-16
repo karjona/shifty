@@ -914,15 +914,18 @@ export class RaceSession implements Stage {
     const me = riders.find((r) => r.isMe);
     race.wrongWay = this.wrongWay.update(race, me);
     const events = parseEvents(client.takeEventsJson());
-    this.hud.events(events, client.slot(), race);
+    // While the race server is silent, or gone, the HUD holds: its clock, its
+    // popups and their sounds (what the prediction alone makes up isn't news).
+    const held = this.state.stalled || this.state.trouble !== null;
+    if (!held) this.hud.events(events, client.slot(), race);
     if (this.trial)
       for (const e of events)
         if (e.kind === "finish" && e.slot === client.slot() && race.racing) this.trialFinish(e.ticks ?? 0, race.tickHz);
     const audible = this.shown && !this.seasonChange?.active;
-    this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
+    const heard = held ? [] : events;
+    this.sfx.frame(riders, race, heard, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    // Its clock held while the race server is silent, or gone.
-    if (!this.state.stalled && this.state.trouble === null) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
+    if (!held) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
     this.board.update({
       race,
       mySlot: client.slot(),
