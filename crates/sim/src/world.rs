@@ -147,6 +147,12 @@ pub struct World {
     /// rider (off in a time trial). Set alike by the server and every
     /// client, like `hold_results`.
     pub disqualify: bool,
+    /// A time trial session: laps without end, timed one by one (see
+    /// `race::Laps`). The race never ends by itself: a loop is lapped until
+    /// the session ends (`end_session`), and a run goes back to the top
+    /// for its next lap once the rider has ridden out past the finish. Set
+    /// alike by the server and every client, like `hold_results`.
+    pub trial: bool,
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
@@ -165,6 +171,7 @@ impl World {
             setups: [Setup::BALANCED; MAX_RIDERS],
             hold_results: false,
             disqualify: true,
+            trial: false,
         }
     }
 
@@ -346,14 +353,33 @@ impl World {
     }
 
     /// Starts the run over straight from the countdown, everyone back on
-    /// the grid (a time trial's retry: the intro has been seen). Only the
-    /// server calls this; clients learn it from snapshots.
+    /// the grid (a time trial's retry: the intro has been seen; the lap
+    /// under way is dropped, the session's laps kept). Only the server
+    /// calls this; clients learn it from snapshots.
     pub fn retry(&mut self) {
         self.race = Race {
             phase: Phase::Countdown,
             phase_tick: self.tick,
         };
         self.line_up();
+        self.sync_weather();
+    }
+
+    /// Ends a time trial session: on to its results, held (the lap under
+    /// way is dropped). Only the server calls this; clients learn it from
+    /// snapshots.
+    pub fn end_session(&mut self) {
+        if self.race.phase == Phase::Results {
+            return;
+        }
+        self.race = Race {
+            phase: Phase::Results,
+            phase_tick: self.tick,
+        };
+        for r in self.riders.iter_mut().flatten() {
+            r.race.laps = r.race.laps.kept();
+        }
+        self.sync_weather();
     }
 
     /// Takes every rider out of the race to ride free: not held on the grid,
@@ -500,6 +526,7 @@ impl World {
                 s,
                 offset,
                 &self.race,
+                self.trial,
                 next,
                 &mut events,
             );
@@ -516,6 +543,7 @@ impl World {
     fn advance_phase(&mut self) {
         let elapsed = self.race.elapsed(self.tick);
         let done = match self.race.phase {
+            Phase::Racing if self.trial => self.ridden_out(),
             Phase::Racing => {
                 let racers = self.riders.iter().flatten().filter(|r| r.race.racing);
                 let mut any = false;
@@ -543,6 +571,8 @@ impl World {
             Phase::Grid => Phase::Intro,
             Phase::Intro => Phase::Countdown,
             Phase::Countdown => Phase::Racing,
+            // A time trial's run: back to the top for the next lap.
+            Phase::Racing if self.trial => Phase::Countdown,
             Phase::Racing => Phase::Results,
             Phase::Results => Phase::Grid,
         };
@@ -555,17 +585,47 @@ impl World {
         if matches!(next, Phase::Grid | Phase::Countdown) {
             self.line_up();
         }
+        // A time trial's lap on a run starts with the start signal.
+        if next == Phase::Racing && self.trial && !self.course().looped() {
+            let tick = self.tick;
+            for r in self.riders.iter_mut().flatten() {
+                if r.race.racing {
+                    r.race.laps.start = tick;
+                }
+            }
+        }
     }
 
-    /// Everyone to the grid, lined up for the race.
+    /// A time trial on a run: everyone racing is through the finish and has
+    /// ridden out `RUN_OUT_TICKS` past it (never on a loop).
+    fn ridden_out(&self) -> bool {
+        if self.course().looped() {
+            return false;
+        }
+        let elapsed = self.race.elapsed(self.tick);
+        let mut any = false;
+        for r in self.riders.iter().flatten().filter(|r| r.race.racing) {
+            any = true;
+            if !r.race.finished() || elapsed < r.race.finish_ticks + race::tuning::RUN_OUT_TICKS {
+                return false;
+            }
+        }
+        any
+    }
+
+    /// Everyone to the grid, lined up for the race (in a time trial, with
+    /// the session's laps so far).
     fn line_up(&mut self) {
         let course = self.course();
         for slot in 0..MAX_RIDERS {
-            if self.riders[slot].is_some() {
+            if let Some(old) = self.riders[slot] {
                 let spot = course.grid_spot(slot);
                 let y = self.rest_height(spot.x, spot.z);
                 let mut r = Rider::at(spot, y);
                 r.race = Progress::lined_up();
+                if self.trial {
+                    r.race.laps = old.race.laps.kept();
+                }
                 self.riders[slot] = Some(r);
             }
         }
@@ -729,7 +789,12 @@ impl World {
             eat(u32::from(p.misses) | (u32::from(p.tricks) << 8) | (u32::from(p.points) << 16));
             eat(p.finish_ticks);
             eat(p.disqualified_ticks);
+            eat(p.laps.start);
+            eat(p.laps.best);
+            eat(p.laps.last);
+            eat(u32::from(p.laps.done) | (u32::from(p.laps.last_void) << 8));
         }
+        eat(u32::from(self.trial));
         h
     }
 }

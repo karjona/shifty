@@ -233,9 +233,16 @@ export async function playSingle(plan: PlanRequest): Promise<JoinTicket> {
   return parseJoinTicket(ticket);
 }
 
-/** A time trial on a circuit (`sim::CourseId`) in a season (0 summer, 1 fall, 2 winter, 3 spring). */
-export async function playTimeTrial(course: number, season: number): Promise<JoinTicket> {
-  const { ticket } = await call("/api/play/time-trial", { method: "POST", body: JSON.stringify({ course, season }) });
+/**
+ * A time trial session on a circuit (`sim::CourseId`) in a season (0 summer, 1 fall, 2 winter, 3 spring),
+ * in a weather (`sim::Weather`; clear ranks, any other is practice) and at a time of day (left out: drawn).
+ */
+export async function playTimeTrial(
+  trial: Pick<TrialRace, "course" | "season" | "weather" | "time">,
+): Promise<JoinTicket> {
+  const { course, season, weather, time } = trial;
+  const body = JSON.stringify({ course, season, weather, ...(time === undefined ? {} : { time }) });
+  const { ticket } = await call("/api/play/time-trial", { method: "POST", body });
   return parseJoinTicket(ticket);
 }
 
@@ -322,10 +329,14 @@ export interface GhostPick {
   timeMs: number;
 }
 
-/** A time trial's circuit and season, the ghosts raced, and the times to beat. */
+/** A time trial's circuit, season, weather and time of day, the ghosts raced, and the times to beat. */
 export interface TrialRace {
   course: number;
   season: number;
+  /** `sim::Weather`: 0 (clear) ranks; any other is practice, with no ghosts. */
+  weather: number;
+  /** 10-minute steps from midnight (left out: drawn). */
+  time?: number;
   ghosts: GhostPick[];
   /** Your best and the record (ms), if any. */
   best: number | null;
@@ -423,6 +434,17 @@ export function takePendingRace(): PendingRace | null {
   return r;
 }
 
+/** A time trial as the session moved it on (your new best's ghost, the times to beat), for a reload of this tab. */
+export function keepTrial(trial: TrialRace): void {
+  try {
+    const kept: unknown = JSON.parse(sessionStorage.getItem(RACE_KEY) ?? "null");
+    if (!isObj(kept) || !isObj(kept.trial)) return;
+    sessionStorage.setItem(RACE_KEY, JSON.stringify({ ...kept, trial }));
+  } catch {
+    // A reload races what was picked at the start.
+  }
+}
+
 /** This tab is done with its race: a reload doesn't come back to it. */
 export function forgetRace(): void {
   try {
@@ -463,6 +485,8 @@ function keptRace(): PendingRace | null {
     ? {
         course: num(t, "course"),
         season: num(t, "season"),
+        weather: num(t, "weather"),
+        ...(typeof t.time === "number" ? { time: t.time } : {}),
         ghosts: list(t.ghosts).flatMap((g) =>
           typeof g.id === "string" ? [{ id: g.id, label: str(g, "label"), timeMs: num(g, "timeMs") }] : [],
         ),

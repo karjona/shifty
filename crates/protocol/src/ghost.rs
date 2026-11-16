@@ -1,39 +1,43 @@
-//! Ghosts: a time trial run as the race server recorded it, played back by
-//! race time. Not netcode: the race server keeps the rider's authoritative
-//! state at snapshot rate from the start signal to the finish, the lobby
-//! stores it, and clients draw it.
+//! Ghosts: a time trial lap as the race server recorded it, played back by
+//! lap time. Not netcode: the race server keeps the rider's authoritative
+//! state at snapshot rate from the lap's start to its end (on a loop from
+//! one crossing of the line to the next, on a run from the start signal to
+//! the finish; see `sim::race::Laps`), the lobby stores it, and clients
+//! draw it.
 //!
-//! Format (version 1), little-endian:
+//! Format (version 2), little-endian:
 //!
 //! ```text
-//! u8   version (1)
+//! u8   version (2)
 //! u8   course (`sim::CourseId`)
 //! u8   season (0 summer, 1 fall, 2 winter, 3 spring)
+//! u8   revision (`sim::Course::revision`)
 //! u8   frame_ticks (2: a frame every two sim ticks, 30 Hz)
-//! u32  finish_ticks: race ticks at the finish
+//! u32  finish_ticks: the lap's time, in ticks
 //! u16  frames: finish_ticks.div_ceil(frame_ticks) + 1
-//! u8   n, then n × u32: race ticks at each split (checkpoints, laps), the finish last
+//! u8   n, then n × u32: ticks into the lap at each split (buoys, checkpoints), the lap's end last
 //! u8   look length, then the rider's appearance bytes
 //! frames: a LEB128 mask of the fields that differ from their prediction,
 //!         then a zigzag LEB128 residual for each, lowest bit first
 //! ```
 //!
-//! Frame `k` is the rider after race tick `k × frame_ticks`, and the last
-//! one the rider at the finish (an odd tick lands between). Positions,
+//! Frame `k` is the rider `k × frame_ticks` ticks into the lap, and the last
+//! one the rider at its end (an odd tick lands between). Positions,
 //! heading, pitch and roll are predicted from the two frames before (steady
 //! motion costs nothing); the rest from the frame before.
 
 use sim::course::Sport;
 use sim::math::Vec3;
+use sim::race::EventKind;
 use sim::world::Rider;
-use sim::{buttons, quant};
+use sim::{SimEvent, World, buttons, quant};
 
 use crate::wire::{DecodeError, Reader, Writer};
 
-pub const GHOST_VERSION: u8 = 1;
+pub const GHOST_VERSION: u8 = 2;
 /// Sim ticks between frames.
 pub const FRAME_TICKS: u32 = 2;
-/// Most bytes a ghost may take (a six-minute run fits easily).
+/// Most bytes a ghost may take (a six-minute lap fits easily).
 pub const MAX_GHOST_BYTES: usize = 128 * 1024;
 /// Most splits in a ghost.
 pub const MAX_SPLITS: usize = 64;
@@ -83,11 +87,14 @@ impl GhostFrame {
     }
 }
 
-/// A recorded run.
+/// A recorded lap.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ghost {
     pub course: u8,
     pub season: u8,
+    /// The circuit's revision the lap was ridden on.
+    pub revision: u8,
+    /// The lap's time (ticks).
     pub finish_ticks: u32,
     pub splits: Vec<u32>,
     pub look: Vec<u8>,
@@ -105,7 +112,7 @@ const SECOND_ORDER: [bool; FIELDS] = [
 const FLAG_GROUNDED: i32 = 1;
 const FLAG_BAILING: i32 = 2;
 
-/// Frames needed for a run that finished after `finish_ticks` race ticks.
+/// Frames needed for a lap of `finish_ticks` ticks.
 pub fn frames_for(finish_ticks: u32) -> usize {
     finish_ticks.div_ceil(FRAME_TICKS) as usize + 1
 }
@@ -212,6 +219,7 @@ impl Ghost {
         w.u8(GHOST_VERSION);
         w.u8(self.course);
         w.u8(self.season);
+        w.u8(self.revision);
         w.u8(FRAME_TICKS as u8);
         w.u32(self.finish_ticks);
         w.u16(self.frames.len().min(usize::from(u16::MAX)) as u16);
@@ -246,7 +254,7 @@ impl Ghost {
     }
 
     /// Reads a ghost, checking that it holds together: the frames cover the
-    /// run to its finish, the splits end there, and nothing is left over.
+    /// lap to its end, the splits end there, and nothing is left over.
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         if buf.len() > MAX_GHOST_BYTES {
             return Err(DecodeError::Invalid("ghost too big"));
@@ -260,6 +268,7 @@ impl Ghost {
         if season > 3 {
             return Err(DecodeError::Invalid("season"));
         }
+        let revision = r.u8()?;
         if u32::from(r.u8()?) != FRAME_TICKS {
             return Err(DecodeError::Invalid("frame ticks"));
         }
@@ -313,6 +322,7 @@ impl Ghost {
         Ok(Self {
             course,
             season,
+            revision,
             finish_ticks,
             splits,
             look,
@@ -321,52 +331,152 @@ impl Ghost {
     }
 }
 
+/// A lap that ended, as `LapRecorder` saw it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LapEnd {
+    /// The lap's number in the session (`sim::race::Laps::done`).
+    pub lap: u8,
+    pub ticks: u32,
+    /// No buoy or gate missed: it counts.
+    pub clean: bool,
+    /// The session's best lap so far.
+    pub best: bool,
+    /// Its recording, if the whole lap was seen.
+    pub ghost: Option<Ghost>,
+}
+
+struct Take {
+    /// World tick the lap began at.
+    start: u32,
+    ghost: Ghost,
+}
+
+/// Records a time trial rider's laps as ghosts, from the world after each
+/// tick: the race server's recording, and tools'.
+#[derive(Default)]
+pub struct LapRecorder {
+    /// The rider's appearance bytes, carried in every ghost.
+    pub look: Vec<u8>,
+    take: Option<Take>,
+}
+
+impl LapRecorder {
+    pub fn new(look: Vec<u8>) -> Self {
+        Self { look, take: None }
+    }
+
+    /// After a tick: records the rider in `slot`, and hands back the lap
+    /// that ended on it (with its ghost if the lap was recorded from its
+    /// start).
+    pub fn after_step(
+        &mut self,
+        world: &World,
+        slot: usize,
+        events: &[SimEvent],
+    ) -> Option<LapEnd> {
+        let Some(r) = world.riders[slot].filter(|r| r.race.racing) else {
+            self.take = None;
+            return None;
+        };
+        let sport = world.course().sport;
+        let mine = || events.iter().filter(|e| usize::from(e.slot) == slot);
+        let ended = mine().find_map(|e| match e.kind {
+            EventKind::LapTime {
+                lap,
+                ticks,
+                clean,
+                best,
+            } => Some(LapEnd {
+                lap,
+                ticks,
+                clean,
+                best,
+                ghost: None,
+            }),
+            _ => None,
+        });
+        let ended = ended.map(|mut end| {
+            if let Some(mut take) = self.take.take()
+                && world.tick.wrapping_sub(take.start) == end.ticks
+            {
+                take.ghost.frames.push(GhostFrame::of(&r, sport));
+                take.ghost.finish_ticks = end.ticks;
+                take.ghost.splits.push(end.ticks);
+                if take.ghost.frames.len() == frames_for(end.ticks) {
+                    end.ghost = Some(take.ghost);
+                }
+            }
+            end
+        });
+        let start = r.race.laps.start;
+        if self.take.as_ref().is_some_and(|t| t.start != start) {
+            self.take = None;
+        }
+        if self.take.is_none() {
+            // Only a lap seen from its first tick is recorded.
+            if start != 0 && start == world.tick {
+                self.take = Some(Take {
+                    start,
+                    ghost: Ghost {
+                        course: world.course as u8,
+                        season: world.conditions.season as u8,
+                        revision: world.course().revision,
+                        look: self.look.clone(),
+                        ..Ghost::default()
+                    },
+                });
+            }
+        } else if let Some(take) = self.take.as_mut() {
+            let at = world.tick.wrapping_sub(take.start);
+            for e in mine() {
+                if let EventKind::Buoy { .. } | EventKind::Checkpoint { .. } = e.kind
+                    && take.ghost.splits.len() < MAX_SPLITS - 1
+                {
+                    take.ghost.splits.push(at);
+                }
+            }
+        }
+        if let Some(take) = self.take.as_mut() {
+            let at = world.tick.wrapping_sub(take.start);
+            if at.is_multiple_of(FRAME_TICKS) {
+                take.ghost.frames.push(GhostFrame::of(&r, sport));
+            }
+            if take.ghost.frames.len() >= usize::from(u16::MAX) {
+                self.take = None;
+            }
+        }
+        ended
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sim::{CourseId, SurfaceKind, World};
 
-    /// A bot's run on a course, recorded as the race server does.
+    /// A bot's lap on a course in a time trial, recorded as the race server
+    /// does: on a loop the second (a flying lap), on a run the first.
     fn bot_run(course: CourseId) -> Ghost {
         let mut world = World::on_course(course, SurfaceKind::Swells, 3);
+        world.trial = true;
+        world.disqualify = false;
         world.spawn(0);
         world.start_intro();
-        let sport = world.course().sport;
-        let mut ghost = Ghost {
-            course: course as u8,
-            season: 2,
-            look: vec![1, 2, 3],
-            ..Ghost::default()
-        };
-        let mut start = None;
+        let want = if world.course().looped() { 2 } else { 1 };
+        let mut rec = LapRecorder::new(vec![1, 2, 3]);
         for _ in 0..sim::TICK_HZ * 60 * 6 {
             let input = sim::bot::bot_input(&world, 0);
             let events = world.step(&[Some(input), None, None, None, None, None, None, None]);
-            if start.is_none() && world.race.phase == sim::Phase::Racing {
-                start = Some(world.tick);
-            }
-            let Some(start) = start else { continue };
-            let at = world.tick - start;
-            for e in events {
-                if let sim::race::EventKind::Checkpoint { .. }
-                | sim::race::EventKind::Lap { lap: 2.. } = e.kind
-                {
-                    ghost.splits.push(at);
-                }
-            }
-            let r = world.riders[0].expect("rider");
-            if r.race.finished() {
-                ghost.frames.push(GhostFrame::of(&r, sport));
-                ghost.finish_ticks = r.race.finish_ticks;
-                ghost.splits.push(r.race.finish_ticks);
-                break;
-            }
-            if at.is_multiple_of(FRAME_TICKS) {
-                ghost.frames.push(GhostFrame::of(&r, sport));
+            if let Some(end) = rec.after_step(&world, 0, &events)
+                && end.lap == want
+            {
+                let ghost = end.ghost.expect("a whole lap");
+                assert_eq!(ghost.finish_ticks, end.ticks);
+                assert_eq!(ghost.revision, 1);
+                return ghost;
             }
         }
-        assert!(ghost.finish_ticks > 0, "the bot finished");
-        ghost
+        panic!("the bot never rode lap {want}");
     }
 
     #[test]
@@ -383,6 +493,24 @@ mod tests {
             );
             let back = Ghost::decode(&bytes).expect("decodes");
             assert_eq!(back, ghost, "lossless on {course:?}");
+            let c = course.course();
+            if c.looped() {
+                // A flying lap: from the line at speed, to the line.
+                for f in [&ghost.frames[0], ghost.frames.last().unwrap()] {
+                    let ahead = c.delta_s(c.start_s, c.project(f.pos.x, f.pos.z).0);
+                    assert!(
+                        (0.0..2.0).contains(&ahead),
+                        "{course:?}: {ahead} m past the line"
+                    );
+                }
+                let step = ghost.frames[1].pos - ghost.frames[0].pos;
+                assert!(step.horizontal().length() / (FRAME_TICKS as f32 / 60.0) > 8.0);
+                assert!(
+                    ghost.splits.len() == c.buoys.len() + 1,
+                    "{:?}",
+                    ghost.splits
+                );
+            }
             // A few dozen KB for a three-minute run at most.
             let per_minute = bytes.len() as f32 / (ghost.finish_ticks as f32 / 3600.0);
             assert!(
@@ -404,7 +532,7 @@ mod tests {
         longer.push(0);
         assert!(Ghost::decode(&longer).is_err());
         let mut wrong_time = bytes.clone();
-        wrong_time[4] = wrong_time[4].wrapping_add(10);
+        wrong_time[5] = wrong_time[5].wrapping_add(10);
         assert!(Ghost::decode(&wrong_time).is_err());
         let mut rng = sim::math::Pcg32::new(5);
         for _ in 0..2000 {
@@ -420,6 +548,7 @@ mod tests {
         let ghost = Ghost {
             course: 1,
             season: 2,
+            revision: 1,
             finish_ticks: 5,
             splits: vec![3, 5],
             look: vec![9, 8],
@@ -437,7 +566,7 @@ mod tests {
         let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
             hex,
-            "0101020205000000040002030000000500000002090882028008020f8010ff07ff1fa610800201c0027f02"
+            "020102010205000000040002030000000500000002090882028008020f8010ff07ff1fa610800201c0027f02"
         );
         let back = Ghost::decode(&bytes).unwrap();
         assert_eq!(back.frames.len(), 4);

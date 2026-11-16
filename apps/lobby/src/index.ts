@@ -15,10 +15,11 @@ import {
   isGhostId,
   loadBoard,
   parseRun,
-  parseTrial,
+  parseTrialPlay,
   startTimeTrial,
   storeRun,
   trialQuery,
+  unranked,
 } from "./ghosts.ts";
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
@@ -40,6 +41,7 @@ import {
 } from "./riders.ts";
 import { isRoomCode, newRoomCode } from "./rooms.ts";
 import type { ServerInfo } from "./servers.ts";
+import { singlePlan } from "./tickets.ts";
 import { VERSION } from "./version.ts";
 
 export { Matchmaker } from "./matchmaker.ts";
@@ -125,6 +127,8 @@ app.post("/api/servers/runs", async (c) => {
   if (!ghost) return c.json({ error: "bad_run", reason: "base64" }, 400);
   const checked = checkGhost(ghost, run);
   if (typeof checked === "string") return c.json({ error: "bad_run", reason: checked }, 400);
+  const why = unranked(run);
+  if (why) return c.json({ stored: false, reason: why });
   return c.json(await storeRun(c.var.db, run, ghost));
 });
 
@@ -255,8 +259,7 @@ app.get("/api/content", async (c) => {
 app.post("/api/play/single", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
-  const body = await jsonBody(c.req.raw);
-  const plan = body.plan === undefined ? TILT : parsePlan(body.plan);
+  const plan = singlePlan((await jsonBody(c.req.raw)).plan);
   if (!plan) return c.json({ error: "bad_request" }, 400);
   try {
     const ticket = await startSingle(c.env, { userId: p.user.id, handle: p.player.handle }, plan);
@@ -270,11 +273,11 @@ app.post("/api/play/single", async (c) => {
 app.post("/api/play/time-trial", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
-  const trial = parseTrial(await jsonBody(c.req.raw));
-  if (!trial) return c.json({ error: "bad_request" }, 400);
+  const play = parseTrialPlay(await jsonBody(c.req.raw));
+  if (!play) return c.json({ error: "bad_request" }, 400);
   try {
     const racer = { userId: p.user.id, handle: p.player.handle };
-    return c.json({ ticket: await startTimeTrial(c.env, racer, trial.course, trial.season) });
+    return c.json({ ticket: await startTimeTrial(c.env, racer, play) });
   } catch (e) {
     if (e instanceof NoRaceServer) return c.json({ error: "no_server" }, 503);
     throw e;

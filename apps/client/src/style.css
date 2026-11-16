@@ -294,6 +294,29 @@ html {
     background: #8e2416;
   }
 }
+/* A time trial's lap: a void lap's clock and last lap struck through, and
+   the tag that says so (red) or that the session is practice (quiet). */
+#race-info .hud-time.void .hud-clock,
+#race-info .hud-last.void b {
+  text-decoration: line-through;
+  text-decoration-thickness: 4px;
+  color: #8f887c;
+}
+#race-info .hud-last b {
+  font-weight: inherit;
+}
+#race-info > .hud-tag {
+  justify-content: center;
+  font-size: 30px;
+  letter-spacing: 0.08em;
+}
+#race-info > .hud-tag.void {
+  background: #b8321f;
+  color: #f6f1e7;
+}
+#race-info > .hud-tag.practice {
+  color: #5f5a51;
+}
 /* The verdict when misses disqualify you: a paper panel over the race. */
 #verdict {
   position: fixed;

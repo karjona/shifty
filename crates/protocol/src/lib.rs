@@ -43,6 +43,23 @@ mod tests {
             r.race.misses = 5;
             r.race.disqualified_ticks = 70_000;
         }
+        // Two with a time trial's laps, one with its last lap void.
+        for (i, r) in world
+            .riders
+            .iter_mut()
+            .flatten()
+            .skip(2)
+            .take(2)
+            .enumerate()
+        {
+            r.race.laps = sim::race::Laps {
+                start: 81_234,
+                done: 17,
+                best: 2_201,
+                last: 2_350,
+                last_void: i == 0,
+            };
+        }
         Snapshot {
             tick: world.tick,
             input_ack: 1234,
@@ -109,6 +126,19 @@ mod tests {
             let snap = full_snapshot_on(course);
             let decoded = ServerMsg::decode(&ServerMsg::Snapshot(snap.clone()).encode()).unwrap();
             assert_eq!(decoded, ServerMsg::Snapshot(snap));
+        }
+    }
+
+    #[test]
+    fn a_session_over_reaches_the_screen() {
+        for reason in [SessionEnd::Idle, SessionEnd::Hour] {
+            let mut snap = full_snapshot();
+            snap.events = vec![Event {
+                id: 7,
+                body: EventBody::SessionOver { reason },
+            }];
+            let msg = ServerMsg::Snapshot(snap);
+            assert_eq!(ServerMsg::decode(&msg.encode()).unwrap(), msg);
         }
     }
 

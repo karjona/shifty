@@ -2,7 +2,7 @@
 // (see crates/protocol/src/token.rs): base64url(claims JSON) "." base64url
 // (signature over "shifty-join-v1." + that first part).
 
-import { type PlanRequest, type RaceSpec, TILT } from "@shifty/rider";
+import { type PlanRequest, type RaceSpec, TILT, parsePlan } from "@shifty/rider";
 
 /** What `match.event` records: the Tilt, or one race. */
 export const planName = (plan: PlanRequest): "gp" | "race" => (plan.tilt ? "gp" : "race");
@@ -13,6 +13,17 @@ export function legacyPlan(event: unknown): PlanRequest {
   if (event === "winter") return { tilt: false, race: { course: 1, season: 2 } };
   if (event === "race") return { tilt: false, race: {} };
   return TILT;
+}
+
+/**
+ * What a single player race asks for, from untrusted JSON (none: the Tilt):
+ * the Tilt, all of it drawn, or one race keeping each pick that fits (a
+ * known circuit, a season its sport rides, weathers that season brings, a
+ * time in its daylight) and leaving the rest to the draw. Null if it isn't
+ * a plan.
+ */
+export function singlePlan(v: unknown): PlanRequest | null {
+  return v === undefined ? TILT : parsePlan(v);
 }
 
 /** A random seed for a plan's draw (every ticket of a room carries the same). */

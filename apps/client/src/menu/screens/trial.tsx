@@ -1,7 +1,18 @@
-// The time trial, on the mode select: pick a circuit and a season it rides,
-// see your best and the board, and pick the ghosts to race (your best and
-// the record unless you choose others).
-import { CIRCUITS, type Circuit, SEASONS, SPORT_SEASONS, type Season } from "@shifty/rider";
+// The time trial, on the mode select: pick a circuit, a season it rides,
+// the weather (the season's own, clear first: any other is practice,
+// timed but not ranked and with no ghosts) and the time of day, see your
+// best lap and the board of best laps, and pick the ghosts to race (your
+// best and the record unless you choose others).
+import {
+  CIRCUITS,
+  type Circuit,
+  SEASONS,
+  SPORT_SEASONS,
+  type Season,
+  WEATHERS,
+  type Weather,
+  weathersIn,
+} from "@shifty/rider";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { circuitName } from "../../game/conditions.ts";
@@ -9,6 +20,7 @@ import { useLocale, useT } from "../../i18n/index.ts";
 import { formatTime } from "../../ui/hud.ts";
 import { type Board, type BoardRow, type GhostPick, type TrialRace, boardQuery } from "../api.ts";
 import { useScrollEdges } from "../hooks.ts";
+import { SpecPickers } from "../plan.tsx";
 import { toast } from "../toast.tsx";
 import { Button, Handle, Panel, Picker, Spinner } from "../ui.tsx";
 
@@ -36,6 +48,10 @@ export interface TrialChoice {
   course: number;
   sport: Circuit["sport"];
   season: number;
+  /** `sim::Weather`: 0 (clear) ranks; any other is practice. */
+  weather: number;
+  /** 10-minute steps from midnight (left out: drawn). */
+  time?: number;
   /** Null until the board is in. */
   race: TrialRace | null;
 }
@@ -46,8 +62,8 @@ export function TrialPanel({
   onChange,
 }: {
   label: string;
-  /** The circuit and season picked last time. */
-  initial: { course: number; season: Season };
+  /** The circuit, season, weather and time of day picked last time. */
+  initial: { course: number; season: Season; weather: Weather; time?: number };
   onChange: (c: TrialChoice) => void;
 }) {
   const t = useT();
@@ -55,10 +71,21 @@ export function TrialPanel({
   const edges = useScrollEdges();
   const [course, setCourse] = useState(initial.course);
   const [season, setSeason] = useState<Season>(initial.season);
+  const [weather, setWeather] = useState<Weather>(initial.weather);
   const circuit = CIRCUITS.find((c) => c.id === course) ?? CIRCUITS[0];
   const seasons = circuit ? SPORT_SEASONS[circuit.sport] : SEASONS;
   const shownSeason = seasons.includes(season) ? season : seasons[0]!;
   const seasonIndex = SEASONS.indexOf(shownSeason);
+  const weathers = weathersIn(shownSeason);
+  const shownWeather = weathers.includes(weather) ? weather : "clear";
+  const weatherIndex = WEATHERS.indexOf(shownWeather);
+  const practice = shownWeather !== "clear";
+  // The time picked, if it is one of the season's named times (else drawn).
+  const [timeSpec, setTimeSpec] = useState<{ season: number; time?: number }>({
+    season: seasonIndex,
+    time: initial.time,
+  });
+  const shownTime = timeSpec.season === seasonIndex ? timeSpec.time : undefined;
   const board = useQuery(boardQuery(course, seasonIndex));
   const [picked, setPicked] = useState<{ key: string; ids: string[] } | null>(null);
   const key = `${course}:${seasonIndex}:${board.data ? "in" : ""}`;
@@ -71,21 +98,27 @@ export function TrialPanel({
 
   useEffect(() => {
     const b = board.data;
+    const at = shownTime === undefined ? {} : { time: shownTime };
     onChange({
       course,
       sport: circuit?.sport ?? "jetski",
       season: seasonIndex,
+      weather: weatherIndex,
+      ...at,
       race: b
         ? {
             course,
             season: seasonIndex,
-            ghosts: picksOf(b, ids),
+            weather: weatherIndex,
+            ...at,
+            // Practice races no ghosts.
+            ghosts: practice ? [] : picksOf(b, ids),
             best: b.mine?.timeMs ?? null,
             record: b.top[0]?.timeMs ?? null,
           }
         : null,
     });
-  }, [course, circuit?.sport, seasonIndex, board.data, ids, onChange]);
+  }, [course, circuit?.sport, seasonIndex, weatherIndex, shownTime, practice, board.data, ids, onChange]);
 
   const toggle = (row: BoardRow) => {
     if (ids.includes(row.ghost)) setPicked({ key, ids: ids.filter((g) => g !== row.ghost) });
@@ -112,6 +145,21 @@ export function TrialPanel({
         value={shownSeason}
         onChange={setSeason}
       />
+      <Picker<Weather>
+        label={t.room.weather}
+        options={weathers.map((w) => ({
+          value: w,
+          label: w === "clear" ? t.weathers[w] : `${t.weathers[w]} · ${t.trial.practice}`,
+        }))}
+        value={shownWeather}
+        onChange={setWeather}
+      />
+      <SpecPickers
+        spec={{ course, season: seasonIndex, ...(shownTime === undefined ? {} : { time: shownTime }) }}
+        fields={["time"]}
+        onChange={(spec) => setTimeSpec({ season: seasonIndex, time: spec.time })}
+      />
+      {practice && <p className="mode-about small trial-practice">{t.trial.practiceNote}</p>}
       <div className="trial-board">
         <header>
           <span className="trial-best">

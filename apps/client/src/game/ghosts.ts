@@ -1,6 +1,7 @@
-// Ghosts in a time trial: recorded runs (the race server's, kept by the
-// lobby) played back by race time next to your rider. Playback, not
-// netcode: each ghost's frames are interpolated at the race clock and
+// Ghosts in a time trial: recorded best laps (the race server's, kept by
+// the lobby) played back by lap time next to your rider, starting over
+// each time you begin a lap. Playback, not netcode: each ghost's frames
+// are interpolated at the lap's clock and
 // drawn through the same rider models and poses as live riders, in the
 // ghost look (render/cel/ghost.ts), with a small label over its head. They
 // collide with nothing, and fade as the camera comes close.
@@ -22,19 +23,20 @@ const NEAR = 2.5;
 const FAR = 7;
 /** How far (m) from your rider's middle, seen from the camera, a ghost counts as behind them. */
 const BEHIND_ME = 0.9;
-/** Through its finish a ghost fades out over this long (s). */
+/** Through its lap's end a ghost fades out over this long (s). */
 const FINISH_FADE = 1;
 /** Tints that stand out on blue water and white snow alike: your best, the record, anyone else's. */
 const TINTS = { best: 0xff4fd8, record: 0xffb21f, other: 0x8cff4a } as const;
 
-/** A recorded run, unpacked. */
+/** A recorded lap, unpacked. */
 export interface GhostRun {
   pick: GhostPick;
   course: number;
   season: number;
+  /** The lap's time (ticks). */
   finishTicks: number;
   frameTicks: number;
-  /** Race ticks at each split (checkpoints, laps), the finish last. */
+  /** Ticks into the lap at each split (buoys or checkpoints), the lap's end last. */
   splits: number[];
   appearance: Appearance | null;
   /** `ghostStride()` floats per frame. */
@@ -200,9 +202,9 @@ export class Ghosts {
   }
 
   /**
-   * Places the ghosts `ticks` race ticks into the run (fractional; before
-   * the start, on the grid). `on`: drawn at all (the race is on the chase
-   * camera). Before the frame is drawn.
+   * Places the ghosts `ticks` ticks into the lap (fractional; with no lap
+   * under way, where their laps start). `on`: drawn at all (the race is on
+   * the chase camera). Before the frame is drawn.
    */
   place(ticks: number, on: boolean, camera: THREE.PerspectiveCamera, dt: number): void {
     this.on = on;
@@ -244,13 +246,13 @@ export class Ghosts {
     this.tags.update(camera, this.env, views, this.names, t, dt);
   }
 
-  /** A ghost `ticks` into its run, between its two nearest frames. */
+  /** A ghost `ticks` into its lap, between its two nearest frames. */
   private sample(g: Shown, ticks: number, out: RiderView): RiderView {
     const run = g.run;
     const stride = ghostStride();
     const count = run.frames.length / stride;
     const last = count - 1;
-    // Frame k is at k × frameTicks, but the last one at the finish (which may fall between).
+    // Frame k is at k × frameTicks, but the last one at the lap's end (which may fall between).
     const at = (k: number) => (k >= last ? run.finishTicks : k * run.frameTicks);
     const k = Math.min(last - 1, Math.max(0, Math.floor(ticks / run.frameTicks)));
     const t0 = at(k);

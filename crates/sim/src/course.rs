@@ -159,6 +159,11 @@ pub struct Course {
     pub lane_half: f32,
     /// Laps of a loop. An open run is ridden once.
     pub laps: u8,
+    /// Counts the changes to the circuit that change what a time on it
+    /// means: a time trial's times and ghosts rank only against those of
+    /// the same revision. Bump it with any change to the line, the gates,
+    /// the obstacles or the ground a rider rides.
+    pub revision: u8,
     /// Arc length of the start line (on a loop, also the finish line).
     pub start_s: f32,
     /// Buoys in the order they are met after the start line (on a loop, round
@@ -272,6 +277,7 @@ pub static OVAL: Course = Course {
     }),
     lane_half: 22.0,
     laps: 3,
+    revision: 1,
     start_s: 60.0,
     buoys: &[
         // First straight, into the swell: slalom.
@@ -454,6 +460,7 @@ pub static CAPE: Course = Course {
     line: Line::Loop(&CAPE_LINE),
     lane_half: 22.0,
     laps: 3,
+    revision: 1,
     start_s: 270.0,
     buoys: &[
         // After the start, down the beach toward the ramp.
