@@ -383,7 +383,7 @@ function Actions({ actions, back, busy }: { actions: EndAction[]; back: EndActio
   );
 }
 
-/** What the buttons do, in the corner. */
+/** What the buttons do, at the panel's foot (the screen's corners are the race's). */
 function EndHints({ actions, back }: { actions: EndAction[]; back: EndAction }) {
   const t = useT();
   const play = actions.find((a) => a.glyph === "play");
@@ -447,8 +447,8 @@ export function WrapUp({
         <Paid pay={pay} />
         {error && <p className="end-error">{error}</p>}
         <Actions actions={actions} back={back} busy={busy} />
+        <EndHints actions={actions} back={back} />
       </section>
-      <EndHints actions={actions} back={back} />
     </div>
   );
 }
@@ -503,8 +503,8 @@ export function TroublePanel({
         </header>
         <p className="end-body">{body}</p>
         <Actions actions={actions} back={back} busy={false} />
+        <EndHints actions={actions} back={back} />
       </section>
-      <EndHints actions={actions} back={back} />
     </div>
   );
 }

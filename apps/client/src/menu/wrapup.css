@@ -13,8 +13,24 @@
   inset: 0;
   pointer-events: none;
 }
-.end-layer .hints {
+/* The hints sit at the panel's foot, leaving the screen's corners (the
+   speed, the riders on television) to the race. */
+.end-panel .hints {
+  position: static;
+  height: 56px;
+  margin: 0 var(--pad);
+  border-top: 1px solid var(--rule);
+  background: none;
+  box-shadow: none;
+  font-size: var(--fs-label);
   pointer-events: auto;
+  animation: none;
+}
+.end-panel .hints > :first-child {
+  padding-left: 0;
+}
+.end-panel .hints > :last-child {
+  padding-right: 0;
 }
 /* Anchored at the bottom: what it paid comes in above the actions, which stay put. */
 .end-panel {
@@ -219,7 +235,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 24px var(--pad) var(--pad);
+  padding: 24px var(--pad) 20px;
 }
 
 /* --- when something went wrong: in the middle, over a dimmed race --- */
