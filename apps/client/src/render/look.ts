@@ -553,6 +553,11 @@ export class ConditionsLook {
     this.setSeason();
   }
 
+  /** The snow line its season and weather set (m): what `LOOK.snowLine` holds while it is the look on show. */
+  get snowLine(): number {
+    return this.line;
+  }
+
   /** The uniforms that hold for the whole race: the season's. */
   private setSeason(): void {
     const { season, weather, turns } = this.conditions;

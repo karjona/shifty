@@ -875,7 +875,8 @@ export class Mountain implements Environment {
   private buildTufts(xyz: Float32Array, rows: Float32Array, offsets: Float32Array, snowRows: Float32Array): void {
     const cols = offsets.length;
     const rand = rng(606);
-    const line = LOOK.snowLine.value;
+    // (Its own look's: built a slice at a time, another look may be on show meanwhile.)
+    const line = this.look.snowLine;
     const spots: number[] = [];
     for (let r = 2; r < rows.length - 2; r += 1) {
       const limit = this.limitAt(rows[r]!);

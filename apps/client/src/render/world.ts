@@ -175,6 +175,8 @@ const REFLECT_FAR = 30;
 const SHADOW_REACH = 45;
 /** Half the sun's shadow box while it warms up (see `warmShadows`): every course fits (m). */
 const WARM_BOX = 1800;
+/** The frames the shadow pass's warm-up is spread over (each draws a share of the casters). */
+const WARM_PARTS = 6;
 /** Half the sun's shadow box in a race (m). */
 const SHADOW_BOX = 40;
 /** Shadow map texels up to this size (m) draw a rider's own shadows cleanly; over coarser ones riders skip them. */
@@ -311,24 +313,26 @@ export class World {
     this.sun.shadow.needsUpdate = true;
     if (this.shadowWarmth > 0) {
       this.shadowWarmth--;
-      this.drawWarmingShadows();
+      this.drawWarmingShadows(this.shadowWarmth % WARM_PARTS);
     } else this.cel.render();
   }
 
-  /** Frames still to draw with every caster in the shadow map (see `warmShadows`). */
+  /** Frames still to draw with casters from all over the course in the shadow map (see `warmShadows`). */
   private shadowWarmth = 0;
 
   /**
-   * Draws the next couple of frames with the shadow box round the whole
-   * course and every rider casting: behind a cover, the shadow pass's
-   * shaders (which a warm-up's compile doesn't reach) are all made, and
-   * none is made mid-race as something new comes into the box.
+   * Draws the next frames with the shadow box round the whole course and
+   * every rider casting, a share of the casters each frame: behind a
+   * cover, the shadow pass's shaders (which a warm-up's compile doesn't
+   * reach) are all made, a few at a time, and none is made mid-race as
+   * something new comes into the box.
    */
-  warmShadows(frames = 2): void {
-    this.shadowWarmth = frames;
+  warmShadows(): void {
+    this.shadowWarmth = WARM_PARTS;
   }
 
-  private drawWarmingShadows(): void {
+  /** A warming frame: the whole course in the box, but only every WARM_PARTS-th caster (from `part`) casting. */
+  private drawWarmingShadows(part: number): void {
     const sun = this.sun;
     const cam = sun.shadow.camera;
     const box = { left: cam.left, right: cam.right, top: cam.top, bottom: cam.bottom, far: cam.far };
@@ -336,9 +340,18 @@ export class World {
     Object.assign(cam, { left: -WARM_BOX, right: WARM_BOX, top: WARM_BOX, bottom: -WARM_BOX, far: WARM_BOX * 4 });
     cam.updateProjectionMatrix();
     sun.position.copy(sun.target.position).addScaledVector(this.sunBack.copy(this.sunOffset).normalize(), WARM_BOX * 2);
+    const resting: THREE.Object3D[] = [];
+    let n = 0;
+    this.scene.traverse((o) => {
+      if (!(o instanceof THREE.Mesh) || !o.castShadow) return;
+      if (n++ % WARM_PARTS === part) return;
+      o.castShadow = false;
+      resting.push(o);
+    });
     try {
       this.cel.render();
     } finally {
+      for (const o of resting) o.castShadow = true;
       Object.assign(cam, box);
       cam.updateProjectionMatrix();
       sun.position.copy(at);
