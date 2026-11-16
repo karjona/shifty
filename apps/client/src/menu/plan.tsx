@@ -23,6 +23,7 @@ import {
 } from "@shifty/rider";
 import { circuitName } from "../game/conditions.ts";
 import { useT } from "../i18n/index.ts";
+import { loadModels } from "../render/env/models.ts";
 import { Picker } from "./ui.tsx";
 
 /** The picker's "draw" value. */
@@ -50,6 +51,20 @@ export function fitSpec(spec: RaceSpec): RaceSpec {
   if (out.turns !== undefined && !ok.includes(WEATHERS[out.turns]!)) delete out.turns;
   if (out.season === undefined) delete out.time;
   return out;
+}
+
+/** Whether a plan may race on the mountain: a Tilt always does, one race when its circuit or season allows it. */
+export function mayRideSnow(plan: PlanRequest): boolean {
+  if (plan.tilt) return true;
+  const c = plan.race.course === undefined ? undefined : circuit(plan.race.course);
+  if (c) return c.sport === "snow";
+  const season = plan.race.season === undefined ? undefined : SEASONS[plan.race.season];
+  return season === undefined || SPORT_SEASONS.snow.includes(season);
+}
+
+/** Starts downloading the scenery a plan may race on, in the background (nothing waits on it, nothing shows it). */
+export function prefetchScenery(plan: PlanRequest): void {
+  if (mayRideSnow(plan)) void loadModels("snow", null);
 }
 
 /** The sports that ride a season, in the menus' words. */
