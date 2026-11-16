@@ -9,8 +9,47 @@ export type GlyphAction = "confirm" | "back" | "play" | "prev" | "next" | "menu"
 
 type Mark =
   | { kind: "letter"; text: string }
-  | { kind: "cross" | "circle" | "triangle" | "lines" | "plus" }
+  | { kind: "cross" | "circle" | "triangle" | "square" | "lines" | "plus" | "stick" }
   | { kind: "shoulder"; text: string; side: "left" | "right" };
+
+/** A controller's buttons by where they sit (the race's controls), and its left stick. */
+export type PadButton = "south" | "east" | "west" | "north" | "lb" | "rb" | "lt" | "rt" | "stick";
+
+const BUTTONS: Record<Pad, Record<PadButton, Mark>> = {
+  xbox: {
+    south: { kind: "letter", text: "A" },
+    east: { kind: "letter", text: "B" },
+    west: { kind: "letter", text: "X" },
+    north: { kind: "letter", text: "Y" },
+    lb: { kind: "shoulder", text: "LB", side: "left" },
+    rb: { kind: "shoulder", text: "RB", side: "right" },
+    lt: { kind: "shoulder", text: "LT", side: "left" },
+    rt: { kind: "shoulder", text: "RT", side: "right" },
+    stick: { kind: "stick" },
+  },
+  playstation: {
+    south: { kind: "cross" },
+    east: { kind: "circle" },
+    west: { kind: "square" },
+    north: { kind: "triangle" },
+    lb: { kind: "shoulder", text: "L1", side: "left" },
+    rb: { kind: "shoulder", text: "R1", side: "right" },
+    lt: { kind: "shoulder", text: "L2", side: "left" },
+    rt: { kind: "shoulder", text: "R2", side: "right" },
+    stick: { kind: "stick" },
+  },
+  nintendo: {
+    south: { kind: "letter", text: "B" },
+    east: { kind: "letter", text: "A" },
+    west: { kind: "letter", text: "Y" },
+    north: { kind: "letter", text: "X" },
+    lb: { kind: "shoulder", text: "L", side: "left" },
+    rb: { kind: "shoulder", text: "R", side: "right" },
+    lt: { kind: "shoulder", text: "ZL", side: "left" },
+    rt: { kind: "shoulder", text: "ZR", side: "right" },
+    stick: { kind: "stick" },
+  },
+};
 
 const PADS: Record<Pad, Record<GlyphAction, Mark>> = {
   xbox: {
@@ -72,7 +111,28 @@ function Shoulder({ text, side }: { text: string; side: "left" | "right" }) {
 
 /** A controller button. */
 export function PadGlyph({ pad, action }: { pad: Pad; action: GlyphAction }) {
-  const m = PADS[pad][action];
+  return <MarkGlyph m={PADS[pad][action]} />;
+}
+
+/** A controller button by where it sits, or its left stick, as the race's controls show it. */
+export function ButtonGlyph({ pad, button }: { pad: Pad; button: PadButton }) {
+  return (
+    <span className="glyph" aria-hidden="true">
+      <MarkGlyph m={BUTTONS[pad][button]} />
+    </span>
+  );
+}
+
+/** A key, as printed on it. */
+export function KeyCap({ text }: { text: string }) {
+  return (
+    <span className="glyph" aria-hidden="true">
+      <span className={`glyph-key ${text.length > 1 ? "wide" : ""}`}>{text}</span>
+    </span>
+  );
+}
+
+function MarkGlyph({ m }: { m: Mark }) {
   switch (m.kind) {
     case "shoulder":
       return <Shoulder text={m.text} side={m.side} />;
@@ -100,6 +160,19 @@ export function PadGlyph({ pad, action }: { pad: Pad; action: GlyphAction }) {
       return (
         <Face>
           <path className="g-ink-stroke" d="M12 6.6 17.4 16H6.6Z" />
+        </Face>
+      );
+    case "square":
+      return (
+        <Face>
+          <rect className="g-ink-stroke" x="7.4" y="7.4" width="9.2" height="9.2" />
+        </Face>
+      );
+    case "stick":
+      return (
+        <Face>
+          <circle className="g-ink-stroke" cx="12" cy="12" r="6.2" />
+          <circle className="g-ink-fill" cx="12" cy="12" r="2" />
         </Face>
       );
     case "lines":

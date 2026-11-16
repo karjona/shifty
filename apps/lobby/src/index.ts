@@ -23,15 +23,17 @@ import {
 import { jsonBody } from "./json.ts";
 import { isLocale, pickLocale } from "./locale.ts";
 import { devMailbox } from "./mail.ts";
-import { NoRaceServer, startSingle } from "./matches.ts";
+import { NoRaceServer, liveMatch, startSingle } from "./matches.ts";
 import { claimHandle, getPlayer, isCard, isTitle, setCard, view } from "./players.ts";
 import { parseReport, storeReport } from "./results.ts";
+import { matchPay } from "./rewards.ts";
 import {
   buy,
   ownedItems,
   checkAppearance,
   parseSetups,
   recentEarnings,
+  riderClaims,
   riderView,
   saveAppearance,
   saveSetups,
@@ -147,7 +149,7 @@ async function requirePlayer(c: Ctx) {
   if (!s) return { error: c.json({ error: "unauthorized" }, 401) } as const;
   const row = await getPlayer(c.var.db, s.user.id);
   if (!row) return { error: c.json({ error: "no_handle" }, 409) } as const;
-  return { user: s.user, player: view(row) } as const;
+  return { user: s.user, player: view(row), row } as const;
 }
 
 app.get("/api/me", async (c) => {
@@ -195,6 +197,30 @@ app.get("/api/me/earnings", async (c) => {
   const p = await requirePlayer(c);
   if ("error" in p) return p.error;
   return c.json({ earnings: await recentEarnings(c.var.db, p.user.id) });
+});
+
+/** The matchmaking race you are still in, if any, with a ticket back into it. */
+app.get("/api/me/live", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const servers = await c.env.SERVERS.get(c.env.SERVERS.idFromName("all")).live();
+  const live = await liveMatch(c.var.db, c.env.LOBBY_SIGNING_KEY, servers, {
+    userId: p.user.id,
+    handle: p.player.handle,
+  });
+  return c.json(live ?? { match: null });
+});
+
+/** What a match you raced in paid you, race by race, your credits now, and your best on `?course` before it. */
+app.get("/api/me/matches/:id", async (c) => {
+  const p = await requirePlayer(c);
+  if ("error" in p) return p.error;
+  const id = c.req.param("id");
+  const course = Number(c.req.query("course"));
+  const known = Number.isInteger(course) && course >= 0 && course < 256 ? course : undefined;
+  const pay = /^m_[A-Za-z0-9]{1,40}$/u.test(id) ? await matchPay(c.var.db, id, p.user.id, known) : null;
+  if (!pay) return c.json({ error: "no_match" }, 404);
+  return c.json(pay);
 });
 
 app.post("/api/me/handle", async (c) => {
@@ -307,6 +333,8 @@ async function forwardSocket(c: Ctx, stub: { fetch(r: Request): Promise<Response
   const headers = new Headers({ upgrade: "websocket" });
   headers.set("x-shifty-user", p.user.id);
   headers.set("x-shifty-handle", encodeURIComponent(p.player.handle));
+  // Their rider as saved (only what they own), for the others in a room to see.
+  headers.set("x-shifty-look", riderClaims(p.row).look);
   for (const h of ["sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol"]) {
     const v = c.req.header(h);
     if (v) headers.set(h, v);

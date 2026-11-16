@@ -3,7 +3,7 @@
 // members will join you there.
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
@@ -11,6 +11,7 @@ import { CIRCUITS, type PlanRequest, SEASONS, TILT, circuit } from "@shifty/ride
 import {
   ApiError,
   createRoom,
+  liveRaceQuery,
   lobbySocket,
   meQuery,
   type Mode,
@@ -18,6 +19,7 @@ import {
   playTimeTrial,
   roomExists,
   setPendingRace,
+  takeRequeue,
 } from "../api.ts";
 import { PlusIcon, SlidersIcon } from "../icons.tsx";
 import { PlanPickers, seasonSports } from "../plan.tsx";
@@ -40,7 +42,8 @@ export function ModeSelect() {
   const [bots, setBots] = useState(3);
   const [busy, setBusy] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [searching, setSearching] = useState(false);
+  // Play again from the end of a matchmaking race goes straight back into the queue.
+  const [searching, setSearching] = useState(() => mode === "matchmaking" && takeRequeue());
   const [tuning, setTuning] = useState(false);
   const [trial, setTrial] = useState<TrialChoice | null>(null);
   useLoading(busy);
@@ -72,11 +75,11 @@ export function ModeSelect() {
       if (mode === "trial" && trial?.race) {
         const ticket = await playTimeTrial(trial.course, trial.season);
         setPendingRace({ ticket, back: { to: "/play", search: { mode: "trial" } }, trial: trial.race });
-        await navigate({ to: "/race" });
+        await navigate({ to: "/race", replace: true });
       } else if (mode === "single") {
         const ticket = await playSingle(plan);
-        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } } });
-        await navigate({ to: "/race" });
+        setPendingRace({ ticket, back: { to: "/play", search: { mode: "single" } }, plan });
+        await navigate({ to: "/race", replace: true });
       } else {
         const code = await createRoom(plan, bots);
         await navigate({ to: "/room/$code", params: { code } });
@@ -92,6 +95,7 @@ export function ModeSelect() {
   return (
     <div className="screen mode-select">
       <TopBar title={t.play.title} kicker={t.play.club} />
+      <LiveRace />
       <main className="mode-body">
         <div className="party">
           <Button kind="ghost" className="party-add" onClick={() => toast(t.play.partySoon)}>
@@ -167,6 +171,26 @@ export function ModeSelect() {
       {joining && <JoinRoom onClose={() => setJoining(false)} />}
       {searching && <Searching onClose={() => setSearching(false)} />}
       {tuning && <SetupEditor onClose={() => setTuning(false)} />}
+    </div>
+  );
+}
+
+/** A matchmaking race you are still in (you closed its tab): back into it. */
+function LiveRace() {
+  const t = useT();
+  const navigate = useNavigate();
+  const { data: live } = useQuery(liveRaceQuery);
+  if (!live) return null;
+  const rejoin = () => {
+    setPendingRace({ ticket: live.ticket, back: { to: "/play", search: { mode: "matchmaking" } }, rejoin: true });
+    void navigate({ to: "/race", replace: true });
+  };
+  return (
+    <div className="panel live-race">
+      <b>{t.play.liveRace}</b>
+      <Button kind="primary" onClick={rejoin} autoFocus>
+        {t.room.rejoin}
+      </Button>
     </div>
   );
 }
@@ -272,7 +296,7 @@ function Searching({ onClose }: { onClose: () => void }) {
         ticket: parseJoinTicket(get("ticket")),
         back: { to: "/play", search: { mode: "matchmaking" } },
       });
-      void navigate({ to: "/race" });
+      void navigate({ to: "/race", replace: true });
     } else if (msg.t === "error") {
       done.current = true;
       toast(get("error") === "no_server" ? t.common.noServer : t.common.error, "error");

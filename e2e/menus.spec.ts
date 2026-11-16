@@ -50,15 +50,18 @@ test("sign up, pick a handle and race the Tilt against bots", async ({ browser }
   await page.keyboard.press("p");
   await page.waitForURL(/\/play/u);
   await page.keyboard.press("p");
-  await page.waitForURL(/\/race/u);
+  await expect(page).toHaveURL(/\/race/u, { timeout: 30_000 });
   await joinedRace(page);
   // A Tilt: a race per season (two, summer then winter, with fewer circuits than seasons).
   await expect.poll(() => page.evaluate(() => window.__shifty.race().eventCount)).toBeGreaterThanOrEqual(2);
   await expect.poll(() => page.evaluate(() => Object.values(window.__shifty.names()))).toContain(handle);
-  // The race menu takes you back to the mode select.
+  // The race menu takes you back to the mode select, asking first once the Tilt is under way.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: /leave the race/iu }).click();
-  await page.waitForURL(/\/play/u);
+  const confirm = page.getByRole("button", { name: /^leave$/iu });
+  await expect(confirm.or(page.locator(".mode-select"))).toBeVisible();
+  if (await confirm.isVisible()) await confirm.click();
+  await expect(page).toHaveURL(/\/play/u);
 });
 
 test("make a rider, dress them, set them up and visit the pro shop", async ({ browser }) => {
@@ -135,7 +138,10 @@ test("two friends race in a private room", async ({ browser }) => {
   await b.page.getByRole("button", { name: /i'm ready/iu }).click();
   await expect(a.page.locator(".members")).toContainText("Ready");
   await a.page.getByRole("button", { name: /start the race/iu }).click();
-  await Promise.all([a.page.waitForURL(/\/race/u), b.page.waitForURL(/\/race/u)]);
+  await Promise.all([
+    expect(a.page).toHaveURL(/\/race/u, { timeout: 30_000 }),
+    expect(b.page).toHaveURL(/\/race/u, { timeout: 30_000 }),
+  ]);
   await Promise.all([joinedRace(a.page), joinedRace(b.page)]);
   await expect
     .poll(() => a.page.evaluate(() => Object.values(window.__shifty.names())))
@@ -153,8 +159,8 @@ test("matchmaking puts two riders in the same race", async ({ browser }) => {
   );
   // Fewer than four: the race starts once the first in line has waited (10 s in dev).
   await Promise.all([
-    a.page.waitForURL(/\/race/u, { timeout: 40_000 }),
-    b.page.waitForURL(/\/race/u, { timeout: 40_000 }),
+    expect(a.page).toHaveURL(/\/race/u, { timeout: 40_000 }),
+    expect(b.page).toHaveURL(/\/race/u, { timeout: 40_000 }),
   ]);
   await Promise.all([joinedRace(a.page), joinedRace(b.page)]);
   await expect

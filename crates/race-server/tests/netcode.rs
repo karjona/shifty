@@ -69,6 +69,9 @@ struct Peer {
     claims: JoinClaims,
     /// The screen has the course loaded (as soon as it knows which).
     loaded: bool,
+    /// The page is frozen (a long stall, a hidden tab): it neither reads
+    /// nor sends, while its network stack holds what arrives.
+    frozen: bool,
 }
 
 struct Harness {
@@ -102,6 +105,7 @@ fn claims(pid: &str, bots: u8, surface: SurfaceKind, race: RaceClaims) -> JoinCl
         // Lopsided setups, so prediction has to know each rider's.
         setups: vec![[6, 2, 2, 2], [2, 3, 6, 1]],
         trial: false,
+        rejoin: false,
     }
 }
 
@@ -144,6 +148,7 @@ impl Harness {
             down: Link::new(cond, 200 + i as u64),
             claims: claims(pid, 0, SurfaceKind::Flat, RaceClaims::default()),
             loaded: true,
+            frozen: false,
         });
         i
     }
@@ -206,6 +211,9 @@ impl Harness {
             }
             // Client side: receive, update every ~8 ms, send.
             for (i, p) in self.peers.iter_mut().enumerate() {
+                if p.frozen {
+                    continue;
+                }
                 for bytes in p.down.deliver(now) {
                     p.client.handle_packet(&bytes, now);
                 }
@@ -771,5 +779,221 @@ fn finished_riders_are_predicted_exactly_whatever_their_players_press() {
     assert!(
         along > sim::mountain::RUN.finish_s && r.speed() < 0.5,
         "pulled up past the finish: {r:?}"
+    );
+}
+
+#[test]
+fn a_screen_frozen_while_it_loads_keeps_its_seat_for_the_grid_wait() {
+    let mut h = Harness::new(1, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    let b = h.add_peer("b", PERFECT);
+    h.peers[b].loaded = false;
+    h.run(1000.0, |_, _| Input::default());
+    assert_eq!(h.room.human_count(), 2);
+    // B's page builds its course for longer than a racing screen may go quiet.
+    h.peers[b].frozen = true;
+    h.run(race_server::room::IDLE_TIMEOUT_MS as f64 * 2.0, |_, _| {
+        Input::default()
+    });
+    assert_eq!(h.room.human_count(), 2, "a loading screen was dropped");
+    assert_eq!(h.room.world().race.phase, RacePhase::Grid);
+    // It comes back with the course on show: the race starts with both.
+    h.peers[b].frozen = false;
+    h.peers[b].loaded = true;
+    h.run(1000.0, |_, _| Input::default());
+    assert_eq!(h.peers[b].client.phase(), Phase::Joined);
+    assert_eq!(h.room.world().race.phase, RacePhase::Intro);
+    assert_eq!(h.room.stats.grid_timeouts, 0);
+}
+
+#[test]
+fn a_screen_still_silent_after_the_grid_wait_is_dropped() {
+    let mut h = Harness::new(1, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    let b = h.add_peer("b", PERFECT);
+    h.peers[b].loaded = false;
+    h.run(1000.0, |_, _| Input::default());
+    h.peers[b].frozen = true;
+    h.run(
+        race_server::room::LOADING_TIMEOUT_MS as f64 + 1000.0,
+        |_, _| Input::default(),
+    );
+    assert_eq!(h.room.human_count(), 1);
+    // The grid gave up on it, and the race went on without it.
+    assert_ne!(h.room.world().race.phase, RacePhase::Grid);
+    h.peers[b].frozen = false;
+    h.run(500.0, |_, _| Input::default());
+    assert_eq!(
+        h.peers[b].client.phase(),
+        Phase::Rejected(protocol::RejectReason::Kicked)
+    );
+}
+
+#[test]
+fn a_rider_whose_screen_goes_quiet_mid_race_lets_go_then_is_dropped() {
+    let mut h = Harness::new(1, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    h.start_race();
+    h.run(4000.0, driving);
+    let slot = h.peers[0].client.slot().expect("joined");
+    let speed = |h: &Harness| h.room.world().riders[slot].expect("a").speed();
+    let racing = speed(&h);
+    assert!(racing > 10.0, "{racing}");
+    // The page freezes mid-race: the rider doesn't ride on blind, it lets go.
+    h.peers[0].frozen = true;
+    h.run(5000.0, driving);
+    assert_eq!(h.room.human_count(), 1);
+    assert!(speed(&h) < racing * 0.5, "{} of {racing}", speed(&h));
+    // Silent past the idle timeout once its race is on show: dropped.
+    h.run(race_server::room::IDLE_TIMEOUT_MS as f64, driving);
+    assert_eq!(h.room.human_count(), 0);
+}
+
+#[test]
+fn bots_have_riders_names_that_every_screen_agrees_on() {
+    let bot_names = |h: &Harness, i: usize| -> Vec<String> {
+        h.peers[i]
+            .client
+            .roster()
+            .iter()
+            .flatten()
+            .filter(|e| e.kind == protocol::RiderKind::Bot)
+            .map(|e| e.name.clone())
+            .collect()
+    };
+    let mut h = Harness::new(7, SurfaceKind::Flat);
+    h.add_peer("a", PERFECT);
+    h.add_peer("b", PERFECT);
+    h.run(1000.0, |_, _| Input::default());
+    // Two people took two of the seven bots' seats.
+    let names = bot_names(&h, 0);
+    assert_eq!(names.len(), 6);
+    assert_eq!(names, bot_names(&h, 1));
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), names.len(), "{names:?}");
+    for n in &names {
+        let (initial, surname) = n.split_once(". ").expect("an initial and a surname");
+        assert_eq!(initial.chars().count(), 1, "{n}");
+        assert!(
+            !surname.is_empty() && n.len() <= protocol::NAME_MAX_BYTES,
+            "{n}"
+        );
+    }
+    // A screen that rejoins sees the same names.
+    h.peers[1].conn = 99;
+    h.peers[1].client = Client::new("token");
+    h.run(1000.0, |_, _| Input::default());
+    assert_eq!(bot_names(&h, 1), names);
+}
+
+#[test]
+fn after_the_last_results_the_world_runs_on_predicted_exactly_until_nobody_looks() {
+    let cond = NetConditions {
+        latency_ms: 80.0,
+        jitter_ms: 10.0,
+        loss: 0.02,
+    };
+    let mut h = Harness::on(CourseId::Mountain, 2, SurfaceKind::Flat);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    // Down the run on the bot's line, like the bots: the race ends when all are through.
+    let a = h.peers[0].client.slot().expect("joined");
+    for _ in 0..300 {
+        if h.room.world().race.phase == RacePhase::Results {
+            break;
+        }
+        h.drive(500.0, |_, c, _| bot_input(c.predicted_world(), a));
+    }
+    let results = h.room.world().race;
+    assert_eq!(results.phase, RacePhase::Results);
+    // The scoreboard's time goes by; the plan is over, and the results stay up.
+    let scoreboard = f64::from(sim::race::tuning::RESULTS_TICKS) * 1000.0 / f64::from(TICK_HZ);
+    h.run(scoreboard + 500.0, |_, _| Input::default());
+    assert!(h.room.is_over());
+    assert!(!h.room.is_done(), "a is still looking");
+    let before = h.peers[0].client.stats();
+    let tick = h.room.tick();
+    let mut rng = Pcg32::new(5);
+    h.run(10_000.0, |_, _| {
+        Input::from_analog(
+            rng.range(-1.0, 1.0),
+            1.0,
+            rng.range(-1.0, 1.0),
+            (rng.next_u32() & 0xFF) as u8,
+        )
+    });
+    // Everyone rides on autopilot in the results, on the server and on the
+    // screen alike: whatever a presses, nothing mispredicts.
+    assert_eq!(h.room.world().race, results);
+    assert_eq!(h.peers[0].client.race(), results);
+    assert!(h.room.tick() >= tick + TICK_HZ * 9);
+    let s = h.peers[0].client.stats();
+    assert!(s.snapshots - before.snapshots > 250, "{s:?}");
+    assert_eq!(s.mispredictions - before.mispredictions, 0, "{s:?}");
+    // Nobody new comes in; once a has gone, the room is done.
+    assert_eq!(
+        h.room
+            .join(
+                9,
+                &claims("z", 0, SurfaceKind::Flat, RaceClaims::default()),
+                0,
+                0
+            )
+            .err(),
+        Some(protocol::RejectReason::Over)
+    );
+    let conn = h.peers[0].conn;
+    h.room.leave(conn);
+    assert!(h.room.is_done());
+}
+
+#[test]
+fn a_reloaded_screen_rejoins_its_seat_and_predicts_on() {
+    let cond = NetConditions {
+        latency_ms: 60.0,
+        jitter_ms: 8.0,
+        loss: 0.02,
+    };
+    let mut h = Harness::new(3, SurfaceKind::Swells);
+    h.add_peer("a", cond);
+    h.run(1000.0, |_, _| Input::default());
+    h.start_race();
+    h.run(4000.0, driving);
+    let slot = h.peers[0].client.slot().expect("joined");
+    let progress = h.room.world().riders[slot].expect("rider").race;
+    // The tab reloads: the old connection goes without a goodbye, and a new
+    // screen (a new client, a new connection) comes back a few seconds later.
+    let old = h.peers[0].conn;
+    h.room.disconnect(old, h.now as u64);
+    h.peers[0].client = Client::new("token");
+    h.peers[0].conn = 40;
+    h.peers[0].up = Link::new(cond, 300);
+    h.peers[0].down = Link::new(cond, 301);
+    h.peers[0].loaded = false;
+    h.run(3000.0, |_, _| Input::default());
+    let c = &h.peers[0].client;
+    assert_eq!(c.phase(), Phase::Joined);
+    assert_eq!(c.slot(), Some(slot), "the same seat");
+    // The same rider, its race carried on (it coasted while away).
+    let now = h.room.world().riders[slot].expect("rider").race;
+    assert!(
+        now.racing && now.lap >= progress.lap,
+        "{progress:?} -> {now:?}"
+    );
+    // The new screen knows everyone again, and predicts the bots exactly.
+    let seated = h.room.world().riders.iter().flatten().count();
+    assert_eq!(c.roster().iter().flatten().count(), seated);
+    h.peers[0].loaded = true;
+    let before = h.peers[0].client.stats();
+    h.run(4000.0, |_, _| Input::from_analog(0.1, 1.0, 0.0, 0));
+    let s = h.peers[0].client.stats();
+    assert!(s.snapshots - before.snapshots > 100, "{s:?}");
+    assert!(
+        f64::from(s.mispredictions - before.mispredictions)
+            < f64::from(s.snapshots - before.snapshots) * 0.1,
+        "{s:?}"
     );
 }

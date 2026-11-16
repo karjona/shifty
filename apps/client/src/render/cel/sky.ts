@@ -242,7 +242,7 @@ function cumulus(size: number, seed: number): THREE.BufferGeometry {
       parts.push(g);
     }
   }
-  const geo = mergeGeometries(parts.map((g) => g.toNonIndexed()));
+  const geo = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
   // A flat base, facing down.
   const pos = geo.attributes.position!;
   const nor = geo.attributes.normal!;

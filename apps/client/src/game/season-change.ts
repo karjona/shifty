@@ -26,20 +26,26 @@ function where(course: number | null): string {
   return course === null ? m.place : `${circuitName(course, circuit(course)?.sport ?? "jetski")} · ${m.place}`;
 }
 
-/** The card itself, under the menus (the race menu, the status): up until `hide`. */
 /** What loading a course goes through (after joining, when the card covers that too). */
 export const COURSE_STEPS: Step[] = ["art", "scene", "shaders", "settle"];
+
+/** What joining a race goes through, its first course's load and all. */
+export const JOIN_STEPS: Step[] = ["connect", "join", ...COURSE_STEPS];
 
 /** The wait a course is remembered by (each one loads its own way). */
 export const courseWait = (course: number) => `course:${course}`;
 
+/** The card itself, under the menus (the race menu, the status): up until `hide`. */
 export class SeasonCard {
   private el: HTMLDivElement;
   private gone = false;
   private wait: Wait | null = null;
+  /** The course coming up, if known (what its wait is remembered by). */
+  private next: number | null;
 
   /** `course`: the course coming up (`sim::CourseId`), if known. */
   constructor(season: Season, fadeIn = true, course: number | null = null) {
+    this.next = course;
     const m = messages();
     this.el = document.createElement("div");
     this.el.className = `season-change season-${season}`;
@@ -63,6 +69,7 @@ export class SeasonCard {
 
   /** The course coming up (`sim::CourseId`). */
   set course(course: number) {
+    this.next = course;
     this.el.querySelector("span")!.textContent = where(course);
     this.wait?.rename(courseWait(course));
   }
@@ -76,8 +83,14 @@ export class SeasonCard {
     return this.wait;
   }
 
+  /** Shows on its bar a race being joined behind it (true), or nothing loading any more (false). */
+  set loading(on: boolean) {
+    if (on) this.load(this.next === null ? "course" : courseWait(this.next), JOIN_STEPS);
+    else if (this.wait) closeCard(this.wait);
+  }
+
   /** What loads behind it (null before `load`). */
-  get loading(): Wait | null {
+  get loads(): Wait | null {
     return this.wait;
   }
 

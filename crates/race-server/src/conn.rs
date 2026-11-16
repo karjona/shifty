@@ -120,6 +120,7 @@ pub async fn serve(
 
     // 2. Forward inputs until the client leaves or the room goes away.
     let mut bad = 0;
+    let mut bye = false;
     while let Some(bytes) = incoming.recv().await {
         match ClientMsg::decode(&bytes) {
             Ok(ClientMsg::Inputs(packet)) => {
@@ -142,7 +143,10 @@ pub async fn serve(
                     break;
                 }
             }
-            Ok(ClientMsg::Bye) => break,
+            Ok(ClientMsg::Bye) => {
+                bye = true;
+                break;
+            }
             Err(_) => {
                 rooms.metrics.bad_packets.fetch_add(1, Ordering::Relaxed);
                 bad += 1;
@@ -153,6 +157,6 @@ pub async fn serve(
             }
         }
     }
-    let _ = room.tx.send(RoomCmd::Leave { conn }).await;
+    let _ = room.tx.send(RoomCmd::Leave { conn, bye }).await;
     rooms.metrics.connections.fetch_sub(1, Ordering::Relaxed);
 }

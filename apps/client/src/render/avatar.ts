@@ -50,6 +50,11 @@ export class Avatar {
     this.mesh.add(this.figure.group);
   }
 
+  /** Who they are and what they wear. */
+  get dressedAs(): Appearance {
+    return this.appearance;
+  }
+
   /** Resolves once the art has first gone on. */
   get ready(): Promise<void> {
     return this.figure.ready;
