@@ -8,12 +8,13 @@ import { useEffect, useRef, useState } from "react";
 import { setClubCloseUp, setClubRider, setClubRiders, showClubRide } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { ApiError, buyItem, meQuery, storeRider } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
-import { hexColour, itemBrand, itemLabel } from "../items.ts";
+import { useAction, useAutoFocus, useBackdrop, useScrollEdges } from "../hooks.ts";
+import { hexColour, itemBrand, itemLabel, sportOptions } from "../items.ts";
 import { nav } from "../nav.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Modal, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { useLoading } from "../busy.tsx";
 
 const forSale = (sport: Sport, slot: Slot, a: Appearance): Item[] =>
   ITEMS.filter((i) => {
@@ -33,6 +34,8 @@ export function ShopScreen() {
   const [trying, setTrying] = useState<string | null>(null);
   const [buying, setBuying] = useState<Item | null>(null);
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
+  const edges = useScrollEdges();
   const tapped = useRef<string | null>(null);
   useAutoFocus();
   useAction("back", () => void navigate({ to: "/", search: { tab: "collection" } }), !buying);
@@ -85,13 +88,13 @@ export function ShopScreen() {
       <main className="menu-body shop">
         <Panel className="shop-panel">
           <Picker
-            label={t.wardrobe.season}
+            label={t.wardrobe.sport}
             value={sport}
             onChange={(s) => {
               setSport(s);
               setTrying(null);
             }}
-            options={(["summer", "winter"] as const).map((s) => ({ value: s, label: t.seasons[s] }))}
+            options={sportOptions(t)}
           />
           <Picker
             label={t.shop.slot}
@@ -105,7 +108,7 @@ export function ShopScreen() {
               label: s === "ride" ? t.wardrobe.rides[sport] : t.wardrobe.slots[s],
             }))}
           />
-          <ul className="shop-items">
+          <ul className="shop-items" ref={edges}>
             {items.map((it, n) => {
               const owned = rider.owned.has(it.id);
               return (
@@ -122,7 +125,8 @@ export function ShopScreen() {
                       if (nav.device === "touch" && tapped.current !== it.id) {
                         tapped.current = it.id;
                         setTrying(it.id);
-                      } else if (!owned) setBuying(it);
+                      } else if (owned) toast(t.shop.wearIt);
+                      else setBuying(it);
                     }}
                   >
                     <i className="swatch" style={{ background: hexColour(it.colours[0]) }} />
@@ -142,7 +146,7 @@ export function ShopScreen() {
       </main>
       {buying && (
         <Modal
-          title={t.shop.title}
+          title={itemLabel(t, buying.id)}
           onClose={() => setBuying(null)}
           actions={
             <>

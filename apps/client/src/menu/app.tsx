@@ -3,7 +3,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import {
-  ErrorComponent,
   type ErrorComponentProps,
   Outlet,
   RouterProvider,
@@ -12,8 +11,12 @@ import {
   createRouter,
   lazyRouteComponent,
   redirect,
+  useNavigate,
 } from "@tanstack/react-router";
-import { inviteQuery, meQuery, redeemInvite } from "./api.ts";
+import { useT } from "../i18n/index.ts";
+import { ApiError, freshInviteQuery, inviteQuery, meQuery, onSessionEnded, redeemInvite } from "./api.ts";
+import { useAction, useAutoFocus } from "./hooks.ts";
+import { Button, Panel, Wordmark } from "./ui.tsx";
 import { InfoPage } from "./screens/info.tsx";
 import { Login } from "./screens/login.tsx";
 import { MainMenu, type MenuTab } from "./screens/main-menu.tsx";
@@ -39,12 +42,61 @@ const rootRoute = createRootRouteWithContext<Ctx>()({
     </>
   ),
   errorComponent: RouteError,
+  notFoundComponent: NotFound,
 });
 
-/** A screen that failed to load: shown at once (the boot screen would hide it). */
-function RouteError(props: ErrorComponentProps) {
+const retry = () => window.location.reload();
+
+/** An address that isn't a screen: say so, and offer the way home. */
+function NotFound() {
+  const t = useT();
+  const navigate = useNavigate();
   useEffect(() => booted(), []);
-  return <ErrorComponent {...props} />;
+  useAutoFocus();
+  const home = () => void navigate({ to: "/" });
+  useAction("back", home);
+  return (
+    <div className="screen login">
+      <header className="screen-top">
+        <Wordmark />
+      </header>
+      <main className="login-main">
+        <Panel className="login-card" title={t.errors.notFoundTitle}>
+          <p>{t.errors.notFound}</p>
+          <Button kind="primary" className="wide" glyph="back" onClick={home} autoFocus>
+            {t.menu.home}
+          </Button>
+        </Panel>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * A screen that failed to load (the lobby out of reach, most often): shown
+ * at once (the boot screen would hide it), with a way to try again.
+ */
+function RouteError({ error }: ErrorComponentProps) {
+  const t = useT();
+  useEffect(() => booted(), []);
+  useAutoFocus();
+  useAction("play", retry);
+  const offline = !(error instanceof ApiError);
+  return (
+    <div className="screen login">
+      <header className="screen-top">
+        <Wordmark />
+      </header>
+      <main className="login-main">
+        <Panel className="login-card" title={offline ? t.errors.offlineTitle : t.errors.title}>
+          <p>{offline ? t.common.offline : t.common.error}</p>
+          <Button kind="primary" className="wide" glyph="play" onClick={retry} autoFocus>
+            {t.common.retry}
+          </Button>
+        </Panel>
+      </main>
+    </div>
+  );
 }
 
 async function signedIn(ctx: Ctx) {
@@ -68,16 +120,21 @@ async function requireHandle({ context }: { context: Ctx }) {
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+/** The login, started afresh when it is sent somewhere with a new reason (the session ended). */
+function LoginScreen() {
+  const { error } = loginRoute.useSearch();
+  return <Login key={error ?? ""} />;
+}
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   validateSearch: (s: Record<string, unknown>): { error?: string } => ({ error: str(s.error) }),
   beforeLoad: async ({ context }) => {
-    const me = await signedIn(context);
+    const [me] = await Promise.all([signedIn(context), context.queryClient.ensureQueryData(inviteQuery)]);
     if (me) throw redirect({ to: me.player ? (me.rider?.appearance ? "/" : "/rider") : "/welcome" });
-    await context.queryClient.ensureQueryData(inviteQuery);
   },
-  component: Login,
+  component: LoginScreen,
 });
 
 /** An invite link: redeems the code for this browser, then the login screen takes over. */
@@ -92,7 +149,7 @@ const inviteRoute = createRoute({
     } catch {
       error = "too_many";
     }
-    await context.queryClient.fetchQuery(inviteQuery);
+    await context.queryClient.fetchQuery(freshInviteQuery);
     throw redirect({ to: "/login", search: { error } });
   },
 });
@@ -188,8 +245,43 @@ const routeTree = rootRoute.addChildren([
 ]);
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
+// The first screen needs the account and, signed out, the invite status: both asked at once.
+void queryClient.prefetchQuery(meQuery);
+void queryClient.prefetchQuery(inviteQuery);
 
 const router = createRouter({ routeTree, context: { queryClient }, defaultPendingMinMs: 0 });
+
+/**
+ * The session ended under the menus (it expired, or you logged out
+ * elsewhere): back to the login, saying so. A race runs on its ticket and
+ * keeps its own screens (results, trouble), so the menus wait until you
+ * leave it.
+ */
+let ended = false;
+const inRace = () => router.state.location.pathname === "/race";
+function endSession(): void {
+  if (inRace()) {
+    ended = true;
+    return;
+  }
+  ended = false;
+  queryClient.setQueryData(meQuery.queryKey, null);
+  void router.navigate({ to: "/login", search: { error: "session" } });
+}
+onSessionEnded(() => {
+  if (queryClient.getQueryData(meQuery.queryKey)) endSession();
+});
+router.subscribe("onResolved", () => {
+  if (ended && !inRace()) endSession();
+});
+// A fresh look at the account (the tab coming back) that finds nobody signed in.
+let signedInBefore = false;
+queryClient.getQueryCache().subscribe((e) => {
+  if (e.type !== "updated" || e.query.queryKey[0] !== meQuery.queryKey[0] || e.action.type !== "success") return;
+  const now = e.query.state.data != null;
+  if (!now && signedInBefore && e.action.manual !== true) endSession();
+  signedInBefore = now;
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

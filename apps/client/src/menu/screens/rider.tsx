@@ -24,11 +24,12 @@ import { useEffect, useState } from "react";
 import { setMenuRider, showMenuRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveRider, storeRider } from "../api.ts";
-import { useAction, useAutoFocus, useBackdrop, useRiderShot } from "../hooks.ts";
+import { useAction, useAutoFocus, useBackdrop, useRiderShot, useScrollEdges } from "../hooks.ts";
 import { hexColour } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Hints, Panel, Picker } from "../ui.tsx";
 import { TopBar } from "./common.tsx";
+import { useLoading } from "../busy.tsx";
 
 const FACE: ReadonlySet<Part> = new Set([
   "hair",
@@ -65,8 +66,10 @@ export function RiderScreen() {
     () => saved ?? { look: randomLook(Math.random), outfits: defaultOutfits("male") },
   );
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const [focus, setFocus] = useState<"body" | "face">("body");
   const space = useRiderShot(focus);
+  const edges = useScrollEdges();
   useAutoFocus();
 
   useEffect(() => showMenuRider(true), []);
@@ -101,12 +104,16 @@ export function RiderScreen() {
 
   return (
     <div className="screen rider-screen">
-      <TopBar title={t.rider.title} kicker={t.menu.collection} sub={t.rider.body} />
+      <TopBar
+        title={first ? t.rider.firstTitle : t.rider.title}
+        kicker={first ? t.rider.firstKicker : t.menu.collection}
+        sub={t.rider.body}
+      />
       <main className="menu-body creator">
         <div className="rider-space" aria-hidden="true" ref={space} />
         <div className="creator-side">
           <Panel className="creator-panel">
-            <div className="creator-rows numbered">
+            <div className="creator-rows numbered" ref={edges}>
               <Picker
                 label={t.rider.bodyType}
                 autoFocus

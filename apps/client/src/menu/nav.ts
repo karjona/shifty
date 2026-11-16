@@ -7,7 +7,9 @@
 // the menu (Start / Options). Each move and action makes its sound.
 //
 // The topmost `[data-nav-scope]` (a dialog) holds the focus while it is
-// open. An element with `data-nav-lr` (a picker) takes left and right for
+// open; up and down scroll its `[data-nav-scroll]` text when there is
+// nothing above or below to move to. Moving into a `[data-nav-region]`
+// from outside lands on its `[data-nav-entry]`. An element with `data-nav-lr` (a picker) takes left and right for
 // itself, as a `nav-lr` event with `detail` -1 or 1.
 import { uiSound } from "../audio/ui.ts";
 
@@ -219,10 +221,26 @@ class Nav {
     }
     // The focus styles read the way it came from (the fill wipes in from that side).
     document.documentElement.dataset.navDir = dir;
-    const next = nearest(active, dir, list);
-    if (!next) return;
+    let next = nearest(active, dir, list);
+    // Coming into a region from outside it lands on the region's way in.
+    const region = next?.closest("[data-nav-region]");
+    if (region && !region.contains(active)) {
+      const entry = region.querySelector<HTMLElement>("[data-nav-entry]");
+      if (entry && list.includes(entry)) next = entry;
+    }
+    if (!next) {
+      if (dir === "up" || dir === "down") this.scrollText(dir === "up" ? -1 : 1);
+      return;
+    }
     next.focus({ preventScroll: false });
     uiSound("move");
+  }
+
+  /** Scrolls the text in scope that has nothing to pick (a dialog's body), when there is nowhere to move. */
+  private scrollText(d: number): void {
+    const el = scope().querySelector<HTMLElement>("[data-nav-scroll]");
+    if (!el || el.scrollHeight <= el.clientHeight) return;
+    el.scrollBy({ top: d * el.clientHeight * 0.4, behavior: "smooth" });
   }
 
   private press(): void {

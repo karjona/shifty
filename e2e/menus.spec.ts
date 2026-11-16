@@ -46,9 +46,14 @@ const joinedRace = (p: Page) => p.waitForFunction(() => window.__shifty?.phase()
 test("sign up, pick a handle and race the Tilt against bots", async ({ browser }) => {
   const { page, handle } = await signUp(browser, "Ana");
   await expect(page.locator(".social-card")).toContainText(handle.split("#")[0]!);
-  // Play (P), then Play again on the mode select: single player is the default.
+  // Play (P), then Play again on the mode select: single player is the default,
+  // one race the first time in; the Tilt is the event picker's next choice.
   await page.keyboard.press("p");
   await page.waitForURL(/\/play/u);
+  const event = page.getByRole("spinbutton", { name: "Event" });
+  await expect(event).toHaveAttribute("aria-valuetext", "One race");
+  await event.click();
+  await expect(event).toHaveAttribute("aria-valuetext", "The Tilt");
   await page.keyboard.press("p");
   await expect(page).toHaveURL(/\/race/u, { timeout: 30_000 });
   await joinedRace(page);

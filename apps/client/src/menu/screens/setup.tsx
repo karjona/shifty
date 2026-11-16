@@ -6,8 +6,10 @@ import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useT } from "../../i18n/index.ts";
 import { meQuery, saveSetups, storeRider } from "../api.ts";
+import { sportOptions } from "../items.ts";
 import { toast } from "../toast.tsx";
 import { Button, Modal, Picker } from "../ui.tsx";
+import { useLoading } from "../busy.tsx";
 
 /** `◀ ■■■□□□ ▶`: left and right take a point off or put one on. */
 function StatRow({
@@ -23,6 +25,7 @@ function StatRow({
   canAdd: boolean;
   onStep: (d: number) => void;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const step = useEffectEvent((d: number) => {
     if (d < 0 ? value > 0 : canAdd && value < STAT_MAX) onStep(d);
@@ -53,7 +56,7 @@ function StatRow({
         <span className="muted small">{about}</span>
       </span>
       <span className="stat-value">
-        <button type="button" tabIndex={-1} aria-label="less" onClick={() => step(-1)}>
+        <button type="button" tabIndex={-1} aria-label={t.setup.less} onClick={() => step(-1)}>
           ◀
         </button>
         <span className="pips" aria-hidden="true">
@@ -61,7 +64,7 @@ function StatRow({
             <i key={i} className={i < value ? "on" : ""} />
           ))}
         </span>
-        <button type="button" tabIndex={-1} aria-label="more" onClick={() => step(1)}>
+        <button type="button" tabIndex={-1} aria-label={t.setup.more} onClick={() => step(1)}>
           ▶
         </button>
       </span>
@@ -78,6 +81,7 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
   );
   const [sport, setSport] = useState<Sport>("summer");
   const [busy, setBusy] = useState(false);
+  useLoading(busy);
   const s = setups[sport];
   const used = STATS.reduce((n, k) => n + s[k], 0);
   const left = STAT_BUDGET - used;
@@ -107,6 +111,9 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       actions={
         <>
+          <Button kind="ghost" glyph="back" onClick={onClose}>
+            {t.common.cancel}
+          </Button>
           <Button onClick={() => setSetups((cur) => ({ ...cur, [sport]: balanced() }))}>{t.setup.balanced}</Button>
           <Button kind="primary" glyph="confirm" disabled={busy || !complete} onClick={() => void save()}>
             {t.setup.save}
@@ -115,12 +122,7 @@ export function SetupEditor({ onClose }: { onClose: () => void }) {
       }
     >
       <p className="muted small">{t.setup.body}</p>
-      <Picker
-        label={t.wardrobe.season}
-        value={sport}
-        onChange={setSport}
-        options={(["summer", "winter"] as const).map((sp) => ({ value: sp, label: t.seasons[sp] }))}
-      />
+      <Picker label={t.wardrobe.sport} value={sport} onChange={setSport} options={sportOptions(t)} />
       {STATS.map((stat) => (
         <StatRow
           key={stat}

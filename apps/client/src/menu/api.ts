@@ -68,6 +68,13 @@ const strOrNull = (o: Obj, k: string): string | null => (typeof o[k] === "string
 const num = (o: Obj, k: string): number => (typeof o[k] === "number" ? o[k] : 0);
 const list = (v: unknown): Obj[] => (Array.isArray(v) ? (v as unknown[]).filter(isObj) : []);
 
+let onUnauthorized: () => void = () => {};
+
+/** Runs `handler` when the lobby says the session is gone (it expired, or you logged out in another tab). */
+export function onSessionEnded(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
 /** Calls the lobby; its JSON answer as an object. Errors carry the lobby's error code. */
 async function call(path: string, init: RequestInit = {}): Promise<Obj> {
   const headers = new Headers(init.headers);
@@ -76,6 +83,7 @@ async function call(path: string, init: RequestInit = {}): Promise<Obj> {
   const res = await fetch(path, { ...init, headers });
   const body: unknown = await res.json().catch(() => null);
   const obj = isObj(body) ? body : {};
+  if (res.status === 401) onUnauthorized();
   if (!res.ok) throw new ApiError(res.status, typeof obj.error === "string" ? obj.error : `http_${res.status}`);
   return obj;
 }
@@ -138,7 +146,13 @@ export async function fetchMe(): Promise<Me | null> {
   };
 }
 
-export const meQuery = queryOptions({ queryKey: ["me"], queryFn: fetchMe, staleTime: 30_000 });
+/** The account; looked at again when the game's tab comes back, in case the session ended meanwhile. */
+export const meQuery = queryOptions({
+  queryKey: ["me"],
+  queryFn: fetchMe,
+  staleTime: 30_000,
+  refetchOnWindowFocus: true,
+});
 
 /** Whether new accounts need an invite code, and whether this browser carries a usable one. */
 export const inviteQuery = queryOptions({
@@ -147,7 +161,11 @@ export const inviteQuery = queryOptions({
     const o = await call("/api/auth/invite/status");
     return { required: o.required === true, redeemed: o.redeemed === true };
   },
+  staleTime: 5 * 60_000,
 });
+
+/** The invite status asked again (after redeeming a code). */
+export const freshInviteQuery = { ...inviteQuery, staleTime: 0 };
 
 /** Redeems an invite code for this browser; false if it is unknown, used up or expired. */
 export async function redeemInvite(code: string): Promise<boolean> {

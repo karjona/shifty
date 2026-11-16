@@ -57,20 +57,32 @@ export function seasonSports(season: Season): CircuitSport[] {
   return (["jetski", "snow"] as const).filter((s) => SPORT_SEASONS[s].includes(season));
 }
 
-/** The plan in a line: "One race · The Bay · Winter · Storm · Dusk", "Draw" for what's left to chance. */
-export function usePlanSummary(plan: PlanRequest): string {
+/** The plan as the host set it, a row per choice ("Random" for what's left to the draw), and the bots. */
+export function PlanRows({ plan, bots }: { plan: PlanRequest; bots: number }) {
   const t = useT();
-  if (plan.tilt) return t.play.events.gp;
-  const r = plan.race;
-  const c = r.course === undefined ? undefined : circuit(r.course);
-  const season = r.season === undefined ? undefined : SEASONS[r.season];
-  return [
-    t.play.events.race,
-    c ? circuitName(c.id, c.sport) : t.room.draw,
-    season ? t.seasons[season] : t.room.draw,
-    r.weather === undefined ? t.room.draw : t.weathers[WEATHERS[r.weather]!],
-    season && r.time !== undefined ? t.timesOfDay[namedTime(season, r.time)] : t.room.draw,
-  ].join(" · ");
+  const rows: [string, string][] = [[t.room.event, plan.tilt ? t.play.events.gp : t.play.events.race]];
+  if (!plan.tilt) {
+    const r = plan.race;
+    const c = r.course === undefined ? undefined : circuit(r.course);
+    const season = r.season === undefined ? undefined : SEASONS[r.season];
+    rows.push(
+      [t.room.circuit, c ? circuitName(c.id, c.sport) : t.room.drawn],
+      [t.room.season, season ? t.seasons[season] : t.room.drawn],
+      [t.room.weather, r.weather === undefined ? t.room.drawn : t.weathers[WEATHERS[r.weather]!]],
+      [t.room.time, season && r.time !== undefined ? t.timesOfDay[namedTime(season, r.time)] : t.room.drawn],
+    );
+  }
+  rows.push([t.room.bots, String(bots)]);
+  return (
+    <dl className="plan-rows">
+      {rows.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 /**

@@ -13,6 +13,10 @@
   --accent: #2b3fd0;
   --on-accent: #f6f1e7;
   --danger: #b8321f;
+  --summer: #2b3fd0;
+  --fall: #c24a1c;
+  --winter: #d4262f;
+  --spring: #24804a;
   --font: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
 
   --fs-label: 20px;
@@ -48,6 +52,7 @@
   font-weight: 420;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
   pointer-events: none;
 }
@@ -262,6 +267,9 @@ a {
 }
 .btn.wide {
   width: 100%;
+  white-space: normal;
+  text-align: center;
+  padding-block: 10px;
 }
 .btn-primary {
   --glyph-ink: var(--ink);
@@ -338,20 +346,22 @@ a {
 .tab .glyph {
   --glyph-ink: inherit;
 }
+/* Glyphs never draw their letters under 11px on the screen, however small
+   the window scales the canvas (--ui-zoom). */
 .glyph-pad {
   display: block;
-  height: 36px;
+  height: max(36px, calc(22px / var(--ui-zoom, 1)));
   width: auto;
   overflow: visible;
 }
 .glyph-pad.shoulder {
-  height: 32px;
+  height: max(32px, calc(23px / var(--ui-zoom, 1)));
 }
 .btn .glyph-pad {
-  height: 32px;
+  height: max(32px, calc(22px / var(--ui-zoom, 1)));
 }
 .btn .glyph-pad.shoulder {
-  height: 28px;
+  height: max(28px, calc(23px / var(--ui-zoom, 1)));
 }
 .glyph-pad .g-body {
   fill: currentColor;
@@ -383,19 +393,19 @@ a {
   align-items: center;
   justify-content: center;
   min-width: 36px;
-  height: 36px;
+  height: max(36px, calc(20px / var(--ui-zoom, 1)));
   padding: 0 9px;
   box-shadow: inset 0 0 0 2px currentColor;
-  font-size: 15px;
+  font-size: max(18px, calc(11.5px / var(--ui-zoom, 1)));
   font-weight: 800;
   font-stretch: 100%;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .btn .glyph-key {
-  height: 32px;
+  height: max(32px, calc(20px / var(--ui-zoom, 1)));
   min-width: 32px;
-  font-size: 14px;
+  font-size: max(17px, calc(11.5px / var(--ui-zoom, 1)));
 }
 
 /* --- tabs: their shoulder buttons at the ends; the current one is underlined --- */
@@ -411,7 +421,7 @@ a {
   box-shadow: var(--lift);
 }
 .tabbar > .glyph {
-  margin: 0 8px;
+  margin: 0 6px;
 }
 .tab {
   position: relative;
@@ -420,7 +430,7 @@ a {
   justify-content: center;
   gap: 10px;
   height: 64px;
-  padding: 0 20px;
+  padding: 0 18px;
   border: 0;
   background: transparent;
   color: rgb(29 27 23 / 0.56);
@@ -436,8 +446,8 @@ a {
 .tab.on::after {
   content: "";
   position: absolute;
-  left: 20px;
-  right: 20px;
+  left: 18px;
+  right: 18px;
   bottom: 0;
   height: 6px;
   background: currentColor;
@@ -464,6 +474,12 @@ a {
 
 /* --- pickers and rows: ◀ value ▶, the arrows show on the focused one --- */
 
+.picker,
+.stat-row,
+.shop-item,
+.trial-row {
+  scroll-margin-block: 56px;
+}
 .picker,
 .stat-row {
   position: relative;
@@ -531,7 +547,7 @@ a {
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 18px;
+  font-size: 22px;
   width: 40px;
   height: 44px;
   padding: 0;
@@ -702,13 +718,14 @@ a {
   width: 720px;
   max-width: 92%;
   max-height: 88%;
-  overflow: auto;
+  overflow: hidden;
   padding: 40px 48px;
   background: var(--paper);
   box-shadow: var(--lift);
   animation: rise 240ms var(--ease) both;
 }
 .modal h2 {
+  flex: none;
   font-size: var(--fs-head);
   line-height: 1.1;
   font-weight: 780;
@@ -721,12 +738,23 @@ a {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  margin: 0 -48px;
+  padding: 0 48px;
+}
+.modal-body > * {
+  flex: none;
 }
 .modal-body > .picker:first-of-type,
 .modal-body > .stat-row:first-of-type {
   margin-top: 4px;
 }
 .modal-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: 16px;
@@ -792,6 +820,9 @@ a {
   font-weight: 400;
   font-stretch: 85%;
   color: var(--ink-2);
+}
+.social-card .who b.long {
+  font-stretch: 82%;
 }
 .social-card .who span {
   font-size: var(--fs-label);
@@ -871,7 +902,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 1040px;
+  max-width: calc(100% - var(--col-r) - var(--gap));
   padding: 28px var(--pad) 28px;
   background: var(--paper);
   box-shadow: var(--lift);
@@ -901,12 +932,18 @@ a {
   display: flex;
   align-items: center;
   gap: 28px;
+  max-width: var(--col-r);
   height: 72px;
   padding: 0 24px 0 8px;
   background: var(--paper);
   box-shadow: var(--lift);
 }
+.account .social-card {
+  flex: 0 1 auto;
+  min-width: 0;
+}
 .account .credits {
+  flex: none;
   padding-left: 28px;
   border-left: 1px solid var(--rule);
   order: 2;
@@ -970,6 +1007,27 @@ a {
 .info-card .panel-title {
   font-size: var(--fs-head);
 }
+/* A handle: the number set lighter, a long name narrower (ui.tsx, Handle). */
+.handle i {
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 85%;
+  color: var(--ink-2);
+}
+.handle.long {
+  font-stretch: 82%;
+}
+:focus .handle i {
+  color: inherit;
+  opacity: 0.75;
+}
+/* A new handle as the login card's title. */
+.handle-title.long {
+  display: block;
+  font-size: var(--fs-head);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
 .or {
   display: flex;
   align-items: center;
@@ -991,6 +1049,10 @@ a {
 .consent {
   font-size: var(--fs-label);
   color: var(--ink-2);
+}
+.login-links {
+  display: flex;
+  flex-direction: column;
 }
 .footer {
   display: flex;
@@ -1092,6 +1154,7 @@ a {
   font-weight: 760;
   font-stretch: 75%;
   letter-spacing: 0.2em;
+  text-shadow: 0 1px 10px rgb(24 16 8 / 0.45);
 }
 
 /* The banner: one at a time, turning every few seconds. */
@@ -1107,16 +1170,16 @@ a {
   box-shadow: var(--lift);
 }
 .hero.season-summer {
-  --hero: #2b3fd0;
+  --hero: var(--summer);
 }
 .hero.season-fall {
-  --hero: #c24a1c;
+  --hero: var(--fall);
 }
 .hero.season-winter {
-  --hero: #d4262f;
+  --hero: var(--winter);
 }
 .hero.season-spring {
-  --hero: #24804a;
+  --hero: var(--spring);
 }
 .hero-head {
   display: flex;
@@ -1155,22 +1218,39 @@ a {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 240px;
+  height: 300px;
+  overflow: hidden;
   padding: 28px var(--pad) 32px;
   background: var(--hero, var(--accent));
   color: var(--on-accent);
   transition: background-color 120ms var(--ease);
 }
 .hero-block b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  flex: none;
   margin-top: auto;
-  max-width: 560px;
+  padding-bottom: 0.06em;
   font-size: var(--fs-title);
   line-height: 0.98;
   font-weight: 820;
   font-stretch: 118%;
   letter-spacing: -0.03em;
 }
+/* A long title takes three smaller lines. */
+.hero-block b.long {
+  -webkit-line-clamp: 3;
+  font-size: 52px;
+  line-height: 1;
+}
 .hero-block > span:not(.glyph) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  flex: none;
   font-size: var(--fs-body);
   line-height: 32px;
   opacity: 0.92;
@@ -1193,6 +1273,13 @@ a {
 .news {
   padding: 20px var(--pad) 8px;
   gap: 4px;
+}
+/* Room for the banner and the news while they load, so nothing jumps when they come in. */
+.hero-loading .hero-block {
+  background: var(--paper-deep);
+}
+.news.loading ul {
+  min-height: calc(var(--row) * 2);
 }
 .missions {
   flex-direction: row;
@@ -1247,8 +1334,14 @@ a {
   text-transform: uppercase;
 }
 .news-item b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   flex: 1;
+  margin: 10px 0;
   font-size: var(--fs-nav);
+  line-height: 34px;
   font-weight: 600;
 }
 .news-item::after {
@@ -1264,11 +1357,121 @@ a {
   color: inherit;
 }
 
+/* Settings: the sections on the left, the open one's options beside them. */
 .settings {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-content: start;
+  grid-template-columns: 440px minmax(0, var(--col-r));
+  align-items: start;
   gap: var(--gap);
+}
+.settings-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+}
+.settings-sections {
+  gap: 0;
+  padding: 8px var(--pad);
+  counter-reset: row;
+}
+.settings-sections .tab {
+  justify-content: flex-start;
+  height: var(--row);
+  padding: 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: var(--fs-nav);
+  font-weight: 700;
+  font-stretch: 100%;
+  letter-spacing: 0;
+  text-transform: none;
+  counter-increment: row;
+}
+.settings-sections .tab:last-child {
+  border-bottom: 0;
+}
+.settings-sections .tab > span {
+  position: relative;
+  z-index: 1;
+}
+.settings-sections .tab > span::before {
+  content: counter(row, decimal-leading-zero);
+  display: inline-block;
+  width: 48px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  font-stretch: 75%;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  vertical-align: 2px;
+}
+.settings-sections .tab::before {
+  inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
+  box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
+}
+/* The open section: a chevron pointing at its options (over the tabs' underline, compact or not). */
+.main-menu .settings-sections .tab.on[role="tab"]::after {
+  left: auto;
+  right: 4px;
+  top: 50%;
+  bottom: auto;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border: solid currentColor;
+  border-width: 3px 3px 0 0;
+  background: none;
+  transform: rotate(45deg);
+  z-index: 1;
+  animation: none;
+}
+.settings-sections .tab:focus {
+  color: var(--on-accent);
+  border-bottom-color: transparent;
+}
+.settings-sections .tab:focus > span::before {
+  color: inherit;
+  opacity: 0.7;
+}
+.settings-options > * {
+  animation: slide-in 220ms var(--ease) both;
+}
+/* The menus' buttons, drawn like the hints: an action per row, the controller's and the keyboard's. */
+.controls {
+  width: 100%;
+  border-collapse: collapse;
+}
+.controls th,
+.controls td {
+  height: 52px;
+  padding: 0 16px 0 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: middle;
+}
+.controls thead th,
+.controls thead td {
+  height: 32px;
+  border-bottom: 2px solid var(--ink);
+  letter-spacing: 0.06em;
+  font-stretch: 90%;
+}
+.controls tbody th {
+  font-weight: 600;
+}
+.controls tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.controls th:last-child,
+.controls td:last-child {
+  padding-right: 0;
+}
+.controls .glyph {
+  gap: 6px;
+}
+.controls .muted {
+  font-size: var(--fs-label);
 }
 
 /* --- mode select and rooms --- */
@@ -1287,32 +1490,41 @@ a {
   gap: var(--gap);
   min-height: 0;
 }
+/* The modes: a two-by-two set of tabs over the open mode's panel, the open
+   one underlined, so the panel keeps the column's height. */
 .mode-tabs {
-  flex-direction: column;
-  align-items: stretch;
   align-self: stretch;
   height: auto;
-  gap: 0;
   padding: 0 var(--pad);
   counter-reset: row;
+}
+:root:not([data-compact]) .mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
 }
 .mode-tabs > .glyph {
   display: none;
 }
 .mode-tabs .tab {
   justify-content: flex-start;
-  height: 72px;
+  min-width: 0;
+  height: 56px;
   padding: 0;
   border-bottom: 1px solid var(--rule);
-  color: var(--ink);
-  font-size: var(--fs-head);
+  color: rgb(29 27 23 / 0.56);
+  font-size: var(--fs-nav);
   font-weight: 760;
-  font-stretch: 112%;
-  letter-spacing: -0.012em;
+  font-stretch: 100%;
+  letter-spacing: -0.005em;
   text-transform: none;
+  white-space: nowrap;
   counter-increment: row;
 }
-.mode-tabs .tab:last-of-type {
+.mode-tabs .tab.on {
+  color: var(--ink);
+}
+.mode-tabs .tab:nth-last-of-type(-n + 2) {
   border-bottom: 0;
 }
 .mode-tabs .tab > * {
@@ -1322,19 +1534,19 @@ a {
 .mode-tabs .tab > span:first-child::before {
   content: counter(row, decimal-leading-zero);
   display: inline-block;
-  width: 48px;
+  width: 40px;
   font-size: var(--fs-label);
   font-weight: 600;
   font-stretch: 75%;
   letter-spacing: 0.04em;
   color: var(--ink-3);
-  vertical-align: 6px;
+  vertical-align: 3px;
 }
 .mode-tabs .tab::before {
   content: "";
   position: absolute;
   z-index: 0;
-  inset: -1px calc((var(--pad) + var(--bleed)) * -1) 0;
+  inset: -1px -12px 0;
   background: var(--accent);
   box-shadow: 0 8px 20px rgb(24 16 8 / 0.22);
   opacity: 0;
@@ -1347,17 +1559,9 @@ a {
   align-self: center;
 }
 .mode-tabs .tab.on::after {
-  left: auto;
-  right: 4px;
-  top: 50%;
-  bottom: auto;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  border: solid currentColor;
-  border-width: 3px 3px 0 0;
-  background: none;
-  transform: rotate(45deg);
+  left: 40px;
+  right: 0;
+  bottom: 0;
   z-index: 1;
 }
 .mode-tabs .tab:focus {
@@ -1372,13 +1576,21 @@ a {
   color: inherit;
   opacity: 0.7;
 }
+/* A mode's panel is as tall as what it holds (the time trial's board takes
+   the rest of the column); the actions keep to the bottom. */
 .mode-panel {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   animation: slide-in 220ms var(--ease) both;
 }
-.mode-panel .panel-title {
-  margin-bottom: -4px;
+.mode-side > .actions {
+  margin-top: auto;
+}
+.mode-about {
+  line-height: 32px;
+}
+.mode-about.small {
+  line-height: 28px;
 }
 .mode-panel .btn {
   align-self: flex-start;
@@ -1390,39 +1602,60 @@ a {
 }
 .races ol {
   list-style: none;
-  margin: 8px 0 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
   padding: 0;
-  border-top: 2px solid var(--ink);
 }
 .races li {
+  --season: var(--ink);
   display: flex;
-  align-items: baseline;
-  gap: 16px;
-  min-height: 56px;
-  padding-top: 14px;
-  border-bottom: 1px solid var(--rule);
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 10px;
+  border-top: 6px solid var(--season);
+}
+.races li.season-summer {
+  --season: var(--summer);
+}
+.races li.season-fall {
+  --season: var(--fall);
+}
+.races li.season-winter {
+  --season: var(--winter);
+}
+.races li.season-spring {
+  --season: var(--spring);
 }
 .races li .num {
-  width: 32px;
   font-size: var(--fs-label);
+  line-height: 24px;
   font-weight: 600;
   color: var(--ink-3);
 }
 .races li b {
-  width: 140px;
-  font-size: var(--fs-nav);
+  font-size: var(--fs-body);
+  line-height: 1.2;
   font-weight: 760;
-  font-stretch: 112%;
+  font-stretch: 100%;
+}
+.races li .muted {
+  font-size: var(--fs-label);
+  line-height: 24px;
 }
 .actions {
   display: flex;
   gap: var(--gap);
 }
 .actions .btn {
+  flex: none;
   min-height: 72px;
   min-width: 216px;
   padding: 0 24px;
   font-size: var(--fs-body);
+  font-stretch: 100%;
   box-shadow:
     inset 0 0 0 2px var(--ink),
     var(--lift);
@@ -1430,6 +1663,8 @@ a {
 .actions .btn-primary {
   flex: 1;
   min-width: 0;
+  white-space: normal;
+  text-align: center;
   box-shadow: var(--lift);
 }
 .actions .btn:focus {
@@ -1467,7 +1702,7 @@ a {
   gap: 24px;
 }
 .room-code {
-  font-size: 96px;
+  font-size: 80px;
   line-height: 1;
   font-weight: 820;
   font-stretch: 75%;
@@ -1489,14 +1724,55 @@ a {
   border-bottom: 1px solid var(--rule);
   font-size: var(--fs-nav);
 }
-.members li b {
+.members li {
+  gap: 16px;
+}
+.members .handle {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.members li.me .handle {
+  font-style: italic;
+}
+/* Someone whose screen dropped: still in the room for a moment, quietly. */
+.members li.away .handle {
+  color: var(--ink-3);
+}
+.badge.quiet {
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 2px var(--rule);
 }
 .members .badge {
   align-self: center;
 }
 .room .mode-panel .panel-title {
   display: none;
+}
+/* The plan, as a guest sees it: the host's choices, a row each. */
+.plan-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+.plan-rows > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--rule);
+}
+.plan-rows dt {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+.plan-rows dd {
+  margin: 0;
+  font-weight: 650;
+  text-align: right;
 }
 /* The host's pickers and a full room can outgrow the panel: it scrolls. */
 .room .mode-panel {
@@ -1691,8 +1967,10 @@ a {
   display: flex;
   align-items: center;
   gap: 16px;
+  max-width: 1040px;
   min-height: 64px;
-  padding: 0 28px;
+  padding: 14px 28px;
+  line-height: 1.3;
   background: var(--ink);
   color: var(--paper);
   font-size: var(--fs-body);
@@ -1702,6 +1980,7 @@ a {
 }
 .toast::before {
   content: "";
+  flex: none;
   width: 6px;
   height: 28px;
   background: var(--accent);
@@ -1828,6 +2107,20 @@ a {
   margin-top: 8px;
 }
 
+/* Lists that scroll fade out on the side where more of them is hidden (hooks.ts, useScrollEdges). */
+[data-more="down"] {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 56px), transparent);
+}
+[data-more="up"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 56px);
+  mask-image: linear-gradient(transparent, #000 56px);
+}
+[data-more="both"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+  mask-image: linear-gradient(transparent, #000 56px, #000 calc(100% - 56px), transparent);
+}
+
 /* --- setups: a row of pips per stat --- */
 
 .stat-row {
@@ -1946,16 +2239,20 @@ a {
   max-height: 100%;
   min-height: 0;
 }
-.wardrobe .btn {
-  min-height: 56px;
-  padding: 0 20px;
-  font-size: var(--fs-label);
+/* Save across the panel; the creator and the shop side by side under it. */
+.wardrobe > .row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
-.wardrobe .row {
-  flex-wrap: wrap;
+.wardrobe > .row .btn {
+  padding: 0 20px;
+}
+.wardrobe > .row .btn-primary {
+  grid-column: 1 / -1;
 }
 
-@media (max-aspect-ratio: 4/3) {
+@media (max-aspect-ratio: 1/1) {
   .home,
   .mode-body,
   .creator {
@@ -2048,9 +2345,6 @@ a {
 .tab.on::after {
   animation: grow 280ms var(--ease) both;
 }
-.mode-tabs .tab.on::after {
-  animation: none;
-}
 @keyframes grow {
   from {
     transform: scaleX(0);
@@ -2073,22 +2367,17 @@ a {
 .mode-side > *,
 .creator-side > *,
 .shop-panel,
-.settings > * {
+.settings-sections {
   animation: enter-right 460ms var(--ease) both;
 }
 .home-right > :nth-child(2),
 .mode-side > :nth-child(2),
-.creator-side > :nth-child(2),
-.settings > :nth-child(2) {
+.creator-side > :nth-child(2) {
   animation-delay: 70ms;
 }
 .home-right > :nth-child(3),
-.mode-side > :nth-child(3),
-.settings > :nth-child(3) {
+.mode-side > :nth-child(3) {
   animation-delay: 140ms;
-}
-.settings > :nth-child(4) {
-  animation-delay: 210ms;
 }
 .title-panel,
 .menu-tabs,
@@ -2243,10 +2532,15 @@ a {
    picking the ghosts raced --- */
 
 .trial-panel {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  gap: 12px;
+  flex: 1 1 auto;
+  gap: 8px;
+  padding-block: 24px;
+}
+.trial-panel .picker {
+  min-height: 52px;
+}
+.trial-panel > * {
+  flex: none;
 }
 .trial-panel .label {
   font-size: var(--fs-label);
@@ -2259,41 +2553,76 @@ a {
 .trial-best {
   display: flex;
   align-items: baseline;
-  gap: 16px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--rule);
+  gap: 12px;
+  min-width: 0;
 }
 .trial-best b {
-  font-size: var(--fs-head);
+  font-size: var(--fs-nav);
   font-weight: 760;
   font-stretch: 75%;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+.trial-panel > .trial-board {
+  flex: 1 1 auto;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
 .trial-board header {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
+  gap: 16px;
 }
-.trial-board ol {
+.trial-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  margin: 0 calc((var(--pad) + var(--bleed)) * -1);
+  padding: 0 calc(var(--pad) + var(--bleed));
+  background: linear-gradient(var(--ink), var(--ink)) no-repeat center top /
+    calc(100% - 2 * (var(--pad) + var(--bleed))) 2px;
+}
+.trial-rows ol {
   list-style: none;
-  margin: 6px 0 8px;
-  padding: 0;
-  border-top: 2px solid var(--ink);
+  margin: 0;
+  padding: 2px 0 0;
+}
+/* Your row, when it is past the top ten, stays in sight at the bottom of the board. */
+.trial-rows li.pinned {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--paper);
+  box-shadow: 0 -2px 0 var(--ink);
+}
+.trial-note {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding-top: 2px;
 }
 .trial-row {
   position: relative;
   display: grid;
-  grid-template-columns: 40px 1fr auto 22px;
+  grid-template-columns: 56px minmax(0, 1fr) auto 22px;
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 44px;
+  min-height: 33px;
   padding: 0;
   border: 0;
   border-bottom: 1px solid var(--rule);
   background: none;
   font: inherit;
   font-size: var(--fs-body);
+  line-height: 32px;
   color: var(--ink);
   text-align: left;
   cursor: pointer;
@@ -2343,6 +2672,10 @@ a {
   font-weight: 700;
   font-stretch: 75%;
   font-variant-numeric: tabular-nums;
+}
+.trial-row.empty {
+  cursor: default;
+  color: var(--ink-3);
 }
 .trial-row .pick {
   width: 20px;
