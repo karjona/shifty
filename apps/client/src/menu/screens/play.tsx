@@ -67,7 +67,7 @@ export function ModeSelect() {
   const setMode = (m: Mode) => void navigate({ to: "/play", search: { mode: m }, replace: true });
   // The mode on show is the one to come back to (a race's way back names it).
   useEffect(() => {
-    if (mode !== lastPicks().mode) setPicks(keepPicks({ mode }));
+    if (mode !== lastPicks().mode) keepPicks({ mode });
   }, [mode]);
 
   const fail = (e: unknown) => {
