@@ -959,3 +959,26 @@ pub fn render_stride() -> usize {
 pub fn determinism_hash(ticks: u32) -> String {
     format!("{:016x}", sim::determinism_scenario(ticks))
 }
+
+/// The races a ticket's room runs, in order, as JSON: `[{course, season,
+/// weather, turns, time}]` in wire numbers (empty if the token can't be
+/// read). Drawn the way the race server draws them, for screens to say
+/// what comes next; what is raced comes from the server.
+#[wasm_bindgen(js_name = planOf)]
+pub fn plan_of(token: &str) -> String {
+    let plan = protocol::token::read_claims(token).map_or_else(Vec::new, |c| c.room_plan());
+    let list: Vec<serde_json::Value> = plan
+        .iter()
+        .map(|e| {
+            let [season, weather, turns, time] = e.conditions.to_bytes();
+            json!({
+                "course": e.course as u8,
+                "season": season,
+                "weather": weather,
+                "turns": turns,
+                "time": time,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(list).to_string()
+}

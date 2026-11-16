@@ -12,7 +12,7 @@ import { SEASONS } from "./seasons.ts";
 
 /** Puts the podium on screen over the page's (empty) menus; `onDone` when the player goes on. */
 export function showPodium(data: PodiumData, onDone: () => void): void {
-  createRoot(document.querySelector("#root")!).render(<PodiumScreen data={data} onDone={onDone} />);
+  createRoot(document.querySelector("#root")!).render(<PodiumScreen data={data} onContinue={onDone} />);
 }
 
 const NAMES = ["Kilian#2304", "Bot 4", "Marta#0117", "Bot 2", "Jordi#8810", "Bot 6", "Bot 7", "Bot 8"];

@@ -307,6 +307,13 @@ impl Client {
         self.trial
     }
 
+    /// The race on now keeps its results up until the room ends them: a
+    /// time trial (until a retry), or the last race of the room's plan. The
+    /// server holds the same races' results.
+    fn holds_results(&self) -> bool {
+        self.trial || self.event_index.saturating_add(1) >= self.event_count
+    }
+
     /// Tilt points by seat (None: no rider there).
     pub fn gp_points(&self) -> &[Option<u16>; MAX_RIDERS] {
         &self.gp_points
@@ -522,7 +529,7 @@ impl Client {
                     w.surface_seed,
                 );
                 self.trial = w.trial;
-                self.world.trial = w.trial;
+                self.world.hold_results = self.holds_results();
                 self.base = self.world.clone();
                 // Run ahead of the server by the trip time plus a small lead.
                 self.world.tick =
@@ -672,6 +679,7 @@ impl Client {
                 })
         });
         let mut world = self.base.clone();
+        world.hold_results = self.holds_results();
         world.tick = s.tick;
         world.race = s.race;
         world.riders = riders;

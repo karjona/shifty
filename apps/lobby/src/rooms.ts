@@ -8,6 +8,7 @@ import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, matchEnded, matchRider, startMatch } from "./matches.ts";
 import { type PlanRequest, parsePlan } from "@shifty/rider";
 import { type JoinTicket, legacyPlan, mintTicket, type TicketServer } from "./tickets.ts";
+import { RACE_TTL_MS, actingHost } from "./room-host.ts";
 
 /** The race a room started: its plan and seed are what rejoin tickets carry. */
 export interface StartedRace {
@@ -27,6 +28,10 @@ export interface RoomSettings {
   createdAt: number;
   /** The race the room last started, while it may still be running. */
   race: StartedRace | null;
+  /** When the host's last socket closed (absent while they are here). */
+  hostAway?: number;
+  /** When the room learned its last race was over. */
+  raceEndedAt?: number;
 }
 
 /** Stored settings (rooms saved by older lobbies name an `event`, and their race no seed). */
@@ -78,8 +83,6 @@ export function newRoomCode(): string {
 
 /** An abandoned room is forgotten after this long. */
 const EMPTY_TTL_MS = 10 * 60_000;
-/** A started race counts as running (members can rejoin it) this long. */
-const RACE_TTL_MS = 30 * 60_000;
 
 /** A socket's member, as stored on it. */
 function memberOf(ws: WebSocket): Member | null {
@@ -152,7 +155,7 @@ export class RoomLobby extends DurableObject<Env> {
     if (!race) return s;
     const stale = Date.now() - race.at > RACE_TTL_MS || !Array.isArray(race.server.certHashes);
     if (!stale && !(await matchEnded(this.env, race.room))) return s;
-    const next = { ...s, race: null };
+    const next = { ...s, race: null, raceEndedAt: Date.now() };
     await this.save(next);
     return next;
   }
@@ -165,6 +168,15 @@ export class RoomLobby extends DurableObject<Env> {
     return this.sockets(except)
       .flatMap((ws) => memberOf(ws) ?? [])
       .toSorted((a, b) => a.joinedAt - b.joinedAt);
+  }
+
+  /** Who hosts now (see room-host.ts). */
+  private host(s: RoomSettings, except?: WebSocket): string {
+    return actingHost(
+      s,
+      this.members(except).map((m) => m.userId),
+      Date.now(),
+    );
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -195,10 +207,7 @@ export class RoomLobby extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
     server.serializeAttachment({ userId, handle, ready: false, joinedAt } satisfies Member);
-    if (!others.some((m) => m.userId === s.hostId) && s.hostId !== userId && others.length === 0) {
-      // Everyone left and someone came back: they host now.
-      await this.save({ ...s, hostId: userId });
-    }
+    if (userId === s.hostId && s.hostAway !== undefined) await this.save({ ...s, hostAway: undefined });
     await this.ctx.storage.deleteAlarm();
     this.broadcast();
     return new Response(null, { status: 101, webSocket: client });
@@ -211,7 +220,7 @@ export class RoomLobby extends DurableObject<Env> {
     const msg: RoomServerMsg = {
       t: "state",
       code: s.code,
-      hostId: s.hostId,
+      hostId: this.host(s, except),
       plan: s.plan,
       bots: s.bots,
       members: this.members(except).map(({ userId, handle, ready }) => ({ userId, handle, ready })),
@@ -235,7 +244,7 @@ export class RoomLobby extends DurableObject<Env> {
       this.send(ws, { t: "error", error: "bad_message" });
       return;
     }
-    const isHost = me.userId === s.hostId;
+    const isHost = me.userId === this.host(s);
     switch (msg.t) {
       case "settings": {
         if (!isHost) return this.send(ws, { t: "error", error: "not_host" });
@@ -280,10 +289,10 @@ export class RoomLobby extends DurableObject<Env> {
   }
 
   private async start(ws: WebSocket, me: Member, s: RoomSettings): Promise<void> {
-    if (me.userId !== s.hostId) return this.send(ws, { t: "error", error: "not_host" });
+    const host = this.host(s);
+    if (me.userId !== host) return this.send(ws, { t: "error", error: "not_host" });
     const members = this.members();
-    if (members.some((m) => m.userId !== s.hostId && !m.ready))
-      return this.send(ws, { t: "error", error: "not_ready" });
+    if (members.some((m) => m.userId !== host && !m.ready)) return this.send(ws, { t: "error", error: "not_ready" });
     let tickets: Map<string, JoinTicket>;
     let seed: number;
     try {
@@ -324,8 +333,9 @@ export class RoomLobby extends DurableObject<Env> {
     if (!s) return;
     const left = memberOf(ws);
     const rest = this.members(ws);
-    if (left && left.userId === s.hostId && rest.length > 0 && !rest.some((m) => m.userId === s.hostId)) {
-      await this.save({ ...s, hostId: rest[0]!.userId });
+    // The host keeps the room while away (see room-host.ts).
+    if (left?.userId === s.hostId && !rest.some((m) => m.userId === s.hostId)) {
+      await this.save({ ...s, hostAway: Date.now() });
     }
     if (rest.length === 0) await this.ctx.storage.setAlarm(Date.now() + EMPTY_TTL_MS);
     this.broadcast(ws);

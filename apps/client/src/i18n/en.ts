@@ -337,6 +337,8 @@ export const en = {
       reload: "Reload",
     },
     joining: "Joining the race…",
+    /** Nothing has come from the race server for a moment. */
+    waiting: "Waiting for the race server…",
     controls: "Controls",
     help: {
       jetski: [
@@ -371,7 +373,6 @@ export const en = {
         "Land flat on the board, along the slope, and let go of the grab first!",
       ],
     },
-    lost: (why: string) => `Connection lost: ${why}`,
     rejected: (why: string) => `Can't join: ${why}`,
     reasons: {
       version: "the game was updated, please reload the page",
@@ -382,13 +383,52 @@ export const en = {
       started: "this Tilt has already started",
       over: "this race is over",
     },
+    /** Leaving on purpose, when it costs something. */
+    leaving: {
+      tilt: "Leave the Tilt?",
+      race: "Leave the race?",
+      tiltOnline:
+        "A bot takes your seat for the rest of the year. You keep what the races you finished paid, but not the bonus for finishing the Tilt.",
+      tiltSingle: "Your year in Costa Nevada ends here.",
+      raceOnline: "A bot takes your place, and this race won't pay you anything.",
+      raceSingle: "The race goes on without you.",
+      stay: "Stay",
+      leave: "Leave",
+    },
+    /** When joining or racing goes wrong. */
+    trouble: {
+      full: { title: "This room is full", body: "Four people race in a room at most." },
+      started: {
+        title: "This Tilt has already started",
+        body: "Nobody new joins a Tilt once its first race is under way.",
+      },
+      over: { title: "This race is over", body: "It finished while you were on your way." },
+      draining: {
+        title: "The race server is restarting",
+        body: "It's finishing its races before an update. Try again in a moment.",
+      },
+      token: { title: "Couldn't join the race", body: "Your ticket for it didn't work. Try again from the menu." },
+      kicked: {
+        title: "You were away too long",
+        body: "Nothing came from your screen for a few seconds, so the race went on without you.",
+      },
+      unreachable: {
+        title: "Couldn't reach the race server",
+        body: "Races need UDP, and your network may be blocking it. Try another network.",
+      },
+      unsupported: {
+        title: "This browser can't race online",
+        body: "Races need WebTransport: please use a recent Chrome, Edge, Firefox or Safari.",
+      },
+      lost: { title: "Lost the race server", body: "The connection dropped, and the race goes on without you." },
+    },
   },
   hud: {
     getReady: "GET READY",
     go: "GO!",
     spectating: "Spectating · next race soon",
     wrongWay: "WRONG WAY",
-    maxPower: "✓ MAX POWER",
+    maxPower: "MAX POWER",
     missedBuoy: "MISSED BUOY",
     checkpoint: (i: number, n: number) => `CHECKPOINT ${i}/${n}`,
     finalLap: "FINAL LAP",
@@ -445,7 +485,36 @@ export const en = {
     final: "Final",
     next: "Next race in",
     podium: "Podium in",
-    back: "Back in",
+    back: "Continue in",
+  },
+  /** What comes after a race: your place, what it paid, and what's next. */
+  end: {
+    continue: "Continue",
+    tilt: "The Tilt",
+    /** Your place in the Tilt, beside it: its points. */
+    points: (n: number) => `${n} pts`,
+    standings: "Final standings",
+    paid: "What it paid",
+    waiting: "Waiting for the results…",
+    late: "What it paid hasn't come through yet. It will reach your credits shortly.",
+    pays: {
+      single: "Single player races don't pay credits.",
+      trial: "Time trials don't pay credits.",
+      alone: "A private room pays races with two or more people in them.",
+      nothing: "This race paid nothing.",
+    },
+    rows: {
+      place: (place: string) => `${place} place`,
+      places: (n: number) => `Places · ${n} races`,
+      style: "Style",
+      bonus: "The Tilt, finished",
+    },
+    credits: "Credits",
+    again: "Play again",
+    findRace: "Find another race",
+    backToRoom: "Back to the room",
+    changeMode: "Change mode",
+    mainMenu: "Main menu",
   },
   podium: {
     card: "The Tilt",
@@ -468,6 +537,9 @@ export const en = {
     season: "Season",
     yourBest: "Your best",
     record: "Record",
+    /** Ghosts the run just beat, on its results. */
+    previousBest: "Your previous best",
+    previousRecord: "Previous record",
     noTime: "No time yet",
     rank: (n: number, total: number) => `${n} of ${total}`,
     board: "Leaderboard",

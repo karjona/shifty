@@ -301,11 +301,63 @@ export interface TrialRace {
   record: number | null;
 }
 
-/** Where a race goes back to when it's over. */
+/** A race to go to: its ticket, where it goes back to when it's over, and how to race it again. */
 export interface PendingRace {
   ticket: JoinTicket;
   back: { to: "/play"; search: { mode: Mode } } | { to: "/room/$code"; params: { code: string } };
   trial?: TrialRace;
+  /** Single player: the plan picked, raced again by Play again. */
+  plan?: PlanRequest;
+}
+
+/** The mode a race was started from. */
+export function raceMode(race: PendingRace): Mode {
+  if (race.trial) return "trial";
+  return race.back.to === "/room/$code" ? "room" : race.back.search.mode;
+}
+
+/** What a match paid you so far, as the lobby's ledger has it. */
+export interface MatchPay {
+  /** The races of the match whose results the lobby has (0-based). */
+  reported: number[];
+  paid: { event: number; reason: "race" | "style" | "grand_prix"; delta: number }[];
+  /** Your credits now. */
+  credits: number;
+}
+
+/** What a match you raced (its room id) paid you; null if the lobby doesn't know it. */
+export async function fetchMatchPay(match: string): Promise<MatchPay | null> {
+  try {
+    const o = await call(`/api/me/matches/${encodeURIComponent(match)}`);
+    const reasons = ["race", "style", "grand_prix"] as const;
+    return {
+      reported: Array.isArray(o.reported)
+        ? (o.reported as unknown[]).filter((n): n is number => typeof n === "number")
+        : [],
+      paid: list(o.paid).flatMap((p) => {
+        const reason = reasons.find((r) => r === p.reason);
+        return reason ? [{ event: num(p, "event"), reason, delta: num(p, "delta") }] : [];
+      }),
+      credits: num(o, "credits"),
+    };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Matchmaking from the end of a race: the mode select goes straight back into the queue. */
+let requeue = false;
+
+export function setRequeue(): void {
+  requeue = true;
+}
+
+/** Whether the mode select should open in the queue (once). */
+export function takeRequeue(): boolean {
+  const r = requeue;
+  requeue = false;
+  return r;
 }
 
 let pending: PendingRace | null = null;
