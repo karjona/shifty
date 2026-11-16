@@ -1,7 +1,7 @@
 // What is built on the mountain (the models of art/env/buildings.py and
 // props.py): the village at the finish, the start hut and the lodge, the
 // chairlift with its chairs travelling, the start and finish gantries,
-// checkpoint gates, flags, sponsor boards, and the crowd. Roofs carry the
+// flags, sponsor boards, and the crowd. Roofs carry the
 // snow that lies at their height, windows light up at dusk, cloth flaps in
 // the wind and the crowd cheers.
 import * as THREE from "three/webgpu";
@@ -192,7 +192,7 @@ export function builtMaterial(): CelMaterial {
 let cloth: CelMaterial | null = null;
 
 /**
- * Flags, gate panels and boards: what has alpha 0 takes its instance's
+ * Flags and boards: what has alpha 0 takes its instance's
  * `tint`, and flaps in the wind by how far it is from what holds it (`uv.x`).
  */
 function clothMaterial(): CelMaterial {
@@ -385,7 +385,6 @@ export class Built {
     this.lift(scenery);
     this.gantry(run.startGate, bandTexture("23.4° SHIFTY · COSTA NEVADA", "#1f3b6e", "#ffffff", false), 16);
     this.gantry(run.finish, bandTexture("FINISH", "#f4f4f0", "#111111", true), 28);
-    this.gates();
     this.finishArea(scenery);
     this.instances(this.tinted, clothMaterial(), true);
     this.instances(this.crowd, crowdMaterial(), true);
@@ -713,28 +712,6 @@ export class Built {
     mesh.layers.set(UNREFLECTED);
     mesh.userData.noMerge = true;
     this.group.add(mesh);
-  }
-
-  /** Checkpoints: a pair of gate panels either side of the run, red then blue down the mountain. */
-  private gates(): void {
-    this.run.checkpoints.forEach((g, i) => {
-      for (const side of [-1, 1]) {
-        for (const back of [0, 1.6]) {
-          const o = (g.limit + 1.3 + back * 0.5) * side;
-          const x = g.x - Math.cos(g.yaw) * o - Math.sin(g.yaw) * back;
-          const z = g.z + Math.sin(g.yaw) * o - Math.cos(g.yaw) * back;
-          this.tinted.push({
-            model: "gate",
-            x,
-            y: this.ground(x, z),
-            z,
-            turn: g.yaw + Math.PI + side * 0.25,
-            scale: 1.25,
-            tint: i % 2 === 0 ? 0xd8342a : 0x2456c8,
-          });
-        }
-      }
-    });
   }
 
   /** The finish straight: feather flags, sponsor boards along the fences, and the crowd behind them; flags at the start. */

@@ -112,7 +112,7 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
     return new THREE.Vector3(x, y, z);
   };
   // A rider `at` metres down a run, `off` metres to their right of its centre line.
-  const along = (): View | null => {
+  const downRun = (): View | null => {
     if (data.sport !== "snow" || !params.has("at")) return null;
     const path = data.run.path;
     const p = path[Math.max(0, Math.min(path.length - 1, Math.round((Number(params.get("at")) - path[0]!.s) / 4)))]!;
@@ -142,7 +142,7 @@ export async function courseShot(engine: Engine, params: URLSearchParams): Promi
   const view: View =
     params.has("eye") && params.has("look")
       ? { eye: point("eye"), look: point("look"), rider: null }
-      : (along() ?? views[Math.min(views.length - 1, Number(params.get("view") ?? 0))]!);
+      : (downRun() ?? views[Math.min(views.length - 1, Number(params.get("view") ?? 0))]!);
   const turn = Number(params.get("turn") ?? 0);
   // The intro's fly-over, held at one moment of it.
   const fly = params.has("fly") ? new Flyover(data, env).intro(Number(params.get("fly")) * 7, 7) : null;
