@@ -1154,6 +1154,7 @@ a {
   font-weight: 760;
   font-stretch: 75%;
   letter-spacing: 0.2em;
+  text-shadow: 0 1px 10px rgb(24 16 8 / 0.45);
 }
 
 /* The banner: one at a time, turning every few seconds. */
