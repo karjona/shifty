@@ -7,6 +7,7 @@ import { isRecord } from "./json.ts";
 import { FIELD, MAX_HUMANS, NoRaceServer, startMatch } from "./matches.ts";
 import { TILT } from "@shifty/rider";
 import type { JoinTicket } from "./tickets.ts";
+import { type Away, QUEUE_AWAY_MS, closedOnPurpose, goneAway, keptFor, stillAway } from "./away.ts";
 
 interface Queued {
   userId: string;
@@ -55,7 +56,14 @@ export class Matchmaker extends DurableObject<Env> {
     if (!userId || !handle) return new Response("unauthorized", { status: 401 });
     if (request.headers.get("upgrade") !== "websocket") return new Response("expected a websocket", { status: 426 });
     const pair = new WebSocketPair();
-    let since = Date.now();
+    const now = Date.now();
+    // Back within the grace of a drop: their place in line, as it was.
+    const dropped = await this.dropped();
+    let since = keptFor(dropped, userId, now, QUEUE_AWAY_MS) ?? now;
+    await this.ctx.storage.put(
+      "dropped",
+      dropped.filter((d) => d.userId !== userId),
+    );
     for (const { ws, q } of this.queue()) {
       if (q.userId === userId) {
         since = q.since;
@@ -139,7 +147,19 @@ export class Matchmaker extends DurableObject<Env> {
     // Nothing to say while queued; the socket only has to stay open.
   }
 
-  override async webSocketClose(ws: WebSocket): Promise<void> {
+  /** Players whose socket dropped, with their place in line, kept a while (see away.ts). */
+  private async dropped(): Promise<Away<number>[]> {
+    const list = (await this.ctx.storage.get<Away<number>[]>("dropped")) ?? [];
+    const queued = new Set(this.queue().map(({ q }) => q.userId));
+    return stillAway(list, queued, Date.now(), QUEUE_AWAY_MS);
+  }
+
+  override async webSocketClose(ws: WebSocket, code = 1006): Promise<void> {
+    // A drop (not a cancel, nor a match) keeps their place a while for their screen to come back.
+    const q = queuedOf(ws);
+    if (q && !closedOnPurpose(code) && !this.queue(ws).some((o) => o.q.userId === q.userId)) {
+      await this.ctx.storage.put("dropped", goneAway(await this.dropped(), q.userId, q.since, Date.now()));
+    }
     // Leaving the queue: the others' wait doesn't change.
     if (this.queue(ws).length === 0) await this.ctx.storage.deleteAlarm();
   }

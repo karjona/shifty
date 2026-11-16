@@ -99,3 +99,28 @@ void test("setups spend exactly the budget, each stat 0-6", () => {
   assert.equal(parseSetup({ speed: 3.5, handling: 2.5, stability: 3, tricks: 3 }), null);
   assert.equal(parseSetup("lots"), null);
 });
+
+void test("bots vary: bodies, colourways and rides, in what the art has built and fits them", () => {
+  const seen = { summer: new Set<string>(), winter: new Set<string>(), bodies: new Set<string>() };
+  for (let seed = 0; seed < 20; seed++) {
+    for (let slot = 0; slot < 8; slot++) {
+      const a = botAppearance(seed, slot);
+      seen.bodies.add(a.look.body);
+      for (const sport of ["summer", "winter"] as const) {
+        const kit = a.outfits[sport];
+        assert.equal(
+          kitProblem(sport, kit, a.look.body, () => true),
+          null,
+          `${seed}/${slot} ${sport}`,
+        );
+        for (const id of Object.values(kit)) seen[sport].add(id);
+      }
+    }
+  }
+  assert.equal(seen.bodies.size, 2);
+  // Puffers, beanies and boards in several colours each; jetskis, vests and bottoms likewise.
+  for (const model of ["winter.top.puffer", "winter.head.beanie", "winter.ride.", "summer.vest.foam", "summer.ride."]) {
+    const colours = [...seen[model.startsWith("winter") ? "winter" : "summer"]].filter((id) => id.startsWith(model));
+    assert.ok(colours.length >= 3, `${model}: ${colours.join(", ")}`);
+  }
+});
