@@ -333,7 +333,24 @@ pub fn snowboard_input(world: &World, run: &Run, slot: usize, bot: SnowBot) -> I
     // Aim past the line by some of how far off it the bot is, to catch up.
     let behind = snow_line(run, rocks, slot, s) - off;
     let room = half - 1.0;
-    let aim = clamp(lane + CATCH_UP * behind, -room, room);
+    let mut aim = clamp(lane + CATCH_UP * behind, -room, room);
+    let mut look = look;
+    // Held up against something: round it, on the side the bot is on.
+    if speed < STUCK_SPEED {
+        let against = run
+            .obstacles
+            .iter()
+            .map(|o| (o.s, o.offset, o.radius))
+            .chain(rocks.iter().map(|k| (k.s, k.offset, k.obstacle.radius)))
+            .find(|&(os, offset, radius)| {
+                (-1.0..4.0).contains(&(os - s)) && (offset - off).abs() < radius + 1.2
+            });
+        if let Some((os, offset, radius)) = against {
+            let side = if off >= offset { 1.0 } else { -1.0 };
+            aim = clamp(offset + side * (radius + 1.8), -room, room);
+            look = (os - s).max(0.0) + 3.0;
+        }
+    }
     let (tx, tz) = run.centerline(s + look).at_offset(aim);
     let desired = atan2(tx - r.pos.x, tz - r.pos.z);
     let heading = if speed > 3.0 {

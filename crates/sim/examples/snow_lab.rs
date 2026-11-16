@@ -581,8 +581,11 @@ fn solo_landings(event: Event, bot: SnowBot) -> (f32, u32, u32) {
             let r = w.riders[0].unwrap();
             let (s, off) = run.project(r.pos.x, r.pos.z);
             println!(
-                "   solo s {s:6.1} off {off:+5.1} {:3.0} km/h",
-                r.speed() * 3.6
+                "   solo s {s:6.1} off {off:+5.1} {:3.0} km/h bail {} yaw {:+.2} input {:?}",
+                r.speed() * 3.6,
+                r.bail_ticks,
+                r.yaw,
+                r.last_input
             );
         }
         for e in w.step(&inputs) {
