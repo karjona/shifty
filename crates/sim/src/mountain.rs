@@ -1060,6 +1060,7 @@ pub static MOUNTAIN: Course = Course {
     buoys: &[],
     ramps: &[],
     land: &[],
+    boats: &[],
     sea: SeaState::OPEN_SEA,
 };
 

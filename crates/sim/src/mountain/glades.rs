@@ -270,5 +270,6 @@ pub static GLADES: Course = Course {
     buoys: &[],
     ramps: &[],
     land: &[],
+    boats: &[],
     sea: SeaState::OPEN_SEA,
 };
