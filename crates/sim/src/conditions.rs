@@ -497,7 +497,7 @@ pub struct Rock {
 }
 
 /// Rocks on a run this far apart along it (m), about.
-const ROCK_GAP: (f32, f32) = (55.0, 105.0);
+const ROCK_GAP: (f32, f32) = (45.0, 90.0);
 /// No rocks this close to the start, the finish, a checkpoint (m), or
 /// another obstacle (m, beyond both radii).
 const ROCK_CLEAR_GATE: f32 = 25.0;
@@ -554,7 +554,7 @@ fn place_rocks(run: &Run, start_s: f32) -> Vec<Rock> {
         let near_gate = gates.iter().any(|&g| (g - s).abs() < ROCK_CLEAR_GATE);
         // Off the built features (tables, rollers, kickers), and not where
         // riders still fly off one.
-        let on_feature = (-9..=3).any(|i| run.jumps_at(s + i as f32 * 5.0, offset).abs() > 0.05);
+        let on_feature = (-12..=3).any(|i| run.jumps_at(s + i as f32 * 5.0, offset).abs() > 0.05);
         let crowded = run.obstacles().iter().any(|o| {
             let (dx, dz) = (o.x - x, o.z - z);
             let clear = o.radius + radius + ROCK_CLEAR_OBSTACLE;

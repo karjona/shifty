@@ -210,7 +210,7 @@ impl SnowBot {
     /// The bot in a seat.
     pub fn of(slot: usize) -> Self {
         Self {
-            pace: 0.86 + (slot % 3) as f32 * 0.05,
+            pace: 0.84 + (slot % 3) as f32 * 0.08,
             trickster: slot % 3 != 1,
         }
     }
