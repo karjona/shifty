@@ -1383,6 +1383,8 @@ a {
 .controls thead td {
   height: 32px;
   border-bottom: 2px solid var(--ink);
+  letter-spacing: 0.06em;
+  font-stretch: 90%;
 }
 .controls tbody th {
   font-weight: 600;
