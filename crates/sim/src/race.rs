@@ -7,7 +7,9 @@
 //! the race, and a results screen. All of it is sim state, so clients
 //! predict it like everything else and the server's copy is the official
 //! one. Through the finish a rider's race is over: it rides on autopilot
-//! (see `World::on_autopilot`) and scores nothing more.
+//! (see `World::on_autopilot`) and scores nothing more. So is the race of a
+//! rider disqualified for missing `MAX_MISSES` buoys or gates (see
+//! `disqualify`), placed behind everyone else.
 //!
 //! The start line, buoys or checkpoints, and the finish are "gates", met in
 //! order (on a loop the start line is also the finish). In summer, passing a
@@ -32,6 +34,9 @@ pub mod tuning {
     /// Movement along the course bigger than this in one tick is a teleport,
     /// not a gate crossing.
     pub const MAX_GATE_STEP: f32 = 20.0;
+    /// Misses (buoys or gates passed on the wrong side) that disqualify a
+    /// rider.
+    pub const MAX_MISSES: u8 = 5;
 }
 
 use tuning::*;
@@ -118,11 +123,22 @@ pub struct Progress {
     pub points: u16,
     /// Race ticks at the finish; 0 = not finished.
     pub finish_ticks: u32,
+    /// Race ticks when the rider was disqualified; 0 = not disqualified.
+    pub disqualified_ticks: u32,
 }
 
 impl Progress {
     pub fn finished(&self) -> bool {
         self.finish_ticks != 0
+    }
+
+    pub fn disqualified(&self) -> bool {
+        self.disqualified_ticks != 0
+    }
+
+    /// The rider's race is over: through the finish, or disqualified.
+    pub fn done(&self) -> bool {
+        self.finished() || self.disqualified()
     }
 
     /// Top speed multiplier from the meter.
@@ -186,6 +202,11 @@ pub enum EventKind {
     Finish {
         ticks: u32,
     },
+    /// Disqualified after `ticks` race ticks for missing `MAX_MISSES`
+    /// buoys or gates.
+    Disqualified {
+        ticks: u32,
+    },
     /// Landed a trick (`sketchy`: not cleanly, for half the points).
     Trick {
         trick: Trick,
@@ -235,7 +256,7 @@ pub fn pass_gates(
     }
     p.next_gate = ((gate + 1) % course.gate_count()) as u8;
     let slot = slot as u8;
-    let live = race.phase == Phase::Racing && p.racing && !p.finished();
+    let live = race.phase == Phase::Racing && p.racing && !p.done();
     let finish = |p: &mut Progress, events: &mut Vec<SimEvent>| {
         p.finish_ticks = race.elapsed(tick).max(1);
         events.push(SimEvent {
@@ -340,13 +361,34 @@ pub fn landed(
     } else {
         trick
     };
-    if p.racing && race.phase == Phase::Racing && !p.finished() {
+    if p.racing && race.phase == Phase::Racing && !p.done() {
         p.tricks = p.tricks.saturating_add(1);
         p.points = p.points.saturating_add(trick.points);
     }
     events.push(SimEvent {
         slot,
         kind: EventKind::Trick { trick, sketchy },
+    });
+}
+
+/// Disqualifies a rider still in the race once it has missed
+/// `MAX_MISSES` buoys or gates: its race ends at `tick`.
+pub fn disqualify(
+    p: &mut Progress,
+    race: &Race,
+    slot: usize,
+    tick: u32,
+    events: &mut Vec<SimEvent>,
+) {
+    if race.phase != Phase::Racing || !p.racing || p.done() || p.misses < MAX_MISSES {
+        return;
+    }
+    p.disqualified_ticks = race.elapsed(tick).max(1);
+    events.push(SimEvent {
+        slot: slot as u8,
+        kind: EventKind::Disqualified {
+            ticks: p.disqualified_ticks,
+        },
     });
 }
 

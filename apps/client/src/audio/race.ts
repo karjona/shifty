@@ -12,6 +12,7 @@ import type { ObstacleData } from "../render/mountain.ts";
 import type { RiderView } from "../render/world.ts";
 import type { RaceEvent, RaceView } from "../ui/hud.ts";
 import type { CourseInfo } from "../wasm-json.ts";
+import { playCue } from "./end.ts";
 import { audio } from "./index.ts";
 import type { SoundName } from "./library.ts";
 import { clamp01, gain, Glide } from "./dsp.ts";
@@ -123,6 +124,8 @@ export class RaceAudio {
   private goStart = -1;
   private wrongUp = false;
   private wrongAt = -10;
+  /** Your misses as last heard (the last one before you're out has its cue). */
+  private misses = 0;
 
   /** A new course (on joining, and at each race of a Tilt). */
   setCourse(course: CourseInfo, topSpeed: number): void {
@@ -279,6 +282,9 @@ export class RaceAudio {
         case "finish":
           if (s === mySlot) audio.play("finish");
           break;
+        case "disqualified":
+          if (s === mySlot) playCue("disqualified");
+          break;
         case "trick":
           if (mine) audio.play("trick", e.sketchy ? 0.45 : 1, 0, e.sketchy ? 0.84 : 1);
           if (e.sketchy) this.judged(s, SKETCHY, heardHere);
@@ -374,6 +380,11 @@ export class RaceAudio {
       audio.play("wrongWay");
     }
     this.wrongUp = race.wrongWay;
+    // One more miss and you're out: whichever sport it was missed in.
+    const live = race.phase === RACING && race.racing && race.disqualifiedTicks === 0;
+    if (live && race.maxMisses > 1 && race.misses > this.misses && race.misses === race.maxMisses - 1)
+      playCue("lastChance");
+    this.misses = race.phase === RACING ? race.misses : 0;
   }
 
   /** One rider's frame: landings, pops, bumps; your own voices. */

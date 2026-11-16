@@ -38,6 +38,11 @@ mod tests {
         for _ in 0..120 {
             world.step(&inputs);
         }
+        // Every rider but the first disqualified, so both encodings ride.
+        for r in world.riders.iter_mut().flatten().skip(1) {
+            r.race.misses = 5;
+            r.race.disqualified_ticks = 70_000;
+        }
         Snapshot {
             tick: world.tick,
             input_ack: 1234,
@@ -79,7 +84,11 @@ mod tests {
 
     #[test]
     fn worst_case_snapshot_fits_one_datagram() {
-        let bytes = ServerMsg::Snapshot(full_snapshot()).encode();
+        let mut snap = full_snapshot();
+        for rs in &mut snap.riders {
+            rs.rider.race.disqualified_ticks = 70_000;
+        }
+        let bytes = ServerMsg::Snapshot(snap).encode();
         assert!(
             bytes.len() <= MAX_DATAGRAM,
             "snapshot is {} bytes",

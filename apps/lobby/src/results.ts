@@ -29,6 +29,8 @@ export interface ResultReport {
     timeMs: number | null;
     trickPoints: number;
     gpPoints: number | null;
+    /** Out of the race for missing too many buoys or gates. */
+    disqualified: boolean;
   }[];
 }
 
@@ -64,12 +66,14 @@ export function parseReport(v: unknown): ResultReport | null {
     const trickPoints = int(x.trickPoints, 0, 1_000_000);
     if (place === null || trickPoints === null) return null;
     if (x.pid !== null && typeof x.pid !== "string") return null;
+    if (x.disqualified !== undefined && typeof x.disqualified !== "boolean") return null;
     entries.push({
       pid: x.pid,
       place,
       timeMs: x.timeMs === null ? null : int(x.timeMs, 0, 3_600_000),
       trickPoints,
       gpPoints: x.gpPoints === null ? null : int(x.gpPoints, 0, 10_000),
+      disqualified: x.disqualified === true,
     });
   }
   return { room: o.room, round, event, eventCount, course, conditions, entries };
@@ -108,6 +112,7 @@ export async function storeReport(db: Db, report: ResultReport): Promise<number>
       timeMs: e.timeMs,
       trickPoints: e.trickPoints,
       gpPoints: e.gpPoints,
+      disqualified: e.disqualified,
     }));
   if (rows.length === 0) return 0;
   await db.insert(raceResult).values(rows).onConflictDoNothing();

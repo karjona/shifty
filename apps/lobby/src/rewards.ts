@@ -1,5 +1,6 @@
 // Credits for racing. Online races pay by finishing place, plus style (trick
-// points, capped) and a bonus for finishing a Tilt. Matchmaking
+// points, capped) and a bonus for finishing a Tilt. A disqualified rider is
+// paid last place's credits and no style. Matchmaking
 // always pays (even when bots fill the seats); a private room pays only
 // races with two or more people in them; single player never pays. Rewards
 // are tuned so a full Tilt earns about a fifth of an average item.
@@ -40,10 +41,12 @@ export function payouts(report: ResultReport, m: MatchInfo, known: Set<string>, 
   const ref = `${m.id}:${report.round}:${report.event}`;
   const lastOfGrandPrix = m.event === "gp" && report.event === planLength - 1;
   const out: Payout[] = [];
+  const last = PLACE_CREDITS[Math.min(report.entries.length, PLACE_CREDITS.length) - 1] ?? 0;
   for (const e of report.entries) {
     if (!e.pid || !known.has(e.pid)) continue;
-    out.push({ userId: e.pid, delta: PLACE_CREDITS[e.place - 1] ?? 0, reason: "race", ref });
-    const style = Math.min(STYLE_CAP, Math.floor(e.trickPoints / STYLE_POINTS_PER_CREDIT));
+    const place = e.disqualified ? last : (PLACE_CREDITS[e.place - 1] ?? 0);
+    out.push({ userId: e.pid, delta: place, reason: "race", ref });
+    const style = e.disqualified ? 0 : Math.min(STYLE_CAP, Math.floor(e.trickPoints / STYLE_POINTS_PER_CREDIT));
     if (style > 0) out.push({ userId: e.pid, delta: style, reason: "style", ref });
     if (lastOfGrandPrix) out.push({ userId: e.pid, delta: GRAND_PRIX_BONUS, reason: "grand_prix", ref });
   }
@@ -85,7 +88,7 @@ export interface MatchPay {
   paid: { event: number; reason: Payout["reason"]; delta: number }[];
   /** The player's credits now. */
   credits: number;
-  /** The player's best place on the circuit asked about, in the matches before this one (null: none). */
+  /** The player's best place on the circuit asked about, in the matches before this one, never a disqualification (null: none). */
   bestBefore: number | null;
 }
 
@@ -119,7 +122,14 @@ export async function matchPay(db: Db, matchId: string, userId: string, course?:
       : await db
           .select({ place: sql<number | null>`min(${raceResult.place})` })
           .from(raceResult)
-          .where(and(eq(raceResult.userId, userId), eq(raceResult.course, course), ne(raceResult.matchId, matchId)));
+          .where(
+            and(
+              eq(raceResult.userId, userId),
+              eq(raceResult.course, course),
+              ne(raceResult.matchId, matchId),
+              eq(raceResult.disqualified, false),
+            ),
+          );
   const paid = rows.flatMap((r) => {
     const event = Number(r.ref.slice(prefix.length).split(":")[1]);
     const reason = PAID_REASONS.find((x) => x === r.reason);
