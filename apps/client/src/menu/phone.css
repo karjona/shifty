@@ -1275,8 +1275,9 @@
 :root[data-compact] .board-results > .board-panel > .board-head {
   grid-column: 1 / -1;
   grid-row: 1;
+  align-items: center;
   margin: 0;
-  padding: 14px 0 10px;
+  padding: 12px 0 8px;
 }
 :root[data-compact] .board-results > .board-panel > .board-row {
   grid-column: 1;
@@ -1298,8 +1299,11 @@
   grid-column: 2;
 }
 :root[data-compact] .board-results .board-panel .board-row {
-  height: 58px;
+  height: 52px;
   padding-right: 0;
+}
+:root[data-compact] .board-results:not(:has(.board-tilt)) .board-race .board-head .board-label {
+  display: none;
 }
 :root[data-compact] .board-results .board-panel .board-cols {
   padding-right: 0;
@@ -1307,15 +1311,26 @@
 :root[data-compact] .board-results .board-panel > .board-row:nth-of-type(5) {
   border-bottom: 0;
 }
-:root[data-compact] .board-results .board-race .board-cols,
-:root[data-compact] .board-results .board-race .board-row {
-  grid-template-columns: 52px minmax(0, 1fr) 140px repeat(var(--n), 76px);
+/* Each half keeps the place, the rider, the time or gap, and the last
+   column (the style, or in a Tilt the points the place won); the others
+   are on the wrap-up. */
+:root[data-compact] .board-results .board-race:not(.board-trial) .board-cols,
+:root[data-compact] .board-results .board-race:not(.board-trial) .board-row {
+  grid-template-columns: 52px minmax(0, 1fr) 132px 100px;
   column-gap: 10px;
 }
+:root[data-compact] .board-results .board-race:not(.board-trial) .board-cols > :nth-child(n + 4):not(:last-child),
+:root[data-compact] .board-results .board-race:not(.board-trial) .board-row > :nth-child(n + 4):not(:last-child) {
+  display: none;
+}
+:root[data-compact] .board-results .board-cols {
+  font-size: 18px;
+  letter-spacing: 0.1em;
+}
 @media (max-width: 760px) {
-  :root[data-compact] .board-results .board-race .board-cols,
-  :root[data-compact] .board-results .board-race .board-row {
-    grid-template-columns: 44px minmax(0, 1fr) 120px repeat(var(--n), 60px);
+  :root[data-compact] .board-results .board-race:not(.board-trial) .board-cols,
+  :root[data-compact] .board-results .board-race:not(.board-trial) .board-row {
+    grid-template-columns: 44px minmax(0, 1fr) 116px 84px;
     column-gap: 8px;
   }
 }

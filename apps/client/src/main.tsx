@@ -15,7 +15,6 @@ const label = document.querySelector("#loading span");
 if (label) label.textContent = words.loading;
 const rotate = document.querySelector("#rotate span");
 if (rotate) rotate.textContent = words.rotate;
-const swipe = document.querySelector("#boot .boot-swipe span");
-if (swipe) swipe.textContent = words.swipeUp;
+for (const swipe of document.querySelectorAll("#boot .boot-swipe span, #swipe span")) swipe.textContent = words.swipeUp;
 
 void import("./start.tsx");

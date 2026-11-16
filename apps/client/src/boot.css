@@ -234,3 +234,48 @@ html[data-bars] #boot .boot-swipe {
     transform: translateY(-12px);
   }
 }
+
+/* Over a race waiting on its grid or running its intro (the controls' help
+   is up) while Safari's bars are: a swipe up now gives the race the whole
+   screen (once the controls are up, nothing moves the page). */
+#swipe {
+  display: none;
+}
+html[data-bars]:has(.race-help:not(.in-menu)) #swipe {
+  position: fixed;
+  z-index: 20;
+  top: 8px;
+  left: max(env(safe-area-inset-left, 0px), 16px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px 0 8px;
+  background: var(--accent, #2b3fd0);
+  box-shadow: 0 6px 16px rgb(24 16 8 / 0.24);
+  color: #f6f1e7;
+  font-family: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  font-stretch: 112%;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: swipe-hint-in 400ms ease both;
+}
+#swipe svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: square;
+  animation: swipe-up 1.6s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+@keyframes swipe-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}

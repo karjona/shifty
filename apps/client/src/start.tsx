@@ -17,6 +17,8 @@ installTyping();
 onLocale(() => {
   const rotate = document.querySelector("#rotate span");
   if (rotate) rotate.textContent = messages().common.rotate;
+  const swipe = document.querySelector("#swipe span");
+  if (swipe) swipe.textContent = messages().common.swipeUp;
 });
 
 // The quick race, the look checks, the podium and the sound board only exist on the dev server: builds
