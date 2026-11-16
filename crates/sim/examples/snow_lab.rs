@@ -614,6 +614,25 @@ fn solo_landings(event: Event, bot: SnowBot) -> (f32, u32, u32) {
             ) {
                 sketchy += 1;
             }
+            if let EventKind::Buoy {
+                buoy, ok: false, ..
+            } = e.kind
+                && std::env::var_os("MISSES").is_some()
+            {
+                let r = w.riders[0].unwrap();
+                let (s, off) = run.project(r.pos.x, r.pos.z);
+                let g = run.gates[usize::from(buoy)];
+                println!(
+                    "   alone ({:.2}) missed gate {} (s={:.0} {:+.1}±{:.1}) at off={off:+.1} s={s:.0} {:.0} km/h{}",
+                    bot.pace,
+                    buoy + 1,
+                    g.s,
+                    g.offset,
+                    g.span * 0.5,
+                    r.speed() * 3.6,
+                    if r.grounded { "" } else { " in the air" }
+                );
+            }
         }
         if w.riders[0].unwrap().race.finished() {
             break;
@@ -631,7 +650,12 @@ fn solo_landings(event: Event, bot: SnowBot) -> (f32, u32, u32) {
 /// What tricks cost a bot alone at the fastest bots' pace, in every
 /// condition of the spread.
 fn tricks(only: Option<CourseId>) {
-    let fast = SnowBot::of(fast_seat()).pace;
+    // `SEAT=n` rides as that seat's bot's pace.
+    let seat = std::env::var("SEAT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(fast_seat);
+    let fast = SnowBot::of(seat).pace;
     let mut cost = Vec::new();
     for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
         for event in spread(lab.course) {
