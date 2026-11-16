@@ -7,7 +7,7 @@
 // says what went wrong when joining or racing does.
 import "../wrapup.css";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { audio } from "../../audio/index.ts";
 import type { Season } from "../../game/conditions.ts";
 import type { RaceEnd, Trouble } from "../../game/race.ts";
@@ -318,24 +318,23 @@ function Paid({ pay }: { pay: Pay }) {
   );
 }
 
-/** The actions: the first focused; B and Y do theirs straight away. */
+/**
+ * The actions, the first focused as they come up (one row filled with the
+ * accent: the focused one); B and Y do theirs straight away.
+ */
 function Actions({ actions, back, busy }: { actions: EndAction[]; back: EndAction; busy: boolean }) {
   const play = actions.find((a) => a.glyph === "play");
+  const ref = useRef<HTMLDivElement>(null);
   useAction("back", back.run, !busy);
   useAction("play", () => play?.run(), !busy && play !== undefined);
   useAutoFocus();
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>("[data-nav-autofocus]")?.focus({ preventScroll: true });
+  }, []);
   return (
-    <div className="end-actions">
+    <div ref={ref} className="end-actions">
       {actions.map((a, i) => (
-        <Button
-          key={a.label}
-          kind={i === 0 ? "primary" : "default"}
-          glyph={a.glyph}
-          className="wide"
-          onClick={a.run}
-          disabled={busy}
-          autoFocus={i === 0}
-        >
+        <Button key={a.label} glyph={a.glyph} className="wide" onClick={a.run} disabled={busy} autoFocus={i === 0}>
           {a.label}
         </Button>
       ))}

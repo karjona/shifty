@@ -293,3 +293,12 @@
 :root[data-compact] .end-actions .btn {
   min-height: 48px;
 }
+
+/* A finger leaves no hover behind. */
+@media (hover: none) {
+  .end-layer .hint:hover {
+    --glyph-ink: var(--paper);
+    background: none;
+    color: inherit;
+  }
+}

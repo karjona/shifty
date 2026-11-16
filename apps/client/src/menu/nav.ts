@@ -119,6 +119,8 @@ class Nav {
   private listeners = new Set<() => void>();
   private held = new Map<string, number>();
   private wasPressed = new Set<number>();
+  /** Where the mouse was last seen moving. */
+  private pointerAt = { x: Number.NaN, y: Number.NaN };
 
   constructor() {
     document.documentElement.dataset.input = this.device;
@@ -131,10 +133,14 @@ class Nav {
       { capture: true, passive: true },
     );
     addEventListener("pointermove", (e) => {
-      if (e.pointerType === "mouse" && (e.movementX !== 0 || e.movementY !== 0)) this.setDevice("mouse");
+      if (e.pointerType !== "mouse") return;
+      this.pointerAt = { x: e.clientX, y: e.clientY };
+      if (e.movementX !== 0 || e.movementY !== 0) this.setDevice("mouse");
     });
     document.addEventListener("pointerover", (e) => {
       if (this.device !== "mouse" || !this.enabled) return;
+      // Something that opens under a resting mouse doesn't take the focus from its starting element.
+      if (e.clientX === this.pointerAt.x && e.clientY === this.pointerAt.y) return;
       const el = e.target instanceof Element ? e.target.closest<HTMLElement>(SELECTOR) : null;
       if (el && scope().contains(el) && document.activeElement !== el && !isTextInput(document.activeElement)) {
         document.documentElement.dataset.navDir = "pointer";
