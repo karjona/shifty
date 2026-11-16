@@ -5,7 +5,7 @@
 // after the Tilt (`children`) takes the screen with the podium behind it.
 import "../podium.css";
 import "../../ui/results.css";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Engine } from "../../game/engine.ts";
 import { Podium, PodiumCard, type PodiumData } from "../../game/podium.ts";
 import { messages, useT } from "../../i18n/index.ts";
@@ -21,6 +21,53 @@ function Name({ name, bot }: { name: string; bot: boolean }) {
       {tagged && <i>{tagged[2]}</i>}
     </span>
   );
+}
+
+/** The smallest the champion's name is set on one line, and on two, as a share of its full size. */
+const ONE_LINE_MIN = 0.5;
+const TWO_LINES_MIN = 0.34;
+
+/**
+ * The champion's name (without its handle's tag), as large as fits left of
+ * the podium's gate: smaller, then on two lines, for a long name (keyed by
+ * it: a new name fits anew).
+ */
+function ChampionName({ name, podium }: { name: string; podium: Podium | null }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const screen = el?.closest(".podium-screen");
+    if (!el || !screen || !podium) return undefined;
+    const fit = () => {
+      el.style.fontSize = "";
+      el.style.maxWidth = "";
+      el.classList.remove("wrapped");
+      // Measured whole on one line, in the window's pixels.
+      el.classList.add("fitted");
+      const box = screen.getBoundingClientRect();
+      const text = el.getBoundingClientRect();
+      // (Window pixels per canvas pixel.)
+      const zoom = box.width / (screen.clientWidth || box.width);
+      const room = box.left + podium.gateLeft(box.width / box.height) * box.width - text.left - 24 * zoom;
+      const full = Number.parseFloat(getComputedStyle(el).fontSize);
+      if (text.width <= room || room <= 0) return;
+      const one = room / text.width;
+      if (one >= ONE_LINE_MIN) {
+        el.style.fontSize = `${full * one}px`;
+        return;
+      }
+      el.classList.add("wrapped");
+      el.style.maxWidth = `${room / zoom}px`;
+      // Two lines, each a little short of the room, and its longest word (by its share of the letters) on one.
+      const word = Math.max(...name.split(/\s+/u).map((w) => w.length)) / Math.max(1, name.length);
+      const two = Math.min(ONE_LINE_MIN, (1.8 * room) / text.width, (0.95 * room) / (word * text.width));
+      el.style.fontSize = `${full * Math.max(TWO_LINES_MIN, two)}px`;
+    };
+    fit();
+    addEventListener("resize", fit);
+    return () => removeEventListener("resize", fit);
+  }, [name, podium]);
+  return <b ref={ref}>{name}</b>;
 }
 
 /** How long (ms) the ceremony plays before Continue shows. */
@@ -39,6 +86,7 @@ export function PodiumScreen({
   const t = useT();
   const [shown, setShown] = useState(false);
   const [beat, setBeat] = useState(false);
+  const [podium, setPodium] = useState<Podium | null>(null);
 
   useEffect(() => {
     const m = messages();
@@ -47,14 +95,16 @@ export function PodiumScreen({
     let live = true;
     void Promise.all([Engine.get(), card.covered()]).then(([engine]) => {
       if (!live) return;
-      const podium = new Podium(data);
-      stage = podium;
-      engine.show(podium);
+      const scene = new Podium(data);
+      stage = scene;
+      engine.show(scene);
       // The champion's name stands on the scene once the card has cleared.
-      void podium.shown.then(async () => {
+      void scene.shown.then(async () => {
         if (!live) return;
         await card.hide();
-        if (live) setShown(true);
+        if (!live) return;
+        setPodium(scene);
+        setShown(true);
       });
     });
     return () => {
@@ -77,6 +127,7 @@ export function PodiumScreen({
 
   if (!shown) return null;
   const champion = data.riders[0];
+  const championName = champion ? (/^(.*?)(?:#\d{4})?$/u.exec(champion.name)?.[1] ?? champion.name) : "";
   return (
     <div className={`screen podium-screen${after ? " after" : ""}`}>
       {champion && (
@@ -84,7 +135,7 @@ export function PodiumScreen({
           <span className="podium-year">
             {t.podium.card} · {t.place}
           </span>
-          <b>{/^(.*?)(?:#\d{4})?$/u.exec(champion.name)?.[1] ?? champion.name}</b>
+          <ChampionName key={championName} name={championName} podium={podium} />
           <span className="podium-champion">{t.podium.champion(champion.look.look.body === "female")}</span>
         </div>
       )}

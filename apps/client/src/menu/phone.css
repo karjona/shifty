@@ -1111,7 +1111,7 @@
 :root[data-compact] .intro-card {
   bottom: var(--edge-b);
   min-width: 0;
-  max-width: min(980px, 100% - min(600px, 34%) - var(--edge-l) - var(--edge-r) - var(--gap));
+  max-width: min(980px, 100% - min(560px, 40%) - var(--edge-l) - var(--edge-r) - var(--gap));
   padding: 16px 26px 14px;
 }
 :root[data-compact] .intro-kicker,
