@@ -16,7 +16,8 @@ import { formatTime, ordinal } from "../../ui/hud.ts";
 import { LAUREL_BOX, LAUREL_LEAVES, LEAF_PATH, laurelStems, leafTransform } from "../../ui/laurel.ts";
 import { circuitTitle, conditionsLine } from "../../ui/results.ts";
 import { type MatchPay, type Mode, fetchMatchPay, meQuery } from "../api.ts";
-import { useAction, useAutoFocus } from "../hooks.ts";
+import { useAction, useAutoFocus, useDevice } from "../hooks.ts";
+import { pointing } from "../nav.ts";
 import { Button, Hints } from "../ui.tsx";
 import type { GlyphAction } from "../glyphs.tsx";
 
@@ -383,10 +384,15 @@ function Actions({ actions, back, busy }: { actions: EndAction[]; back: EndActio
   );
 }
 
-/** What the buttons do, at the panel's foot (the screen's corners are the race's). */
+/**
+ * What the buttons do, at the panel's foot (the screen's corners are the
+ * race's). A mouse or a finger has every action on the panel already.
+ */
 function EndHints({ actions, back }: { actions: EndAction[]; back: EndAction }) {
   const t = useT();
+  const { device } = useDevice();
   const play = actions.find((a) => a.glyph === "play");
+  if (pointing(device)) return null;
   return (
     <Hints
       items={[
