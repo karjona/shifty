@@ -308,7 +308,7 @@ export class Wait {
     // Steps come and go quickly in places: the line keeps one a moment.
     const held = this.saying.step;
     if (most !== held && (held === null || t - this.saying.since > 600 || !live.some((s) => s.step === held)))
-      this.saying = { step: most ?? held, since: t };
+      this.saying = { step: most ?? (steps.some((x) => x.step === held) ? held : null), since: t };
     return this.saying.step ? { step: this.saying.step } : null;
   }
 
