@@ -230,9 +230,11 @@
    the menus' canvas, clear of the safe areas and of the panels' buttons. */
 :root[data-compact] #loading {
   zoom: var(--menu-zoom, 0.6);
+  top: auto;
   left: max(var(--safe-left, 0px), 28px);
   right: auto;
   bottom: max(var(--safe-bottom, 0px), 14px);
+  translate: none;
   height: 40px;
   font-size: 17px;
 }
