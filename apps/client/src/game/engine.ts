@@ -13,6 +13,8 @@ import { type Wait, begin, bootLoad, booted, download, waitNow } from "../loadin
 /** Something on screen, drawn every frame. */
 export interface Stage {
   start(engine: Engine): void;
+  /** Resolves once its scene is built (built a slice at a time: nothing is drawn meanwhile). */
+  build?(): Promise<void>;
   /** Compiles the shaders its scene (or `root`, about to join it) needs (see `Engine.warm`). */
   compile?(root?: THREE.Object3D): Promise<void>;
   /** Resolves once what it shows has arrived and gone on (a rider's art). */
@@ -183,6 +185,16 @@ export class Engine {
     const late = new Promise<void>((resolve) => setTimeout(resolve, LOAD_MAX_MS));
     const wait = waitNow();
     const arriving = (async () => {
+      if (this.render && stage.build) {
+        const building = begin("scene", wait);
+        this.holding++;
+        try {
+          await stage.build();
+        } finally {
+          this.holding--;
+          building.end();
+        }
+      }
       if (this.render && stage.compile) await this.warm(() => stage.compile!(), true, wait);
       await Promise.race([stage.loaded?.(), late]);
     })();

@@ -24,7 +24,12 @@
 #boot .boot-stack {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 30px;
+}
+/* As wide as the wordmark set in its face, whether or not the face is in yet (the bar never changes width). */
+#boot .load {
+  width: 444px;
 }
 #boot .boot-mark {
   display: flex;

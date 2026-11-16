@@ -13,7 +13,9 @@ const FONT_WAIT_MS = 2500;
 
 fitUi();
 
-const words = { en, es, ca }[initialLocale()].common;
+const locale = initialLocale();
+document.documentElement.lang = locale;
+const words = { en, es, ca }[locale].common;
 setWords(
   () => words.loadingSteps,
   () => words.loading,
