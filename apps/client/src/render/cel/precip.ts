@@ -102,9 +102,12 @@ class Fall {
   readonly mesh: THREE.Mesh;
   /** How much falls (0-1). */
   readonly amount = uniform(0);
+  /** Drops or flakes at most. */
+  private count: number;
 
   constructor(look: PrecipLook, flakes: boolean, seed: number, name: string) {
     const n = look.count;
+    this.count = n;
     const corner = new Float32Array(n * 4 * 2);
     const seeds = new Float32Array(n * 4 * 4);
     const index = new Uint32Array(n * 6);
@@ -183,6 +186,9 @@ class Fall {
   set(amount: number): void {
     this.amount.value = amount;
     this.mesh.visible = amount > 0.001;
+    // The quads are in order of when they join (`seed.w`): only those falling are drawn.
+    const falling = Math.min(this.count, Math.ceil(amount * this.count) + 1);
+    this.mesh.geometry.setDrawRange(0, falling * 6);
   }
 }
 
