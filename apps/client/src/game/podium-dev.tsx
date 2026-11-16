@@ -3,7 +3,8 @@
 // checks, and on Continue to what comes after it. URL options: season (the
 // accent: summer, fall, winter, spring), riders (1-8), me (your place, 1-8;
 // 0 = none of them), seed (the bots' looks), place (1-8: after the podium,
-// the end of one race in that place instead of the Tilt's).
+// the end of one race in that place instead of the Tilt's), champion (the
+// winner's handle).
 import { botAppearance, defaultAppearance } from "@shifty/rider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
@@ -56,7 +57,7 @@ export function podiumDev(params: URLSearchParams): void {
   const data: PodiumData = {
     riders: NAMES.slice(0, count).map((name, i) => ({
       slot: i,
-      name,
+      name: i === 0 ? (params.get("champion") ?? name) : name,
       bot: name.startsWith("Bot"),
       look: i === 0 ? defaultAppearance() : botAppearance(Number(params.get("seed") ?? 7), i),
       points: POINTS[i]!,

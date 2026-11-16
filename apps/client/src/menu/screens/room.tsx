@@ -97,10 +97,10 @@ export function RoomScreen() {
     if (appearance) setClubRider(appearance, sport);
   }, [appearance, sport]);
   // The scenery of the room's race comes down while everyone waits.
-  const plan = room?.plan ?? null;
+  const roomPlan = room?.plan ?? null;
   useEffect(() => {
-    if (plan) prefetchScenery(plan);
-  }, [plan]);
+    if (roomPlan) prefetchScenery(roomPlan);
+  }, [roomPlan]);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
