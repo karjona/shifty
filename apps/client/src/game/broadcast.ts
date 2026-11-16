@@ -16,7 +16,7 @@ import { capeRigs } from "./broadcast-cape.ts";
 import type { Aim, Rig, Watch } from "./broadcast-rig.ts";
 import { snowRigs } from "./broadcast-snow.ts";
 
-/** Seconds after your finish before the broadcast takes over, by sport (the finish has its moment first). */
+/** Seconds after your finish (or your disqualification) before the broadcast takes over, by sport (the finish has its moment first). */
 const AFTER_FINISH = { jetski: 2.5, snow: 0.8 };
 /** A lost shot is cut away from this soon (s), and from a shot in the air after this long. */
 const LOST_CUT = 0.5;
@@ -53,6 +53,8 @@ export interface OnAirRace {
   /** Your rider rides on autopilot (`sim::World::on_autopilot`). */
   autopilot: boolean;
   finishTicks: number;
+  /** Race ticks when you were disqualified (0: you weren't). */
+  disqualifiedTicks: number;
   phaseTicks: number;
   tickHz: number;
 }
@@ -61,7 +63,8 @@ export interface OnAirRace {
 export function onAir(race: OnAirRace, sport: "jetski" | "snow"): boolean {
   if (!race.autopilot) return false;
   if (race.phase === RESULTS || (race.phase === RACING && !race.racing)) return true;
-  return race.phase === RACING && (race.phaseTicks - race.finishTicks) / race.tickHz >= AFTER_FINISH[sport];
+  const over = race.finishTicks > 0 ? race.finishTicks : race.disqualifiedTicks;
+  return race.phase === RACING && (race.phaseTicks - over) / race.tickHz >= AFTER_FINISH[sport];
 }
 
 export class Broadcast {

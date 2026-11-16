@@ -10,7 +10,7 @@ import { ChevronBoards } from "./chevrons.ts";
 import { type Lantern, breakwaterCameras, buildBreakwater, flashLanterns } from "./coast/harbour.ts";
 import { OVERHEAD, type Sunlight } from "./coast/grounding.ts";
 import { COSTA_NEVADA, DOWNWIND, Life } from "./coast/life.ts";
-import { boatMaterial, clothMaterial } from "./coast/materials.ts";
+import { bannerMaterial, boatMaterial, clothMaterial } from "./coast/materials.ts";
 import { Crowd } from "./coast/people.ts";
 import { Shape, box, place, post } from "./coast/shape.ts";
 import { buildLand, landDistance } from "./land.ts";
@@ -135,48 +135,53 @@ function gateTower(tall: number): THREE.Mesh {
   return mesh;
 }
 
+/** The start gate: how high the banner's free edge hangs over the water (m), how far the banner hangs below the beam, and its rows of squares. */
+const GATE = { foot: 5.9, banner: 2.1, rows: 3 };
+
 /**
- * The start gate's span, `width` across (along x, centred), its banner's
- * foot at y = 0: a truss of two chords and posts, the chequered banner
- * hung in it, a board in Costa Nevada's colours over its middle and
- * pennants at its ends. `yaw` is the heading it will be turned to.
+ * The start gate's span, `width` across (along x, centred), its banner's free
+ * edge at y = 0: a truss beam, the chequered banner hanging from it as
+ * cloth, a board in Costa Nevada's colours over its middle and pennants at
+ * its ends. `yaw` is the heading it will be turned to.
  */
 function gateSpan(width: number, yaw: number): THREE.Group {
   const g = new THREE.Group();
   const shape = new Shape();
   const half = width / 2;
-  const tall = 1.6;
-  for (const y of [-0.12, tall + 0.12]) shape.take(new THREE.BoxGeometry(width, 0.2, 0.2), MARK.steel, place(0, y, 0));
-  const bays = 16;
+  const tall = GATE.banner;
+  const beam = 0.44;
+  for (const y of [tall + 0.06, tall + 0.06 + beam])
+    shape.take(new THREE.BoxGeometry(width, 0.14, 0.22), MARK.steel, place(0, y, 0));
+  const bays = Math.round(width / 3);
   for (let k = 0; k <= bays; k++)
     shape.take(
-      new THREE.BoxGeometry(0.1, tall + 0.24, 0.24),
+      new THREE.BoxGeometry(0.1, beam, 0.2),
       MARK.steel,
-      place(-half + (k / bays) * width, tall / 2, 0),
+      place(-half + (k / bays) * width, tall + 0.06 + beam / 2, 0),
     );
-  // The banner: two rows of squares, seen from both sides.
-  const cell = width / bays;
-  for (let k = 0; k < bays; k++)
-    for (let row = 0; row < 2; row++) {
-      const colour = (k + row) % 2 === 0 ? MARK.ink : MARK.white;
-      const x0 = -half + k * cell;
-      const y0 = row * (tall / 2);
-      for (const z of [0.06, -0.06]) {
-        const a = new THREE.Vector3(x0, y0, z);
-        const b = new THREE.Vector3(x0 + cell, y0, z);
-        const c = new THREE.Vector3(x0 + cell, y0 + tall / 2, z);
-        const d = new THREE.Vector3(x0, y0 + tall / 2, z);
-        if (z > 0) shape.quad(a, b, c, d, colour);
-        else shape.quad(b, a, d, c, colour);
-      }
-    }
   // The board over the middle, in three stripes.
   const board = Math.min(7, width * 0.42);
+  const foot = tall + beam + 0.2;
   COSTA_NEVADA.forEach((colour, k) =>
-    shape.take(new THREE.BoxGeometry(board / 3, 1.0, 0.16), colour, place((k - 1) * (board / 3), tall + 0.76, 0)),
+    shape.take(new THREE.BoxGeometry(board / 3, 1.0, 0.16), colour, place((k - 1) * (board / 3), foot + 0.54, 0)),
   );
-  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 1.3, 0));
-  shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, tall + 0.22, 0));
+  for (const y of [foot, foot + 1.08])
+    shape.take(new THREE.BoxGeometry(board + 0.3, 0.12, 0.26), MARK.ink, place(0, y, 0));
+  // The banner: squares in rows, hung by its top edge, with a hem along the free one.
+  const banner = new Shape();
+  const cell = tall / GATE.rows;
+  const columns = Math.round((width - 0.6) / cell);
+  const wide = (width - 0.6) / columns;
+  const hung = { weight: (p: THREE.Vector3) => Math.max(0, tall - p.y) };
+  for (let k = 0; k < columns; k++)
+    for (let row = 0; row < GATE.rows; row++)
+      banner.take(
+        new THREE.PlaneGeometry(wide, cell, 2, 2),
+        (k + row) % 2 === 0 ? MARK.ink : MARK.white,
+        place(-half + 0.3 + (k + 0.5) * wide, tall - (row + 0.5) * cell, 0),
+        hung,
+      );
+  banner.take(new THREE.PlaneGeometry(width - 0.6, 0.09, columns * 2, 1), MARK.red, place(0, -0.045, 0), hung);
   // Pennants flying from both ends.
   const cloth = new Shape();
   for (const side of [-1, 1]) {
@@ -190,6 +195,10 @@ function gateSpan(width: number, yaw: number): THREE.Group {
   const frame = shape.mesh(boatMaterial(), "cast");
   frame.name = "gate-span";
   g.add(frame);
+  const flying = banner.mesh(bannerMaterial(), "none");
+  flying.name = "gate-banner";
+  flying.frustumCulled = false;
+  g.add(flying);
   const pennants = cloth.mesh(clothMaterial(), "none");
   pennants.layers.set(UNREFLECTED);
   pennants.frustumCulled = false;
@@ -245,9 +254,6 @@ function rampMesh(length: number, width: number, height: number): THREE.Mesh {
   mesh.name = "ramp";
   return mesh;
 }
-
-/** The start gate: how high the banner's foot hangs over the water (m), and the banner's height. */
-const GATE = { foot: 6.4, banner: 1.6 };
 
 /** Where the start gate's two towers float, and how tall and wide they stand (m), for what they hide. */
 export function gateTowers(d: CourseData): { x: number; z: number; radius: number; top: number }[] {

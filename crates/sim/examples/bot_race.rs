@@ -1,5 +1,6 @@
 //! Runs a full bots-only race and prints what happened: finish times,
-//! missed buoys, tricks, points and bails, and which tricks were landed.
+//! missed buoys or gates and disqualifications, tricks, points and bails,
+//! and which tricks were landed.
 //! For tuning bots, tricks and the courses, in any conditions.
 //!
 //! `cargo run -p sim --example bot_race --release [seed] [course] [season weather [turns] [time]]`
@@ -8,7 +9,8 @@
 //! conditions are names (`winter storm clear 60`), the course's home
 //! conditions if left out. `bot_race table [seed]` races every circuit in
 //! every season its sport rides, in a spread of weathers, and prints a
-//! table: the times against the home conditions', falls and tricks.
+//! table: the times against the home conditions', misses (all of them,
+//! the most by one bot) and disqualifications, falls and tricks.
 //! `bot_race kinds [seeds] [course...]` races seeds 1 to `seeds` on each
 //! circuit (all of them if none is named) in its home conditions and
 //! prints, by bot kind (each seat's pace, and whether it tricks), the wins,
@@ -152,6 +154,15 @@ fn race(event: Event, seed: u32) -> Outcome {
     }
 }
 
+/// Misses in all, the most by one rider, and how many were disqualified.
+fn misses(o: &Outcome) -> (u32, u8, usize) {
+    let st = o.world.standings();
+    let all = st.iter().map(|s| u32::from(s.progress.misses)).sum();
+    let most = st.iter().map(|s| s.progress.misses).max().unwrap_or(0);
+    let out = st.iter().filter(|s| s.progress.disqualified()).count();
+    (all, most, out)
+}
+
 /// Finish times (s) of those who finished, fastest first, and how many didn't.
 fn times(o: &Outcome) -> (Vec<f32>, usize) {
     let mut t: Vec<f32> = o
@@ -220,11 +231,15 @@ fn main() {
     for st in o.world.standings() {
         let p = st.progress;
         let slot = usize::from(st.slot);
+        let time = if p.disqualified() {
+            format!("DQ {:>5.1}s", p.disqualified_ticks as f32 / 60.0)
+        } else {
+            format!("{:>6.2}s", p.finish_ticks as f32 / 60.0)
+        };
         println!(
-            "{}. bot {} {:>6.2}s  missed {}  tricks {:>2} ({:>5} pts)  bails {}  air {:.1}s",
+            "{}. bot {} {time:>9}  missed {}  tricks {:>2} ({:>5} pts)  bails {}  air {:.1}s",
             st.place,
             slot + 1,
-            p.finish_ticks as f32 / 60.0,
             p.misses,
             p.tricks,
             p.points,
@@ -243,7 +258,7 @@ fn main() {
 /// conditions.
 fn table(seed: u32) {
     println!(
-        "{:<10} {:<7} {:<16} {:>8} {:>8} {:>7} {:>4} {:>6} {:>7} {:>6} {:>5}",
+        "{:<10} {:<7} {:<16} {:>8} {:>8} {:>7} {:>4} {:>6} {:>4} {:>3} {:>6} {:>7}",
         "circuit",
         "season",
         "weather",
@@ -251,11 +266,14 @@ fn table(seed: u32) {
         "median",
         "vs home",
         "dnf",
-        "bails",
-        "tricks",
         "missed",
-        "most"
+        "most",
+        "dq",
+        "bails",
+        "tricks"
     );
+    let mut worst = (0u8, String::new());
+    let mut out_all = 0;
     for &course in CourseId::ALL {
         let home = race(Event::home(course), seed);
         let (home_times, _) = times(&home);
@@ -296,11 +314,13 @@ fn table(seed: u32) {
                     _ => (f32::NAN, f32::NAN),
                 };
                 let tricks: u32 = o.landed.values().map(|v| v.0).sum();
-                let misses = o.world.riders.iter().flatten().map(|r| r.race.misses);
-                let (missed, most) =
-                    misses.fold((0u32, 0u8), |(t, m), n| (t + u32::from(n), m.max(n)));
+                let (missed, most, out) = misses(&o);
+                out_all += out;
+                if most > worst.0 {
+                    worst = (most, format!("{course:?} {season:?} {label}"));
+                }
                 println!(
-                    "{:<10} {:<7} {:<16} {:>7.2}s {:>7.2}s {:>+6.1}% {:>4} {:>6} {:>7} {:>6} {:>5}",
+                    "{:<10} {:<7} {:<16} {:>7.2}s {:>7.2}s {:>+6.1}% {:>4} {:>6} {:>4} {:>3} {:>6} {:>7}",
                     format!("{course:?}"),
                     format!("{season:?}"),
                     label,
@@ -308,14 +328,19 @@ fn table(seed: u32) {
                     median,
                     (median / home_median - 1.0) * 100.0,
                     dnf,
-                    o.bails.iter().sum::<u32>(),
-                    tricks,
                     missed,
-                    most
+                    most,
+                    out,
+                    o.bails.iter().sum::<u32>(),
+                    tricks
                 );
             }
         }
     }
+    println!(
+        "disqualified in all: {out_all}; most misses by one bot: {} ({})",
+        worst.0, worst.1
+    );
 }
 
 /// A seat's kind of bot: its pace class (0 slowest to 2 fastest) and
@@ -343,6 +368,7 @@ struct Tally {
     time: f32,
     misses: u32,
     most_misses: u8,
+    out: u32,
     bails: u32,
     air: u32,
     points: u32,
@@ -352,12 +378,13 @@ impl Tally {
     fn row(&self, label: &str) {
         let n = self.races.max(1) as f32;
         println!(
-            "  {label:<22} {:>5} {:>6.2} {:>8.2}s {:>7.2} {:>5} {:>6.2} {:>6.1}s {:>7.0}",
+            "  {label:<22} {:>5} {:>6.2} {:>8.2}s {:>7.2} {:>5} {:>3} {:>6.2} {:>6.1}s {:>7.0}",
             self.wins,
             self.places as f32 / n,
             self.time / self.finished.max(1) as f32,
             self.misses as f32 / n,
             self.most_misses,
+            self.out,
             self.bails as f32 / n,
             self.air as f32 / 60.0 / n,
             self.points as f32 / n,
@@ -391,6 +418,7 @@ fn kinds(seeds: u32, courses: &[CourseId]) {
                     }
                     t.misses += u32::from(p.misses);
                     t.most_misses = t.most_misses.max(p.misses);
+                    t.out += u32::from(p.disqualified());
                     t.bails += o.bails[slot];
                     t.air += o.airtime[slot];
                     t.points += u32::from(p.points);
@@ -399,8 +427,8 @@ fn kinds(seeds: u32, courses: &[CourseId]) {
         }
         println!("{course:?}, {seeds} races in its home conditions");
         println!(
-            "  {:<22} {:>5} {:>6} {:>9} {:>7} {:>5} {:>6} {:>7} {:>7}",
-            "kind", "wins", "place", "time", "misses", "most", "bails", "air", "points"
+            "  {:<22} {:>5} {:>6} {:>9} {:>7} {:>5} {:>3} {:>6} {:>7} {:>7}",
+            "kind", "wins", "place", "time", "misses", "most", "dq", "bails", "air", "points"
         );
         for (class, t) in by_class.iter().enumerate() {
             t.row(&format!("pace class {class}"));

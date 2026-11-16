@@ -144,6 +144,10 @@ pub struct World {
     /// plan. Set alike by the server and every client (from where the race
     /// stands in the room's plan), like the course.
     pub hold_results: bool,
+    /// Missing `race::tuning::MAX_MISSES` buoys or gates disqualifies a
+    /// rider (off in a time trial). Set alike by the server and every
+    /// client, like `hold_results`.
+    pub disqualify: bool,
 }
 
 pub type Inputs = [Option<Input>; MAX_RIDERS];
@@ -161,6 +165,7 @@ impl World {
             riders: [None; MAX_RIDERS],
             setups: [Setup::BALANCED; MAX_RIDERS],
             hold_results: false,
+            disqualify: true,
         }
     }
 
@@ -365,15 +370,15 @@ impl World {
 
     /// Whether a seat's rider rides on autopilot: out of the race, its
     /// inputs come from `bot` instead of its player, and it passes through
-    /// riders still racing. That is a rider through the finish (for the
-    /// rest of the race), one who joined mid-race (until the next one), and
-    /// everyone on the results.
+    /// riders still racing. That is a rider through the finish or
+    /// disqualified (for the rest of the race), one who joined mid-race
+    /// (until the next one), and everyone on the results.
     pub fn on_autopilot(&self, slot: usize) -> bool {
         let Some(r) = &self.riders[slot] else {
             return false;
         };
         match self.race.phase {
-            Phase::Racing => r.race.finished() || !r.race.racing,
+            Phase::Racing => r.race.done() || !r.race.racing,
             Phase::Results => true,
             Phase::Grid | Phase::Intro | Phase::Countdown => false,
         }
@@ -499,6 +504,9 @@ impl World {
                 next,
                 &mut events,
             );
+            if self.disqualify {
+                race::disqualify(&mut r.race, &self.race, slot, next, &mut events);
+            }
         }
         self.tick = next;
         self.advance_phase();
@@ -518,7 +526,7 @@ impl World {
                     any = true;
                     if r.race.finished() {
                         first = first.min(r.race.finish_ticks);
-                    } else {
+                    } else if !r.race.disqualified() {
                         all_done = false;
                     }
                 }
@@ -564,8 +572,9 @@ impl World {
         }
     }
 
-    /// Racing riders in race order: finishers by time, then by distance
-    /// covered. Riding free (joined mid-race) are left out.
+    /// Racing riders in race order: finishers by time, then riders still
+    /// racing by distance covered, then the disqualified, the later out
+    /// first. Riding free (joined mid-race) are left out.
     pub fn standings(&self) -> Vec<Standing> {
         let course = self.course();
         let mut list: Vec<(u8, Progress, f32)> = self
@@ -587,11 +596,25 @@ impl World {
                 })
             })
             .collect();
-        list.sort_by(|a, b| match (a.1.finished(), b.1.finished()) {
-            (true, true) => a.1.finish_ticks.cmp(&b.1.finish_ticks).then(a.0.cmp(&b.0)),
-            (true, false) => core::cmp::Ordering::Less,
-            (false, true) => core::cmp::Ordering::Greater,
-            (false, false) => b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)),
+        // 0 finished, 1 still racing, 2 disqualified.
+        let rank = |p: &Progress| {
+            if p.finished() {
+                0
+            } else if p.disqualified() {
+                2
+            } else {
+                1
+            }
+        };
+        list.sort_by(|a, b| {
+            rank(&a.1)
+                .cmp(&rank(&b.1))
+                .then_with(|| match rank(&a.1) {
+                    0 => a.1.finish_ticks.cmp(&b.1.finish_ticks),
+                    1 => b.2.total_cmp(&a.2),
+                    _ => b.1.disqualified_ticks.cmp(&a.1.disqualified_ticks),
+                })
+                .then(a.0.cmp(&b.0))
         });
         list.iter()
             .enumerate()
@@ -711,6 +734,7 @@ impl World {
             ]));
             eat(u32::from(p.misses) | (u32::from(p.tricks) << 8) | (u32::from(p.points) << 16));
             eat(p.finish_ticks);
+            eat(p.disqualified_ticks);
         }
         h
     }

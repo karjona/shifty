@@ -20,6 +20,7 @@ export function parseStandings(json: string): StandingView[] {
     place: num(o, "place"),
     lap: num(o, "lap"),
     finishTicks: num(o, "finishTicks"),
+    disqualifiedTicks: num(o, "disqualifiedTicks"),
     misses: num(o, "misses"),
     tricks: num(o, "tricks"),
     points: num(o, "points"),
@@ -50,6 +51,7 @@ export function parseEvents(json: string): RaceEvent[] {
       kind !== "checkpoint" &&
       kind !== "lap" &&
       kind !== "finish" &&
+      kind !== "disqualified" &&
       kind !== "trick" &&
       kind !== "sketchy" &&
       kind !== "bail"

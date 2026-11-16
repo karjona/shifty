@@ -2,7 +2,8 @@
 // ticket from the dev server (see vite.config.ts); a Tilt ends on its
 // podium. The netcode e2e tests use it too. URL options: name, room, bots,
 // event (snow, gp for the Tilt, or a circuit's id or name: cape, glades), season, weather, turns,
-// time, seed, surface, pid, render=0, autopilot=1, scale, water.
+// time, seed, surface, pid, render=0, autopilot=1 (or miss: past every buoy
+// on its wrong side, out after five), scale, water.
 import { CIRCUITS, SEASONS, TIMES_OF_DAY, WEATHERS, circuit, timeOf } from "@shifty/rider";
 import { messages } from "../i18n/index.ts";
 import { parseJoinTicket, WebTransportUnavailable } from "../net/transport.ts";
@@ -105,7 +106,7 @@ export async function quickRace(params: URLSearchParams): Promise<void> {
         hud: document.querySelector<HTMLDivElement>("#ui")!,
         status: setStatus,
         render: params.get("render") !== "0",
-        autopilot: params.get("autopilot") === "1",
+        autopilot: params.get("autopilot") === "miss" ? "miss" : params.get("autopilot") === "1",
         debug: true,
         onOver: ({ podium }) => {
           if (!podium) {

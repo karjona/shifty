@@ -61,11 +61,12 @@ type Pay =
   | { state: "late" }
   | { state: "paid"; rows: { label: string; delta: number }[]; before: number; after: number };
 
-/** What the match paid you, from the lobby's ledger, as rows: place, style, the Tilt bonus. */
+/** What the match paid you, from the lobby's ledger, as rows: place (or a disqualification's), style, the Tilt bonus. */
 function payRows(
   pay: MatchPay,
   races: number,
   place: number,
+  disqualified: boolean,
   t: ReturnType<typeof useT>,
 ): { rows: { label: string; delta: number }[]; total: number } {
   const sum = (reason: string) => pay.paid.filter((p) => p.reason === reason).reduce((s, p) => s + p.delta, 0);
@@ -73,7 +74,12 @@ function payRows(
   const rows: { label: string; delta: number }[] = [];
   if (placeRaces > 0)
     rows.push({
-      label: races > 1 ? t.end.rows.places(placeRaces) : t.end.rows.place(ordinal(place)),
+      label:
+        races > 1
+          ? t.end.rows.places(placeRaces)
+          : disqualified
+            ? t.end.rows.disqualified
+            : t.end.rows.place(ordinal(place)),
       delta: sum("race"),
     });
   if (sum("style") > 0) rows.push({ label: t.end.rows.style, delta: sum("style") });
@@ -90,6 +96,7 @@ function usePay(
   match: string | null,
   races: number,
   place: number,
+  disqualified: boolean,
   course: number,
 ): { pay: Pay; bestBefore: number | null } {
   const t = useT();
@@ -113,7 +120,7 @@ function usePay(
       const complete = got !== null && got.reported.includes(races - 1);
       if (got && complete) {
         setBestBefore(got.bestBefore);
-        const { rows, total } = payRows(got, races, place, t);
+        const { rows, total } = payRows(got, races, place, disqualified, t);
         queryClient.setQueryData(meQuery.queryKey, (m) =>
           m?.rider ? { ...m, rider: { ...m.rider, credits: got.credits } } : m,
         );
@@ -135,7 +142,7 @@ function usePay(
       live = false;
       if (timer) clearTimeout(timer);
     };
-  }, [mode, match, races, place, course, queryClient, t]);
+  }, [mode, match, races, place, disqualified, course, queryClient, t]);
   return { pay, bestBefore };
 }
 
@@ -201,6 +208,7 @@ function Head({
   hero,
   heroSub,
   rank = 0,
+  out = false,
 }: {
   kicker: string;
   title: string;
@@ -211,6 +219,8 @@ function Head({
   heroSub?: string;
   /** 1 to 3: the place stands on the podium's base, the first crowned with laurel. */
   rank?: number;
+  /** Disqualified: the place reads so in red. */
+  out?: boolean;
 }) {
   return (
     <header className="end-head">
@@ -220,7 +230,7 @@ function Head({
         {sub && <span className="end-sub">{sub}</span>}
         {callout && <p className="board-callout">{callout}</p>}
       </div>
-      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : ""}`}>
+      <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : out ? " dq" : ""}`}>
         <b>
           {rank === 1 && <Laurel />}
           {hero}
@@ -272,9 +282,20 @@ function RaceHead({ end }: { end: RaceEnd }) {
       kicker={t.results.title}
       title={circuitTitle(end.course)}
       sub={conditionsLine(end.conditions)}
-      hero={end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : t.results.dnf}
-      heroSub={end.finishTicks > 0 ? formatTime(end.finishTicks, end.tickHz) : undefined}
+      hero={
+        end.place > 0 && end.finishTicks > 0 ? ordinal(end.place) : end.disqualified ? t.results.dsq : t.results.dnf
+      }
+      heroSub={
+        end.finishTicks > 0
+          ? formatTime(end.finishTicks, end.tickHz)
+          : end.disqualified
+            ? end.sport === "jetski"
+              ? t.hud.outBuoys(end.misses)
+              : t.hud.outGates(end.misses)
+            : undefined
+      }
       rank={end.finishTicks > 0 ? end.place : 0}
+      out={end.disqualified}
     />
   );
 }
@@ -428,7 +449,14 @@ export function WrapUp({
   const t = useT();
   const end = summary.kind === "race" ? summary.end : null;
   const races = end?.eventCount ?? 1;
-  const { pay, bestBefore } = usePay(mode, match, races, end?.place ?? 0, end?.course ?? -1);
+  const { pay, bestBefore } = usePay(
+    mode,
+    match,
+    races,
+    end?.place ?? 0,
+    end?.disqualified ?? false,
+    end?.course ?? -1,
+  );
   const trial = summary.kind === "trial" ? summary.trial : null;
   const verdict = verdictOf(summary, bestBefore, t);
   const won = verdict?.win ?? false;
@@ -438,7 +466,9 @@ export function WrapUp({
   return (
     <div className="end-layer" data-nav-scope="">
       <section className={`end-panel${end?.podium ? " tilt" : ""}`} aria-label={t.end.continue}>
-        {verdict && <p className={`end-verdict${verdict.win ? " win" : ""}`}>{verdict.text}</p>}
+        {verdict && (
+          <p className={`end-verdict${verdict.win ? " win" : ""}${verdict.out ? " out" : ""}`}>{verdict.text}</p>
+        )}
         {end && <RaceHead end={end} />}
         {trial && (
           <Head
@@ -463,14 +493,15 @@ export function WrapUp({
 /**
  * The line a result is called out with: a race won or a podium place, the
  * Tilt won or its podium, a time trial's new record or best, your best
- * finish on a circuit (the lobby's records); null for an ordinary result.
- * `win`: it is a first place.
+ * finish on a circuit (the lobby's records), or a disqualification; null
+ * for an ordinary result. `win`: it is a first place; `out`: you were
+ * disqualified.
  */
 function verdictOf(
   summary: Summary,
   bestBefore: number | null,
   t: ReturnType<typeof useT>,
-): { text: string; win: boolean } | null {
+): { text: string; win: boolean; out?: boolean } | null {
   const v = t.end.verdicts;
   if (summary.kind === "trial") {
     const beat = summary.trial.beat;
@@ -481,6 +512,7 @@ function verdictOf(
     const i = end.podium.riders.findIndex((r) => r.me);
     return i === 0 ? { text: v.tiltWin, win: true } : i > 0 && i < 3 ? { text: v.tiltPodium, win: false } : null;
   }
+  if (end.disqualified) return { text: v.disqualified, win: false, out: true };
   if (end.finishTicks <= 0 || end.place <= 0) return null;
   if (end.place === 1) return { text: v.win, win: true };
   if (end.place <= 3) return { text: v.podium, win: false };

@@ -39,8 +39,31 @@ pub const STATS_FIELDS: [&str; 17] = [
     "targetLead",
 ];
 
+/// Dev: rides the course passing every buoy on its wrong side.
+fn missing_input(world: &World, slot: usize) -> Input {
+    let Some(r) = world.riders[slot] else {
+        return Input::default();
+    };
+    let course = world.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = match gate.checked_sub(1).and_then(|b| course.buoys.get(b)) {
+        Some(b) => match b.keep {
+            Keep::Right => b.offset + 4.0,
+            Keep::Left => b.offset - 4.0,
+        },
+        None => 0.0,
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = sim::math::clamp(-sim::math::angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+    Input::from_analog(steer, 1.0, 0.0, 0)
+}
+
 /// Layout of the race buffer (f64), for the HUD.
-pub const RACE_FIELDS: [&str; 28] = [
+pub const RACE_FIELDS: [&str; 30] = [
     "phase",
     "phaseStart",
     "phaseTicks",
@@ -69,6 +92,8 @@ pub const RACE_FIELDS: [&str; 28] = [
     "weather",
     "turns",
     "time",
+    "disqualifiedTicks",
+    "maxMisses",
 ];
 
 /// Layout of the weather buffer (f32), for the look: the race's weather at
@@ -392,6 +417,12 @@ impl WasmClient {
             f64::from(world.conditions.weather as u8),
             f64::from(world.conditions.turns as u8),
             f64::from(world.conditions.time),
+            f64::from(p.disqualified_ticks),
+            if world.disqualify {
+                f64::from(race_tuning::MAX_MISSES)
+            } else {
+                0.0
+            },
         ];
         self.race_buf.copy_from_slice(&v);
         self.race_buf.as_ptr()
@@ -410,7 +441,8 @@ impl WasmClient {
         serde_json::Value::Array(list).to_string()
     }
 
-    /// Race order as JSON: `[{slot, place, lap, finishTicks, misses, tricks, points}]`.
+    /// Race order as JSON: `[{slot, place, lap, finishTicks,
+    /// disqualifiedTicks, misses, tricks, points}]`.
     #[wasm_bindgen(js_name = standingsJson)]
     pub fn standings_json(&self) -> String {
         let list: Vec<serde_json::Value> = self
@@ -423,6 +455,7 @@ impl WasmClient {
                     "place": st.place,
                     "lap": st.progress.lap,
                     "finishTicks": st.progress.finish_ticks,
+                    "disqualifiedTicks": st.progress.disqualified_ticks,
                     "misses": st.progress.misses,
                     "tricks": st.progress.tricks,
                     "points": st.progress.points,
@@ -434,7 +467,7 @@ impl WasmClient {
 
     /// New race events as JSON: `[{tick, slot, kind, ...}]` where kind is
     /// `buoy` (`buoy`, `ok`, `meter`), `checkpoint` (`index`), `lap` (`lap`),
-    /// `finish` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
+    /// `finish` (`ticks`), `disqualified` (`ticks`), `trick` (`spin` in half turns, `flip`, `roll`,
     /// `grab`, `stunt`, `grabTicks`, `points`, `sketchy`), `sketchy` (a
     /// plain jump landed badly) or `bail`.
     #[wasm_bindgen(js_name = takeEventsJson)]
@@ -455,6 +488,9 @@ impl WasmClient {
                 }
                 EventKind::Finish { ticks } => {
                     json!({ "tick": e.tick, "slot": e.slot, "kind": "finish", "ticks": ticks })
+                }
+                EventKind::Disqualified { ticks } => {
+                    json!({ "tick": e.tick, "slot": e.slot, "kind": "disqualified", "ticks": ticks })
                 }
                 EventKind::Trick { trick: t, sketchy } => json!({
                     "tick": e.tick,
@@ -544,13 +580,20 @@ impl WasmClient {
     }
 
     /// Dev: what a bot would do in my place right now, as analog
-    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`).
+    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`). `miss`: on
+    /// the water, ride past every buoy on its wrong side instead (for
+    /// `?autopilot=miss`, to see misses add up to a disqualification).
     #[wasm_bindgen(js_name = autoInput)]
-    pub fn auto_input(&self) -> Vec<f32> {
+    pub fn auto_input(&self, miss: bool) -> Vec<f32> {
         let Some(slot) = self.inner.slot() else {
             return vec![0.0; 4];
         };
-        let i = sim::bot::bot_input(self.inner.predicted_world(), slot);
+        let world = self.inner.predicted_world();
+        let i = if miss && world.course().looped() {
+            missing_input(world, slot)
+        } else {
+            sim::bot::bot_input(world, slot)
+        };
         vec![
             i.steer_f(),
             i.throttle_f(),
