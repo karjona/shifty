@@ -207,7 +207,7 @@ app.get("/api/me/live", async (c) => {
     userId: p.user.id,
     handle: p.player.handle,
   });
-  return live ? c.json(live) : c.json({ error: "none" }, 404);
+  return c.json(live ?? { match: null });
 });
 
 /** What a match you raced in paid you, race by race, your credits now, and your best on `?course` before it. */

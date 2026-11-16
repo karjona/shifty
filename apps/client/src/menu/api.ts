@@ -454,20 +454,15 @@ export function leftMatch(match: string): void {
 
 /** A matchmaking race you are still in, with a ticket back into it (null: none). */
 export async function fetchLiveRace(): Promise<{ match: string; ticket: JoinTicket } | null> {
+  const o = await call("/api/me/live");
+  if (typeof o.match !== "string") return null;
+  let left: string | null = null;
   try {
-    const o = await call("/api/me/live");
-    if (typeof o.match !== "string") return null;
-    let left: string | null = null;
-    try {
-      left = localStorage.getItem(LEFT_KEY);
-    } catch {
-      left = null;
-    }
-    return o.match === left ? null : { match: o.match, ticket: parseJoinTicket(o.ticket) };
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
+    left = localStorage.getItem(LEFT_KEY);
+  } catch {
+    left = null;
   }
+  return o.match === left ? null : { match: o.match, ticket: parseJoinTicket(o.ticket) };
 }
 
 export const liveRaceQuery = queryOptions({ queryKey: ["live-race"], queryFn: fetchLiveRace, staleTime: 5_000 });
