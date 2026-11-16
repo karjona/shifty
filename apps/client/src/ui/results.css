@@ -109,6 +109,17 @@
 .board-row.out .c-time {
   color: var(--ink-3);
 }
+/* Disqualified: the time column says so, in red ink. */
+.board-row .c-time .dq {
+  font-weight: 820;
+  letter-spacing: 0.06em;
+  color: #b8321f;
+}
+.board-row.me .c-time .dq {
+  padding: 0 6px;
+  background: #b8321f;
+  color: #f6f1e7;
+}
 /* Your row: the accent fills it, the text turns to paper. */
 .board-row.me {
   background: var(--accent);
@@ -422,6 +433,12 @@
 .end-verdict.win {
   background: var(--accent);
   color: var(--on-accent);
+}
+/* Disqualified: the line in red. */
+.board-verdict.out,
+.end-verdict.out {
+  background: #b8321f;
+  color: #f6f1e7;
 }
 .board-mine.ranked,
 .end-hero.ranked {

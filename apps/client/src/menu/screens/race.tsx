@@ -156,8 +156,9 @@ function RaceRun({
         onOver: (data) => planOver(data),
         trial: race.trial,
         card: card ?? undefined,
-        // Dev: `?autopilot=1` rides menu races with the bot's inputs too, as it does the quick race.
-        autopilot: import.meta.env.DEV && devParams.get("autopilot") === "1",
+        // Dev: `?autopilot=1` (or `miss`) rides menu races with the bot's inputs too, as it does the quick race.
+        autopilot:
+          import.meta.env.DEV && (devParams.get("autopilot") === "miss" ? "miss" : devParams.get("autopilot") === "1"),
       });
       engine.show(s);
       setSession(s);

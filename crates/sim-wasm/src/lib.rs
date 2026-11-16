@@ -39,6 +39,29 @@ pub const STATS_FIELDS: [&str; 17] = [
     "targetLead",
 ];
 
+/// Dev: rides the course passing every buoy on its wrong side.
+fn missing_input(world: &World, slot: usize) -> Input {
+    let Some(r) = world.riders[slot] else {
+        return Input::default();
+    };
+    let course = world.course();
+    let (s, _) = course.project(r.pos.x, r.pos.z);
+    let gate = usize::from(r.race.next_gate) % course.gate_count();
+    let target = match gate.checked_sub(1).and_then(|b| course.buoys.get(b)) {
+        Some(b) => match b.keep {
+            Keep::Right => b.offset + 4.0,
+            Keep::Left => b.offset - 4.0,
+        },
+        None => 0.0,
+    };
+    let (tx, tz) = course
+        .centerline(s + 12.0 + r.speed() * 0.6)
+        .at_offset(target);
+    let desired = sim::math::atan2(tx - r.pos.x, tz - r.pos.z);
+    let steer = sim::math::clamp(-sim::math::angle_diff(r.yaw, desired) * 2.5, -1.0, 1.0);
+    Input::from_analog(steer, 1.0, 0.0, 0)
+}
+
 /// Layout of the race buffer (f64), for the HUD.
 pub const RACE_FIELDS: [&str; 30] = [
     "phase",
@@ -557,13 +580,20 @@ impl WasmClient {
     }
 
     /// Dev: what a bot would do in my place right now, as analog
-    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`).
+    /// `[steer, throttle, lean, buttons]` (for `?autopilot=1`). `miss`: on
+    /// the water, ride past every buoy on its wrong side instead (for
+    /// `?autopilot=miss`, to see misses add up to a disqualification).
     #[wasm_bindgen(js_name = autoInput)]
-    pub fn auto_input(&self) -> Vec<f32> {
+    pub fn auto_input(&self, miss: bool) -> Vec<f32> {
         let Some(slot) = self.inner.slot() else {
             return vec![0.0; 4];
         };
-        let i = sim::bot::bot_input(self.inner.predicted_world(), slot);
+        let world = self.inner.predicted_world();
+        let i = if miss && world.course().looped() {
+            missing_input(world, slot)
+        } else {
+            sim::bot::bot_input(world, slot)
+        };
         vec![
             i.steer_f(),
             i.throttle_f(),
