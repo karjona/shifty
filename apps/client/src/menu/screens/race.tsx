@@ -36,6 +36,7 @@ import { RaceControls } from "./controls.tsx";
 import { PodiumScreen } from "./podium.tsx";
 import { type EndAction, TroublePanel, type TrialSummary, WrapUp, useTroubleText } from "./wrapup.tsx";
 import { VERSION } from "../../version.ts";
+import { devParams } from "../../dev-params.ts";
 
 /** `sim::Phase`. */
 const GRID = 0;
@@ -155,6 +156,8 @@ function RaceRun({
         onOver: (data) => planOver(data),
         trial: race.trial,
         card: card ?? undefined,
+        // Dev: `?autopilot=1` rides menu races with the bot's inputs too, as it does the quick race.
+        autopilot: import.meta.env.DEV && devParams.get("autopilot") === "1",
       });
       engine.show(s);
       setSession(s);
