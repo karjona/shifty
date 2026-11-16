@@ -148,61 +148,99 @@ function pieceTextures(key: string): string[] {
   );
 }
 
-/** A model of the art (e.g. `body`, `summer.vest.foam`) for a body, loaded once; `wait` counts its download. */
-export function loadModel(body: BodyKind, model: string, wait: Wait | null): Promise<ModelAsset> {
-  const key = `${body}/${model}`;
-  let p = cache.get(key);
-  // (Still on its way: counted in this wait too.)
-  if (p) followArt([`${BASE}/${key}.glb`, ...pieceTextures(key)], wait);
-  else {
-    for (const path of pieceTextures(key)) void loadTexture(path, wait).catch(() => null);
-    p = (async () => {
-      const file = await loadGltf(`${BASE}/${key}.glb`, wait);
+/** A model's file, parsed: its skinned meshes (joints in BONES order) and the skeleton's rest positions. */
+interface Parsed {
+  meshes: { name: string; mesh: THREE.SkinnedMesh; geometry: THREE.BufferGeometry }[];
+  rest: THREE.Vector3[];
+}
+
+const parsed = new Map<string, Promise<Parsed>>();
+
+/** A model's file (`<body>/<model>`), parsed once. */
+function parse(key: string, wait: Wait | null): Promise<Parsed> {
+  let p = parsed.get(key);
+  if (!p) {
+    p = loadGltf(`${BASE}/${key}.glb`, wait).then((file) => {
       file.scene.updateMatrixWorld(true);
       const meshes: THREE.SkinnedMesh[] = [];
       file.scene.traverse((o) => {
         if (o instanceof THREE.SkinnedMesh) meshes.push(o);
       });
       const rest = BONES.map(() => new THREE.Vector3());
-      const skeleton = meshes[0]?.skeleton;
-      for (const b of skeleton?.bones ?? []) {
+      for (const b of meshes[0]?.skeleton.bones ?? []) {
         const name = boneOf(b.name);
         if (name) b.getWorldPosition(rest[BONE[name]]!);
       }
+      // A mesh split into primitives comes back as a group of meshes named after the node.
+      return {
+        meshes: meshes.map((m) => ({ name: m.name.replace(/_\d+$/, ""), mesh: m, geometry: remapJoints(m) })),
+        rest,
+      };
+    });
+    // A file that failed can be asked for again.
+    p.catch(() => parsed.delete(key));
+    parsed.set(key, p);
+  }
+  return p;
+}
+
+/**
+ * A model of the art (e.g. `body`, `summer.vest.foam`) for a body, loaded
+ * once; `wait` counts its download. `only`: just these pieces of it (a
+ * hair style as it sits under a hat), whose textures alone come down.
+ */
+export function loadModel(
+  body: BodyKind,
+  model: string,
+  wait: Wait | null,
+  only: readonly string[] | null = null,
+): Promise<ModelAsset> {
+  const key = `${body}/${model}`;
+  const id = only ? `${key}#${only.toSorted().join(",")}` : key;
+  const prefix = `${BASE}/${key}.`;
+  const wanted = (piece: string) => !only || only.includes(piece);
+  const maps = pieceTextures(key).filter((t) => wanted(t.slice(prefix.length).split(".")[0] ?? ""));
+  let p = cache.get(id);
+  // (Still on its way: counted in this wait too.)
+  if (p) followArt([`${BASE}/${key}.glb`, ...maps], wait);
+  else {
+    for (const path of maps) void loadTexture(path, wait).catch(() => null);
+    p = (async () => {
+      const file = await parse(key, wait);
       const pieces = await Promise.all(
-        meshes.map(async (m) => {
-          // A mesh split into primitives comes back as a group of meshes named after the node.
-          const name = m.name.replace(/_\d+$/, "");
-          const skin = model === "body" && name === "skin";
-          const [detail, mask, flat, lines] = await Promise.all([
-            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.detail.png`, wait),
-            skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.mask.png`, wait),
-            name === "face" ? maybeTexture(`${BASE}/${key}.${name}.flat.png`, wait) : Promise.resolve(null),
-            skin ? loadTexture(`${BASE}/${key}.${name}.lines.png`, wait) : Promise.resolve(null),
-          ]);
-          const finish: unknown = Reflect.get(m.userData, "finish");
-          const tints: unknown = Reflect.get(m.userData, "tints");
-          const hides: unknown = Reflect.get(m.userData, "hides");
-          return {
-            morphs: { ...m.morphTargetDictionary },
-            name,
-            geometry: remapJoints(m),
-            detail,
-            mask,
-            flat,
-            lines,
-            gaze: gazeOf(Reflect.get(m.userData, "gaze")),
-            finish: finishOf(finish),
-            tints: tintsOf(tints),
-            hides: hidesOf(hides),
-          };
-        }),
+        file.meshes
+          .filter((m) => wanted(m.name))
+          .map(async ({ name, mesh: m, geometry }) => {
+            const skin = model === "body" && name === "skin";
+            const [detail, mask, flat, lines] = await Promise.all([
+              skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.detail.png`, wait),
+              skin ? BLANK : loadTexture(`${BASE}/${key}.${name}.mask.png`, wait),
+              name === "face" ? maybeTexture(`${BASE}/${key}.${name}.flat.png`, wait) : Promise.resolve(null),
+              skin ? loadTexture(`${BASE}/${key}.${name}.lines.png`, wait) : Promise.resolve(null),
+            ]);
+            const finish: unknown = Reflect.get(m.userData, "finish");
+            const tints: unknown = Reflect.get(m.userData, "tints");
+            const hides: unknown = Reflect.get(m.userData, "hides");
+            return {
+              morphs: { ...m.morphTargetDictionary },
+              name,
+              geometry,
+              detail,
+              mask,
+              flat,
+              lines,
+              gaze: gazeOf(Reflect.get(m.userData, "gaze")),
+              finish: finishOf(finish),
+              tints: tintsOf(tints),
+              hides: hidesOf(hides),
+            };
+          }),
       );
-      return { pieces, rest };
+      return { pieces, rest: file.rest };
     })();
     // A model that failed can be asked for again.
-    p.catch(() => cache.delete(key));
-    cache.set(key, p);
+    p.catch(() => cache.delete(id));
+    cache.set(id, p);
   }
   return p;
 }

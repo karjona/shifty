@@ -140,8 +140,9 @@ function worn(look: Look, kit: Kit, sport: Sport): Worn[] {
 /** Fetches what a look wears for a sport ahead, in the background: a figure dressed in it later comes at once. */
 export function prefetchLook(appearance: Appearance, sport: Sport): void {
   const look = { ...appearance.look, body: artBody(appearance.look) };
-  const models = ["body", ...worn(look, appearance.outfits[sport], sport).map((w) => w.model)];
-  for (const m of models) void loadModel(look.body, m, null).catch(() => null);
+  void loadModel(look.body, "body", null).catch(() => null);
+  for (const w of worn(look, appearance.outfits[sport], sport))
+    void loadModel(look.body, w.model, null, w.pieces ?? null).catch(() => null);
   void overlaysFor(look, null).catch(() => null);
 }
 
@@ -193,7 +194,10 @@ export class RiderFigure {
       const look = { ...appearance.look, body: artBody(appearance.look) };
       const items = worn(look, appearance.outfits[sport], sport);
       const [assets, faces] = await Promise.all([
-        Promise.all([loadModel(look.body, "body", wait), ...items.map((i) => loadModel(look.body, i.model, wait))]),
+        Promise.all([
+          loadModel(look.body, "body", wait),
+          ...items.map((i) => loadModel(look.body, i.model, wait, i.pieces ?? null)),
+        ]),
         overlaysFor(look, wait),
       ]);
       if (version !== this.version) return;
