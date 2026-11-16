@@ -234,10 +234,17 @@ export function snowRigs(
     begin(_w, r) {
       sideS = along.of(r) + 40 + r.speed * 1.6;
       sideOf = -sideOf;
-      // On the edge of the run, inside its fence and clear of the trees (and of its own pines).
+      // Just past the run's edge (behind its netting, among its trees), on
+      // the side that is not rock if one is; over the wall where both are.
+      // Clear of the run's own pines and towers.
       for (let tries = 0; tries < 4; tries++) {
         const i = Math.max(0, Math.min(run.path.length - 1, Math.round((sideS - run.path[0]!.s) / 4)));
-        sideEye.copy(on(sideS, sideOf * (run.path[i]!.limit - 2.5), 2.2));
+        const p = run.path[i]!;
+        const edge = (side: number) => (side > 0 ? p.edgeR : p.edgeL);
+        if (edge(sideOf) === "rock") sideOf = -sideOf;
+        const limit = sideOf > 0 ? p.limitR : p.limitL;
+        const walled = edge(sideOf) === "rock";
+        sideEye.copy(on(sideS, sideOf * (limit + 1.2), walled ? 6 : 2.2));
         if (!run.obstacles.some((o) => Math.hypot(o.x - sideEye.x, o.z - sideEye.z) < o.radius + 4)) break;
         sideS += 10;
       }

@@ -484,6 +484,7 @@ export const ca: Messages = {
     wrongWay: "SENTIT CONTRARI",
     maxPower: "POTÈNCIA MÀXIMA",
     missedBuoy: "BOIA FALLADA",
+    missedGate: "PORTA SALTADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VOLTA",
     lap: (n: number) => `VOLTA ${n}`,

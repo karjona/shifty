@@ -68,9 +68,13 @@ import { farLandscape, landscape } from "./mountain-far.ts";
 import { MountainLife } from "./mountain-life.ts";
 import { MOUNTAIN, fadingInk, gustAt, snowShade, windNow } from "./mountain-look.ts";
 import { alpineRanges } from "./mountain-ranges.ts";
-import { rockWalls } from "./mountain-walls.ts";
+import { cliffFaces, rockWalls } from "./mountain-walls.ts";
+import { SnowGates } from "./snow-gates.ts";
 import { ROCK_SHADE, coverPatches, rockMeshes, strata } from "./mountain-rocks.ts";
 import type { CameraTuning, Environment, Frame, RiderModel, RiderView } from "./world.ts";
+
+/** What bounds a run on one side (`sim::mountain::EdgeKind`). */
+export type EdgeKind = "bank" | "trees" | "netting" | "rock";
 
 export interface RunPoint {
   s: number;
@@ -78,10 +82,15 @@ export interface RunPoint {
   y: number;
   z: number;
   yaw: number;
-  /** Half width of the groomed run, its walls, and how far riders can go. */
+  /** Half width of the groomed run, its walls, and how far riders can go (on the wider side, the left and the right). */
   half: number;
   wall: number;
   limit: number;
+  limitL: number;
+  limitR: number;
+  /** What bounds the run on its left and its right. */
+  edgeL: EdgeKind;
+  edgeR: EdgeKind;
 }
 
 export interface GateData {
@@ -92,6 +101,40 @@ export interface GateData {
   yaw: number;
   half: number;
   limit: number;
+  /** Its place among the course's gates (0: the start). */
+  gate: number;
+}
+
+/** A gate to pass between its poles: its centre (`offset` from the centre line), the run's heading there, half the gap, and its place among the course's gates. */
+export interface RunGateData {
+  s: number;
+  offset: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  half: number;
+  gate: number;
+}
+
+/** A cliff across the run: its lip at `s` on the centre line, its face `face` m long, from `top` down to `bottom`. */
+export interface CliffData {
+  s: number;
+  face: number;
+  x: number;
+  z: number;
+  yaw: number;
+  top: number;
+  bottom: number;
+  half: number;
+}
+
+/** A rock wall along one side of the run (`side`: 1 the right), from `from` to `to`, its face about `height` m over the run's edge. */
+export interface RockWallData {
+  from: number;
+  to: number;
+  side: 1 | -1;
+  height: number;
 }
 
 export interface ObstacleData {
@@ -140,6 +183,9 @@ export interface RunData {
   startGate: GateData;
   finish: GateData;
   checkpoints: GateData[];
+  gates: RunGateData[];
+  cliffs: CliffData[];
+  walls: RockWallData[];
   /** The centre line every 4 m. */
   path: RunPoint[];
   obstacles: ObstacleData[];
@@ -557,6 +603,7 @@ export class Mountain implements Environment {
   private trees: Tree[] = [];
   private buildings: Building[] = [];
   private built: Built | null = null;
+  private gates: SnowGates | null = null;
   private life: MountainLife | null = null;
   /** What stands on the mountain (built once its models are in). */
   private props = new THREE.Group();
@@ -662,6 +709,8 @@ export class Mountain implements Environment {
       PALETTE[this.conditions.season].accent,
     );
     this.props.add(this.built.group);
+    this.gates = new SnowGates(run.gates, (x, z) => this.ground(x, z));
+    this.group.add(this.gates.group);
     yield;
     // What is still a plain material takes the cel look, its lines fading into the fog like the rest.
     const plain = new Set<THREE.Mesh>();
@@ -1159,7 +1208,7 @@ export class Mountain implements Environment {
     };
   }
 
-  /** Red netting along both edges of the run (not in the gully, whose walls hold you in). */
+  /** Red netting along the run's edges wherever the sim's edge is netting. */
   private buildFences(): void {
     const tex = nettingTexture();
     const mat = fadingInk(
@@ -1183,7 +1232,8 @@ export class Mountain implements Environment {
       const pts = new Float32Array(this.run.path.length * 2);
       const tops: [number, number][] = [];
       this.run.path.forEach((p, i) => {
-        const o = (p.limit + 0.5) * side;
+        // Where the sim's netting stops riders.
+        const o = ((side > 0 ? p.limitR : p.limitL) + 0.15) * side;
         const x = p.x - Math.cos(p.yaw) * o;
         const z = p.z + Math.sin(p.yaw) * o;
         pts.set([x, z], i * 2);
@@ -1193,7 +1243,7 @@ export class Mountain implements Environment {
       let u = 0;
       let open = false;
       this.run.path.forEach((p, i) => {
-        const fenced = this.scenery.fenced(p.s, p.half, this.run.finishS);
+        const fenced = (side > 0 ? p.edgeR : p.edgeL) === "netting";
         const [x, z] = tops[i]!;
         const y = ys[i]!;
         if (!fenced) {
@@ -1224,7 +1274,12 @@ export class Mountain implements Environment {
   private buildRocks(models: Models): void {
     const heights = (points: Float32Array) => this.terrain.heights(points);
     for (const mesh of rockMeshes(this.run, this.scenery, models, heights)) this.props.add(mesh);
-    for (const mesh of rockWalls(this.run, this.scenery.walls, heights)) this.props.add(mesh);
+    const walls = [
+      ...this.scenery.walls,
+      ...this.run.walls.map((w) => ({ from: w.from, to: w.to, side: w.side, height: Math.max(3, w.height), out: 0 })),
+    ];
+    for (const mesh of rockWalls(this.run, walls, heights)) this.props.add(mesh);
+    for (const mesh of cliffFaces(this.run, this.run.cliffs, heights)) this.props.add(mesh);
     const patches = coverPatches(this.run, (x, z) => this.ground(x, z));
     if (patches) this.props.add(patches);
   }
@@ -1252,6 +1307,7 @@ export class Mountain implements Environment {
     this.precipitation.update(this.look.rain, this.look.snow);
     MOUNTAIN.snowing.value = this.look.snow;
     this.built?.update(f.t);
+    this.gates?.update(f.t, f.dt, f.riders, f.nextBuoy);
     const snowy = Math.min(1, Math.max(0, (f.eye.y - LOOK.snowLine.value + 30) / 40)) * LOOK.snowCover.value;
     this.life?.update(f.eye, f.t, f.dt, snowy, this.look.snow);
     for (const r of f.riders) this.emit(r, f.models.get(r.slot), f.dt);

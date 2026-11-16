@@ -492,6 +492,7 @@ export const es: Messages = {
     wrongWay: "SENTIDO CONTRARIO",
     maxPower: "POTENCIA MÁXIMA",
     missedBuoy: "BOYA FALLADA",
+    missedGate: "PUERTA SALTADA",
     checkpoint: (i: number, n: number) => `CONTROL ${i}/${n}`,
     finalLap: "ÚLTIMA VUELTA",
     lap: (n: number) => `VUELTA ${n}`,
