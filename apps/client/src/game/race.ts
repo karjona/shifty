@@ -129,6 +129,9 @@ export interface RaceEnd {
   /** Your time (ticks; 0: not finished), and the sim's rate. */
   finishTicks: number;
   tickHz: number;
+  /** You were disqualified in it (placed last, no time), for missing `misses` buoys or gates. */
+  disqualified: boolean;
+  misses: number;
   /** Your style points in it. */
   points: number;
   /** How many races the plan had (more than one: a Tilt). */
@@ -143,8 +146,8 @@ export interface RaceOptions {
   status: (text: string) => void;
   /** false: run the netcode without drawing (netcode tests). */
   render?: boolean;
-  /** Dev: ride with the bot's inputs. */
-  autopilot?: boolean;
+  /** Dev: ride with the bot's inputs (`miss`: past every buoy on its wrong side). */
+  autopilot?: boolean | "miss";
   /** Dev: the netcode debug panel (F1). */
   debug?: boolean;
   /** Called once the race server has said yes or no. */
@@ -575,7 +578,7 @@ export class RaceSession implements Stage {
     if (this.paused && !this.input.forced) i = { steer: 0, throttle: 0, lean: 0, buttons: 0 };
     // Test hooks that force the input win over the autopilot.
     if ((this.opts.autopilot || this.autopilot) && client.phase() === 1 && !this.input.forced) {
-      const [steer = 0, throttle = 0, lean = 0, buttons = 0] = client.autoInput();
+      const [steer = 0, throttle = 0, lean = 0, buttons = 0] = client.autoInput(this.opts.autopilot === "miss");
       i = { steer, throttle, lean, buttons };
     }
     client.update(now, i.steer, i.throttle, i.lean, i.buttons);
@@ -653,6 +656,8 @@ export class RaceSession implements Stage {
       place: f("place"),
       racers: f("racers"),
       misses: f("misses"),
+      disqualifiedTicks: f("disqualifiedTicks"),
+      maxMisses: f("maxMisses"),
       tickHz: f("tickHz") || 60,
       wrongWay: f("wrongWay") === 1,
       points: f("points"),
@@ -1038,6 +1043,8 @@ export class RaceSession implements Stage {
       racers: standings.length,
       finishTicks: mine?.finishTicks ?? 0,
       tickHz: race.tickHz,
+      disqualified: (mine?.disqualifiedTicks ?? 0) > 0,
+      misses: mine?.misses ?? 0,
       points: mine?.points ?? 0,
       eventCount: race.eventCount,
     });
