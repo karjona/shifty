@@ -253,6 +253,9 @@ const FOG_NEAR = 45;
 const FOG_FAR = 330;
 const CLEAR_NEAR = 80;
 const CLEAR_FAR = 4000;
+/** The chase camera stays this far (m) inside a run's riding limit, and looks for its nearest point this many points either way first. */
+const EYE_INSET = 1.5;
+const EYE_SEARCH = 12;
 /** The forest is cut back this far either side of the chairlift's line (m). */
 const LIFT_SWATHE = 8;
 /** No trees stand within this of the middle of the grid (m). */
@@ -567,6 +570,8 @@ export class Mountain implements Environment {
   readonly topSpeed = 32;
 
   private run: RunData;
+  /** The run's point nearest the chase camera last frame (see `keepEye`). */
+  private eyeIndex = 0;
   private terrain: Terrain;
   private fog: THREE.Fog | null = null;
   private background = new THREE.Color();
@@ -781,6 +786,47 @@ export class Mountain implements Environment {
     fog.near = fog.near * (CLEAR_NEAR / FOG_NEAR) * weather ** 1.3;
     MOUNTAIN.fogNear.value = fog.near;
     MOUNTAIN.fogFar.value = fog.far;
+  }
+
+  /**
+   * Keeps the chase camera inside the riding width, short of the edge by
+   * `EYE_INSET`: trees lean in over the edge, and netting and rock walls
+   * would stand between the camera and its rider.
+   */
+  keepEye(eye: { x: number; z: number }): void {
+    const path = this.run.path;
+    // Near where it was last frame: the camera moves a few metres a frame at most.
+    let best = Infinity;
+    let index = this.eyeIndex;
+    const from = Math.max(0, index - EYE_SEARCH);
+    const to = Math.min(path.length - 1, index + EYE_SEARCH);
+    for (let i = from; i <= to; i++) {
+      const p = path[i]!;
+      const d = (p.x - eye.x) ** 2 + (p.z - eye.z) ** 2;
+      if (d < best) {
+        best = d;
+        index = i;
+      }
+    }
+    if (index === from || index === to) {
+      for (let i = 0; i < path.length; i++) {
+        const p = path[i]!;
+        const d = (p.x - eye.x) ** 2 + (p.z - eye.z) ** 2;
+        if (d < best) {
+          best = d;
+          index = i;
+        }
+      }
+    }
+    this.eyeIndex = index;
+    const p = path[index]!;
+    const rx = -Math.cos(p.yaw);
+    const rz = Math.sin(p.yaw);
+    const off = (eye.x - p.x) * rx + (eye.z - p.z) * rz;
+    const room = Math.max(0, (off > 0 ? p.limitR : p.limitL) - EYE_INSET);
+    const kept = Math.max(-room, Math.min(room, off));
+    eye.x += rx * (kept - off);
+    eye.z += rz * (kept - off);
   }
 
   ground(x: number, z: number): number {

@@ -384,19 +384,20 @@ pub struct SnowBot {
     pub trickster: bool,
 }
 
-/// Each seat's snowboard bot: its tier and whether it tricks. Bots fill
-/// the seats from the last one down, so a field of any size has fast,
-/// middling and slow bots in it, tricksters and not; on a narrow run the
-/// grid counts, so a fast bot starts in each row.
+/// Each seat's snowboard bot: its tier and whether it tricks. On a narrow
+/// run the grid counts: the two fast bots start side by side in the front
+/// row, one that tricks and one that doesn't, so either can win. Bots fill
+/// the seats from the last one down, so a small field has middling and
+/// slow bots, tricksters and not.
 pub const SNOW_SEATS: [(Tier, bool); crate::MAX_RIDERS] = [
     (Tier::Middling, true),
-    (Tier::Slow, false),
     (Tier::Fast, true),
-    (Tier::Middling, true),
+    (Tier::Fast, false),
+    (Tier::Middling, false),
+    (Tier::Slow, true),
+    (Tier::Slow, false),
     (Tier::Slow, true),
     (Tier::Middling, false),
-    (Tier::Slow, false),
-    (Tier::Fast, false),
 ];
 
 impl SnowBot {
@@ -474,7 +475,14 @@ pub fn snowboard_input(world: &World, run: &Run, slot: usize, bot: SnowBot) -> I
             continue;
         }
         let on_line = (snow_line(run, rocks, slot, s0 + ramp) - offset).abs() < half_width - 1.0;
-        if on_line {
+        // Not with a rock poking through where it would come down.
+        let lip = s0 + ramp;
+        let rock_below = rocks.iter().any(|k| {
+            (lip..lip + POP_ROCK_CLEAR).contains(&k.s)
+                && (k.offset - snow_line(run, rocks, slot, k.s)).abs()
+                    < k.obstacle.radius + DODGE_CLEAR + 2.0
+        });
+        if on_line && !rock_below {
             jump = to_lip > speed * DT * 1.5 && to_lip < speed * POP_LOAD;
             break;
         }
@@ -589,8 +597,9 @@ pub fn snowboard_input(world: &World, run: &Run, slot: usize, bot: SnowBot) -> I
     } else if speed < STUCK_SPEED {
         // Nearly stopped (back up after a fall, held up by a rock): skate on.
         1.0
-    } else if speed < tucked - 2.0 {
-        // Tuck wherever a tucked carve still makes the bends ahead.
+    } else if speed < tucked - 2.0 && steer.abs() < TUCK_STEER {
+        // Tuck wherever a tucked carve still makes the bends ahead, and
+        // stand up to turn hard (a tuck turns less).
         pace.min(1.0)
     } else {
         0.0
@@ -672,7 +681,7 @@ pub fn snow_line(run: &Run, rocks: &[Rock], slot: usize, t: f32) -> f32 {
 /// A bot swings round an obstacle on its line from this far before it (m),
 /// back over `DODGE_AFTER` m past it, this far clear of it (beyond its
 /// radius).
-const DODGE_BEFORE: f32 = 35.0;
+const DODGE_BEFORE: f32 = 50.0;
 const DODGE_AFTER: f32 = 12.0;
 const DODGE_CLEAR: f32 = 2.2;
 
@@ -721,8 +730,12 @@ const DODGE_AHEAD: f32 = 12.0;
 /// Tricksters load a pop for this long before a lip (s): a short pop, for
 /// air enough to trick without flying far past the landing.
 const POP_LOAD: f32 = 0.2;
+/// Tricksters don't pop with a rock this far past the lip (m) near their line.
+const POP_ROCK_CLEAR: f32 = 90.0;
 /// Tricksters pop off tables whose landing is at least this long (m).
 const POP_LANDING: f32 = 30.0;
+/// A bot steering harder than this stands up out of its tuck.
+const TUCK_STEER: f32 = 0.5;
 /// How much of its distance off its line a bot aims past it.
 const CATCH_UP: f32 = 0.3;
 const TREE_CLEAR: f32 = 1.6;

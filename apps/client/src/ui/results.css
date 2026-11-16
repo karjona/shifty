@@ -49,11 +49,16 @@
   font-stretch: 112%;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--ink-3);
 }
 .board-cols > :nth-child(n + 3),
 .board-row > :nth-child(n + 3) {
   text-align: right;
+}
+/* A label longer than its column reaches into the gap before it. */
+.board-cols > :nth-child(n + 3) {
+  justify-self: end;
 }
 .board-row > .c-name {
   text-align: left;
@@ -97,6 +102,7 @@
   font-weight: 820;
 }
 .c-time .still {
+  white-space: nowrap;
   font-size: 15px;
   font-weight: 650;
   font-stretch: 112%;

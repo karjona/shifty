@@ -181,7 +181,7 @@ html {
 }
 #banner.count,
 #banner.wrong {
-  top: 26vh;
+  top: 280px;
   padding: 0;
   background: none;
   box-shadow: none;
@@ -195,8 +195,13 @@ html {
   text-transform: none;
   text-shadow: 0 8px 48px rgb(24 16 8 / 0.35);
 }
+/* "Get ready" is a line, not a number: smaller, to fit the canvas in every language. */
+#banner.count.ready {
+  top: 330px;
+  font-size: 120px;
+}
 #banner.wrong {
-  top: 30vh;
+  top: 324px;
   padding: 0 32px;
   background: #b8321f;
   font-size: 72px;

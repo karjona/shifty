@@ -215,7 +215,7 @@ function Head({
   rank?: number;
   /** Disqualified: the place reads so in red. */
   out?: boolean;
-  /** The hero under the title, not beside it (a time is wide). */
+  /** The hero under the title, not beside it (a time is wide: no laurel round it). */
   stack?: boolean;
 }) {
   return (
@@ -228,7 +228,7 @@ function Head({
       </div>
       <div className={`end-hero${rank >= 1 && rank <= 3 ? ` ranked rank-${rank}` : out ? " dq" : ""}`}>
         <b>
-          {rank === 1 && <Laurel />}
+          {rank === 1 && !stack && <Laurel />}
           {hero}
         </b>
         {heroSub && <span>{heroSub}</span>}
