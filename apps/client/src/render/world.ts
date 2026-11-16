@@ -331,7 +331,8 @@ export class World {
     this.shadowWarmth = WARM_PARTS;
   }
 
-  /** A warming frame: the whole course in the box, but only every WARM_PARTS-th caster (from `part`) casting. */
+  /** A warming frame: the whole course in the box, but only the casters of a share of the kinds (`part` of
+   * WARM_PARTS) casting: each kind of caster (its material, skinned or instanced) makes its own shaders. */
   private drawWarmingShadows(part: number): void {
     const sun = this.sun;
     const cam = sun.shadow.camera;
@@ -341,10 +342,14 @@ export class World {
     cam.updateProjectionMatrix();
     sun.position.copy(sun.target.position).addScaledVector(this.sunBack.copy(this.sunOffset).normalize(), WARM_BOX * 2);
     const resting: THREE.Object3D[] = [];
-    let n = 0;
+    const kinds = new Map<string, number>();
     this.scene.traverse((o) => {
       if (!(o instanceof THREE.Mesh) || !o.castShadow) return;
-      if (n++ % WARM_PARTS === part) return;
+      const m: unknown = o.material;
+      const kind = `${m instanceof THREE.Material ? `${m.type}.${m.name}` : "many"}.${o instanceof THREE.SkinnedMesh}.${o instanceof THREE.InstancedMesh}`;
+      let k = kinds.get(kind);
+      if (k === undefined) kinds.set(kind, (k = kinds.size));
+      if (k % WARM_PARTS === part) return;
       o.castShadow = false;
       resting.push(o);
     });

@@ -408,9 +408,10 @@ export function waitNow(): Wait | null {
 }
 
 function current(): Wait | null {
-  if (booting) return bootWait;
+  // (A card up under the boot screen, a race joined on a reload: its course counts on the card's bar.)
   const card = cards.findLast((w) => !w.closed);
   if (card) return card;
+  if (booting) return bootWait;
   if (!signWait || signWait.closed) {
     const wait: Wait = new Wait("sign", [], () => {
       wait.close();
