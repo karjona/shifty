@@ -16,7 +16,7 @@ use crate::world::{Rider, World};
 pub fn bot_input(world: &World, slot: usize) -> Input {
     match world.course().line {
         Line::Stadium(_) | Line::Loop(_) => jetski_input(world, slot),
-        Line::Run(run) => snowboard_input(world, run, slot),
+        Line::Run(run) => snowboard_input(world, run, slot, SnowBot::of(slot)),
     }
 }
 
@@ -197,6 +197,24 @@ fn stunt_stick(id: u8) -> (f32, f32) {
     }
 }
 
+/// How a snowboard bot rides: how hard it pushes (`pace`, 1 = flat out)
+/// and whether it goes for tricks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SnowBot {
+    pub pace: f32,
+    pub trickster: bool,
+}
+
+impl SnowBot {
+    /// The bot in a seat.
+    pub fn of(slot: usize) -> Self {
+        Self {
+            pace: 0.86 + (slot % 3) as f32 * 0.05,
+            trickster: slot % 3 != 1,
+        }
+    }
+}
+
 /// Slower than this (m/s) on the snow, a bot skates whatever the bend.
 const STUCK_SPEED: f32 = 3.0;
 
@@ -206,7 +224,7 @@ const STUCK_SPEED: f32 = 3.0;
 /// pop and let go at the lip; in the air they spin a 360 when there is time
 /// for it, and grab otherwise. Past the finish they pull up in the finish
 /// area (see `finish_area_input`).
-fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
+pub fn snowboard_input(world: &World, run: &Run, slot: usize, bot: SnowBot) -> Input {
     let Some(r) = world.riders[slot] else {
         return Input::default();
     };
@@ -216,8 +234,7 @@ fn snowboard_input(world: &World, run: &Run, slot: usize) -> Input {
     }
     let speed = r.speed();
     let half = run.width_at(s).half;
-    let pace = 0.86 + (slot % 3) as f32 * 0.05;
-    let trickster = slot % 3 != 1;
+    let SnowBot { pace, trickster } = bot;
     let mut lane = clamp(
         ((slot % 4) as f32 - 1.5) * 0.3 * half,
         -half + 2.0,

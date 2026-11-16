@@ -8,10 +8,15 @@
 //!
 //! `cargo run -p sim --example snow_lab --release [mountain|glades] [seed]`
 //! (every run by default; the arguments in any order).
+//!
+//! `snow_lab kinds [mountain|glades]` races the bots on each run in every
+//! season and a spread of weathers, and prints who wins by kind of bot
+//! (tricksters or not, and by pace), their times against the best a bot
+//! does alone flat out in the same conditions, their falls and missed gates.
 
 use std::time::Instant;
 
-use sim::bot::bot_input;
+use sim::bot::{SnowBot, bot_input, snowboard_input};
 use sim::conditions::{Conditions, Event, Season, TimeOfDay, Weather};
 use sim::course::Line;
 use sim::input::buttons;
@@ -48,14 +53,21 @@ const LABS: [Lab; 2] = [
 fn main() {
     let mut seed = 1;
     let mut only = None;
+    let mut by_kind = false;
     for a in std::env::args().skip(1) {
         if let Ok(n) = a.parse() {
             seed = n;
+        } else if a == "kinds" {
+            by_kind = true;
         } else {
             only = CourseId::ALL.iter().copied().find(|c| {
                 a.eq_ignore_ascii_case(&format!("{c:?}")) && c.sport() == Sport::Snowboard
             });
         }
+    }
+    if by_kind {
+        kinds(only);
+        return;
     }
     for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
         let course = lab.course;
@@ -448,5 +460,164 @@ fn conditions(lab: &Lab, seed: u32, home: f32) {
         "fall rocks ({}), s/offset: {}",
         rocks.len(),
         rocks.join(" ")
+    );
+}
+
+/// A spread of conditions for every season a run is ridden in.
+fn spread(course: CourseId) -> Vec<Event> {
+    let mut out = Vec::new();
+    for &season in Sport::Snowboard.seasons() {
+        for (weather, turns, time) in [
+            (Weather::Clear, Weather::Clear, TimeOfDay::Morning),
+            (Weather::Clear, Weather::Clear, TimeOfDay::Dusk),
+            (Weather::Cloudy, Weather::Cloudy, TimeOfDay::Noon),
+            (Weather::Snow, Weather::Snow, TimeOfDay::Noon),
+            (Weather::Windy, Weather::Clear, TimeOfDay::Noon),
+            (Weather::Storm, Weather::Cloudy, TimeOfDay::Noon),
+            (Weather::Rain, Weather::Rain, TimeOfDay::Afternoon),
+            (Weather::Cloudy, Weather::Storm, TimeOfDay::Dawn),
+        ] {
+            if !season.has(weather) || !season.has(turns) {
+                continue;
+            }
+            out.push(Event {
+                course,
+                conditions: Conditions {
+                    season,
+                    weather,
+                    turns,
+                    time: season.time_of(time),
+                },
+            });
+        }
+    }
+    out
+}
+
+/// One bot alone down the run riding as `bot`: its time (s) and falls.
+fn solo(event: Event, bot: SnowBot) -> (f32, u32) {
+    let mut w = World::for_event(event, SurfaceKind::Flat, 1);
+    let run = w.course().run().expect("a run");
+    w.spawn(0);
+    w.start_intro();
+    let mut inputs: Inputs = [None; MAX_RIDERS];
+    let mut falls = 0;
+    for _ in 0..60 * 60 * 6 {
+        inputs[0] = Some(snowboard_input(&w, run, 0, bot));
+        for e in w.step(&inputs) {
+            if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
+                falls += 1;
+            }
+        }
+        if w.riders[0].unwrap().race.finished() {
+            break;
+        }
+    }
+    let p = w.riders[0].unwrap().race;
+    let t = if p.finished() {
+        p.finish_ticks as f32 / 60.0
+    } else {
+        f32::NAN
+    };
+    (t, falls)
+}
+
+/// Who wins, by kind of bot, across a spread of conditions on each run.
+fn kinds(only: Option<CourseId>) {
+    const KINDS: [&str; 3] = ["slow trickster (slot%3=0)", "clean (slot%3=1)", "fast trickster (slot%3=2)"];
+    let mut wins = [0u32; 3];
+    let mut races = 0u32;
+    let mut gap = [Vec::<f32>::new(), Vec::new(), Vec::new()];
+    let mut best_gap = Vec::<f32>::new();
+    let mut falls = [0u32; 3];
+    let mut misses = [0u32; 3];
+    let mut most_misses = 0u8;
+    let mut points = [0u32; 3];
+    for lab in LABS.iter().filter(|l| only.is_none_or(|c| c == l.course)) {
+        println!("== {:?}", lab.course);
+        for event in spread(lab.course) {
+            // The best a bot does alone, flat out and clean.
+            let mut best = f32::MAX;
+            let mut best_falls = 0;
+            for pace in [0.95, 1.0, 1.05, 1.1, 1.15, 1.2] {
+                let (t, f) = solo(event, SnowBot { pace, trickster: false });
+                if std::env::var_os("SOLO").is_some() {
+                    println!("   alone at pace {pace}: {t:.2} s, {f} falls");
+                }
+                if t < best {
+                    best = t;
+                    best_falls = f;
+                }
+            }
+            let mut w = World::for_event(event, SurfaceKind::Flat, 1);
+            for slot in 0..MAX_RIDERS {
+                w.spawn(slot);
+            }
+            w.start_intro();
+            let mut inputs: Inputs = [None; MAX_RIDERS];
+            for _ in 0..60 * 60 * 8 {
+                for (slot, i) in inputs.iter_mut().enumerate() {
+                    *i = Some(bot_input(&w, slot));
+                }
+                for e in w.step(&inputs) {
+                    if e.kind == EventKind::Bail && w.race.phase == Phase::Racing {
+                        falls[usize::from(e.slot) % 3] += 1;
+                    }
+                }
+                if w.race.phase == Phase::Results {
+                    break;
+                }
+            }
+            races += 1;
+            let standings = w.standings();
+            let winner = usize::from(standings[0].slot);
+            wins[winner % 3] += 1;
+            let mut line = Vec::new();
+            for st in &standings {
+                let k = usize::from(st.slot) % 3;
+                let p = st.progress;
+                misses[k] += u32::from(p.misses);
+                most_misses = most_misses.max(p.misses);
+                points[k] += u32::from(p.points);
+                if p.finished() {
+                    let t = p.finish_ticks as f32 / 60.0;
+                    gap[k].push(t / best - 1.0);
+                    line.push(format!("{}:{t:.1}", st.slot + 1));
+                } else {
+                    line.push(format!("{}:DNF", st.slot + 1));
+                }
+            }
+            let first = standings[0].progress.finish_ticks as f32 / 60.0;
+            best_gap.push(first / best - 1.0);
+            let c = event.conditions;
+            println!(
+                "{:?} {:?}>{:?} {:5.1}: alone flat out {best:.2} s ({best_falls} falls) | {}",
+                c.season,
+                c.weather,
+                c.turns,
+                f32::from(c.time) / 6.0,
+                line.join(" ")
+            );
+        }
+    }
+    let median = |v: &mut Vec<f32>| {
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() / 2).copied().unwrap_or(f32::NAN) * 100.0
+    };
+    println!("\n== {races} races");
+    for k in 0..3 {
+        println!(
+            "{:28} wins {:3}  median {:+5.1}% vs alone flat out  falls {:3}  missed gates {:3}  points {}",
+            KINDS[k],
+            wins[k],
+            median(&mut gap[k]),
+            falls[k],
+            misses[k],
+            points[k]
+        );
+    }
+    println!(
+        "winner median {:+.1}% vs alone flat out; most gates one bot missed in a race: {most_misses}",
+        median(&mut best_gap)
     );
 }
