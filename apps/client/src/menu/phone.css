@@ -674,7 +674,7 @@
   top: var(--body-top);
   bottom: var(--edge-b);
   right: var(--edge-r);
-  width: 800px;
+  width: min(800px, 100% - var(--edge-l) - var(--edge-r) - 500px);
   max-width: calc(100% - var(--edge-l) - var(--edge-r));
   align-items: flex-start;
   justify-content: flex-end;
@@ -781,7 +781,7 @@
     padding: 0 10px;
   }
   :root[data-compact] .login-main {
-    width: 700px;
+    width: min(760px, 100% - var(--edge-l) - var(--edge-r) - 330px);
   }
   :root[data-compact] body:has(.footer) #loading {
     bottom: calc(var(--edge-b) + 2 * var(--tap) + 8px);

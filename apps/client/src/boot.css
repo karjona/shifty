@@ -180,8 +180,8 @@
    game stays fixed in place. */
 html[data-swipe] {
   height: auto;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: visible;
+  touch-action: pan-x pan-y;
 }
 html[data-swipe] body {
   height: auto;

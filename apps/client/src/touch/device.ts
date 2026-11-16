@@ -170,14 +170,18 @@ export function exitFullscreen(): void {
  * phone from pinch-zooming the game.
  */
 export function installScreen(): void {
-  // Safari's pinch zoom on a phone (the viewport's maximum-scale doesn't stop it).
-  document.addEventListener("gesturestart", (e) => {
-    if (touchScreen()) e.preventDefault();
-  });
+  // Safari's pinch zoom on a touch screen (the viewport's maximum-scale doesn't stop it). Not on an
+  // iPhone's Safari: a listener over the whole page holds every swipe until the page's script has seen it,
+  // and the swipe that takes Safari's bars away is lost; there `touch-action` keeps the pinch out (boot.css).
+  if (!phoneSafari())
+    document.addEventListener("gesturestart", (e) => {
+      if (touchScreen()) e.preventDefault();
+    });
   addEventListener(
     "pointerup",
     (e) => {
-      if (e.pointerType === "mouse" || declined || standalone() || !touchScreen()) return;
+      // An iPhone's Safari takes its bars away with a swipe instead (installSafariBars).
+      if (e.pointerType === "mouse" || declined || standalone() || !touchScreen() || phoneSafari()) return;
       enterFullscreen();
     },
     { capture: true, passive: true },
