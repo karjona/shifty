@@ -337,7 +337,7 @@ function Searching({ onClose }: { onClose: () => void }) {
     return () => {
       done.current = true;
       clearTimeout(timer);
-      socket?.close();
+      socket?.close(1000, "left");
     };
   }, []);
   return (

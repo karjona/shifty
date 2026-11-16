@@ -4,11 +4,11 @@
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import { setClubRiders } from "../../game/backdrops.ts";
+import { setClubParty, setClubRider } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { type JoinTicket, parseJoinTicket } from "../../net/transport.ts";
-import { type PlanRequest, TILT, parsePlan } from "@shifty/rider";
-import { lobbySocket, meQuery, roomExists, setPendingRace } from "../api.ts";
+import { type Appearance, type PlanRequest, TILT, circuit, parsePlan } from "@shifty/rider";
+import { lobbySocket, lookOf, meQuery, roomExists, setPendingRace } from "../api.ts";
 import { useAction, useAutoFocus, useBackdrop } from "../hooks.ts";
 import { toast } from "../toast.tsx";
 import { PlanPickers, PlanRows } from "../plan.tsx";
@@ -54,6 +54,8 @@ function parseRoomMessage(data: unknown): RoomMessage | null {
                 userId: String(Reflect.get(x, "userId")),
                 handle: String(Reflect.get(x, "handle")),
                 ready: Reflect.get(x, "ready") === true,
+                away: Reflect.get(x, "away") === true,
+                appearance: lookOf(String(Reflect.get(x, "look") ?? "")),
               },
             ]
           : [],
@@ -68,27 +70,46 @@ interface RoomState {
   hostId: string;
   plan: PlanRequest;
   bots: number;
-  members: { userId: string; handle: string; ready: boolean }[];
+  /** `away`: their screen dropped and the room keeps their place a moment. */
+  members: { userId: string; handle: string; ready: boolean; away: boolean; appearance: Appearance | null }[];
   racing: string[];
 }
+
+/** The last state of each room this page has been in, shown again at once on coming back to it. */
+const lastRooms = new Map<string, RoomState>();
 
 export function RoomScreen() {
   useBackdrop("club");
   const t = useT();
   const navigate = useNavigate();
   const { code } = route.useParams();
-  const me = useSuspenseQuery(meQuery).data?.user.id ?? null;
+  const { data: account } = useSuspenseQuery(meQuery);
+  const me = account?.user.id ?? null;
+  const appearance = account?.rider?.appearance ?? null;
   const queryClient = useQueryClient();
-  const [room, setRoom] = useState<RoomState | null>(null);
+  const [room, setRoom] = useState<RoomState | null>(() => lastRooms.get(code) ?? null);
+  // Whether this socket has said how the room is (until then, what's shown is the last known state).
+  const [fresh, setFresh] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  // You on the terrace (also when the room is opened straight from a link), dressed for its race.
+  const sport = room && !room.plan.tilt && circuit(room.plan.race.course ?? -1)?.sport === "snow" ? "winter" : "summer";
+  useEffect(() => {
+    if (appearance) setClubRider(appearance, sport);
+  }, [appearance, sport]);
   const ws = useRef<WebSocket | null>(null);
   const leaving = useRef(false);
   useAutoFocus();
-  useLoading(room === null || reconnecting, reconnecting ? t.room.reconnecting : t.room.connecting);
+  useLoading(!fresh, reconnecting ? t.room.reconnecting : t.room.connecting);
 
+  /** Says to the room you're leaving it on purpose (a drop keeps your place a moment instead). */
+  const sayLeave = () => {
+    const socket = ws.current;
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ t: "leave" }));
+    socket?.close(1000, "left");
+  };
   const leave = () => {
     leaving.current = true;
-    ws.current?.close();
+    sayLeave();
     void navigate({ to: "/play", search: { mode: "room" } });
   };
   useAction("back", leave);
@@ -103,12 +124,16 @@ export function RoomScreen() {
         socket.send(JSON.stringify({ t: "ready", ready: true }));
       }
       ready.current = { was: mineNow?.ready ?? false, back: false };
+      lastRooms.set(code, m.room);
       setRoom(m.room);
-      setClubRiders(m.room.members.length);
+      setFresh(true);
+      setClubParty(
+        m.room.members.filter((x) => x.userId !== me).map((x) => ({ id: x.userId, appearance: x.appearance })),
+      );
     } else if (m?.t === "ticket") {
       leaving.current = true;
       setPendingRace({ ticket: m.ticket, back: { to: "/room/$code", params: { code } } });
-      socket.close();
+      socket.close(1000, "racing");
       void navigate({ to: "/race", replace: true });
     } else if (m?.t === "error") {
       const msg =
@@ -127,6 +152,7 @@ export function RoomScreen() {
   const giveUp = useEffectEvent((closeCode: number, gone: boolean) => {
     if (leaving.current) return;
     leaving.current = true;
+    lastRooms.delete(code);
     const why =
       closeCode === 4001 ? t.room.full : closeCode === 4000 ? t.room.elsewhere : gone ? t.room.gone : t.room.lost;
     toast(why, "error");
@@ -153,6 +179,7 @@ export function RoomScreen() {
           return;
         }
         setReconnecting(true);
+        setFresh(false);
         ready.current.back = true;
         checkSession();
         timer = setTimeout(
@@ -181,20 +208,31 @@ export function RoomScreen() {
     return () => {
       leaving.current = true;
       clearTimeout(timer);
-      ws.current?.close();
+      ws.current?.close(1000, "left");
     };
   }, [code]);
+  // Friends on the terrace from the first frame, as they were last seen.
+  useEffect(() => {
+    const known = lastRooms.get(code);
+    if (known) {
+      setClubParty(
+        known.members.filter((x) => x.userId !== me).map((x) => ({ id: x.userId, appearance: x.appearance })),
+      );
+    }
+  }, [code, me]);
 
-  const send = (msg: object) => ws.current?.send(JSON.stringify(msg));
+  const send = (msg: object) => {
+    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(msg));
+  };
   const host = room !== null && me !== null && room.hostId === me;
   const mine = room?.members.find((m) => m.userId === me);
   const start = () => send({ t: "start" });
   // The ready (or start) button waits for the room; it takes the focus once it's here.
-  const loaded = room !== null;
+  const loaded = fresh;
   useEffect(() => {
     if (loaded) document.querySelector<HTMLElement>(".room .actions .btn-primary")?.focus();
   }, [loaded]);
-  useAction("play", () => (host ? start() : send({ t: "ready", ready: !mine?.ready })), room !== null);
+  useAction("play", () => (host ? start() : send({ t: "ready", ready: !mine?.ready })), fresh);
 
   return (
     <div className="screen room">
@@ -209,9 +247,11 @@ export function RoomScreen() {
               <>
                 <ul className="members">
                   {room.members.map((m) => (
-                    <li key={m.userId} className={m.userId === me ? "me" : undefined}>
+                    <li key={m.userId} className={`${m.userId === me ? "me" : ""} ${m.away ? "away" : ""}`}>
                       <Handle handle={m.handle} />
-                      {m.userId === room.hostId ? (
+                      {m.away ? (
+                        <span className="badge quiet">{t.room.away}</span>
+                      ) : m.userId === room.hostId ? (
                         <span className="badge">{t.room.host}</span>
                       ) : (
                         <span className={`badge ${m.ready ? "ok" : ""}`}>
@@ -249,7 +289,14 @@ export function RoomScreen() {
           </Panel>
           <footer className="actions">
             {host ? (
-              <Button kind="primary" glyph="play" className="play-button big" onClick={start} autoFocus>
+              <Button
+                kind="primary"
+                glyph="play"
+                className="play-button big"
+                onClick={start}
+                disabled={!fresh}
+                autoFocus
+              >
                 {t.room.start}
               </Button>
             ) : (
@@ -258,7 +305,7 @@ export function RoomScreen() {
                 glyph="play"
                 className="play-button big"
                 onClick={() => send({ t: "ready", ready: !mine?.ready })}
-                disabled={!room}
+                disabled={!fresh}
                 autoFocus
               >
                 {mine?.ready ? t.room.notYet : t.room.imReady}

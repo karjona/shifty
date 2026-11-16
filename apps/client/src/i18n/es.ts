@@ -327,6 +327,7 @@ export const es: Messages = {
     notReady: "No listo",
     imReady: "¡Listo!",
     notYet: "Todavía no",
+    away: "Ausente",
     event: "Prueba",
     circuit: "Circuito",
     season: "Estación",

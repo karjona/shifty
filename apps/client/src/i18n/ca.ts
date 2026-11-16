@@ -327,6 +327,7 @@ export const ca: Messages = {
     notReady: "No a punt",
     imReady: "Estic a punt",
     notYet: "Encara no",
+    away: "Absent",
     event: "Prova",
     circuit: "Circuit",
     season: "Estació",

@@ -1734,6 +1734,14 @@ a {
 .members li.me .handle {
   font-style: italic;
 }
+/* Someone whose screen dropped: still in the room for a moment, quietly. */
+.members li.away .handle {
+  color: var(--ink-3);
+}
+.badge.quiet {
+  color: var(--ink-3);
+  box-shadow: inset 0 0 0 2px var(--rule);
+}
 .members .badge {
   align-self: center;
 }

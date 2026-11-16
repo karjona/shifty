@@ -327,6 +327,7 @@ export const en = {
     notReady: "Not ready",
     imReady: "I'm ready",
     notYet: "Not yet",
+    away: "Away",
     event: "Event",
     circuit: "Circuit",
     season: "Season",
