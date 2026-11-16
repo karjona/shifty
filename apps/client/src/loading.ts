@@ -291,15 +291,42 @@ export class Wait {
 
   /** What the line says: a hold's own words, or the step with the most still to do (null: nothing yet). */
   saysWhat(t = now()): { text: string } | { step: Step } | null {
+    if (this.closed) return this.saying.step ? { step: this.saying.step } : null;
     const label = [...this.holds.values()].findLast((l) => l !== null);
     if (label) return { text: label() };
-    const live = this.steps(t).filter((s) => s.live);
-    const most = live.toSorted((a, b) => b.weight * (1 - b.done) - a.weight * (1 - a.done))[0]?.step ?? null;
+    const steps = this.steps(t);
+    const live = steps.filter((s) => s.live);
+    // (Between steps: the next one it has planned.)
+    const most =
+      live.toSorted((a, b) => b.weight * (1 - b.done) - a.weight * (1 - a.done))[0]?.step ??
+      steps.find((s) => s.done === 0 && !this.jobs.some((j) => j.step === s.step))?.step ??
+      null;
     // Steps come and go quickly in places: the line keeps one a moment.
     const held = this.saying.step;
     if (most !== held && (held === null || t - this.saying.since > 600 || !live.some((s) => s.step === held)))
       this.saying = { step: most ?? held, since: t };
     return this.saying.step ? { step: this.saying.step } : null;
+  }
+
+  /** Dev: what it is waiting on, step by step (see `window.__loads`). */
+  inspect(t = now()): unknown {
+    return {
+      name: this.name,
+      shown: Math.round(this.shown * 1000) / 10,
+      steps: this.steps(t).map((s) => ({
+        step: s.step,
+        live: s.live,
+        weight: Math.round(s.weight),
+        done: Math.round(s.done * 1000) / 10,
+        jobs: this.jobs
+          .filter((j) => j.step === s.step)
+          .map(
+            (j) =>
+              `${j.ended === null ? "live" : "over"} ${j.done}/${j.total} ${Math.round((j.ended ?? t) - j.start)}ms`,
+          ),
+      })),
+      holds: this.holds.size,
+    };
   }
 
   /** It has progress to show: something counted, or (for a wait with a name of its own) steps timed before. */
@@ -369,6 +396,12 @@ const cards: Wait[] = [];
 /** The sign's wait, while something shorter loads. */
 let signWait: Wait | null = null;
 let quiet = 0;
+
+// Dev: `window.__loads()` lists the waits that are open and what each waits on.
+if (import.meta.env.DEV)
+  Reflect.set(globalThis, "__loads", () =>
+    [booting ? bootWait : null, ...cards, signWait].flatMap((w) => (w && !w.closed ? [w.inspect()] : [])),
+  );
 
 /** The wait work begun now goes to (null: background work, under `quietly`). */
 export function waitNow(): Wait | null {

@@ -243,13 +243,13 @@ export class Engine {
   warm(compile: () => Promise<void>, hold = true, wait: Wait | null = waitNow()): Promise<void> {
     this.warming++;
     if (hold) this.holding++;
+    // (Counted from now: waiting its turn is part of it.)
+    const compiling = begin("shaders", wait);
     const run = this.warmed
-      .then(() => {
-        const compiling = begin("shaders", wait && !wait.closed ? wait : null);
-        return countingCompiles((done, total) => compiling.count(done, total), compile).finally(() => compiling.end());
-      })
+      .then(() => countingCompiles((done, total) => compiling.count(done, total), compile))
       .catch((e: unknown) => console.error(e))
       .finally(() => {
+        compiling.end();
         this.warming--;
         if (hold) this.holding--;
       });
