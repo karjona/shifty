@@ -635,6 +635,8 @@ export const en = {
     newBest: "NEW PERSONAL BEST!",
     newRecord: "NEW RECORD!",
     retry: "Restart lap",
+    /** The race menu: leaving ends the session. */
+    leave: "Leave the session",
     /** The weather row's note when the pick isn't clear. */
     practice: "Practice",
     practiceNote: "Practice: timed, not ranked, no ghosts.",
@@ -651,7 +653,7 @@ export const en = {
     noLap: "No clean lap",
     /** Why the session ended, when the room closed it. */
     ended: {
-      idle: "The session closed after three minutes without riding.",
+      idle: "The session closed after three minutes with the controls untouched.",
       hour: "The session closed after an hour.",
     },
   },

@@ -631,6 +631,7 @@ export const es: Messages = {
     newBest: "¡NUEVO RÉCORD PERSONAL!",
     newRecord: "¡NUEVO RÉCORD!",
     retry: "Reiniciar vuelta",
+    leave: "Salir de la sesión",
     practice: "Práctica",
     practiceNote: "Práctica: con tiempo, sin clasificación ni fantasmas.",
     void: "NULA",
@@ -641,7 +642,7 @@ export const es: Messages = {
     laps: (n: number) => (n === 1 ? "1 vuelta" : `${n.toLocaleString("es")} vueltas`),
     noLap: "Ninguna vuelta limpia",
     ended: {
-      idle: "La sesión se ha cerrado tras tres minutos sin rodar.",
+      idle: "La sesión se ha cerrado tras tres minutos sin tocar los controles.",
       hour: "La sesión se ha cerrado al cabo de una hora.",
     },
   },

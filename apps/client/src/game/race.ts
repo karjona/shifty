@@ -522,6 +522,8 @@ export class RaceSession implements Stage {
     this.trialBeat = Math.max(this.trialBeat, record ? 2 : 1);
     trial.best = ms;
     if (record) trial.record = ms;
+    // Kept for a reload of this tab, with what the session set.
+    trial.beat = this.trialBeat;
     keepTrial(trial);
     // The race server reports the lap as it ends; the lobby has it a moment later.
     if (this.ghosts) setTimeout(() => void this.refreshBest(trial, ms), 2500);
@@ -559,6 +561,7 @@ export class RaceSession implements Stage {
     if (this.opts.trial) {
       const trial = { ...this.opts.trial };
       this.trial = trial;
+      this.trialBeat = trial.beat ?? 0;
       this.hud.trial = [];
       // Practice weather races no ghosts.
       const ghosts = new Ghosts(trial.weather === 0 ? trial.ghosts : [], this.opts.hud);

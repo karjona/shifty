@@ -341,6 +341,8 @@ export interface TrialRace {
   /** Your best and the record (ms), if any. */
   best: number | null;
   record: number | null;
+  /** What the session set on the board so far: 2 the record, 1 your best (absent: nothing). */
+  beat?: number;
 }
 
 /** A race to go to: its ticket, where it goes back to when it's over, and how to race it again. */
@@ -434,6 +436,12 @@ export function takePendingRace(): PendingRace | null {
   return r;
 }
 
+/** The next session of a time trial: its picks and the times to beat, without what this session set. */
+export function nextSession(trial: TrialRace): TrialRace {
+  const { course, season, weather, time, ghosts, best, record } = trial;
+  return { course, season, weather, ...(time === undefined ? {} : { time }), ghosts, best, record };
+}
+
 /** A time trial as the session moved it on (your new best's ghost, the times to beat), for a reload of this tab. */
 export function keepTrial(trial: TrialRace): void {
   try {
@@ -492,6 +500,7 @@ function keptRace(): PendingRace | null {
         ),
         best: typeof t.best === "number" ? t.best : null,
         record: typeof t.record === "number" ? t.record : null,
+        ...(t.beat === 1 || t.beat === 2 ? { beat: t.beat } : {}),
       }
     : undefined;
   return { ticket, back, trial, plan: parsePlan(v.plan) ?? undefined, rejoin: true };

@@ -25,6 +25,7 @@ import {
   leftMatch,
   fetchBoard,
   meQuery,
+  nextSession,
   playSingle,
   playTimeTrial,
   raceMode,
@@ -283,7 +284,8 @@ function RaceRun({
     setBusy(true);
     setError(null);
     try {
-      const trialRace = mode === "trial" ? (session?.trialRace() ?? race.trial) : undefined;
+      const kept = mode === "trial" ? (session?.trialRace() ?? race.trial) : undefined;
+      const trialRace = kept && nextSession(kept);
       const ticket = trialRace ? await playTimeTrial(trialRace) : await playSingle(race.plan ?? { tilt: true });
       const first = readPlan(ticket.token)[0];
       const next = new SeasonCard(first?.conditions.season ?? "summer", true, first?.course ?? null);
@@ -491,7 +493,7 @@ function RaceRun({
               {t.race.resume}
             </Button>
             {trial && <Button onClick={retry}>{t.trial.retry}</Button>}
-            <Button onClick={leave}>{t.race.leave}</Button>
+            <Button onClick={leave}>{trial ? t.trial.leave : t.race.leave}</Button>
             {online && <p className="muted small">{t.race.noPause}</p>}
           </div>
         </div>
