@@ -59,7 +59,17 @@ export interface CourseData {
   path: PathPoint[];
 }
 
-export type LandKind = "town" | "island" | "rock" | "headland" | "coast" | "beach" | "mole" | "stack" | "arch" | "jetty";
+export type LandKind =
+  | "town"
+  | "island"
+  | "rock"
+  | "headland"
+  | "coast"
+  | "beach"
+  | "mole"
+  | "stack"
+  | "arch"
+  | "jetty";
 
 /** What a moored boat is: the sailboats at a jetty are drawn with it (the club's). */
 export type MooredKind = "llaut" | "trawler" | "yacht" | "inflatable" | "sailboat";

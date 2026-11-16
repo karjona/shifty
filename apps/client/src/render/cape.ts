@@ -48,7 +48,7 @@ import { cutShore, traceShore } from "./coast/shoreline.ts";
 import { buildTown } from "./coast/town.ts";
 import { Planting } from "./coast/trees.ts";
 import type { CourseData, LandData } from "./course.ts";
-import { landDistance, rng } from "./land.ts";
+import { landDistance } from "./land.ts";
 import type { RiderView } from "./world.ts";
 import type { Steps } from "./slices.ts";
 import { COAST_SIERRA, farMaterial, foothills, hash, seaHorizon, sierra } from "./scenery.ts";
