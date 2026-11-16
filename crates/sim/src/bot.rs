@@ -93,7 +93,7 @@ impl JetskiBot {
 const FAST_PACE: f32 = 1.0;
 const MIDDLING_PACE: f32 = 0.92;
 const SLOW_PACE: f32 = 0.84;
-const TRICKS_PACE: f32 = 0.05;
+const TRICKS_PACE: f32 = 0.015;
 /// How far off its line (m) a ramp's middle can be for a trickster to
 /// take it.
 const RAMP_REACH: f32 = 4.5;
@@ -143,8 +143,10 @@ impl RacingLine {
             (b.s, b.offset + side)
         };
         let b = &course.buoys[next];
-        // A lane over at every buoy, round all four in turn.
-        let leg = usize::from(bot.lane) + next + n * usize::from(r.race.lap);
+        // A lane over at every buoy, round all four in turn (counting laps
+        // from the last buoy, so the lane holds over the start line).
+        let lap = usize::from(r.race.lap) + usize::from(gate == 0);
+        let leg = usize::from(bot.lane) + next + n * lap;
         let lane = |k: usize| ((k % 4) as f32 - 1.5) * LANE_WIDTH;
         Self {
             prev: passing(next + n - 1),

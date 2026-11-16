@@ -110,6 +110,26 @@ fn race(event: Event, seed: u32) -> Outcome {
         }
         for e in w.step(&inputs) {
             match e.kind {
+                EventKind::Buoy {
+                    buoy, ok: false, ..
+                } if w.race.phase == Phase::Racing && std::env::var("BOT_MISSES").is_ok() => {
+                    let r = w.riders[usize::from(e.slot)].unwrap();
+                    let near = w
+                        .riders
+                        .iter()
+                        .enumerate()
+                        .filter(|&(k, o)| {
+                            k != usize::from(e.slot)
+                                && o.is_some_and(|o| (o.pos - r.pos).horizontal().length() < 4.0)
+                        })
+                        .count();
+                    println!(
+                        "  missed buoy {buoy} seat {} at {:.1}s, flying {}, riders within 4 m {near}",
+                        e.slot,
+                        w.race.elapsed(w.tick) as f32 / 60.0,
+                        !r.grounded
+                    );
+                }
                 EventKind::Bail if w.race.phase == Phase::Racing => {
                     bails[usize::from(e.slot)] += 1;
                 }
