@@ -14,8 +14,8 @@ const CUES: Record<EndCue, { sound: SoundName; level: number; rate: number }> = 
   roll: { sound: "roll", level: 0.8, rate: 1 },
   payout: { sound: "payout", level: 0.9, rate: 1 },
   win: { sound: "win", level: 0.9, rate: 1 },
-  lastChance: { sound: "buoyMiss", level: 1, rate: 0.75 },
-  disqualified: { sound: "wrongWay", level: 1, rate: 0.7 },
+  lastChance: { sound: "lastChance", level: 1, rate: 1 },
+  disqualified: { sound: "disqualified", level: 1, rate: 1 },
 };
 
 /** A whole tone, as a playback rate. */
