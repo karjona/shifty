@@ -15,8 +15,10 @@ use tracing::{info, warn};
 use crate::record::RunReport;
 use crate::room::{ConnId, RaceReport, Room, RoomConfig};
 
-/// Rooms with no humans for this long shut down.
+/// Rooms with no humans for this long shut down, or this long when a seat
+/// is kept for a player who left a Tilt under way (to come back to).
 const EMPTY_ROOM_TTL: Duration = Duration::from_secs(30);
+const HELD_ROOM_TTL: Duration = Duration::from_secs(180);
 /// Rooms that ended are remembered this long (longer than a join token
 /// lives), so tokens signed before the end can't start the plan again.
 const ENDED_MEMORY_SECS: u64 = 15 * 60;
@@ -33,8 +35,11 @@ pub enum RoomCmd {
         conn: ConnId,
         packet: InputPacket,
     },
+    /// The connection ended: with a goodbye (the player left), or without
+    /// (the seat waits a while for them).
     Leave {
         conn: ConnId,
+        bye: bool,
     },
 }
 
@@ -122,7 +127,8 @@ impl Rooms {
         {
             return Ok(h.clone());
         }
-        if self.ended_since(claims, now_unix()) {
+        // A rejoin ticket only seats a player in a room still running.
+        if claims.rejoin || self.ended_since(claims, now_unix()) {
             return Err(RejectReason::Over);
         }
         if self.draining.load(Ordering::Relaxed) {
@@ -209,11 +215,15 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
                     }
                 }
                 RoomCmd::Inputs { conn, packet } => room.handle_inputs(conn, &packet, now_ms(now)),
-                RoomCmd::Leave { conn } => {
+                RoomCmd::Leave { conn, bye } => {
                     if room.slot_of(conn).is_some() {
-                        info!(room = %room.config.id, conn, "player left");
+                        info!(room = %room.config.id, conn, bye, "player left");
                     }
-                    room.leave(conn);
+                    if bye {
+                        room.leave(conn);
+                    } else {
+                        room.disconnect(conn, now_ms(now));
+                    }
                     conns.remove(&conn);
                 }
             }
@@ -269,7 +279,12 @@ async fn run_room(mut room: Room, mut rx: mpsc::Receiver<RoomCmd>, rooms: &Rooms
         }
         if room.human_count() == 0 {
             let since = *empty_since.get_or_insert(now);
-            if now.duration_since(since) > EMPTY_ROOM_TTL {
+            let ttl = if room.holds_seats() {
+                HELD_ROOM_TTL
+            } else {
+                EMPTY_ROOM_TTL
+            };
+            if now.duration_since(since) > ttl {
                 break;
             }
         } else {
@@ -309,7 +324,19 @@ mod tests {
             look: String::new(),
             setups: Vec::new(),
             trial: false,
+            rejoin: false,
         }
+    }
+
+    #[test]
+    fn a_rejoin_ticket_never_starts_a_room() {
+        let rooms = Rooms::new();
+        let ticket = JoinClaims {
+            rejoin: true,
+            ..claims("r9", 0)
+        };
+        assert_eq!(rooms.get_or_create(&ticket).err(), Some(RejectReason::Over));
+        assert_eq!(rooms.room_count(), 0);
     }
 
     #[test]

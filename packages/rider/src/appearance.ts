@@ -9,6 +9,7 @@ import {
   SPORTS,
   type Slot,
   defaultOutfits,
+  fits,
   item,
   itemByNumber,
   kitProblem,
@@ -118,30 +119,48 @@ export function fromBase64Url(s: string): Uint8Array | null {
 const rides = (sport: keyof Outfits) => ITEMS.filter((i) => i.model.startsWith(`${sport}.ride.`)).map((i) => i.id);
 
 /**
- * A bot's appearance, the same on every client: a random look in starter
- * clothes on any of the rides, from the room's seed and the bot's seat.
+ * What bots dress in, per sport: the garments the art has built (the
+ * starter kits' models), each in any of its colourways, and how often the
+ * slot is left bare (never where one is required).
+ */
+const BOT_WEAR: Record<keyof Outfits, readonly (readonly [Slot, readonly string[], number])[]> = {
+  summer: [
+    ["head", ["summer.head.cap"], 0.45],
+    ["eyes", ["summer.eyes.shades"], 0.4],
+    ["vest", ["summer.vest.foam"], 0],
+    ["bottom", ["summer.bottom.boardshorts", "summer.bottom.swimsuit"], 0],
+    ["feet", ["summer.feet.watershoes"], 0.35],
+  ],
+  winter: [
+    ["head", ["winter.head.beanie"], 0.15],
+    ["eyes", ["winter.eyes.goggles"], 0.2],
+    ["top", ["winter.top.puffer"], 0],
+    ["bottom", ["winter.bottom.pants"], 0],
+    ["hands", ["winter.hands.gloves"], 0.3],
+    ["feet", ["winter.feet.boots"], 0],
+  ],
+};
+
+/**
+ * A bot's appearance, the same on every client: a random look (body, skin,
+ * hair, face, height and build) in the built garments in any colourway, on
+ * any ride, from the room's seed and the bot's seat.
  */
 export function botAppearance(seed: number, slot: number): Appearance {
   const next = rng((seed * 31 + slot * 7919 + 17) >>> 0);
   const look = randomLook(next);
   const outfits = defaultOutfits(look.body);
   const pick = <T>(xs: readonly T[]) => xs[Math.min(xs.length - 1, Math.floor(next() * xs.length))]!;
-  // Starter colours vary per bot, so the field isn't all one kit; bots ride any ride, so a race shows them all.
-  const swap: [keyof Outfits, Slot, string[]][] = [
-    ["summer", "vest", ["summer.vest.foam.yellow", "summer.vest.foam.red"]],
-    [
-      "summer",
-      "bottom",
-      look.body === "female"
-        ? ["summer.bottom.swimsuit.black", "summer.bottom.swimsuit.red"]
-        : ["summer.bottom.boardshorts.navy", "summer.bottom.boardshorts.teal"],
-    ],
-    ["summer", "ride", rides("summer")],
-    ["winter", "top", ["winter.top.puffer.red", "winter.top.puffer.blue"]],
-    ["winter", "head", ["winter.head.beanie.white", "winter.head.beanie.red"]],
-    ["winter", "bottom", ["winter.bottom.pants.navy", "winter.bottom.pants.grey"]],
-    ["winter", "ride", rides("winter")],
-  ];
-  for (const [sport, where, ids] of swap) outfits[sport][where] = pick(ids);
+  for (const sport of SPORTS) {
+    for (const [where, models, bare] of BOT_WEAR[sport]) {
+      const choices = ITEMS.filter((i) => models.includes(i.model) && fits(i, look.body)).map((i) => i.id);
+      // (Drawn whatever happens, so each choice keeps its place in the sequence.)
+      const left = next() < bare;
+      const id = pick(choices);
+      if (left) delete outfits[sport][where];
+      else outfits[sport][where] = id;
+    }
+    outfits[sport].ride = pick(rides(sport));
+  }
   return { look, outfits };
 }

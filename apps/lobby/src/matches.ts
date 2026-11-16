@@ -1,9 +1,10 @@
 // Starting races: pick a race server, record the match (online modes) and
 // sign each player's join ticket.
-import { and, eq } from "drizzle-orm";
-import { openDb } from "./db/client.ts";
+import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
+import { type Db, openDb } from "./db/client.ts";
 import { match, matchPlayer } from "./db/schema.ts";
 import { databaseUrl, type Env } from "./env.ts";
+import type { ServerInfo } from "./servers.ts";
 import { type RiderClaims, loadRiderClaims } from "./riders.ts";
 import { type PlanRequest, TILT } from "@shifty/rider";
 import { type JoinTicket, mintTicket, planName, planSeed, roomId } from "./tickets.ts";
@@ -107,6 +108,53 @@ export async function startMatch(
     tickets.set(r.userId, ticket);
   }
   return { tickets, seed };
+}
+
+/** A matchmaking race counts as under way (and can be rejoined) this long after it started, at most. */
+const LIVE_MS = 30 * 60_000;
+
+/**
+ * The matchmaking race a player is still in (its plan not over, started
+ * lately, its race server up among `servers`), with a ticket back into it.
+ * The ticket only seats the player in the race's room if it still runs.
+ */
+export async function liveMatch(
+  db: Db,
+  signingKey: string,
+  servers: ServerInfo[],
+  racer: Racer,
+  nowMs = Date.now(),
+): Promise<{ match: string; ticket: JoinTicket } | null> {
+  const [m] = await db
+    .select({ id: match.id, server: match.server, look: matchPlayer.look, setups: matchPlayer.setups })
+    .from(match)
+    .innerJoin(matchPlayer, and(eq(matchPlayer.matchId, match.id), eq(matchPlayer.userId, racer.userId)))
+    .where(and(eq(match.mode, "matchmaking"), isNull(match.endedAt), gt(match.createdAt, new Date(nowMs - LIVE_MS))))
+    .orderBy(desc(match.createdAt))
+    .limit(1);
+  const server = m ? servers.find((s) => s.addr === m.server && !s.draining) : undefined;
+  if (!m || !server) return null;
+  const [{ humans } = { humans: 1 }] = await db
+    .select({ humans: count() })
+    .from(matchPlayer)
+    .where(eq(matchPlayer.matchId, m.id));
+  const ticket = await mintTicket(
+    signingKey,
+    {
+      server: { addr: server.addr, version: server.version, certHashes: server.certHashes },
+      room: m.id,
+      pid: racer.userId,
+      name: racer.handle,
+      plan: TILT,
+      seed: 0,
+      bots: Math.max(0, FIELD - humans),
+      rider: { look: m.look ?? "", setups: m.setups ?? [] },
+      humans,
+      rejoin: true,
+    },
+    nowMs,
+  );
+  return { match: m.id, ticket };
 }
 
 /** Whether the last race of a match's plan has finished. */

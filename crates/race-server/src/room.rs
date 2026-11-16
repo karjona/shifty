@@ -46,6 +46,9 @@ const LEAD_WINDOW_TICKS: u32 = 30;
 /// is dropped by the connection, one whose page has stopped (hung) by the
 /// room, both after the same while.
 pub const IDLE_TIMEOUT_MS: u64 = 10_000;
+/// A player whose connection went (a reload, a closed tab, a dropped
+/// network) keeps the seat this long, the rider coasting, to come back to it.
+pub const AWAY_GRACE_MS: u64 = 20_000;
 /// The grid waits at most this long for every screen to be ready; screens
 /// still loading then see the race wherever it is.
 pub const GRID_TIMEOUT_TICKS: u32 = TICK_HZ * 30;
@@ -235,6 +238,19 @@ pub struct RaceReport {
 struct Entrant {
     pid: Option<String>,
     points: u16,
+    /// A bot rides this seat for a player who left a Tilt under way: who,
+    /// and the points they had. They take it back if they come back.
+    held: Option<(String, u16)>,
+}
+
+impl Entrant {
+    fn new(pid: Option<String>) -> Self {
+        Self {
+            pid,
+            points: 0,
+            held: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -269,6 +285,8 @@ struct Player {
     /// The race of the plan this player's screen is ready for, plus one
     /// (0 = none yet).
     ready: u8,
+    /// When the connection went, if it has (see `AWAY_GRACE_MS`).
+    away_since: Option<u64>,
 }
 
 impl Player {
@@ -365,10 +383,7 @@ impl Room {
         for i in 0..room.config.bots as usize {
             let slot = MAX_RIDERS - 1 - i;
             room.seats[slot] = Seat::Bot;
-            room.entrants[slot] = Some(Entrant {
-                pid: None,
-                points: 0,
-            });
+            room.entrants[slot] = Some(Entrant::new(None));
             room.world.spawn(slot);
         }
         room.apply_setups();
@@ -504,34 +519,70 @@ impl Room {
             .players
             .iter()
             .position(|p| p.as_ref().is_some_and(|p| p.pid == claims.pid));
-        let slot = match existing {
-            Some(slot) => {
+        let held = self.entrants.iter().position(|e| {
+            e.as_ref()
+                .and_then(|e| e.held.as_ref())
+                .is_some_and(|(pid, _)| *pid == claims.pid)
+        });
+        let slot = match (existing, held) {
+            (Some(slot), _) => {
+                let tick = self.world.tick;
                 let p = self.players[slot].as_mut().expect("seated");
                 let fresh = p.conn != conn;
                 if fresh {
+                    // A new screen (a reload, or back after the connection
+                    // went): the same seat and rider; it says again what it
+                    // has loaded and learns the roster from the start.
                     out.close.push(p.conn);
                     p.conn = conn;
-                    // A new screen: it says again what it has loaded, and
-                    // learns the roster from the start.
                     p.ready = 0;
+                    p.away_since = None;
+                    p.inputs = [None; INPUT_RING];
+                    p.highest_input_tick = tick;
                     p.events.clear();
                     p.next_event_id = 0;
                     if let Some(trial) = &mut self.trial {
                         trial.seat(&claims.pid, &claims.look_bytes());
                     }
                 }
+                let p = self.players[slot].as_mut().expect("seated");
                 p.last_packet_ms = now_ms;
                 if fresh {
                     self.send_roster(slot);
                 }
                 slot
             }
-            None => {
+            (None, Some(slot)) => {
+                // Back to a Tilt left under way: the seat the bot kept, with
+                // the points the player had, riding free until the next race
+                // if this one has started.
+                let points = self.entrants[slot]
+                    .as_ref()
+                    .and_then(|e| e.held.as_ref())
+                    .map_or(0, |(_, points)| *points);
+                self.seats[slot] = Seat::Human;
+                self.entrants[slot] = Some(Entrant {
+                    points,
+                    ..Entrant::new(Some(claims.pid.clone()))
+                });
+                self.world.remove(slot);
+                self.world.spawn(slot);
+                self.players[slot] = Some(self.new_player(conn, claims, client_time, now_ms));
+                self.apply_setups();
+                self.send_roster(slot);
+                if let Some(joined) = self.roster_event(slot) {
+                    self.broadcast_event(&joined, Some(slot));
+                }
+                let table = self.standings_event();
+                self.broadcast_event(&table, Some(slot));
+                slot
+            }
+            (None, None) => {
                 let most = if self.trial.is_some() { 1 } else { MAX_HUMANS };
                 if self.human_count() >= most {
                     return Err(RejectReason::RoomFull);
                 }
-                if self.human_count() == 0 {
+                if self.human_count() == 0 && !self.holds_seats() {
                     // First player in: a fresh start on the grid (and
                     // Tilt), not the middle of a bots-only race.
                     self.restart_plan();
@@ -541,11 +592,12 @@ impl Room {
                 let slot = match self.seats.iter().position(|s| *s == Seat::Empty) {
                     Some(s) => s,
                     None => {
-                        // Bots give their seat to humans.
-                        let bot = self
-                            .seats
-                            .iter()
-                            .position(|s| *s == Seat::Bot)
+                        // Bots give their seat to humans (not one kept for a player).
+                        let bot = (0..MAX_RIDERS)
+                            .find(|&s| {
+                                self.seats[s] == Seat::Bot
+                                    && self.entrants[s].as_ref().is_none_or(|e| e.held.is_none())
+                            })
                             .ok_or(RejectReason::RoomFull)?;
                         self.seats[bot] = Seat::Empty;
                         self.world.remove(bot);
@@ -554,32 +606,10 @@ impl Room {
                     }
                 };
                 self.seats[slot] = Seat::Human;
-                self.entrants[slot] = Some(Entrant {
-                    pid: Some(claims.pid.clone()),
-                    points: 0,
-                });
+                self.entrants[slot] = Some(Entrant::new(Some(claims.pid.clone())));
                 self.world.spawn(slot);
-                let player = Player {
-                    conn,
-                    pid: claims.pid.clone(),
-                    name: truncate_utf8(claims.name.trim(), protocol::NAME_MAX_BYTES).to_owned(),
-                    look: claims.look_bytes(),
-                    setups: claims.setups.clone(),
-                    inputs: [None; INPUT_RING],
-                    highest_input_tick: self.world.tick,
-                    lead_min_window: i32::MAX,
-                    lead_report: 0,
-                    echo_client_time: client_time,
-                    echo_received_ms: now_ms,
-                    last_packet_ms: now_ms,
-                    rate_tokens: RATE_BURST,
-                    rate_last_ms: now_ms,
-                    events: VecDeque::new(),
-                    next_event_id: 0,
-                    ready: 0,
-                };
                 self.arrived += 1;
-                self.players[slot] = Some(player);
+                self.players[slot] = Some(self.new_player(conn, claims, client_time, now_ms));
                 self.apply_setups();
                 if let Some(trial) = &mut self.trial {
                     trial.seat(&claims.pid, &claims.look_bytes());
@@ -594,19 +624,66 @@ impl Room {
         Ok((self.welcome(slot, client_time), out))
     }
 
-    /// A screen joining learns the whole roster, in slot order, and the
-    /// Tilt table.
+    fn new_player(
+        &self,
+        conn: ConnId,
+        claims: &JoinClaims,
+        client_time: u16,
+        now_ms: u64,
+    ) -> Player {
+        Player {
+            conn,
+            pid: claims.pid.clone(),
+            name: truncate_utf8(claims.name.trim(), protocol::NAME_MAX_BYTES).to_owned(),
+            look: claims.look_bytes(),
+            setups: claims.setups.clone(),
+            inputs: [None; INPUT_RING],
+            highest_input_tick: self.world.tick,
+            lead_min_window: i32::MAX,
+            lead_report: 0,
+            echo_client_time: client_time,
+            echo_received_ms: now_ms,
+            last_packet_ms: now_ms,
+            rate_tokens: RATE_BURST,
+            rate_last_ms: now_ms,
+            events: VecDeque::new(),
+            next_event_id: 0,
+            ready: 0,
+            away_since: None,
+        }
+    }
+
+    /// A screen joining (new, or back) learns the whole roster, in slot
+    /// order, and the Tilt table.
     fn send_roster(&mut self, slot: usize) {
         let events: Vec<EventBody> = (0..MAX_RIDERS)
             .filter_map(|s| self.roster_event(s))
             .collect();
         let standings = self.config.grand_prix().then(|| self.standings_event());
-        let player = self.players[slot].as_mut().expect("seated");
+        let Some(player) = self.players[slot].as_mut() else {
+            return;
+        };
         for e in events {
             player.push_event(e);
         }
         if let Some(t) = standings {
             player.push_event(t);
+        }
+    }
+
+    /// A seat a bot keeps for a player who left a Tilt under way.
+    pub fn holds_seats(&self) -> bool {
+        self.entrants.iter().flatten().any(|e| e.held.is_some())
+    }
+
+    /// A player's connection went without a goodbye (a reload, a closed
+    /// tab, the network): the seat waits `AWAY_GRACE_MS` for them, the
+    /// rider coasting, then goes as if they had left.
+    pub fn disconnect(&mut self, conn: ConnId, now_ms: u64) {
+        if let Some(slot) = self.slot_of(conn)
+            && let Some(p) = self.players[slot].as_mut()
+        {
+            p.away_since.get_or_insert(now_ms);
         }
     }
 
@@ -627,25 +704,29 @@ impl Room {
         }
     }
 
-    /// A player leaves. In a Tilt under way a bot takes the seat (the
-    /// player's points so far were already reported). Once the plan is
-    /// over the rider rides on as it was, on autopilot like everyone, for
-    /// whoever is still looking.
+    /// A player leaves. In a Tilt under way a bot takes the seat and keeps
+    /// it for them (their points so far were already reported; they take the
+    /// seat back if they come back). Once the plan is over the rider rides
+    /// on as it was, on autopilot like everyone, for whoever is still looking.
     pub fn leave(&mut self, conn: ConnId) {
         let Some(slot) = self.slot_of(conn) else {
             return;
         };
-        self.players[slot] = None;
+        let Some(player) = self.players[slot].take() else {
+            return;
+        };
         if self.over {
             self.seats[slot] = Seat::Bot;
             return;
         }
         self.broadcast_event(&EventBody::RiderLeft { slot: slot as u8 }, None);
-        if self.grand_prix_started() && self.human_count() > 0 {
+        if self.grand_prix_started() {
+            // The bot rides for nobody, and keeps the seat for the player.
+            let points = self.entrants[slot].as_ref().map_or(0, |e| e.points);
             self.seats[slot] = Seat::Bot;
             self.entrants[slot] = Some(Entrant {
-                pid: None,
-                points: 0,
+                held: Some((player.pid, points)),
+                ..Entrant::new(None)
             });
             // The bot starts from the grid: in this race if it hasn't
             // started, riding free until the next one if it has.
@@ -730,7 +811,11 @@ impl Room {
     fn grid_done(&mut self) -> bool {
         let event = self.event_index as u8 + 1;
         let ready = self.arrived >= usize::from(self.config.humans)
-            && self.players.iter().flatten().all(|p| p.ready >= event);
+            && self
+                .players
+                .iter()
+                .flatten()
+                .all(|p| p.ready >= event || p.away_since.is_some());
         if ready {
             return true;
         }
@@ -863,6 +948,11 @@ impl Room {
                 Seat::Bot => inputs[slot] = Some(bot_input(&self.world, slot)),
                 Seat::Human => {
                     let p = self.players[slot].as_mut().expect("seated");
+                    if p.away_since.is_some() {
+                        // Away: the rider coasts, hands off.
+                        inputs[slot] = Some(Input::default());
+                        continue;
+                    }
                     match p.inputs[next as usize % INPUT_RING].take() {
                         Some((t, input)) if t == next => inputs[slot] = Some(input),
                         _ => {
@@ -901,6 +991,21 @@ impl Room {
             }
         }
 
+        // Players away too long leave.
+        let gone: Vec<ConnId> = self
+            .players
+            .iter()
+            .flatten()
+            .filter(|p| {
+                p.away_since
+                    .is_some_and(|t| now_ms.saturating_sub(t) > AWAY_GRACE_MS)
+            })
+            .map(|p| p.conn)
+            .collect();
+        for conn in gone {
+            self.leave(conn);
+        }
+
         // Idle players are removed (screens still loading this race get longer).
         let shown = self.event_index as u8 + 1;
         let idle: Vec<ConnId> = self
@@ -913,7 +1018,7 @@ impl Room {
                 } else {
                     LOADING_TIMEOUT_MS
                 };
-                now_ms.saturating_sub(p.last_packet_ms) > limit
+                p.away_since.is_none() && now_ms.saturating_sub(p.last_packet_ms) > limit
             })
             .map(|p| p.conn)
             .collect();
@@ -992,6 +1097,7 @@ mod tests {
             look: String::new(),
             setups: Vec::new(),
             trial: false,
+            rejoin: false,
         }
     }
 
@@ -1099,6 +1205,133 @@ mod tests {
             room.join(2, &claims("bea", vec![0], 3), 0, now).err(),
             Some(RejectReason::Over)
         );
+    }
+
+    /// Runs every screen until the race is on (the grid, the intro, the countdown).
+    fn race_on(room: &mut Room, now: &mut u64, screens: &[(ConnId, Option<usize>)]) {
+        for _ in 0..TICK_HZ * 60 {
+            if room.world().race.phase == Phase::Racing {
+                return;
+            }
+            run(room, now, 1, screens);
+        }
+        panic!("the race never started");
+    }
+
+    #[test]
+    fn a_screen_back_after_a_reload_keeps_its_seat_and_learns_the_roster_afresh() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        race_on(&mut room, &mut now, &[(1, Some(0))]);
+        run(&mut room, &mut now, TICK_HZ * 3, &[(1, Some(0))]);
+        let slot = room.slot_of(1).unwrap();
+        // The tab reloads: the connection goes without a goodbye...
+        room.disconnect(1, now);
+        run(&mut room, &mut now, TICK_HZ * 5, &[]);
+        assert_eq!(room.human_count(), 1, "the seat waits");
+        assert!(room.world().riders[slot].unwrap().race.racing);
+        // ...and the new screen takes it back, with the same rider.
+        let before = room.world().riders[slot].unwrap().race;
+        let (welcome, _) = room.join(2, &ana, 0, now).unwrap();
+        assert_eq!(usize::from(welcome.slot), slot);
+        assert_eq!(room.world().riders[slot].unwrap().race, before);
+        let p = room.players[slot].as_ref().unwrap();
+        assert_eq!(
+            p.events.front().map(|e| e.id),
+            Some(0),
+            "the roster again, from the first event"
+        );
+        let roster = p
+            .events
+            .iter()
+            .filter(|e| matches!(e.body, EventBody::RiderJoined { .. }))
+            .count();
+        assert_eq!(roster, 4);
+        assert!(p.away_since.is_none() && p.ready == 0);
+        run(
+            &mut room,
+            &mut now,
+            AWAY_GRACE_MS as u32 / 16 + 60,
+            &[(2, Some(0))],
+        );
+        assert_eq!(room.slot_of(2), Some(slot), "back for good");
+    }
+
+    #[test]
+    fn away_too_long_a_bot_keeps_a_tilt_seat_and_the_player_takes_it_back() {
+        let ana = claims("ana", vec![0, 1], 2);
+        let bea = claims("bea", vec![0, 1], 2);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &bea, 0, now).unwrap();
+        let both = [(1, Some(0)), (2, Some(0))];
+        race_on(&mut room, &mut now, &both);
+        let slot = room.slot_of(1).unwrap();
+        room.entrants[slot].as_mut().unwrap().points = 7;
+        room.disconnect(1, now);
+        // Away past the grace: a bot rides the seat, for nobody.
+        run(
+            &mut room,
+            &mut now,
+            AWAY_GRACE_MS as u32 / 16 + 30,
+            &[(2, Some(0))],
+        );
+        assert_eq!(room.human_count(), 1);
+        assert!(room.seats[slot] == Seat::Bot && room.holds_seats());
+        let e = room.entrants[slot].as_ref().unwrap();
+        assert_eq!((e.pid.clone(), e.points), (None, 0));
+        // Nobody else joins a Tilt under way; Ana takes her seat back with
+        // her points, riding free until the next race.
+        assert_eq!(
+            room.join(3, &claims("cai", vec![0, 1], 2), 0, now).err(),
+            Some(RejectReason::Started)
+        );
+        let (welcome, _) = room.join(4, &ana, 0, now).unwrap();
+        assert_eq!(usize::from(welcome.slot), slot);
+        assert!(room.seats[slot] == Seat::Human && !room.holds_seats());
+        let e = room.entrants[slot].as_ref().unwrap();
+        assert_eq!((e.pid.as_deref(), e.points), (Some("ana"), 7));
+        assert!(!room.world().riders[slot].unwrap().race.racing);
+    }
+
+    #[test]
+    fn the_last_person_out_of_a_tilt_can_come_back_to_it() {
+        let ana = claims("ana", vec![0, 1], 3);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        race_on(&mut room, &mut now, &[(1, Some(0))]);
+        let tick = room.tick();
+        room.disconnect(1, now);
+        run(&mut room, &mut now, AWAY_GRACE_MS as u32 / 16 + 30, &[]);
+        assert_eq!(room.human_count(), 0);
+        assert!(room.holds_seats(), "the bots race on, keeping her seat");
+        room.join(2, &ana, 0, now).unwrap();
+        assert_eq!(room.event_index(), 0);
+        assert_eq!(
+            room.world().race.phase,
+            Phase::Racing,
+            "the Tilt goes on, not from the top"
+        );
+        assert!(room.tick() > tick);
+    }
+
+    #[test]
+    fn a_goodbye_frees_a_seat_at_once() {
+        let ana = claims("ana", vec![0], 2);
+        let bea = claims("bea", vec![0], 2);
+        let mut room = Room::new(RoomConfig::from_claims(&ana));
+        let mut now = 0u64;
+        room.join(1, &ana, 0, now).unwrap();
+        room.join(2, &bea, 0, now).unwrap();
+        race_on(&mut room, &mut now, &[(1, Some(0)), (2, Some(0))]);
+        let slot = room.slot_of(1).unwrap();
+        room.leave(1);
+        assert_eq!(room.human_count(), 1);
+        assert!(room.world().riders[slot].is_none());
     }
 
     #[test]

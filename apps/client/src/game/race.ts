@@ -179,6 +179,8 @@ export interface RaceState {
   trouble: Trouble | null;
   /** Nothing has come from the race server for a moment: the race goes on from prediction, the HUD's clock held. */
   stalled: boolean;
+  /** This race's course is on screen, nothing covering it (a season card). */
+  onShow: boolean;
 }
 
 /** `sim::Phase`: the countdown, the race, the results. */
@@ -316,6 +318,7 @@ export class RaceSession implements Stage {
     plan: [],
     trouble: null,
     stalled: false,
+    onShow: false,
   };
   /** The player moved on from the last race's results before they ran out. */
   private moveOn = false;
@@ -389,6 +392,7 @@ export class RaceSession implements Stage {
     hz: number;
     ghosts: { label: string; ticks: number }[];
     callout: string | null;
+    beat: number;
     name: string;
   } | null {
     const client = this.client;
@@ -396,7 +400,14 @@ export class RaceSession implements Stage {
     const mine = parseStandings(client.standingsJson()).find((s) => s.slot === client.slot());
     const hz = this.readRace().tickHz;
     const name = this.riders.get(client.slot())?.name ?? "";
-    return { ticks: mine?.finishTicks ?? 0, hz, ghosts: this.trialRaced, callout: this.trialCallout, name };
+    return {
+      ticks: mine?.finishTicks ?? 0,
+      hz,
+      ghosts: this.trialRaced,
+      callout: this.trialCallout,
+      beat: this.trialBeat,
+      name,
+    };
   }
 
   /** The ghosts' splits, for the HUD. */
@@ -853,6 +864,7 @@ export class RaceSession implements Stage {
     const current = event === this.event && race.eventIndex !== this.resultsEvent;
     const onShow = current && (!render || (this.shown && !this.covered));
     client.setReady(onShow ? race.eventIndex : -1);
+    this.state.onShow = onShow;
     const hud = !this.covered && !RaceIntro.active(race.phase);
     this.showHud(hud);
     const watching = onAir(race, this.sport);
@@ -904,15 +916,18 @@ export class RaceSession implements Stage {
     const me = riders.find((r) => r.isMe);
     race.wrongWay = this.wrongWay.update(race, me);
     const events = parseEvents(client.takeEventsJson());
-    this.hud.events(events, client.slot(), race);
+    // While the race server is silent, or gone, the HUD holds: its clock, its
+    // popups and their sounds (what the prediction alone makes up isn't news).
+    const held = this.state.stalled || this.state.trouble !== null;
+    if (!held) this.hud.events(events, client.slot(), race);
     if (this.trial)
       for (const e of events)
         if (e.kind === "finish" && e.slot === client.slot() && race.racing) this.trialFinish(e.ticks ?? 0, race.tickHz);
     const audible = this.shown && !this.seasonChange?.active;
-    this.sfx.frame(riders, race, events, client.slot(), this.lastInput, engine.world.camera, audible, dt);
+    const heard = held ? [] : events;
+    this.sfx.frame(riders, race, heard, client.slot(), this.lastInput, engine.world.camera, audible, dt);
     const gp = race.eventCount > 1 ? { index: race.eventIndex, count: race.eventCount, points: this.gpPoints } : null;
-    // Its clock held while the race server is silent, or gone.
-    if (!this.state.stalled && this.state.trouble === null) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
+    if (!held) this.hud.update(race, (me?.speed ?? 0) * 3.6, gp);
     this.board.update({
       race,
       mySlot: client.slot(),
@@ -1042,6 +1057,11 @@ export class RaceSession implements Stage {
     this.seasonChange?.cancel();
     this.sfx.stop();
     void this.card?.hide();
+    // Leaving on purpose says goodbye (the seat goes at once); a reload or a closed tab doesn't.
+    if (this.client && this.transport) {
+      this.client.bye();
+      this.sendOutgoing(this.client, this.transport);
+    }
     this.transport?.close();
     this.client?.free();
     this.client = null;

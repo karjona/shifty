@@ -131,6 +131,7 @@ fn claims_from(m: &HashMap<String, String>, pid: &str, name: &str) -> Result<Joi
         look: String::new(),
         setups: Vec::new(),
         trial: m.get("trial").is_some_and(|t| t == "1"),
+        rejoin: false,
     })
 }
 

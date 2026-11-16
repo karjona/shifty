@@ -3,7 +3,7 @@
 // members will join you there.
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { setClubRider, setClubRiders } from "../../game/backdrops.ts";
 import { useT } from "../../i18n/index.ts";
 import { parseJoinTicket } from "../../net/transport.ts";
@@ -11,6 +11,7 @@ import { CIRCUITS, type PlanRequest, SEASONS, TILT, circuit } from "@shifty/ride
 import {
   ApiError,
   createRoom,
+  liveRaceQuery,
   lobbySocket,
   meQuery,
   type Mode,
@@ -94,6 +95,7 @@ export function ModeSelect() {
   return (
     <div className="screen mode-select">
       <TopBar title={t.play.title} kicker={t.play.club} />
+      <LiveRace />
       <main className="mode-body">
         <div className="party">
           <Button kind="ghost" className="party-add" onClick={() => toast(t.play.partySoon)}>
@@ -169,6 +171,26 @@ export function ModeSelect() {
       {joining && <JoinRoom onClose={() => setJoining(false)} />}
       {searching && <Searching onClose={() => setSearching(false)} />}
       {tuning && <SetupEditor onClose={() => setTuning(false)} />}
+    </div>
+  );
+}
+
+/** A matchmaking race you are still in (you closed its tab): back into it. */
+function LiveRace() {
+  const t = useT();
+  const navigate = useNavigate();
+  const { data: live } = useQuery(liveRaceQuery);
+  if (!live) return null;
+  const rejoin = () => {
+    setPendingRace({ ticket: live.ticket, back: { to: "/play", search: { mode: "matchmaking" } }, rejoin: true });
+    void navigate({ to: "/race", replace: true });
+  };
+  return (
+    <div className="panel live-race">
+      <b>{t.play.liveRace}</b>
+      <Button kind="primary" onClick={rejoin} autoFocus>
+        {t.room.rejoin}
+      </Button>
     </div>
   );
 }
