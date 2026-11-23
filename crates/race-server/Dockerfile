@@ -8,7 +8,7 @@
 # (/healthz, /metrics, /cert-hash): add -p 4433:4433/tcp to reach it locally,
 # never publish it in production. The health check runs inside the container.
 
-FROM rust:1.99-slim-trixie@sha256:b8e062b1c3a80183df83d9ba187cadd2b5ab84bc78d453dbfeb2fccd5f982247 AS build
+FROM rust:1.99-slim-trixie@sha256:f6c4a35d21dbb3c89d7a8d056c193e94fc09037f2b58dd858b09c39a47dd02d7 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends cmake curl && rm -rf /var/lib/apt/lists/*
 
 # cargo-about renders the third-party license notices shipped in the image.
@@ -34,7 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo about generate --locked --fail -m crates/race-server/Cargo.toml \
       --target "$(rustc -vV | sed -n 's/^host: //p')" -o /THIRD-PARTY-NOTICES.md about.hbs
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:08476c244888bfb425bae1ae4dd7c17f093e972aab8426883d97f3c6f280f7c1
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de
 LABEL org.opencontainers.image.source="https://github.com/karjona/shifty" \
       org.opencontainers.image.description="23.4° Shifty race server: WebTransport rooms on UDP 4433" \
       org.opencontainers.image.licenses="Apache-2.0"
